@@ -138,6 +138,6 @@ def load_recent_search_results(
             )
             items.extend(response.get('Items', []))
         except Exception:
-            logger.exception(f"Error querying keyword {keyword!r}")
+            logger.exception('Error querying keyword %r', keyword)
             continue
     return items

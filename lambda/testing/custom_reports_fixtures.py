@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -124,7 +124,7 @@ def report_rows(count: int) -> list[dict[str, Any]]:
 
 
 @contextmanager
-def frozen_report_clock(module: ModuleType) -> Iterator[None]:
+def frozen_report_clock(module: ModuleType) -> Generator[None, None, None]:
     """Pin the handler's timestamp and generated id to ``FROZEN_TIMESTAMP`` / ``REPORT_ID``."""
     with (
         patch.object(module, 'get_timestamp', return_value=FROZEN_TIMESTAMP),

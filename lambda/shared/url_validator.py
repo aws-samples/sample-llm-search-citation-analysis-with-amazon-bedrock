@@ -121,7 +121,7 @@ def _is_ip_blocked(ip_str: str) -> bool:
     return False
 
 
-def _parse_http_url(url: str) -> tuple[str | None, str]:
+def _parse_http_url(url: object) -> tuple[str | None, str]:
     """``(hostname, '')`` for a well-formed http(s) URL, or ``(None, reason)``.
 
     The reasons are the generic messages ``validate_url_safe`` returns; none
@@ -176,7 +176,7 @@ def _resolve_addresses(hostname: str) -> list[str]:
     return [str(addr_info[4][0]) for addr_info in addr_infos]
 
 
-def validate_url_safe(url: str) -> tuple[bool, str]:
+def validate_url_safe(url: object) -> tuple[bool, str]:
     """
     Validate that a URL is safe for server-side fetching (SSRF prevention).
 
@@ -211,7 +211,7 @@ def validate_url_safe(url: str) -> tuple[bool, str]:
         return False, 'Could not resolve hostname'
 
     if any(_is_ip_blocked(ip_str) for ip_str in resolved):
-        logger.warning(f'SSRF blocked: {hostname} resolved to private/reserved IP')
+        logger.warning('SSRF blocked: %s resolved to private/reserved IP', hostname)
         return False, 'URL points to a restricted address'
 
     return True, ''

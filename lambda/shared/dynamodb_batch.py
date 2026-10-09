@@ -196,9 +196,7 @@ def query_latest_per_key(
         return value, (items[0] if items else None)
 
     workers = min(max_workers, len(ordered_values))
-    results: dict[str, dict | None] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        for value, item in pool.map(_query_one, ordered_values):
-            results[value] = item
+        results: dict[str, dict | None] = dict(pool.map(_query_one, ordered_values))
 
     return results

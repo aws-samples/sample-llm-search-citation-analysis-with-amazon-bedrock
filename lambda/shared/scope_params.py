@@ -216,7 +216,7 @@ def map_scope_keywords[ResultT](
         try:
             return compute(keyword)
         except Exception:
-            logger.exception(f"Scoped report failed for {keyword!r}")
+            logger.exception('Scoped report failed for %r', keyword)
             return fallback(keyword)
 
     if not keywords:

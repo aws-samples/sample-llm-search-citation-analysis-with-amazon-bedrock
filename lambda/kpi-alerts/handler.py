@@ -363,7 +363,7 @@ def _notify(alerts: list[dict[str, Any]], execution_id: str, settings: dict[str,
     return {'status': 'published'}
 
 
-def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+def handler(event: object, context: Any) -> dict[str, Any]:
     """Evaluate one clean, unambiguous analysis run without selecting newer rows."""
     if not isinstance(event, dict):
         raise ValueError('KPI alert event must be an object')

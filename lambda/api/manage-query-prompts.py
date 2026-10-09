@@ -54,16 +54,15 @@ def handler(event, context):
 
     if method == 'GET':
         return list_prompts(event, context)
-    elif method == 'POST':
+    if method == 'POST':
         return create_prompt(event, context)
-    elif method == 'PUT':
+    if method == 'PUT':
         return update_prompt(event, context, prompt_id)
-    elif method == 'DELETE':
+    if method == 'DELETE':
         return delete_prompt(event, context, prompt_id)
-    elif method == 'PATCH':
+    if method == 'PATCH':
         return toggle_prompt(event, context, prompt_id)
-    else:
-        return validation_error('Method not allowed', event)
+    return validation_error('Method not allowed', event)
 
 
 def list_prompts(event, context):

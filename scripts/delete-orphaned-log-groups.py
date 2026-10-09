@@ -64,12 +64,12 @@ def live_function_names(lambda_client) -> set[str]:
 
 def log_groups(logs_client, prefix: str) -> list[tuple[str, int]]:
     """(name, storedBytes) for every log group under `prefix`, fully paginated."""
-    found: list[tuple[str, int]] = []
     paginator = logs_client.get_paginator('describe_log_groups')
-    for page in paginator.paginate(logGroupNamePrefix=prefix):
-        for group in page.get('logGroups', []):
-            found.append((group['logGroupName'], group.get('storedBytes', 0)))
-    return found
+    return [
+        (group['logGroupName'], group.get('storedBytes', 0))
+        for page in paginator.paginate(logGroupNamePrefix=prefix)
+        for group in page.get('logGroups', [])
+    ]
 
 
 def find_orphans(

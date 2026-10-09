@@ -125,14 +125,14 @@ def _get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
             last_problem = f'HTTP {response.status_code}: {body}'
         if attempt < MAX_REQUEST_ATTEMPTS - 1:
             wait = _retry_wait_seconds(response, attempt)
-            logger.warning(f"[SERPAPI_RETRY] {last_problem[:200]} | attempt {attempt + 1}/{MAX_REQUEST_ATTEMPTS} | waiting {wait:.1f}s")
+            logger.warning('[SERPAPI_RETRY] %s | attempt %s/%s | waiting %.1fs', last_problem[:200], attempt + 1, MAX_REQUEST_ATTEMPTS, wait)
             time.sleep(wait)
     raise _failed(SerpApiError(f'SerpAPI request failed after {MAX_REQUEST_ATTEMPTS} attempts: {last_problem[:300]}'))
 
 
 def _failed(error: SerpApiError) -> SerpApiError:
     """Log ``error`` under the ``[SERPAPI_FAILED]`` tag ``scripts/quick-error-check.sh`` counts, and return it."""
-    logger.error(f"[SERPAPI_FAILED] {error}")
+    logger.error('[SERPAPI_FAILED] %s', error)
     return error
 
 
@@ -195,6 +195,6 @@ def serpapi_search(
         interval = min(interval * POLL_BACKOFF, POLL_MAX_SECONDS)
         archived = _get_json(SERPAPI_ARCHIVE_URL.format(search_id=search_id), {'api_key': api_key})
         if (done := _finished(archived)) is not None:
-            logger.info(f"SerpAPI search {search_id} ready after {time.monotonic() - started:.1f}s")
+            logger.info('SerpAPI search %s ready after %.1fs', search_id, time.monotonic() - started)
             return done
     raise _failed(SerpApiError(f'SerpAPI search {search_id} timed out: still pending after {deadline_seconds:.0f}s'))

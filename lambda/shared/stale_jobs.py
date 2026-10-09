@@ -61,7 +61,7 @@ def stale_elapsed_seconds(
     # an offset; parse_timestamp reads them as UTC, like the rows meant.
     created = parse_timestamp(created_at)
     if created is None:
-        logger.warning(f"Could not parse created_at {created_at!r}")
+        logger.warning('Could not parse created_at %r', created_at)
         return None
 
     elapsed = (reference - created).total_seconds()

@@ -57,6 +57,11 @@ bash lambda/crawler-layer/build-layer.sh
   Vitest, knip) and the Python gate (`scripts/validate-python.sh`: ruff, pyright, vulture, jscpd, pytest). The
   step-by-step table and the limits each gate enforces are in [README.md, "Validation"](README.md#validation).
   Fix findings; never raise a limit or suppress a finding inline.
+- **Pre-push hook.** `npm install` (its `prepare` script) or `npm run hooks:install` links `.githooks/pre-push` into
+  `.git/hooks/`, so every `git push` runs `npm run validate` first and stops on a failure. The gate is local by
+  design; GitHub does not run it. Pushes that only delete branches or tags skip it. Don't use
+  `git push --no-verify`, which also skips Code Defender's checks on machines that have it; for an emergency push
+  use `SKIP_VALIDATE=1 git push` and say so in the pull request.
 - **Layer rebuilds.** Both layers carry a copy of `lambda/shared`, and `cdk synth` fails when either copy is
   missing or stale. After changing anything in `lambda/shared/`, or a layer's `requirements.txt`, rerun
   `bash lambda/layer/build-layer.sh` and `bash lambda/crawler-layer/build-layer.sh`. The Python tests also import

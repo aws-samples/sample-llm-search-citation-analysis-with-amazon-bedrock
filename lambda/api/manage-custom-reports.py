@@ -44,7 +44,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import get_caller_claims, get_caller_identity
-from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import delete_existing_item, is_conditional_check_failure
@@ -451,4 +451,4 @@ def delete_report(event: dict[str, Any], context: Any, id: str, **_: Any) -> dic
 }, inject_path_params=True)
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Routed entirely by ``route_handler``; see module docstring. This body is never reached."""
-    ...
+    raise RouteNotHandledError(__name__)

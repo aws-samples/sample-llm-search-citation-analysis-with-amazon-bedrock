@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Pre-push gate: `npm run validate` must pass before anything is pushed.
+#
+# Installed into .git/hooks/pre-push by `npm run hooks:install` (also run by
+# `npm install` through the `prepare` script). Machines that set a global
+# core.hooksPath for Code Defender still run it: Code Defender chains the
+# repository's own .git/hooks.
+#
+# Do not bypass with `git push --no-verify`: that also skips Code Defender's
+# security checks. For a push that cannot wait for the gate (an emergency
+# revert), run `SKIP_VALIDATE=1 git push` and say so in the PR.
+set -euo pipefail
+
+zero_sha='0000000000000000000000000000000000000000'
+pushes_commits=false
+# stdin: "<local ref> <local sha> <remote ref> <remote sha>" per ref pushed.
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "$zero_sha" ]; then
+    pushes_commits=true
+  fi
+done
+
+if [ "$pushes_commits" = false ]; then
+  # Only branch or tag deletions: nothing new to validate.
+  exit 0
+fi
+
+if [ "${SKIP_VALIDATE:-}" = "1" ]; then
+  echo "pre-push: SKIP_VALIDATE=1, skipping npm run validate. Say so in the pull request." >&2
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: running npm run validate (lint, build, CDK + web + Python tests, duplication, dead code, contracts)..." >&2
+if ! npm run validate; then
+  echo "" >&2
+  echo "pre-push: npm run validate failed; the push was stopped. Fix the findings and push again." >&2
+  exit 1
+fi
+echo "pre-push: npm run validate passed." >&2

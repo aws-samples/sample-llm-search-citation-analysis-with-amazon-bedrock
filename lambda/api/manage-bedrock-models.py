@@ -33,7 +33,7 @@ from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 
 from shared.api_response import api_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
-from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
+from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
 from shared.models import (
     ModelTier,
@@ -272,7 +272,7 @@ def _log_page_failure(error: BotoCoreError | ClientError) -> None:
     if code in _THROTTLED_CODES:
         logger.info('Service Quotas throttled the quota reading; the next request continues it')
     else:
-        logger.warning('Could not list the Bedrock service quotas', exc_info=True)
+        logger.warning('Could not list the Bedrock service quotas', exc_info=error)
 
 
 def read_quota_pages(start: QuotaReading, budget_seconds: float) -> QuotaReading:
@@ -659,4 +659,4 @@ def handler(event: dict, context: Any) -> dict:
 
     Routes handle everything; this body is never reached.
     """
-    ...
+    raise RouteNotHandledError(__name__)

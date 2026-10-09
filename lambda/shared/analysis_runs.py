@@ -62,11 +62,11 @@ def fetch_enabled_query_prompts(query_prompts_table: Any) -> list[dict[str, str]
             Limit=MAX_QUERY_PROMPTS_PER_RUN,
         )
     except (BotoCoreError, ClientError) as error:
-        logger.warning(f"Could not fetch query prompts, proceeding without them: {error}")
+        logger.warning('Could not fetch query prompts, proceeding without them: %s', error)
         return []
     items: list[dict[str, Any]] = response.get('Items', [])
     prompts = [query_prompt_from_item(item) for item in items]
-    logger.info(f"Found {len(prompts)} enabled query prompts")
+    logger.info('Found %s enabled query prompts', len(prompts))
     return prompts
 
 

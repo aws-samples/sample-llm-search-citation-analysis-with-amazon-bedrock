@@ -1012,14 +1012,14 @@ class TestStepCheckpointPersistence:
     def _job_with_decimal_metadata(self, status: str = 'pending') -> dict:
         return _expansion_job(
             status='running',
-            round=Decimal('1'),
-            active_round=Decimal('1'),
+            round=Decimal(1),
+            active_round=Decimal(1),
             steps={
                 'r1-openai': {
                     'provider': 'openai',
                     'status': status,
-                    'round': Decimal('1'),
-                    'attempt': Decimal('1'),
+                    'round': Decimal(1),
+                    'attempt': Decimal(1),
                 },
             },
         )
@@ -1065,8 +1065,8 @@ class TestStepCheckpointPersistence:
         persisted = {
             'provider': 'openai',
             'status': 'running',
-            'round': Decimal('1'),
-            'attempt': Decimal('1'),
+            'round': Decimal(1),
+            'attempt': Decimal(1),
         }
         table = self._terminal_race_table(persisted)
 
@@ -1091,8 +1091,8 @@ class TestStepCheckpointPersistence:
         persisted = {
             'provider': 'openai',
             'status': 'failed',
-            'round': Decimal('1'),
-            'attempt': Decimal('1'),
+            'round': Decimal(1),
+            'attempt': Decimal(1),
             'error_message': 'winner failed first',
         }
         table = self._terminal_race_table(persisted)

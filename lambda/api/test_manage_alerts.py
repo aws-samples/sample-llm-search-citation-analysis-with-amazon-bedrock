@@ -492,7 +492,7 @@ class TestContentChanges:
             'group_id': 'group-1',
             'changed_at': '2026-10-01T10:00:00Z',
             'description': 'Published landing page',
-            'ttl': Decimal('1822384800'),
+            'ttl': Decimal(1822384800),
         }]}
 
         status, body = _call(alert_api, 'GET', '/api/alerts/content-changes', query={'group_id': 'group-1', 'limit': '10'})

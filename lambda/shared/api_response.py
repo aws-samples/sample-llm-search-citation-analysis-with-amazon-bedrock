@@ -69,7 +69,7 @@ def get_cors_origin() -> str:
     # SSM always returns Value for an existing parameter; the SDK types it
     # as optional, and '' is this function's fail-closed value anyway.
     _cors_origin_cache = response['Parameter'].get('Value', '')
-    logger.info(f"CORS origin loaded: {_cors_origin_cache}")
+    logger.info('CORS origin loaded: %s', _cors_origin_cache)
     return _cors_origin_cache
 
 
@@ -183,7 +183,7 @@ def sanitize_error_message(error: Exception) -> str:
 
     # For unknown errors, return generic message
     # Log the full error for debugging
-    logger.error(f"Unhandled error type {error_type}: {error!s}")
+    logger.error('Unhandled error type %s: %s', error_type, error)
     logger.error(traceback.format_exc())
 
     return 'An unexpected error occurred'

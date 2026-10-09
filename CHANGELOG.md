@@ -9,6 +9,42 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.36.1] - 2026-10-08
+
+### Changed
+
+- ruff now selects `PIE` (flake8-pie). PIE790 reports the no-effect placeholders CodeQL flags as "Statement has
+  no effect" (`...` / `pass` beside a docstring), so they fail `npm run validate` instead of reaching code scanning.
+  The ten `@route_handler` handler bodies, which the router never calls, now `raise RouteNotHandledError(__name__)`
+  (`shared/decorators.py`): reaching one is a bug, and `@api_handler` answers it with a sanitized 500. Two test
+  lambdas that only wrapped `dict` and a double `startswith` were fixed by the same rules.
+- ruff also selects `DTZ`, `LOG`, `G`, `RET`, `C4`, `PERF`, `FLY`, `FURB`, `PGH`, `T10`, `ISC`, `RSE`, `PLW` and `A`,
+  and pyright reports unnecessary `isinstance` calls, unnecessary comparisons and deprecated APIs as errors. The 101
+  logger f-strings are lazy `%s` arguments and `logger.error(..., exc_info=True)` in `except` is `logger.exception`
+  (`@api_handler` included). Guards on untrusted input (request bodies, Step Functions events, the SSRF check, prompt
+  sanitising) are typed `object` so the checks stay; guards on boto3 responses and in-process data were dead and are
+  gone. `_update_request` takes `status: str | None`, `@contextmanager` helpers return `Generator`, and the two
+  routers share `shared.router.route_not_found`. `global` lazy clients (`PLW0603`) and the API's `id` / `type`
+  request parameters (`A002`) are allowed per file.
+- **`npm run validate` runs before every push**, locally: `.githooks/pre-push`, linked into `.git/hooks/` by
+  `npm install` (`prepare`) or `npm run hooks:install` (`scripts/install-git-hooks.sh`, which never changes git
+  config and works under Code Defender's global `core.hooksPath`). Branch/tag deletions skip it;
+  `SKIP_VALIDATE=1 git push` is the documented emergency bypass.
+
+### Security
+
+- Dependency fixes that replace Dependabot PRs #169, #170 and #171:
+  - `@nx/eslint-plugin` ^23.3.0 (nx 23.3.0): local socket exposure and `nx migrate` path traversal.
+  - `undici` pinned to 7.30.0 under nx: two denial-of-service fixes.
+  - knip 6.40.0 and `smol-toml` 1.9.0 (root and web).
+  - `source-map-js` 1.2.2 (root and web).
+  - `postcss-selector-parser` 7.1.6 under Tailwind 3 (web). The built CSS is byte-identical, so Tailwind stays on 3
+    rather than taking #169's major upgrade to Tailwind 4.
+- Still reported: `brace-expansion` 5.0.9 bundled inside `aws-cdk-lib` (bundled dependencies cannot be overridden;
+  still 5.0.9 in the latest 2.272.0; only glob patterns from this repo reach it at synth time), and in `web/` the
+  `braces` advisory with no patched release, reached only through Tailwind 3's file watcher at build time (the fix
+  is the Tailwind 4 migration).
+
 ## [2.36.0] - 2026-10-08
 
 ### Added

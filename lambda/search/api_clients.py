@@ -55,8 +55,8 @@ def extract_citations_from_response(response_text: str) -> list[str]:
     urls = re.findall(url_pattern, response_text)
 
     cleaned_urls = []
-    for url in urls:
-        url = url.rstrip('.,;:!?)')
+    for raw_url in urls:
+        url = raw_url.rstrip('.,;:!?)')
         if url:
             cleaned_urls.append(clean_url(url))
 

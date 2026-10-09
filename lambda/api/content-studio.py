@@ -51,7 +51,7 @@ from shared.content_brief import (
     single_keyword_brief,
     validate_template_placeholders,
 )
-from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
@@ -1663,7 +1663,7 @@ def _single_generation_response(event: dict[str, Any], idea: dict[str, Any], que
 
 @parse_json_body
 @validate({"idea": {"required": True, "source": "body"}})
-def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dict) -> dict[str, Any]:
+def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: object) -> dict[str, Any]:
     """POST /content-studio/generate - queue one content generation."""
     if not isinstance(idea, dict):
         return validation_error("idea must be an object", event, "idea")
@@ -1786,12 +1786,7 @@ def _load_batch_manifest(batch_id: str) -> dict[str, Any] | None:
         )
     except ClientError as error:
         raise _BatchManifestStorageError("Could not read batch manifest") from error
-    item = response.get("Item")
-    if item is None:
-        return None
-    if not isinstance(item, dict):
-        raise _BatchManifestStorageError("Batch manifest has an invalid shape")
-    return item
+    return response.get("Item")
 
 
 def _validated_manifest_snapshot(
@@ -2468,7 +2463,7 @@ def _get_batch(event: dict[str, Any], context: Any) -> dict[str, Any]:
 )
 def _api_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Route API Gateway requests to Content Studio operations."""
-    ...
+    raise RouteNotHandledError(__name__)
 
 
 def _worker_event_bytes(payload: dict[str, Any]) -> bytes:

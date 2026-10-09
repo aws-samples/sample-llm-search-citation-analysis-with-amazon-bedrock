@@ -30,7 +30,7 @@ from shared.ai_clients import (
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
-from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
+from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
 from shared.provider_health import (
@@ -557,7 +557,7 @@ def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict
     except requests.Timeout:
         return {'valid': False, 'error': 'Validation request timed out'}
     except Exception:
-        logger.exception(f"Error during {label}")
+        logger.exception('Error during %s', label)
         return {'valid': False, 'error': 'Validation failed'}
 
 
@@ -1053,4 +1053,4 @@ def handler(event: dict, context: Any) -> dict:
 
     Routes handle everything; this body is never reached.
     """
-    ...
+    raise RouteNotHandledError(__name__)

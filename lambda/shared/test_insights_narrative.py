@@ -212,7 +212,7 @@ class TestStorage:
         assert (item['scope_key'], item['run_timestamp'], item['ttl']) == ('group#group-coruna', RUN_TIMESTAMP, 1822891833)
 
     def test_reads_the_stored_narrative_of_the_run(self) -> None:
-        table = fake_table(get_item={'Item': stored_item(dropped=Decimal('1'))})
+        table = fake_table(get_item={'Item': stored_item(dropped=Decimal(1))})
 
         narrative = load_narrative('group#group-coruna', RUN_TIMESTAMP, table=table)
 

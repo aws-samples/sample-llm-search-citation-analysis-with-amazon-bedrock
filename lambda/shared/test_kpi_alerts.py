@@ -304,8 +304,8 @@ class TestSettingsValidation:
         stored = {
             **_settings(),
             'mention_rate_drop': Decimal('12.5'),
-            'position_loss': Decimal('2'),
-            'competitor_top_n': Decimal('4'),
+            'position_loss': Decimal(2),
+            'competitor_top_n': Decimal(4),
             'improvement_after_content_change': Decimal('7.5'),
         }
 
@@ -319,10 +319,10 @@ class TestSettingsValidation:
     def test_reads_the_mention_rate_drop_stored_under_its_former_name(self) -> None:
         stored = {name: value for name, value in _settings().items() if name != 'mention_rate_drop'}
 
-        assert resolve_settings({**stored, 'citation_rate_drop': Decimal('15')})['mention_rate_drop'] == 15.0
+        assert resolve_settings({**stored, 'citation_rate_drop': Decimal(15)})['mention_rate_drop'] == 15.0
 
     def test_prefers_the_current_name_over_the_former_one(self) -> None:
-        stored = {**_settings(mention_rate_drop=Decimal('20')), 'citation_rate_drop': Decimal('15')}
+        stored = {**_settings(mention_rate_drop=Decimal(20)), 'citation_rate_drop': Decimal(15)}
 
         assert resolve_settings(stored)['mention_rate_drop'] == 20.0
 

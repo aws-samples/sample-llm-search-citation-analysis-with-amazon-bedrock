@@ -17,6 +17,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import (
+    RouteNotHandledError,
     api_handler,
     cors_preflight,
     parse_json_body,
@@ -557,4 +558,4 @@ def _create_content_change(
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Route KPI alert API requests; routes handle everything, this body is never reached."""
-    ...
+    raise RouteNotHandledError(__name__)

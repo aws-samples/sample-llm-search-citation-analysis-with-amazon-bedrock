@@ -7,7 +7,7 @@ and boto3 stubs.
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -35,7 +35,7 @@ def load_handler_module(directory: str, filename: str, module_name: str | None =
 
 
 @contextmanager
-def stubbed_boto3() -> Iterator[None]:
+def stubbed_boto3() -> Generator[None, None, None]:
     """While active, ``boto3.resource`` / ``boto3.client`` return inert ``MagicMock`` clients."""
     with (
         patch('boto3.resource', MagicMock(name='boto3.resource')),

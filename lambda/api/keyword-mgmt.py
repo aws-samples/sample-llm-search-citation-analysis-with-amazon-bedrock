@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import not_found_response, validation_error
-from shared.router import HandlerLoader, path_matches_route
+from shared.router import HandlerLoader, path_matches_route, route_not_found
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -36,7 +36,7 @@ def handler(event, context):
     path = event.get('path', '')
     method = event.get('httpMethod', 'GET')
 
-    logger.info(f"Routing: resource={resource}, path={path}, method={method}")
+    logger.info('Routing: resource=%s, path=%s, method=%s', resource, path, method)
 
     # keyword-research routes take priority (longer prefix)
     if path_matches_route('/api/keyword-research', resource, path):
@@ -60,5 +60,4 @@ def handler(event, context):
             return _handlers.get('get-keywords.py')(event, context)
         return _handlers.get('manage-keywords.py')(event, context)
 
-    logger.error(f"No route matched for resource={resource}, path={path}")
-    return not_found_response(resource='Route', event=event)
+    return route_not_found(event, logger)
