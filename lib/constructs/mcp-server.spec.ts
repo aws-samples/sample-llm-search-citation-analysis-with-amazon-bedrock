@@ -26,6 +26,8 @@ import {
   TEST_REGION,
   collectGetAttTargets,
   extractAuthorizationScopesByVerb,
+  extractBrandingCustomResource,
+  extractBrandingHandlerActions,
   extractClientOAuthScopes,
   extractDistribution,
   extractAllowedResourceIds,
@@ -112,12 +114,35 @@ describe('Managed login', () => {
     expect(Object.keys(domains)).toHaveLength(1);
   });
 
-  it('gives the mcp client the Cognito default branding so its login page renders', () => {
-    const brandings = template.findResources('AWS::Cognito::ManagedLoginBranding', {
-      Properties: { ClientId: { Ref: ids.clientId }, UseCognitoProvidedValues: true },
-    });
+  it('themes the mcp client managed-login pages instead of leaving Cognito defaults', () => {
+    const branding = extractBrandingCustomResource(template);
 
-    expect(Object.keys(brandings)).toHaveLength(1);
+    expect(branding.clientRef).toStrictEqual({ Ref: ids.clientId });
+  });
+
+  it('themes managed login to the dashboard login palette (gray-900 header, white surface, blue-600 links)', () => {
+    const { theme } = extractBrandingCustomResource(template);
+
+    expect(theme.header).toBe('#111827');
+    expect(theme.lightSurface).toBe('#ffffff');
+    expect(theme.link).toBe('#2563eb');
+    expect(theme.radius).toBe(8);
+  });
+
+  it('ships a light and a dark logo asset for the managed-login pages', () => {
+    const branding = extractBrandingCustomResource(template);
+
+    expect(branding.logoLightBase64.length).toBeGreaterThan(0);
+    expect(branding.logoDarkBase64.length).toBeGreaterThan(0);
+    expect(branding.logoLightBase64).not.toBe(branding.logoDarkBase64);
+  });
+
+  it('grants the branding handler only the three managed-login branding actions', () => {
+    expect(extractBrandingHandlerActions(template)).toStrictEqual([
+      'cognito-idp:CreateManagedLoginBranding',
+      'cognito-idp:DescribeManagedLoginBrandingByClient',
+      'cognito-idp:UpdateManagedLoginBranding',
+    ]);
   });
 });
 
