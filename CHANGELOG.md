@@ -9,6 +9,23 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.37.1] - 2026-10-09
+
+### Changed
+
+- **CodeQL code-quality queries run locally before every push.** `npm run validate` (and so the pre-push hook) ends
+  with `npm run quality:codeql` (`scripts/codeql-local.sh`, config `scripts/codeql/codeql-config.yml`): CodeQL's
+  Python and JavaScript/TypeScript `code-quality` suites, the queries the github-code-quality review comments from,
+  and any result fails the push. Rules ruff and ESLint have no equivalent for (for example
+  `py/import-and-import-from`, `py/ineffectual-statement`, `js/superfluous-trailing-arguments`) are now caught before
+  a pull request. Needs the CLI once: `gh extension install github/gh-codeql`; without it the step is skipped with a
+  notice (`CODEQL_REQUIRED=1` makes that a failure). Results and databases go to the git-ignored `.codeql-local/`.
+- All 12 existing findings are fixed: four test modules imported a module both with `import` and `from … import`
+  (now module-qualified), the `resolve_table_env` overload stubs had `...` bodies (now docstrings),
+  `promote-keywords.py` re-exported an unused constant and kept a dead assignment, a test list relied on implicit
+  string concatenation, and two tests built `StorageEvent` with an init dictionary CodeQL's DOM model rejects (now one
+  `dispatchStorageEvent` test helper).
+
 ## [2.37.0] - 2026-10-09
 
 ### Added

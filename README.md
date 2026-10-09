@@ -396,6 +396,7 @@ UI conventions are in [docs/design-system.md](docs/design-system.md); versioning
 | 8 | `npm run contracts` | `scripts/check-contracts.py`: every env var CDK sets is read by a Lambda and vice versa; every member in `web/src/types` is read by dashboard code (allowlist entries need a reason) |
 | 9 | `npm run validate:web` | In `web/`: `tsc --noEmit`, Vitest, knip, `knip --production --strict` |
 | 10 | `npm run validate:python` | `scripts/validate-python.sh`: ruff, pyright, vulture (production, then whole tree), jscpd (code, then tests), pytest |
+| 11 | `npm run quality:codeql` | `scripts/codeql-local.sh`: CodeQL's Python and JavaScript/TypeScript code-quality suites (the queries the github-code-quality review uses), any result fails; needs `gh extension install github/gh-codeql`, skipped with a notice without it |
 
 The Python gate needs the dev toolchain in a repo-local venv and the built shared layer, which the tests import runtime libraries from:
 

@@ -5,6 +5,7 @@ import {
   act, renderHook, waitFor
 } from '@testing-library/react';
 import { LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY } from '../api/contentStudioBatchStorage';
+import { dispatchStorageEvent } from '../test/storageMock';
 import {
   buildBatchCandidate, storeLegacyBatchIdsValue
 } from '../api/contentStudioBatchStorage-fixtures';
@@ -126,10 +127,7 @@ describe('useContentStudioBatchTracking recovery boundaries', () => {
 
     act(() => {
       storeLegacyBatchIdsValue(JSON.stringify(['legacy-batch']));
-      globalThis.dispatchEvent(new StorageEvent(
-        'storage',
-        { key: LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY }
-      ));
+      dispatchStorageEvent(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY);
     });
     await waitFor(() => {
       expect(activeBatchIds(result.current)).toStrictEqual(['legacy-batch']);

@@ -1,0 +1,16 @@
+# Local CodeQL run (scripts/codeql-local.sh): what GitHub's code-quality review
+# scans, minus generated and vendored code.
+name: citation-analysis-local
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/.deps/**'
+  - 'lambda/layer/python/**'
+  - 'lambda/crawler-layer/python/**'
+  - 'cdk.out/**'
+  - '**/cdk.out*/**'
+  - 'web/dist/**'
+  - 'coverage/**'
+  - '.venv/**'
+  - '.kiro/**'
+  - '.hypothesis/**'
+  - 'mutants/**'

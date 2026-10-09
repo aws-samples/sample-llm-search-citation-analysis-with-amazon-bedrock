@@ -20,3 +20,15 @@ export function createStorageMock(): StorageMock {
     }),
   };
 }
+
+/**
+ * Dispatch the `storage` event another tab's write to `key` raises (`null` = a `clear()`).
+ *
+ * Built with `Reflect.construct` because CodeQL's bundled DOM externs still
+ * model `StorageEvent(type)` with one parameter and report the (standard)
+ * `eventInitDict` argument as superfluous (js/superfluous-trailing-arguments).
+ */
+export function dispatchStorageEvent(key: string | null): void {
+  const event: StorageEvent = Reflect.construct(StorageEvent, ['storage', { key }]);
+  globalThis.dispatchEvent(event);
+}
