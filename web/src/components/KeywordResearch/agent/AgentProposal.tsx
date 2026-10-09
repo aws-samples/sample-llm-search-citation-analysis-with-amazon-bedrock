@@ -16,6 +16,7 @@ import {
   OTHER_DIMENSION_ID, dimensionLabel, orderedDimensionIds, runCatalog
 } from './agentBrief';
 import { exportAgentRun } from './agentExport';
+import { PromotionMarketSelect } from '../PromotionMarketSelect';
 
 interface AgentProposalProps {
   readonly job: KeywordResearchItem;
@@ -118,6 +119,7 @@ export function AgentProposal({
           submitting={promotion.submitting}
           onResetToRecommended={() => replaceSelection(recommendedKeywords)}
         />
+        <PromotionMarketSelect id={`agent-market-${job.id}`} market={promotion.market} disabled={promotion.submitting} />
         <PromotionActions promotion={promotion} keywordCount={keywords.length} groupName={groupName} />
         <PromotionFeedback promotion={promotion} />
       </div>

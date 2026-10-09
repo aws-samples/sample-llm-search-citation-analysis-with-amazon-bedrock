@@ -37,6 +37,10 @@ import {
 } from './GroupBriefForm-source';
 import { GroupBriefPromptEditor } from './GroupBriefPromptEditor';
 import { useGroupBriefTemplateDraft } from './useGroupBriefTemplateDraft';
+import {
+  keywordsInMarkets, scopeMarketIds, withMarketIds
+} from '../Markets/marketScope';
+import { MarketScopeFilter } from '../Markets/MarketScopeFilter';
 
 interface GroupBriefFormProps {
   readonly keywords: Keyword[];
@@ -82,6 +86,11 @@ export function GroupBriefForm({
   const activeKeywords = useMemo(
     () => keywords.filter((keyword) => keyword.status === 'active'),
     [keywords]
+  );
+  const marketIds = useMemo(() => scopeMarketIds(scope), [scope]);
+  const pickableKeywords = useMemo(
+    () => keywordsInMarkets(activeKeywords, marketIds),
+    [activeKeywords, marketIds]
   );
   const selectedKeywords = useMemo(
     () => selectedActiveKeywords(scope, activeKeywords),
@@ -169,7 +178,7 @@ export function GroupBriefForm({
           <KeywordScopePicker
             idPrefix="group-brief-keyword-scope"
             name="group-brief-keyword-ids"
-            keywords={activeKeywords}
+            keywords={pickableKeywords}
             groups={groups}
             scope={scope}
             onChange={(nextScope: AnalysisScope) => {
@@ -180,6 +189,15 @@ export function GroupBriefForm({
             allowedModes={['groups', 'keywords']}
             maxGroups={1}
             maxKeywords={50}
+            disabled={generating}
+          />
+          <MarketScopeFilter
+            idPrefix="group-brief"
+            selectedIds={marketIds}
+            onChange={(nextMarketIds) => {
+              setScope(withMarketIds(scope, nextMarketIds));
+              setValidationIssues([]);
+            }}
             disabled={generating}
           />
           <ScopePreview scope={canonicalScope} groups={groups} keywords={selectedKeywords} />

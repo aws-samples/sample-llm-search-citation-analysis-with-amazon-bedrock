@@ -28,6 +28,8 @@ Usage:
 
     rows = collect_all_items(my_table.query, IndexName='StatusIndex', KeyConditionExpression=...)
     first_rows, truncated = collect_capped_items(my_table.scan, 3)
+    rows_in_table = count_all_items(my_table.scan)
+    rows_of_keywords = count_partition_items(my_table, 'keyword', ['hotel a', 'hotel b'])
 """
 
 from __future__ import annotations
@@ -136,6 +138,46 @@ def collect_capped_items(
     read still had a ``LastEvaluatedKey``, i.e. the cap cut the read short.
     """
     return _collect_pages(operation, max_pages, params)
+
+
+def count_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any) -> int:
+    """How many items a table's ``query`` or ``scan`` matches: ``Select='COUNT'`` summed over every page.
+
+    ``params`` are the keyword arguments of ``operation`` besides ``Select``;
+    no item is transferred.
+    """
+    response = operation(**params, Select='COUNT')
+    count = response.get('Count', 0)
+    while 'LastEvaluatedKey' in response:
+        response = operation(**params, Select='COUNT', ExclusiveStartKey=response['LastEvaluatedKey'])
+        count += response.get('Count', 0)
+    return count
+
+
+def count_partition_items(
+    table: Any,
+    partition_key_name: str,
+    partition_values: Iterable[str],
+    *,
+    index_name: str | None = None,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
+) -> int:
+    """How many items of ``table`` (or its ``index_name``) carry one of ``partition_values`` as partition key.
+
+    One ``count_all_items`` query per distinct value, ``max_workers`` at a
+    time. Unlike ``query_latest_per_key`` a failed partition is not skipped:
+    the error propagates, because a partial sum would read as a real count.
+    """
+    values = sorted(set(partition_values))
+    index = {'IndexName': index_name} if index_name else {}
+
+    def count_one(value: str) -> int:
+        return count_all_items(table.query, **index, KeyConditionExpression=Key(partition_key_name).eq(value))
+
+    if not values:
+        return 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers, len(values))) as pool:
+        return sum(pool.map(count_one, values))
 
 
 def query_latest_per_key(

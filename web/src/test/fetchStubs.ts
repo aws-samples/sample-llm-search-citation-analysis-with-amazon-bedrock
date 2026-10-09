@@ -8,3 +8,16 @@ import { mockAuthenticatedFetch } from './infrastructureMock';
 export function answerEveryFetch(body: unknown, status = 200): void {
   mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
 }
+
+/**
+ * Answers each request with the body listed for its path (`/stats`), query
+ * string ignored; a path not listed answers 404.
+ */
+export function answerFetchByPath(bodies: Readonly<Record<string, unknown>>): void {
+  mockAuthenticatedFetch.mockImplementation((input) => {
+    const { pathname } = new URL(String(input));
+    return Promise.resolve(pathname in bodies
+      ? createMockJsonResponse(bodies[pathname])
+      : createMockJsonResponse({ error: 'not found' }, 404));
+  });
+}

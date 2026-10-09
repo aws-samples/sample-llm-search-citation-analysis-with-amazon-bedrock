@@ -10,7 +10,7 @@ import { keywordMarketId } from './marketSelection';
  */
 
 /** `scope` narrowed to `marketIds`; an empty list removes the narrowing. */
-export function withMarketIds(scope: AnalysisScope, marketIds: readonly string[]): AnalysisScope {
+export function withMarketIds<TScope extends AnalysisScope>(scope: TScope, marketIds: readonly string[]): TScope {
   if (marketIds.length > 0) return {
     ...scope,
     market_ids: [...marketIds],

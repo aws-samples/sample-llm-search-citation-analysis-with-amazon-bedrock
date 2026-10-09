@@ -31,7 +31,12 @@ export type ContentStatus = 'pending' | 'generating' | 'generated' | 'failed';
 export type ContentBriefBatchStatus = ContentStatus | 'missing';
 export type ContentBriefStrategy = 'combined' | 'per_keyword';
 
-export type ContentBriefScope =
+/**
+ * The keywords a group brief covers: one group or explicit keyword ids,
+ * optionally narrowed to the keywords of some markets (`market_ids`,
+ * `'global'` for keywords without one); absent means every market.
+ */
+export type ContentBriefScope = (
   | {
     mode: 'groups';
     group_ids: string[];
@@ -39,7 +44,8 @@ export type ContentBriefScope =
   | {
     mode: 'keywords';
     keyword_ids: string[];
-  };
+  }
+) & { market_ids?: string[] };
 
 export interface ContentIdea {
   id: string;

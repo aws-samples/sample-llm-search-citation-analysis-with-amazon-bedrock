@@ -8,11 +8,13 @@
  * The owning view creates the `usePromoteKeywords` instance (one per displayed
  * result) and passes it here, so each result keeps its own selection.
  */
+import { useId } from 'react';
 import {
   SELECTION_LIMIT, promotionSuccessMessage
 } from '../../hooks/usePromoteKeywords';
 import type { UsePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { Spinner } from '../ui/Spinner';
+import { PromotionMarketSelect } from './PromotionMarketSelect';
 
 interface KeywordPromotionControlsProps {promotion: UsePromoteKeywords;}
 
@@ -26,6 +28,7 @@ export const KeywordPromotionControls = ({ promotion }: KeywordPromotionControls
     outcome,
     promote,
   } = promotion;
+  const marketSelectId = useId();
 
   const startPromotion = () => {
     void promote();
@@ -37,6 +40,8 @@ export const KeywordPromotionControls = ({ promotion }: KeywordPromotionControls
         <p className="flex-1 text-sm text-gray-600">
           {selectedCount} of {SELECTION_LIMIT} keywords selected
         </p>
+
+        <PromotionMarketSelect id={marketSelectId} market={promotion.market} disabled={submitting} />
 
         <button
           type="button"

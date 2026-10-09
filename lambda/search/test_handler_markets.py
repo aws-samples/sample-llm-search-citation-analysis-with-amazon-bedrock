@@ -107,6 +107,24 @@ class TestPerplexityAgentApiAnswer:
         assert result['metadata'].get(field) == expected
 
 
+class TestSlowEngineAttempts:
+    def test_asks_openai_with_the_bounded_attempt_budget(self, search_handler):
+        client = MagicMock()
+        client.responses_with_web_search.return_value = OPENAI_WEB_SEARCH_RESPONSE
+        with patch.object(search_handler, 'OpenAIClient', return_value=client):
+            search_handler.query_openai(_KEYWORD, 'sk-test')
+
+        assert client.responses_with_web_search.call_args.kwargs['max_retries'] == search_handler.SLOW_ENGINE_MAX_ATTEMPTS
+
+    def test_asks_claude_with_the_bounded_attempt_budget(self, search_handler):
+        client = MagicMock()
+        client.generate_content.return_value = {'content': [], 'model': 'claude-sonnet-5-5'}
+        with patch.object(search_handler, 'ClaudeClient', return_value=client):
+            search_handler.query_claude(_KEYWORD, 'ck-test')
+
+        assert client.generate_content.call_args.kwargs['max_retries'] == search_handler.SLOW_ENGINE_MAX_ATTEMPTS
+
+
 class TestOpenAIWebSearchAnswer:
     def test_reads_the_message_text(self, search_handler):
         text, _citations = search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE)

@@ -26,15 +26,19 @@ process.
   - **Add to markets…** on a keyword (`POST /api/markets`, Admin) asks Bedrock how a local user in each chosen market
     would type it and creates linked translations (`concept_id`).
   - Run Analysis, schedules, the MCP run tools and every scoped read endpoint take a market (`scope.market_ids`, the
-    `market_id` query parameter). The header's market selector narrows every scoped view, report (`?market=`) and the
-    Citations tab; *All markets (combined)* is the default.
+    `market_id` query parameter). The header's market selector narrows every scoped view, report (`?market=`), the
+    Citations tab and the Dashboard totals and charts (`GET /api/stats?market_id=`, whose `last_execution` is then the
+    market's newest run); *All markets (combined)* is the default.
+  - Content Studio group briefs (single and batch) take a market filter (`scope.market_ids`), research keywords are
+    promoted into a chosen market (`POST /api/keywords/promote` `market_id`, defaulting to the header's market), and
+    the MCP tools forward `market_id` / `concept_id` (`manage_keywords`, `get_dashboard_stats`, content brief tools).
   - KPI snapshots and alerts are kept per (keyword group, market), and written insights per group and market, in the
     market's language. SearchResults rows carry `market_id`; brand extraction adds the market's competitors and
     local brand names.
 - **YouTube citations**: every YouTube link (`youtu.be`, `m.`, `/shorts/`, `/embed/`, `/live/`, nocookie, `&t=`/`&si=`)
   is stored as `https://www.youtube.com/watch?v=<id>`, so a video is one citation (`shared/youtube.py`,
-  `test-fixtures/youtube-urls.json`). Citations carry `content_type` (`video` / `page`); the Citations tab shows a
-  *Video* badge, a type filter, a Type column in the export and, in the detail view, the video's title, channel and
+  `test-fixtures/youtube-urls.json`). Citations carry `content_type` (`video` / `page`); the Citations tab and Citation
+  Gaps show a *Video* badge, the Citations tab a type filter, a Type column in the export and, in the detail view, the video's title, channel and
   thumbnail. The crawler reads videos from YouTube oEmbed (pinned host, no redirects, 64 KB cap) instead of an
   AgentCore browser session.
 
@@ -49,6 +53,8 @@ process.
 - **Claude** uses the newest web search tool (`web_search_20260318`, dynamic filtering) with no `max_uses` cap and
   4,096 output tokens; a model that refuses dynamic filtering is asked again with `allowed_callers: ["direct"]`, and
   an in-body `too_many_requests` / `unavailable` search error is retried. Default model `claude-sonnet-5-5`.
+  OpenAI and Claude get three attempts per answer in analysis runs (was five), so a stalled engine cannot outlast the
+  provider Lambda's 900 s.
 - **Gemini** default model `gemini-3.6-flash` (the replacement Google lists for `gemini-3-flash-preview`).
 - Citations are no longer capped: every deduplicated citation is stored; only the crawl list keeps the
   `MAX_CITATIONS_PER_KEYWORD` cap (Step Functions state size, crawl cost). `total_citations_found` counts every

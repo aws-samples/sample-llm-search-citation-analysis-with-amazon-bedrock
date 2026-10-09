@@ -8,6 +8,9 @@ import type {
   Keyword,
   KeywordGroup,
 } from '../../types';
+import {
+  keywordsInMarkets, scopeMarketIds, withMarketIds
+} from '../Markets/marketScope';
 
 export type PendingGeneration =
   | {
@@ -25,14 +28,15 @@ export function selectedActiveKeywords(
   scope: ContentBriefScope,
   keywords: Keyword[]
 ): Keyword[] {
+  const inMarkets = keywordsInMarkets(keywords, scopeMarketIds(scope));
   if (scope.mode === 'groups') {
     const selectedGroups = new Set(scope.group_ids);
-    return keywords.filter((keyword) => (
+    return inMarkets.filter((keyword) => (
       keyword.group_ids?.some((groupId) => selectedGroups.has(groupId)) === true
     ));
   }
   const selectedIds = new Set(scope.keyword_ids);
-  return keywords.filter((keyword) => selectedIds.has(keyword.id));
+  return inMarkets.filter((keyword) => selectedIds.has(keyword.id));
 }
 
 export function canonicalContentBriefScope(
@@ -40,17 +44,18 @@ export function canonicalContentBriefScope(
   groups: KeywordGroup[],
   selectedKeywords: Keyword[]
 ): ContentBriefScope {
+  const marketIds = scopeMarketIds(scope);
   if (scope.mode === 'groups') {
     const knownGroups = new Set(groups.map((group) => group.id));
-    return {
+    return withMarketIds({
       mode: 'groups',
       group_ids: scope.group_ids.filter((groupId) => knownGroups.has(groupId)),
-    };
+    }, marketIds);
   }
-  return {
+  return withMarketIds({
     mode: 'keywords',
     keyword_ids: selectedKeywords.map((keyword) => keyword.id),
-  };
+  }, marketIds);
 }
 
 export function contentBriefFields(

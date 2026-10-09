@@ -110,8 +110,12 @@ def _group_id_entry(entry: str) -> str | None:
     return candidate if candidate and len(candidate) <= MAX_GROUP_ID_LENGTH else None
 
 
-def _validate_market_ids(value: Any) -> tuple[list[str] | None, str | None]:
-    """The optional ``scope.market_ids`` filter: ``(None, None)`` when absent, else the deduplicated ids."""
+def validate_scope_market_ids(value: Any) -> tuple[list[str] | None, str | None]:
+    """The optional ``scope.market_ids`` filter: ``(None, None)`` when absent, else the deduplicated ids.
+
+    Every scope that takes a market filter validates it here (run and schedule
+    scopes through ``validate_scope``, Content Studio group briefs directly).
+    """
     if value is None:
         return None, None
     if not isinstance(value, list) or not value:
@@ -145,7 +149,7 @@ def validate_scope(value: Any) -> tuple[dict[str, Any] | None, str | None]:
     mode = value.get('mode')
     if mode not in SCOPE_MODES:
         return None, f"scope.mode must be one of {', '.join(SCOPE_MODES)}"
-    market_ids, market_error = _validate_market_ids(value.get('market_ids'))
+    market_ids, market_error = validate_scope_market_ids(value.get('market_ids'))
     if market_error:
         return None, market_error
     markets = {} if market_ids is None else {'market_ids': market_ids}

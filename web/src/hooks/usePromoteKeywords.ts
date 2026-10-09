@@ -21,6 +21,7 @@ import type {
 import {
   keywordSelectionKey, uniqueResearchKeywords
 } from './keywordIdentity';
+import { usePromotionMarket } from './usePromotionMarket';
 
 export const SELECTION_LIMIT = 500;
 export const PROMOTION_TIMEOUT_MS = 30_000;
@@ -202,6 +203,8 @@ export interface UsePromoteKeywords {
   error: string | null;
   limitMessage: string | null;
   outcome: PromotionOutcome | null;
+  /** The market the promoted keywords are created in, and its picker's choices. */
+  market: ReturnType<typeof usePromotionMarket>;
   toggle: (keyword: string) => void;
   clearSelection: () => void;
   replaceSelection: (keywords: readonly string[]) => void;
@@ -232,6 +235,8 @@ export const usePromoteKeywords = (
   const activeRequestRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const reconciliation = useContext(KEYWORD_RECONCILIATION_CONTEXT);
+  const market = usePromotionMarket();
+  const { marketId } = market;
 
   const availableUniqueKeywords = useMemo(
     () => uniqueResearchKeywords(availableKeywords),
@@ -379,6 +384,7 @@ export const usePromoteKeywords = (
       const result = await promoteKeywords({
         keywords: requestedKeywords,
         groupIds,
+        marketId,
         signal: controller.signal,
       });
 
@@ -400,6 +406,7 @@ export const usePromoteKeywords = (
     }
   }, [
     groupIds,
+    marketId,
     applyPromotionOutcome,
     clearRequestTimer,
     clearSuccessTimer,
@@ -452,6 +459,7 @@ export const usePromoteKeywords = (
     error,
     limitMessage,
     outcome,
+    market,
     toggle,
     clearSelection,
     replaceSelection,

@@ -322,11 +322,11 @@ class TestExactScopeContract:
         [
             (
                 {'mode': 'groups', 'group_ids': ['group-1'], 'keyword_ids': ['keyword-1']},
-                'scope for groups mode must contain exactly mode and group_ids',
+                'scope for groups mode must contain mode and group_ids, and optionally market_ids',
             ),
             (
                 {'mode': 'keywords', 'keyword_ids': ['keyword-1'], 'group_ids': ['group-1']},
-                'scope for keywords mode must contain exactly mode and keyword_ids',
+                'scope for keywords mode must contain mode and keyword_ids, and optionally market_ids',
             ),
         ],
         ids=['group-extra-field', 'keyword-extra-field'],

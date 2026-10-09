@@ -17,6 +17,8 @@ export interface PromoteKeywordsOptions {
   priority?: NonNullable<KeywordExtended['priority']>;
   /** Keyword groups every promoted keyword should join. */
   groupIds?: string[];
+  /** The market every promoted keyword is created in (absent = no market). */
+  marketId?: string | null;
   signal?: AbortSignal;
 }
 
@@ -45,7 +47,7 @@ export async function promoteKeywords(
   options: PromoteKeywordsOptions
 ): Promise<PromotionOutcome> {
   const {
-    keywords, status, priority, groupIds, signal
+    keywords, status, priority, groupIds, marketId, signal
   } = options;
   const wire = await apiPost<PromoteKeywordsResponse>(
     '/keywords/promote',
@@ -54,6 +56,7 @@ export async function promoteKeywords(
       ...(status === undefined ? {} : { status }),
       ...(priority === undefined ? {} : { priority }),
       ...(groupIds === undefined || groupIds.length === 0 ? {} : { group_ids: groupIds }),
+      ...(marketId ? { market_id: marketId } : {}),
     },
     {
       signal,

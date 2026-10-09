@@ -215,3 +215,39 @@ describe('selectedActiveKeywords explicit filtering', () => {
     }, [selected, unselected])).toStrictEqual([selected]);
   });
 });
+
+describe('group brief markets', () => {
+  it('keeps only the selected keywords of the scope markets', () => {
+    const chilean = buildKeyword({ market_id: 'cl-es' });
+    const unassigned = buildKeyword({ id: 'keyword-2' });
+
+    expect(selectedActiveKeywords({
+      mode: 'keywords',
+      keyword_ids: ['keyword-1', 'keyword-2'],
+      market_ids: ['global'],
+    }, [chilean, unassigned])).toStrictEqual([unassigned]);
+  });
+
+  it('carries the scope markets into the canonical scope', () => {
+    expect(canonicalContentBriefScope({
+      mode: 'groups',
+      group_ids: ['group-1'],
+      market_ids: ['cl-es', 'global'],
+    }, [buildKeywordGroup()], [])).toStrictEqual({
+      mode: 'groups',
+      group_ids: ['group-1'],
+      market_ids: ['cl-es', 'global'],
+    });
+  });
+
+  it('drops an empty market list from the canonical scope', () => {
+    expect(canonicalContentBriefScope({
+      mode: 'keywords',
+      keyword_ids: [],
+      market_ids: [],
+    }, [], [buildKeyword()])).toStrictEqual({
+      mode: 'keywords',
+      keyword_ids: ['keyword-1'],
+    });
+  });
+});
