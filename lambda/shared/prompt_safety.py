@@ -69,7 +69,7 @@ MAX_USER_INPUT_LENGTH = 4000
 _VALID_TAG = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
-def sanitize_user_input(text: str, max_length: int = MAX_USER_INPUT_LENGTH) -> str:
+def sanitize_user_input(text: object, max_length: int = MAX_USER_INPUT_LENGTH) -> str:
     """Strip characters that could close a wrapping tag or inject control sequences.
 
     Specifically:

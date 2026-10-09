@@ -399,7 +399,7 @@ class TestClientPayloads:
         assert 'system' not in ai_clients.claude_web_search_payload('q', 'claude-sonnet-4-6')
 
     def test_claude_posts_to_the_messages_api_with_the_anthropic_headers(self):
-        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=lambda: {})) as post:
+        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=dict)) as post:
             ai_clients.ClaudeClient('ck-test').generate_content('q', max_retries=0)
 
         assert (post.call_args.args[0], post.call_args.kwargs['headers']) == (
@@ -408,7 +408,7 @@ class TestClientPayloads:
         )
 
     def test_perplexity_posts_to_the_sonar_chat_api(self):
-        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=lambda: {})) as post:
+        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=dict)) as post:
             ai_clients.PerplexityClient('pk-test').chat_completion(_QUESTION, max_retries=0)
 
         assert post.call_args.args[0] == 'https://api.perplexity.ai/chat/completions'

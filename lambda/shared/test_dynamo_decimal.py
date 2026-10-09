@@ -19,7 +19,7 @@ from shared.dynamo_decimal import DecimalEncoder, convert_floats_to_decimal, pos
 
 class TestToInt:
     def test_converts_decimal_to_int(self):
-        assert to_int(Decimal('7')) == 7
+        assert to_int(Decimal(7)) == 7
 
     def test_returns_default_when_value_is_none(self):
         assert to_int(None, default=3) == 3
@@ -43,7 +43,7 @@ class TestPositiveInt:
         pytest.param(True, None, id='bool'),
         pytest.param(2.0, None, id='float'),
         pytest.param('3', None, id='numeric-string'),
-        pytest.param(Decimal('3'), None, id='decimal'),
+        pytest.param(Decimal(3), None, id='decimal'),
         pytest.param(None, None, id='missing'),
     ])
     def test_reads_only_ints_of_at_least_one(self, value, expected):

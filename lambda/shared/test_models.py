@@ -71,7 +71,7 @@ def _converse_kwargs(models_module, role, **invoke_kwargs) -> dict:
 def clear_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate each test from env pollution across tier/model overrides and the saved-model table."""
     for key in list(os.environ.keys()):
-        if key.startswith("BEDROCK_TIER_") or key.startswith("BEDROCK_MODEL_"):
+        if key.startswith(("BEDROCK_TIER_", "BEDROCK_MODEL_")):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv(PROVIDER_TABLE_ENV, raising=False)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -55,7 +55,7 @@ def load_content_studio_module(module_name: str) -> Any:
 def patched_content_studio(
     module: Any,
     resource: MagicMock,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Patch one loaded handler's DynamoDB resource."""
     with patch.object(module, "dynamodb", resource):
         yield
@@ -395,7 +395,7 @@ def patched_stream_worker(
     module: Any,
     resource: MagicMock,
     generation: MagicMock,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Patch stream worker dependencies while retaining the real claim path."""
     with (
         patch.object(module, "dynamodb", resource),

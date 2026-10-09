@@ -145,7 +145,7 @@ class LLMBrandExtractor:
     def __init__(self, config: dict | None = None):
         # The model is resolved via shared.models.ModelRole.EXTRACTION.
         # Use default config if None or empty dict
-        self.config = config if config else DEFAULT_EXTRACTION_CONFIG
+        self.config = config or DEFAULT_EXTRACTION_CONFIG
         self.industry = self.config.get("industry") or DEFAULT_INDUSTRY_ID
         self.industry_preset = get_preset(self.industry)
 
@@ -159,7 +159,7 @@ class LLMBrandExtractor:
         if not text:
             return []
 
-        logger.info(f"Brand extraction input text length: {len(text)} chars")
+        logger.info('Brand extraction input text length: %s chars', len(text))
 
         # Build extraction prompt based on config
         prompt = self._build_extraction_prompt(text)
@@ -180,7 +180,7 @@ class LLMBrandExtractor:
         include_sentiment = bool(self.config.get("include_sentiment", True))
         for brand in brands:
             _normalize_sentiment_fields(brand, include_sentiment)
-        logger.info(f"LLM extracted {len(brands)} brand mentions")
+        logger.info('LLM extracted %s brand mentions', len(brands))
         return brands
 
     def _build_extraction_prompt(self, text: str) -> str:
@@ -349,15 +349,15 @@ def extract_brands_from_response(response_text: str, config: dict | None = None)
     # Try to load config from DynamoDB if not provided
     if config is None:
         loaded_config = get_brand_config()
-        config = loaded_config if loaded_config else None
-        logger.info(f"Loaded brand config from DynamoDB: {bool(config)}, industry: {config.get('industry') if config else 'default'}")
+        config = loaded_config or None
+        logger.info('Loaded brand config from DynamoDB: %s, industry: %s', bool(config), config.get('industry') if config else 'default')
 
-    logger.info(f"Starting brand extraction for text of {len(response_text)} chars")
+    logger.info('Starting brand extraction for text of %s chars', len(response_text))
 
     extractor = LLMBrandExtractor(config=config)
     mentions = extractor.extract_mentions(response_text)
 
-    logger.info(f"Brand extraction complete: {len(mentions)} brands found")
+    logger.info('Brand extraction complete: %s brands found', len(mentions))
 
     # Separate by classification
     first_party = [b for b in mentions if b.get("classification") == "first_party"]

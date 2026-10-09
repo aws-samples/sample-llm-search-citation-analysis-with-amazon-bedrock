@@ -118,7 +118,7 @@ def load_keyword_results(
 
     missing = keyword_count - len(keyword_results)
     if missing > 0:
-        logger.warning(f"{missing} of {keyword_count} keywords have no Map run result record")
+        logger.warning('%s of %s keywords have no Map run result record', missing, keyword_count)
         keyword_results.extend(
             {'timestamp': timestamp, 'status': 'failed', 'error': MISSING_RESULT_ERROR} for _ in range(missing)
         )

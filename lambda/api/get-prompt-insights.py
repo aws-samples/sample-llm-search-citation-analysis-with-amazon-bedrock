@@ -74,7 +74,7 @@ def _group_by_keyword(items: list[dict[str, Any]]) -> dict[str, list[dict[str, A
     for item in items:
         keyword_results[item.get('keyword', '')].append(item)
 
-    logger.info(f"Found {len(keyword_results)} unique keywords")
+    logger.info('Found %s unique keywords', len(keyword_results))
     return keyword_results
 
 
@@ -227,7 +227,7 @@ def analyze_prompt_brand_correlation(config: dict[str, Any], keywords: Sequence[
 
     # The 20 most recent rows of each of the first 50 keywords, one partition query each.
     items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=_MAX_KEYWORDS, keywords=keywords)
-    logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")
+    logger.info('Queried %s total items across %s keywords', len(items), len(keywords))
     keyword_results = _group_by_keyword(items)
     prompts = [_analyze_keyword(keyword, results) for keyword, results in keyword_results.items()]
     return _rank_prompts(prompts)

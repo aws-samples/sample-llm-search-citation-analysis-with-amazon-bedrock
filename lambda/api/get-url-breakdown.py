@@ -88,12 +88,10 @@ def _expand_to_breakdown(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             })
             continue
 
-        for provider in providers:
-            breakdown.append({
-                'keyword': keyword,
-                'provider': provider,
-                'timestamp': timestamp,
-            })
+        breakdown.extend(
+            {'keyword': keyword, 'provider': provider, 'timestamp': timestamp}
+            for provider in providers
+        )
 
     return breakdown
 

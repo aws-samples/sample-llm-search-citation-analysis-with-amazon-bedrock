@@ -803,7 +803,7 @@ def parse_selection(text: str, config: dict[str, Any], candidates: list[dict[str
     parsed = parse_llm_json(text, expect='array')
     if not isinstance(parsed, list):
         return None
-    by_key = {normalize_keyword(str(entry.get('keyword', ''))): entry for entry in candidates if isinstance(entry, dict)}
+    by_key = {normalize_keyword(str(entry.get('keyword', ''))): entry for entry in candidates}
     target = _selection_target(config)
     dimensions = selected_dimensions(config, include_other=True)
     seen: set[str] = set()
@@ -839,9 +839,8 @@ def fallback_selection(config: dict[str, Any], candidates: list[dict[str, Any]])
     """Deterministic proposal when the selection model fails: top candidates by relevance."""
     target = _selection_target(config)
     dimensions = selected_dimensions(config, include_other=True)
-    proposal = []
-    for entry in candidates[:target]:
-        proposal.append({
+    return [
+        {
             'keyword': entry.get('keyword', ''),
             'dimension': _clean_dimension(entry.get('dimension'), dimensions),
             'intent': str(entry.get('intent') or 'informational').lower()[:40],
@@ -849,8 +848,9 @@ def fallback_selection(config: dict[str, Any], candidates: list[dict[str, Any]])
             'relevance': _clean_relevance(entry.get('relevance'), 5.0),
             'rationale': '',
             'providers': list(entry.get('providers') or []),
-        })
-    return proposal
+        }
+        for entry in candidates[:target]
+    ]
 
 
 def _tracking_providers(entry: dict[str, Any]) -> tuple[str, ...]:

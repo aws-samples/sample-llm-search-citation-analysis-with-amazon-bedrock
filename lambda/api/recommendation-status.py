@@ -244,5 +244,5 @@ def list_statuses(rec_ids: list[str]) -> dict[str, dict[str, Any]]:
             # The status feature is auxiliary — if the lookup fails, return
             # what we have and let the caller render recommendations
             # without status. Logged so an operator can investigate.
-            logger.exception(f'list_statuses failed for chunk {i}')
+            logger.exception('list_statuses failed for chunk %s', i)
     return out

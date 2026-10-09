@@ -72,12 +72,12 @@ def log_error(
     if event:
         safe_event = {k: v for k, v in event.items() if k not in ['api_key', 'secret', 'password', 'token']}
 
-    logger.error(f"Error in {context}: {error_type} - {sanitize_error_for_step_function(error)}")
+    logger.error('Error in %s: %s - %s', context, error_type, sanitize_error_for_step_function(error))
 
     if safe_event:
-        logger.error(f"Event context: {json.dumps(safe_event, default=str)[:500]}")
+        logger.error('Event context: %s', json.dumps(safe_event, default=str)[:500])
 
-    logger.error(f"Traceback:\n{traceback.format_exc()}")
+    logger.error('Traceback:\n%s', traceback.format_exc())
 
 
 def step_function_success(
@@ -95,7 +95,7 @@ def step_function_success(
         Success response dictionary
     """
     if context:
-        logger.info(f"Success: {context}")
+        logger.info('Success: %s', context)
 
     return {
         'status': 'success',

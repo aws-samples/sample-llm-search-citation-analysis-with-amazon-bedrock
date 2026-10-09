@@ -61,7 +61,7 @@ def _active_keywords() -> list[dict[str, Any]]:
         return query_active_keywords(keywords_table)
     except (BotoCoreError, ClientError) as gsi_error:
         # Fallback to scan if GSI doesn't exist (for backwards compatibility)
-        logger.warning(f"StatusIndex GSI not available, falling back to scan: {gsi_error}")
+        logger.warning('StatusIndex GSI not available, falling back to scan: %s', gsi_error)
         return _scan_active_keywords()
 
 

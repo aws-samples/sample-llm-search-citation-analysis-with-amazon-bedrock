@@ -79,7 +79,7 @@ def _resolve_scope_request(scope_body: Any, event: dict[str, Any]) -> tuple[dict
 @api_handler
 @require_group(ADMIN_GROUP)
 @parse_json_body
-def handler(event: dict[str, Any], context: Any, body: dict) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, body: object) -> dict[str, Any]:
     """
     POST /api/trigger-keyword-analysis
 

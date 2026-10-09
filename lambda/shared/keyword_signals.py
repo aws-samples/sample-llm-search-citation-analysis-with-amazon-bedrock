@@ -62,16 +62,16 @@ def fetch_google_signals(api_key: str, query: str, *, country: str = 'us', langu
     search = serpapi_search(api_key, {**base, 'engine': 'google', 'num': 10}, deadline_seconds=SIGNALS_DEADLINE_SECONDS)
     autocomplete = serpapi_search(api_key, {**base, 'engine': 'google_autocomplete'}, deadline_seconds=SIGNALS_DEADLINE_SECONDS)
 
-    found: list[tuple[Any, str]] = []
-    for item in search.get('related_searches') or []:
-        if isinstance(item, dict):
-            found.append((item.get('query'), SIGNAL_SOURCES[0]))
-    for item in search.get('related_questions') or []:
-        if isinstance(item, dict):
-            found.append((item.get('question'), SIGNAL_SOURCES[1]))
-    for item in autocomplete.get('suggestions') or []:
-        if isinstance(item, dict):
-            found.append((item.get('value'), SIGNAL_SOURCES[2]))
+    found: list[tuple[Any, str]] = [
+        (item.get(field), source)
+        for items, field, source in (
+            (search.get('related_searches'), 'query', SIGNAL_SOURCES[0]),
+            (search.get('related_questions'), 'question', SIGNAL_SOURCES[1]),
+            (autocomplete.get('suggestions'), 'value', SIGNAL_SOURCES[2]),
+        )
+        for item in items or []
+        if isinstance(item, dict)
+    ]
 
     seen: set[str] = set()
     candidates: list[dict[str, Any]] = []
@@ -86,5 +86,5 @@ def fetch_google_signals(api_key: str, query: str, *, country: str = 'us', langu
         candidates.append({'keyword': phrase, 'source': source, 'relevance': SIGNAL_RELEVANCE, 'intent': '', 'competition': ''})
         if len(candidates) >= MAX_SIGNALS_PER_QUERY:
             break
-    logger.info(f"SerpAPI signals for {query!r}: {len(candidates)} candidates")
+    logger.info('SerpAPI signals for %r: %s candidates', query, len(candidates))
     return candidates

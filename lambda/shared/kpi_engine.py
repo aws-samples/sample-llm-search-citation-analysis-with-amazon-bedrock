@@ -256,7 +256,7 @@ def _mention_counts(answers: Iterable[Answer]) -> dict[str, int]:
 
 
 def _net_sentiment(sightings: Iterable[Sighting]) -> dict[str, Any]:
-    split = {label: 0 for label in ('positive', 'neutral', 'negative', 'mixed')}
+    split: dict[str, int] = dict.fromkeys(('positive', 'neutral', 'negative', 'mixed'), 0)
     for sighting in sightings:
         if sighting.sentiment is not None:
             split[sighting.sentiment] += 1

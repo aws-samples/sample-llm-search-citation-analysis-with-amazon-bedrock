@@ -8,7 +8,7 @@ a new run ID. Every path uses ``attribute_not_exists(id)`` for atomic insertion.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -239,7 +239,7 @@ class TestCreatePendingContent:
     @staticmethod
     @contextmanager
     def _table(put_raises: Exception | None = None,
-               get_item_return: dict | None = None) -> Iterator[MagicMock]:
+               get_item_return: dict | None = None) -> Generator[MagicMock, None, None]:
         """Point the module at a fake table and at `_FakeClientError` for the block.
 
         `ClientError` is swapped so the handler's `except` catches the fake the

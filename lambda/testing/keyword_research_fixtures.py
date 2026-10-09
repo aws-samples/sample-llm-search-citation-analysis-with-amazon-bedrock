@@ -22,10 +22,14 @@ def load_keyword_research(module_name: str) -> ModuleType:
 
 
 def research_table_stub(item: dict | None = None, items: list[dict] | None = None) -> MagicMock:
-    """A table whose ``get_item`` finds ``item`` (nothing when ``None``) and whose ``scan`` lists ``items``."""
+    """A table whose ``get_item`` finds ``item`` (nothing when ``None``) and whose ``scan`` lists ``items``.
+
+    ``update_item`` answers like DynamoDB without ``ReturnValues``: an empty response.
+    """
     table = MagicMock()
     table.get_item.return_value = {'Item': item} if item is not None else {}
     table.scan.return_value = {'Items': items or [], 'Count': len(items or [])}
+    table.update_item.return_value = {}
     return table
 
 

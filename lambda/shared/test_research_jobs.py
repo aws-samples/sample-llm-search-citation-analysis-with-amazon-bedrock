@@ -143,7 +143,7 @@ class TestMergeExpansionKeywords:
 
     def test_reads_decimal_relevance_as_written_by_dynamodb(self):
         merged = merge_expansion_keywords([
-            _step('openai', keywords=[{'keyword': 'low', 'relevance': Decimal('3')}, {'keyword': 'high', 'relevance': Decimal('9.5')}]),
+            _step('openai', keywords=[{'keyword': 'low', 'relevance': Decimal(3)}, {'keyword': 'high', 'relevance': Decimal('9.5')}]),
         ])
 
         assert [entry['keyword'] for entry in merged] == ['high', 'low']
@@ -360,7 +360,7 @@ class TestBoundStepResult:
     def test_returns_canonical_ints_when_step_metadata_contains_ints_or_integral_decimals(self):
         results = [
             bound_step_result({'round': round_number, 'attempt': attempt})
-            for round_number, attempt in ((4, 5), (Decimal('4'), Decimal('5')))
+            for round_number, attempt in ((4, 5), (Decimal(4), Decimal(5)))
         ]
 
         assert [(result['round'], result['attempt']) for result in results] == [(4, 5), (4, 5)]

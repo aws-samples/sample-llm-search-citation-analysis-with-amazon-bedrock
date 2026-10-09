@@ -159,7 +159,7 @@ def normalize_url(url: str) -> str:
     except ValueError as e:
         # The only error `urlparse` raises for a string (e.g. an unbalanced
         # IPv6 bracket); the URL is kept verbatim rather than dropped.
-        logger.warning(f"Error normalizing URL {url}: {e}")
+        logger.warning('Error normalizing URL %s: %s', url, e)
         return url
 
     # Remove tracking parameters
@@ -242,7 +242,7 @@ def get_timestamp_compact() -> str:
     return utc_now().strftime('%Y%m%d-%H%M%S')
 
 
-def extract_domain(url: str) -> str:
+def extract_domain(url: object) -> str:
     """The domain of ``url`` as ``kpi_engine.normalize_domain`` defines it, as a string.
 
     Callers display the domain next to the URL, so they need a string: ``''``
@@ -259,7 +259,7 @@ def extract_domain(url: str) -> str:
     return normalize_domain(url) or ""
 
 
-def brand_names_match(candidate: str, tracked: str) -> bool:
+def brand_names_match(candidate: object, tracked: object) -> bool:
     """Safely test whether two brand names refer to the same brand.
 
     Designed as a fallback for classification logic when a brand extraction

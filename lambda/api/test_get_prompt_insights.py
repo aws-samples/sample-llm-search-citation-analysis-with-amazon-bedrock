@@ -347,9 +347,9 @@ class TestBrandTallies:
         assert (first_party['mentions'], first_party['best_rank'], first_party['providers']) == (3, 2, ['openai'])
 
     def test_reads_decimal_ranks_and_mention_counts_as_integers(self, insights_module):
-        rows = _run('best running shoes', _brand('first_party', Decimal('2'), Decimal('3')))
+        brand = _brand('first_party', Decimal(2), Decimal(3))
 
-        first_party = _winning_first_party(insights_module, rows)
+        first_party = _winning_first_party(insights_module, _run('best running shoes', brand))
 
         assert (first_party['mentions'], first_party['best_rank']) == (3, 2)
         assert {type(first_party['mentions']), type(first_party['best_rank'])} == {int}

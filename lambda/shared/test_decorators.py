@@ -22,7 +22,15 @@ from typing import Any
 import pytest
 
 from shared.auth import require_group
-from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler, validate
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    cors_preflight,
+    paginate,
+    parse_json_body,
+    route_handler,
+    validate,
+)
 from testing.cors_fixtures import CONFIGURED_ORIGIN, configured_cors_origin, credentialed_json_headers
 from testing.events import parse_response_lenient
 
@@ -65,12 +73,12 @@ class TestPositionalArgumentForwarding:
     @pytest.mark.parametrize(
         ('name', 'decorate'),
         [
-            ('api_handler', lambda fn: api_handler(fn)),
-            ('parse_json_body', lambda fn: parse_json_body(fn)),
-            ('validate', lambda fn: validate({})(fn)),
-            ('cors_preflight', lambda fn: cors_preflight(fn)),
-            ('paginate', lambda fn: paginate()(fn)),
-            ('require_group', lambda fn: require_group('Admin')(fn)),
+            ('api_handler', api_handler),
+            ('parse_json_body', parse_json_body),
+            ('validate', validate({})),
+            ('cors_preflight', cors_preflight),
+            ('paginate', paginate()),
+            ('require_group', require_group('Admin')),
         ],
     )
     def test_decorator_forwards_a_positional_argument(self, name, decorate) -> None:
@@ -213,3 +221,26 @@ class TestCorsPreflight:
             'headers': credentialed_json_headers(CONFIGURED_ORIGIN),
             'body': '',
         }
+
+
+class TestRouteHandlerBody:
+    """A routed handler's own body is a placeholder that raises if ever reached."""
+
+    def test_matched_route_answers_without_calling_the_decorated_body(self) -> None:
+        @route_handler({'GET': lambda event, context: {'statusCode': 204, 'body': ''}})
+        def handler(event, context) -> dict[str, Any]:
+            raise RouteNotHandledError(__name__)
+
+        response = handler({'httpMethod': 'GET', 'path': '/api/things'}, None)
+
+        assert response == {'statusCode': 204, 'body': ''}
+
+    def test_api_handler_turns_a_reached_body_into_a_500_without_the_message(self) -> None:
+        @api_handler
+        def handler(event, context) -> dict[str, Any]:
+            raise RouteNotHandledError('internal.module.name')
+
+        status, payload = parse_response_lenient(handler(make_event(method='GET'), None))
+
+        assert status == 500
+        assert payload == {'error': 'An unexpected error occurred'}

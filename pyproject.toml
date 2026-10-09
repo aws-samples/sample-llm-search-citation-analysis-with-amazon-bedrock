@@ -61,6 +61,30 @@ norecursedirs = [
 #         be satisfied by wrapping every message in a custom class.
 #   T20 — no print(); Lambda code logs through `logging`
 #   PT  — flake8-pytest-style
+#   PIE — flake8-pie: no-effect placeholders (`...`/`pass` beside a docstring,
+#         PIE790 — what CodeQL reports as "Statement has no effect"), lambdas
+#         that only wrap a builtin, repeated startswith calls
+#   DTZ — flake8-datetimez: no naive datetimes; every timestamp this system
+#         stores or compares is UTC, and naive/aware mixing raises at runtime
+#   LOG — flake8-logging: misuse of the logging API (exc_info outside except,
+#         loggers built from __file__, warn() for warning())
+#   G   — flake8-logging-format: lazy %-style logger args, never f-strings or
+#         .format() (G004) — formatting is skipped when the level is off and
+#         CloudWatch groups identical templates; logger.exception, not
+#         logger.error(exc_info=True) (G201)
+#   RET — flake8-return: superfluous else after return, implicit returns
+#   C4  — flake8-comprehensions: no redundant list()/dict()/sorted() wrapping
+#   PERF — perflint: comprehensions over append loops, items() misuse
+#   FLY — flynt: f-strings over static str.join
+#   FURB — refurb: modern idioms (Decimal from int literal, `x or y`, ...)
+#   PGH — pygrep-hooks: no blanket `# noqa` / `# type: ignore`
+#   T10 — no debugger breakpoints left in code
+#   ISC — implicit string concatenation (a missing comma in a list)
+#   RSE — no parentheses when raising a bare exception class
+#   PLW — pylint warnings (useless lambdas, loop variables overwritten in the
+#         body, `global` — see per-file-ignores for the lazy-client pattern)
+#   A   — flake8-builtins: no names shadowing builtins (see per-file-ignores
+#         for API Gateway path parameters)
 #
 # The ceilings below are hard stops. Cyclomatic complexity is capped at 12
 # (both languages: eslint.config.mjs caps TypeScript at the same value); the
@@ -71,7 +95,8 @@ norecursedirs = [
 select = [
     "F", "E", "W", "I", "B", "ARG", "UP", "SIM", "RUF",
     "C90", "PLR0911", "PLR0912", "PLR0915", "RET504", "ERA001",
-    "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT",
+    "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT", "PIE",
+    "DTZ", "LOG", "G", "RET", "C4", "PERF", "FLY", "FURB", "PGH", "T10", "ISC", "RSE", "PLW", "A",
 ]
 
 ignore = [
@@ -83,8 +108,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Handler entry points: `event` and `context` are required by AWS but often unused by routers.
+# A002 in lambda/api: `@validate` / `@route_handler(inject_path_params=True)` pass
+# request fields as keyword arguments named after the API's own `{id}` path
+# parameter and `?type=` query parameter, so those handler parameters must be
+# called `id` / `type`.
 "lambda/**/handler.py"      = ["ARG001"]
-"lambda/api/**"             = ["ARG001"]
+"lambda/api/**"             = ["ARG001", "A002"]
 # Tests: allow magic values, imperative fixtures, loose typing. Mock lambdas
 # must match the mocked signature even when arguments go unused (ARG005), and
 # the sys.path shim before importing hyphenated Lambda modules forces imports
@@ -101,10 +130,21 @@ ignore = [
 #   S608 — the "SQL" is an LLM prompt that happens to contain the word SELECT.
 #   S104 — 0.0.0.0 appears in the SSRF *blocklist*, not as a bind address.
 "lambda/shared/ai_clients.py"     = ["S311"]
-"lambda/shared/models.py"         = ["S311"]
 "lambda/shared/serpapi.py"        = ["S311"]
 "lambda/shared/research_agent.py" = ["S105", "S608"]
 "lambda/shared/url_validator.py"  = ["S104"]
+# PLW0603 — `global` here is the lazy module-level boto3 client / cache that a
+# warm Lambda container reuses across invocations; tests swap the module
+# attribute (`_table`, `_bedrock_client`, `_cors_origin_cache`, ...) directly.
+"lambda/mcp/directory.py"         = ["PLW0603"]
+"lambda/mcp/invoke.py"            = ["PLW0603"]
+"lambda/mcp/state.py"             = ["PLW0603"]
+"lambda/mcp/tool_search.py"       = ["PLW0603"]
+"lambda/search/handler.py"        = ["PLW0603"]
+"lambda/shared/api_response.py"   = ["PLW0603"]
+"lambda/shared/models.py"         = ["PLW0603", "S311"]
+"lambda/shared/secrets.py"        = ["PLW0603"]
+"lambda/shared/utils.py"          = ["PLW0603"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["shared", "api_clients", "search_clients", "brand_extractor"]
@@ -159,11 +199,22 @@ sort_by_size = true
 # inline — fix the type or the annotation. (`strict` mode is not a realistic
 # next step for this codebase: measured at 2,754 findings on lambda/shared
 # alone, almost all `reportUnknown*` on the dict[str, Any] rows.)
+#
+# Three checks beyond `standard`, as errors:
+#   reportUnnecessaryIsInstance / reportUnnecessaryComparison — a runtime guard
+#     the declared types say can never fail is either dead code or a wrong
+#     annotation. Data from JSON, DynamoDB or an API event is typed `object` /
+#     `Mapping[str, object]` at the boundary so its validation stays meaningful.
+#   reportDeprecated — no calls into APIs the stubs mark deprecated (e.g.
+#     `datetime.utcnow`), so removals in a future runtime fail here first.
 # ---------------------------------------------------------------------------
 [tool.pyright]
 pythonVersion = "3.12"
 pythonPlatform = "Linux"
 typeCheckingMode = "standard"
+reportUnnecessaryIsInstance = "error"
+reportUnnecessaryComparison = "error"
+reportDeprecated = "error"
 include = ["lambda", "scripts"]
 exclude = [
     "**/node_modules",

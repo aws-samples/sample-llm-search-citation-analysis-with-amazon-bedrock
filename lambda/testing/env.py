@@ -7,7 +7,7 @@ have the variables in place *before* ``load_handler_module`` executes the file.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -38,7 +38,7 @@ def setdefault_env(defaults: Mapping[str, str]) -> None:
 
 
 @contextmanager
-def cleared_env(*names: str) -> Iterator[None]:
+def cleared_env(*names: str) -> Generator[None, None, None]:
     """Unset ``names`` for the block and restore the previous values afterwards."""
     with patch.dict(os.environ):
         for name in names:

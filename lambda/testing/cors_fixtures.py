@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -24,7 +24,7 @@ def credentialed_json_headers(origin: str) -> dict[str, str]:
 
 
 @contextmanager
-def configured_cors_origin(*, allow_localhost: bool = False) -> Iterator[None]:
+def configured_cors_origin(*, allow_localhost: bool = False) -> Generator[None, None, None]:
     """Serve ``CONFIGURED_ORIGIN`` from the warm-container cache, optionally allowing localhost too."""
     # `shared/__init__.py` re-exports the `api_response` function; patch the submodule.
     api_response_module = importlib.import_module('shared.api_response')

@@ -60,7 +60,7 @@ def _get_table_item_count(table, cache_key: str) -> int:
             response = table.scan(Select='COUNT', ExclusiveStartKey=response['LastEvaluatedKey'])
             count += response.get('Count', 0)
     except (BotoCoreError, ClientError) as e:
-        logger.warning(f"Failed to get item count for {table.table_name}: {e}")
+        logger.warning('Failed to get item count for %s: %s', table.table_name, e)
         return cached['count'] if cached else 0
 
     _count_cache[cache_key] = {'count': count, 'timestamp': now}
@@ -103,7 +103,7 @@ def handler(event, context, provider=None):
             if items:
                 timestamps.append(items[0].get('timestamp', ''))
         except (BotoCoreError, ClientError) as e:
-            logger.debug(f"No data for provider {p}: {e!s}")
+            logger.debug('No data for provider %s: %s', p, e)
             continue
 
     last_execution = max(timestamps) if timestamps else None

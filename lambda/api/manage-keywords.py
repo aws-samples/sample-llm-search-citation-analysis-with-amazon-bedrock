@@ -78,7 +78,7 @@ def _duplicate_response(event):
 
 
 def _update_request(
-    text: str, status: str, stored_keyword: str, metadata: dict[str, Any], group_ids: list[str] | None
+    text: str, status: str | None, stored_keyword: str, metadata: dict[str, Any], group_ids: list[str] | None
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
     """The ``UpdateExpression`` and its attribute names and values for one keyword update.
 

@@ -149,8 +149,7 @@ def throttle_extra_attempts() -> int:
         value = -1
     if value < 0:
         logger.warning(
-            f"[THROTTLE_CONFIG] {THROTTLE_EXTRA_ATTEMPTS_ENV}={raw!r} is not an integer >= 0; "
-            f"using {THROTTLE_EXTRA_ATTEMPTS}"
+            '[THROTTLE_CONFIG] %s=%r is not an integer >= 0; using %s', THROTTLE_EXTRA_ATTEMPTS_ENV, raw, THROTTLE_EXTRA_ATTEMPTS
         )
         return THROTTLE_EXTRA_ATTEMPTS
     return value
@@ -221,15 +220,12 @@ def _status_retry_wait(
     budget = throttle_attempts if throttled else max_retries
     if attempt >= budget - 1:
         logger.error(
-            f"[{provider_name}_FAILED] Status {response.status_code} "
-            f"after {attempt + 1} attempts | Error: {error_body}"
+            '[%s_FAILED] Status %s after %s attempts | Error: %s', provider_name, response.status_code, attempt + 1, error_body
         )
         return None
     wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
     logger.warning(
-        f"[{provider_name}_RETRY] Status {response.status_code} | "
-        f"Attempt {attempt + 1}/{budget} | "
-        f"Waiting {wait_time:.1f}s | Error: {error_body}"
+        '[%s_RETRY] Status %s | Attempt %s/%s | Waiting %.1fs | Error: %s', provider_name, response.status_code, attempt + 1, budget, wait_time, error_body
     )
     return wait_time
 
@@ -250,20 +246,19 @@ def _request_error_wait(
     timed_out = isinstance(error, requests.exceptions.Timeout)
     if attempt >= max_retries - 1:
         if timed_out:
-            logger.error(f"[{provider_name}_TIMEOUT_FAILED] After {max_retries} attempts", exc_info=error)
+            logger.error('[%s_TIMEOUT_FAILED] After %s attempts', provider_name, max_retries, exc_info=error)
         else:
             logger.error(
-                f"[{provider_name}_REQUEST_FAILED] {str(error)[:500]} after {max_retries} attempts",
+                '[%s_REQUEST_FAILED] %s after %s attempts', provider_name, str(error)[:500], max_retries,
                 exc_info=error,
             )
         return None
     wait_time = _backoff_seconds(attempt)
     if timed_out:
-        logger.warning(f"[{provider_name}_TIMEOUT] Attempt {attempt + 1}/{max_retries} | Waiting {wait_time}s")
+        logger.warning('[%s_TIMEOUT] Attempt %s/%s | Waiting %ss', provider_name, attempt + 1, max_retries, wait_time)
     else:
         logger.warning(
-            f"[{provider_name}_REQUEST_ERROR] {str(error)[:200]} | "
-            f"Attempt {attempt + 1}/{max_retries} | Waiting {wait_time}s"
+            '[%s_REQUEST_ERROR] %s | Attempt %s/%s | Waiting %ss', provider_name, str(error)[:200], attempt + 1, max_retries, wait_time
         )
     return wait_time
 
@@ -329,8 +324,7 @@ def retry_with_backoff(provider_name: str, timeout: int = 60):
 
                     if response.status_code != 200:
                         logger.error(
-                            f"[{provider_name}_ERROR] Status {response.status_code} | "
-                            f"Response: {response.text[:500]}"
+                            '[%s_ERROR] Status %s | Response: %s', provider_name, response.status_code, response.text[:500]
                         )
 
                     # An HTTPError raised here is a RequestException, so a
@@ -346,7 +340,7 @@ def retry_with_backoff(provider_name: str, timeout: int = 60):
                     time.sleep(wait_time)
                     attempt += 1
 
-            logger.error(f"[{provider_name}_EXHAUSTED] Failed after {actual_max_retries} attempts")
+            logger.error('[%s_EXHAUSTED] Failed after %s attempts', provider_name, actual_max_retries)
             raise RuntimeError(f"{provider_name} API failed after {actual_max_retries} attempts")
 
         return wrapper
@@ -469,10 +463,10 @@ def _run_gemini(client: GeminiClient, prompt: str, max_retries: int = 5) -> dict
 def _extract_perplexity_text(response: dict[str, Any]) -> str:
     choices = response.get('choices', [])
     if not choices:
-        logger.warning(f"Perplexity response has no choices: {response}")
+        logger.warning('Perplexity response has no choices: %s', response)
         return ''
     content = choices[0].get('message', {}).get('content', '')
-    logger.info(f"Perplexity content length: {len(content)}")
+    logger.info('Perplexity content length: %s', len(content))
     return content
 
 
@@ -540,6 +534,6 @@ def run_web_search(provider: WebSearchProvider, client: Any, prompt: str, *, max
     (a Step Functions step with its own budget) decides how many it can
     afford. Errors propagate — the step, not this function, records them.
     """
-    logger.info(f"Querying {provider.provider_id}")
+    logger.info('Querying %s', provider.provider_id)
     raw_response = provider.run(client, prompt, max_retries=max_retries)
     return provider.extract_text(raw_response)

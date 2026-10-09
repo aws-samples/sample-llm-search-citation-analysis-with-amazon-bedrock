@@ -26,7 +26,14 @@ from shared.api_response import (
     validation_error,
 )
 from shared.auth import ADMIN_GROUP, is_self_reference, require_group
-from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    cors_preflight,
+    paginate,
+    parse_json_body,
+    route_handler,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -502,4 +509,4 @@ def handler(event: dict, context: Any) -> dict:
 
     Routes handle everything; this body is never reached.
     """
-    ...
+    raise RouteNotHandledError(__name__)

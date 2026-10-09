@@ -183,7 +183,7 @@ def handler(event, context, **scope_params):
         items = _scan_all_citations(keyword=report_scope.keywords[0])
     else:
         items = _scan_all_citations(keywords=list(report_scope.keywords))
-    logger.info(f"Fetched {len(items)} citation records from Citations table")
+    logger.info('Fetched %s citation records from Citations table', len(items))
 
     # Aggregate by URL across all keywords
     url_data, provider_totals, brand_mentions = _aggregate_citations(items, tracked_brands)
@@ -196,7 +196,7 @@ def handler(event, context, **scope_params):
                 'citation_count': data['total_count'],
                 'by_provider': dict(data['provider_counts']),
                 'keyword_count': len(data['keywords']),
-                'keywords': sorted(list(data['keywords'])),
+                'keywords': sorted(data['keywords']),
             }
             for url, data in url_data.items()
         ],

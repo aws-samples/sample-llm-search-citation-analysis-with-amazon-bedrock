@@ -272,7 +272,7 @@ def _assert_utc_wire_timestamp(value):
     """Assert a timestamp is UTC ISO-8601 in the trailing-'Z' wire format."""
     assert value.endswith('Z'), f'Timestamp {value!r} lacks the trailing Z'
 
-    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    parsed = datetime.fromisoformat(value)
 
     assert parsed.utcoffset() == UTC.utcoffset(None), f'Timestamp {value!r} is not UTC'
 
