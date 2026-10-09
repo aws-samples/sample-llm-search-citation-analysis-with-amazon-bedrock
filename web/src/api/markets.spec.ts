@@ -1,0 +1,197 @@
+import {
+  describe, expect, it, vi
+} from 'vitest';
+import {
+  fetchMarkets, MarketsError, MarketsInUseError, saveMarkets, suggestMarketKeywords
+} from './markets';
+import {
+  mockApiGet, mockApiPost, mockApiPut
+} from './clientMock-fixtures';
+import {
+  BRAZIL, CHILE, SANTIAGO
+} from '../components/Markets/markets-fixtures';
+
+vi.mock('./client', () => import('./clientMock-fixtures'));
+
+describe('fetchMarkets', () => {
+  it('returns the markets and the save time of the listing', async () => {
+    mockApiGet.mockResolvedValue({
+      markets: [CHILE, SANTIAGO],
+      updated_at: '2026-09-18T09:00:00Z',
+    });
+
+    await expect(fetchMarkets()).resolves.toStrictEqual({
+      markets: [CHILE, SANTIAGO],
+      updated_at: '2026-09-18T09:00:00Z',
+    });
+  });
+
+  it('reads a never-saved list as having no save time', async () => {
+    mockApiGet.mockResolvedValue({ markets: [] });
+
+    await expect(fetchMarkets()).resolves.toStrictEqual({
+      markets: [],
+      updated_at: null,
+    });
+  });
+
+  it('drops members the dashboard does not know', async () => {
+    mockApiGet.mockResolvedValue({
+      markets: [{
+        ...CHILE,
+        unexpected: 'value',
+      }],
+      updated_at: null,
+    });
+
+    await expect(fetchMarkets()).resolves.toStrictEqual({
+      markets: [CHILE],
+      updated_at: null,
+    });
+  });
+
+  it('asks GET /markets with the abort signal', async () => {
+    mockApiGet.mockResolvedValue({ markets: [] });
+    const controller = new AbortController();
+
+    await fetchMarkets(controller.signal);
+
+    expect(mockApiGet).toHaveBeenCalledWith('/markets', { signal: controller.signal });
+  });
+
+  it.each([
+    ['nothing', null],
+    ['no list', { updated_at: null }],
+    ['a market without a currency', {
+      markets: [{
+        ...CHILE,
+        currency: undefined,
+      }] 
+    }],
+    ['a text latitude', {
+      markets: [{
+        ...CHILE,
+        lat: '-33',
+        lng: -70,
+      }] 
+    }],
+    ['competitors that are not names', {
+      markets: [{
+        ...CHILE,
+        competitors: [1],
+      }] 
+    }],
+    ['a numeric save time', {
+      markets: [],
+      updated_at: 5,
+    }],
+  ])('refuses a listing with %s', async (_description, payload) => {
+    mockApiGet.mockResolvedValue(payload);
+
+    await expect(fetchMarkets()).rejects.toThrow('Markets API returned an invalid market list');
+  });
+});
+
+describe('saveMarkets', () => {
+  it('puts the whole list and returns what the server stored', async () => {
+    mockApiPut.mockResolvedValue({
+      markets: [CHILE, BRAZIL],
+      updated_at: '2026-09-19T10:00:00Z',
+    });
+
+    await expect(saveMarkets([CHILE, BRAZIL])).resolves.toStrictEqual({
+      markets: [CHILE, BRAZIL],
+      updated_at: '2026-09-19T10:00:00Z',
+    });
+  });
+
+  it('keeps the 400 and 409 refusal bodies readable', async () => {
+    mockApiPut.mockResolvedValue({ markets: [] });
+
+    await saveMarkets([]);
+
+    expect(mockApiPut).toHaveBeenCalledWith('/markets', { markets: [] }, { acceptedJsonStatuses: [400, 409] });
+  });
+
+  it('throws the markets keywords still use when the server answers 409', async () => {
+    mockApiPut.mockResolvedValue({
+      error: 'Markets still used by keywords',
+      market_ids: ['br-pt'],
+    });
+
+    await expect(saveMarkets([CHILE])).rejects.toStrictEqual(new MarketsInUseError('Markets still used by keywords', ['br-pt']));
+  });
+
+  it('names the markets still in use on the error', async () => {
+    mockApiPut.mockResolvedValue({
+      error: 'Markets still used by keywords',
+      market_ids: ['br-pt', 'cl-es'],
+    });
+
+    const failure: unknown = await saveMarkets([]).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(MarketsInUseError);
+    expect((failure as MarketsInUseError).marketIds).toStrictEqual(['br-pt', 'cl-es']);
+  });
+
+  it('throws the validation message of a 400', async () => {
+    mockApiPut.mockResolvedValue({ error: 'Market 1: country is not valid' });
+
+    await expect(saveMarkets([CHILE])).rejects.toThrow(MarketsError);
+    await expect(saveMarkets([CHILE])).rejects.toThrow('Market 1: country is not valid');
+  });
+});
+
+describe('suggestMarketKeywords', () => {
+  it('posts the keyword and the markets', async () => {
+    mockApiPost.mockResolvedValue({ suggestions: [] });
+
+    await suggestMarketKeywords('cheap flights to Lima', ['cl-es', 'br-pt']);
+
+    expect(mockApiPost).toHaveBeenCalledWith('/markets', {
+      keyword: 'cheap flights to Lima',
+      market_ids: ['cl-es', 'br-pt'],
+    }, {
+      signal: undefined,
+      acceptedJsonStatuses: [400, 502],
+    });
+  });
+
+  it('returns one local wording per market', async () => {
+    mockApiPost.mockResolvedValue({
+      suggestions: [
+        {
+          market_id: 'cl-es',
+          keyword: 'pasajes baratos a Lima',
+        },
+        {
+          market_id: 'br-pt',
+          keyword: 'passagens baratas para Lima',
+        },
+      ],
+    });
+
+    await expect(suggestMarketKeywords('cheap flights to Lima', ['cl-es', 'br-pt'])).resolves.toStrictEqual([
+      {
+        market_id: 'cl-es',
+        keyword: 'pasajes baratos a Lima',
+      },
+      {
+        market_id: 'br-pt',
+        keyword: 'passagens baratas para Lima',
+      },
+    ]);
+  });
+
+  it('throws the refusal of an unknown market', async () => {
+    mockApiPost.mockResolvedValue({ error: "Unknown market 'xx'" });
+
+    await expect(suggestMarketKeywords('flights', ['xx'])).rejects.toThrow("Unknown market 'xx'");
+  });
+
+  it('refuses suggestions without a keyword', async () => {
+    mockApiPost.mockResolvedValue({ suggestions: [{ market_id: 'cl-es' }] });
+
+    await expect(suggestMarketKeywords('flights', ['cl-es'])).rejects.toThrow('Markets API returned invalid suggestions');
+  });
+});

@@ -28,6 +28,9 @@ import {
   successfulFullProposalResponseFixture,
   type PromotionHookReader,
 } from './usePromoteKeywords-fixtures';
+import {
+  buildMarketSelectionMock, marketSelectionWrapper
+} from '../components/Markets/markets-fixtures';
 
 import type {
   SelectionState, UsePromoteKeywordsOptions
@@ -458,6 +461,19 @@ describe('full proposal promotion', () => {
 
 describe('promotion request safety', () => {
   beforeEach(setupNeverSettlingPromotion);
+
+  it('creates the promoted keywords in the header market', () => {
+    const { result } = renderSelectedPromotion({ wrapper: marketSelectionWrapper(buildMarketSelectionMock({ selectedMarketId: 'cl-es' })) });
+
+    act(() => {
+      void result.current.promote();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith('/keywords/promote', {
+      keywords: availableKeywordFixtures,
+      market_id: 'cl-es',
+    }, expect.anything());
+  });
 
   it('sends one request when promotion is triggered twice before rendering updates', () => {
     const { result } = renderSelectedPromotion();

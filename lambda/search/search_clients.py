@@ -14,6 +14,7 @@ from typing import Any, ClassVar
 import requests
 
 from api_clients import clean_url, retry_with_backoff
+from shared.markets import Market, brave_params, exa_params, firecrawl_params, serpapi_params, tavily_params
 from shared.serpapi import serpapi_search
 
 logger = logging.getLogger(__name__)
@@ -65,11 +66,15 @@ class BaseSearchClient(ABC):
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def search(self, query: str) -> dict[str, Any]:
-        """Execute the search and return the standardized result."""
+    def search(self, query: str, market: Market | None = None) -> dict[str, Any]:
+        """Execute the search and return the standardized result.
+
+        ``market`` adds the provider's native country/language parameters;
+        without one the request is exactly what it was before markets.
+        """
         start_time = time.time()
         try:
-            raw_response = self._fetch(query)
+            raw_response = self._fetch(query, market)
             latency_ms = _elapsed_ms(start_time)
             citations, results = self._collect_results(self._hits(raw_response))
             return self._build_result(
@@ -93,8 +98,8 @@ class BaseSearchClient(ABC):
             )
 
     @abstractmethod
-    def _fetch(self, query: str) -> dict[str, Any]:
-        """Ask the provider for ``query`` and return its decoded answer."""
+    def _fetch(self, query: str, market: Market | None) -> dict[str, Any]:
+        """Ask the provider for ``query`` (from ``market``) and return its decoded answer."""
 
     def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
         """The raw hits in the provider's answer."""
@@ -168,13 +173,17 @@ class _HttpSearchClient(BaseSearchClient):
     #: ``(header, template)`` carrying the API key (``{key}`` in the template), or ``None`` when it travels in the body.
     credential_header: ClassVar[tuple[str, str] | None] = None
 
-    def _fetch(self, query: str) -> dict[str, Any]:
+    def _fetch(self, query: str, market: Market | None) -> dict[str, Any]:
         send = retry_with_backoff(provider_name=self.provider_id.upper(), timeout=self.timeout)(self._send)
-        return send(self._request_body(query))
+        return send({**self._request_body(query), **(self._market_params(market) if market else {})})
 
     @abstractmethod
     def _request_body(self, query: str) -> dict[str, Any]:
-        """The JSON body (or, for a GET, the query parameters) for ``query``."""
+        """The JSON body (or, for a GET, the query parameters) for ``query``, as asked without a market."""
+
+    @abstractmethod
+    def _market_params(self, market: Market) -> dict[str, Any]:
+        """The provider's native locale parameters for ``market``, merged over the request body."""
 
     def _headers(self) -> dict[str, str]:
         """The request headers, including the provider's credential."""
@@ -206,6 +215,9 @@ class BraveSearchClient(_HttpSearchClient):
     def _request_body(self, query: str) -> dict[str, Any]:
         return {"q": query, "count": 10, "text_decorations": False, "search_lang": "en"}
 
+    def _market_params(self, market: Market) -> dict[str, Any]:
+        return brave_params(market)
+
     def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
         return raw_response.get("web", {}).get("results", [])
 
@@ -230,6 +242,9 @@ class TavilySearchClient(_HttpSearchClient):
             "include_raw_content": False,
             "max_results": 10
         }
+
+    def _market_params(self, market: Market) -> dict[str, Any]:
+        return tavily_params(market)
 
 
 class ExaSearchClient(_HttpSearchClient):
@@ -260,6 +275,9 @@ class ExaSearchClient(_HttpSearchClient):
             }
         }
 
+    def _market_params(self, market: Market) -> dict[str, Any]:
+        return exa_params(market)
+
 
 class SerpAPIClient(BaseSearchClient):
     """SerpAPI Google Search client (async submit + Search Archive, see ``shared.serpapi``)."""
@@ -272,8 +290,9 @@ class SerpAPIClient(BaseSearchClient):
     url_key = "link"
     hit_fields = _fields(position=("position", None), displayed_link=("displayed_link", None))
 
-    def _fetch(self, query: str) -> dict[str, Any]:
-        return serpapi_search(self.api_key, {"q": query, "engine": "google", "num": 10, "hl": "en", "gl": "us"})
+    def _fetch(self, query: str, market: Market | None) -> dict[str, Any]:
+        locale = serpapi_params(market) if market else {"hl": "en", "gl": "us"}
+        return serpapi_search(self.api_key, {"q": query, "engine": "google", "num": 10, **locale})
 
     def _answer_metadata(self, raw_response: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -296,6 +315,9 @@ class FirecrawlSearchClient(_HttpSearchClient):
 
     def _request_body(self, query: str) -> dict[str, Any]:
         return {"query": query, "limit": 10}
+
+    def _market_params(self, market: Market) -> dict[str, Any]:
+        return firecrawl_params(market)
 
     def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
         # Data can be an array directly or have a 'web' key

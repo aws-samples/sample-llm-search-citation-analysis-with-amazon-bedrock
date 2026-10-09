@@ -222,6 +222,27 @@ class TestScopeRouting:
             'url': 'https://e.com/p', 'include_history': 'true',
         }
 
+    def test_passes_the_market_next_to_the_scope(self):
+        assert _route('get_visibility', {'group_id': 'grp_1', 'market_id': 'cl-es'}).query == {'group_id': 'grp_1', 'market_id': 'cl-es'}
+
+    def test_passes_the_market_next_to_scope_all(self):
+        assert _route('get_visibility', {'all': True, 'market_id': 'global'}).query == {'scope': 'all', 'market_id': 'global'}
+
+    def test_a_market_alone_satisfies_a_required_scope(self):
+        assert _route('get_visibility', {'market_id': 'cl-es'}).query == {'market_id': 'cl-es'}
+
+    def test_a_market_does_not_count_as_a_second_scope_argument(self):
+        assert _route('get_report', {'kind': 'group_kpis', 'keyword': 'parador', 'market_id': 'cl-es'}).query == {
+            'keyword': 'parador', 'market_id': 'cl-es',
+        }
+
+    @pytest.mark.parametrize('name', [
+        'get_visibility', 'get_report', 'get_citations', 'get_brand_mentions', 'estimate_run', 'start_run',
+        'estimate_content_brief', 'generate_content_brief', 'get_dashboard_stats', 'manage_keywords',
+    ])
+    def test_market_taking_tools_accept_a_market(self, name):
+        assert find_operation(name).input_schema['properties']['market_id']['type'] == 'string'
+
 
 class TestManageKeywordsRouting:
     def test_update_group_targets_the_group_path_with_its_id_as_path_parameter(self):
@@ -272,6 +293,38 @@ class TestManageKeywordsRouting:
         writers = [tool for tool in OPERATIONS if tool.scope == 'write' and tool.spend is None]
 
         assert [(tool.name, tool.admin) for tool in writers] == [('manage_keywords', False)]
+
+    def test_add_posts_the_market_and_the_concept_of_the_keyword(self):
+        route = _route('manage_keywords', {'action': 'add', 'keyword': 'vuelos altiplano air', 'market_id': 'cl-es', 'concept_id': 'kw_1'})
+
+        assert route.body == {'keyword': 'vuelos altiplano air', 'market_id': 'cl-es', 'concept_id': 'kw_1'}
+
+    def test_update_puts_the_market_and_the_concept_of_the_keyword(self):
+        arguments = {'action': 'update', 'keyword_id': 'kw_2', 'keyword': 'voos altiplano air', 'market_id': 'br-pt', 'concept_id': 'kw_1'}
+
+        route = _route('manage_keywords', arguments)
+
+        assert (route.path, route.body) == ('/api/keywords/kw_2', {'keyword': 'voos altiplano air', 'market_id': 'br-pt', 'concept_id': 'kw_1'})
+
+    def test_update_forwards_an_empty_market_and_concept_so_the_api_removes_them(self):
+        arguments = {'action': 'update', 'keyword_id': 'kw_2', 'keyword': 'voos altiplano air', 'market_id': '', 'concept_id': ''}
+
+        assert _route('manage_keywords', arguments).body == {'keyword': 'voos altiplano air', 'market_id': '', 'concept_id': ''}
+
+    def test_update_forwards_the_global_market(self):
+        arguments = {'action': 'update', 'keyword_id': 'kw_2', 'keyword': 'altiplano air baggage', 'market_id': 'global'}
+
+        assert _route('manage_keywords', arguments).body == {'keyword': 'altiplano air baggage', 'market_id': 'global'}
+
+    def test_leaves_the_market_and_concept_out_when_not_given(self):
+        route = _route('manage_keywords', {'action': 'update', 'keyword_id': 'kw_2', 'keyword': 'parador', 'market_id': None})
+
+        assert route.body == {'keyword': 'parador'}
+
+    @pytest.mark.parametrize('name', ['market_id', 'concept_id'])
+    def test_rejects_a_market_or_concept_that_is_not_a_string(self, name):
+        with pytest.raises(InvalidArguments, match=f'{name} must be of type string'):
+            _route('manage_keywords', {'action': 'add', 'keyword': 'parador', name: 7})
 
 
 class TestProviderShape:
@@ -337,6 +390,16 @@ class TestRunRouting:
         assert (route.router, route.method, route.path, route.body) == (
             'execution-mgmt', 'POST', '/api/trigger-keyword-analysis', {'scope': scope},
         )
+
+    def test_adds_the_market_to_the_scope_descriptor(self):
+        route = _route('estimate_run', {'group_id': 'grp_1', 'market_id': 'cl-es'})
+
+        assert route.body == {'scope': {'mode': 'groups', 'group_ids': ['grp_1'], 'market_ids': ['cl-es']}}
+
+    def test_content_briefs_put_the_market_in_the_idea_scope(self):
+        idea = _idea({'group_id': 'grp_1', 'market_id': 'cl-es'})
+
+        assert idea['scope'] == {'mode': 'groups', 'group_ids': ['grp_1'], 'market_ids': ['cl-es']}
 
     def test_does_not_accept_a_keyword_text_scope(self):
         with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): keyword'):
@@ -405,6 +468,23 @@ class TestContentBriefRouting:
     def test_names_a_brief_in_another_language_with_another_idea_id(self):
         assert _idea({'group_id': 'grp_1'})['id'] != _idea({'group_id': 'grp_1', 'output_language': 'Spanish'})['id']
 
+    def test_names_a_brief_of_one_market_with_another_idea_id(self):
+        assert _idea({'group_id': 'grp_1'})['id'] != _idea({'group_id': 'grp_1', 'market_id': 'cl-es'})['id']
+
+    def test_puts_the_market_in_a_selected_keyword_scope(self):
+        assert _idea({'keyword_ids': ['kw_1'], 'market_id': 'global'})['scope'] == {
+            'mode': 'keywords', 'keyword_ids': ['kw_1'], 'market_ids': ['global'],
+        }
+
+    def test_a_market_alone_is_not_a_brief_scope(self):
+        with pytest.raises(InvalidArguments, match='Provide one of group_id, keyword_ids'):
+            _route('estimate_content_brief', {'market_id': 'cl-es'})
+
+    def test_generate_builds_the_same_market_scoped_request_as_its_estimate(self):
+        arguments = {'group_id': 'grp_1', 'market_id': 'cl-es'}
+
+        assert _route('estimate_content_brief', arguments) == _route('generate_content_brief', {**arguments, CONFIRMATION_ARGUMENT: 'abc'})
+
     def test_refuses_the_all_keywords_scope_content_studio_does_not_take(self):
         with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): all'):
             _route('estimate_content_brief', {'all': True})
@@ -438,6 +518,14 @@ class TestReadRouting:
 
     def test_alerts_pass_status_and_limit(self):
         assert _route('list_alerts', {'status': 'all', 'limit': 5}).query == {'status': 'all', 'limit': '5'}
+
+    def test_dashboard_stats_pass_the_market(self):
+        route = _route('get_dashboard_stats', {'market_id': 'cl-es', 'provider': 'gemini'})
+
+        assert (route.router, route.path, route.query) == ('stats-insights', '/api/stats', {'provider': 'gemini', 'market_id': 'cl-es'})
+
+    def test_dashboard_stats_without_a_market_send_no_query(self):
+        assert _route('get_dashboard_stats', {}).query is None
 
 
 class TestCustomReportSelection:

@@ -21,6 +21,8 @@ export interface TopUrl {
   by_provider?: { [provider: string]: number };
   keyword_count?: number;
   keywords?: string[];
+  /** Stored by deduplication (derived from the URL for older rows); absent from older API builds. */
+  content_type?: 'video' | 'page';
 }
 
 export interface Citations {
@@ -46,6 +48,10 @@ export interface Keyword {
   status?: 'active' | 'inactive' | 'paused';
   /** Ids of the keyword groups this keyword belongs to (absent = none). */
   group_ids?: string[];
+  /** The configured market the keyword is asked from (absent, null or '' = the global market). */
+  market_id?: string | null;
+  /** The id of the keyword this one localizes; translations of one question share it. */
+  concept_id?: string | null;
 }
 
 /** A folder of keywords, typically one per hotel / property. */
@@ -60,9 +66,11 @@ export interface KeywordGroup {
 
 /**
  * What an analysis run should cover, resolved server-side against the active
- * keyword list: everything, whole groups, or explicit keyword ids.
+ * keyword list: everything, whole groups, or explicit keyword ids. Every
+ * mode may narrow to the keywords of some markets (`market_ids`, `'global'`
+ * for keywords without one); absent means every market.
  */
-export type AnalysisScope =
+export type AnalysisScope = (
   | { mode: 'all' }
   | {
     mode: 'groups';
@@ -71,7 +79,8 @@ export type AnalysisScope =
   | {
     mode: 'keywords';
     keyword_ids: string[] 
-  };
+  }
+) & { market_ids?: string[] };
 
 /**
  * What a KPI view or report covers. Serialised to the read endpoints' scope
@@ -94,6 +103,8 @@ export interface ReportScopeInfo {
   kind: 'all' | 'group' | 'keywords' | 'keyword';
   label: string;
   keyword_count: number;
+  /** The market the answer is narrowed to (`'global'` = keywords without one); absent or null = every market. */
+  market_id?: string | null;
 }
 
 export interface KeywordExtended extends Keyword {

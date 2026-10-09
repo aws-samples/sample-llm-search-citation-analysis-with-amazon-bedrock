@@ -263,6 +263,8 @@ export class ProviderSearch extends Construct {
         'keyword.$': '$.keyword',
         'timestamp.$': '$.timestamp',
         'query_prompts.$': '$.query_prompts',
+        // The keyword's market (or null); the search Lambda re-validates it.
+        'market.$': '$.market',
         providers: [provider.id],
       }),
       // Only the slim results survive into the Parallel output.

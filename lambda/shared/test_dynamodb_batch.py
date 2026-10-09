@@ -14,6 +14,10 @@ one failed partition as missing without discarding successful partitions.
 ``collect_all_items`` concatenates pages in order and feeds each page's
 ``LastEvaluatedKey`` into the next request; ``collect_capped_items`` does the
 same for at most ``max_pages`` pages and reports whether the cap cut it short.
+
+``count_all_items`` sums ``Select='COUNT'`` pages; ``count_partition_items``
+sums one such count per distinct partition value and, unlike
+``query_latest_per_key``, lets a failed partition raise.
 """
 
 from __future__ import annotations
@@ -315,3 +319,75 @@ class TestCollectCappedItems:
 
     def test_reads_a_page_without_items_as_empty(self) -> None:
         assert dynamodb_batch.collect_capped_items(MagicMock(side_effect=[{}]), 1) == ([], False)
+
+
+def _counting_table(counts: dict[str, int]) -> MagicMock:
+    """A table whose ``query`` answers ``Count = counts[partition value]`` (0 for any other value)."""
+    table = MagicMock()
+    table.query.side_effect = lambda **kwargs: {'Count': counts.get(kwargs['KeyConditionExpression'].get_expression()['values'][1], 0)}
+    return table
+
+
+class TestCountAllItems:
+    def test_asks_for_a_count_only_read(self):
+        operation = MagicMock(return_value={'Count': 4})
+
+        assert dynamodb_batch.count_all_items(operation, IndexName='StatusIndex') == 4
+        operation.assert_called_once_with(IndexName='StatusIndex', Select='COUNT')
+
+    def test_sums_the_count_of_every_page(self):
+        operation = MagicMock(side_effect=[{'Count': 2, 'LastEvaluatedKey': {'id': 'a'}}, {'Count': 0, 'LastEvaluatedKey': {'id': 'b'}}, {'Count': 5}])
+
+        assert dynamodb_batch.count_all_items(operation) == 7
+
+    def test_starts_each_page_after_the_previous_one(self):
+        operation = MagicMock(side_effect=[{'Count': 2, 'LastEvaluatedKey': {'id': 'a'}}, {'Count': 5}])
+
+        dynamodb_batch.count_all_items(operation)
+
+        assert operation.call_args_list[1] == call(Select='COUNT', ExclusiveStartKey={'id': 'a'})
+
+    def test_reads_a_missing_count_as_zero(self):
+        assert dynamodb_batch.count_all_items(MagicMock(return_value={})) == 0
+
+
+class TestCountPartitionItems:
+    def test_sums_the_counts_of_the_given_partitions(self):
+        table = _counting_table({'hotel a': 3, 'hotel b': 4, 'hotel c': 100})
+
+        assert dynamodb_batch.count_partition_items(table, 'keyword', ['hotel a', 'hotel b']) == 7
+
+    def test_counts_a_repeated_partition_once(self):
+        table = _counting_table({'hotel a': 3})
+
+        assert dynamodb_batch.count_partition_items(table, 'keyword', ['hotel a', 'hotel a']) == 3
+        assert table.query.call_count == 1
+
+    def test_queries_the_named_index_with_a_count_only_read(self):
+        table = _counting_table({'hotel a': 3})
+
+        dynamodb_batch.count_partition_items(table, 'keyword', ['hotel a'], index_name='KeywordIndex')
+
+        kwargs = table.query.call_args.kwargs
+        assert (kwargs['IndexName'], kwargs['Select']) == ('KeywordIndex', 'COUNT')
+
+    def test_counts_nothing_without_partitions(self):
+        table = _counting_table({})
+
+        assert dynamodb_batch.count_partition_items(table, 'keyword', []) == 0
+        table.query.assert_not_called()
+
+    def test_raises_when_a_partition_cannot_be_counted(self):
+        table = MagicMock()
+        table.query.side_effect = QueryFailure('throttled')
+
+        with pytest.raises(QueryFailure, match='throttled'):
+            dynamodb_batch.count_partition_items(table, 'keyword', ['hotel a', 'hotel b'])
+
+    def test_runs_at_most_max_workers_queries_at_a_time(self):
+        table = _counting_table({})
+
+        with patch.object(dynamodb_batch.concurrent.futures, 'ThreadPoolExecutor', wraps=dynamodb_batch.concurrent.futures.ThreadPoolExecutor) as executor:
+            dynamodb_batch.count_partition_items(table, 'keyword', ['a', 'b', 'c'], max_workers=2)
+
+        executor.assert_called_once_with(max_workers=2)

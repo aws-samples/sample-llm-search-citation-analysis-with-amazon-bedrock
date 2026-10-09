@@ -36,11 +36,15 @@ def _search_item(ts: str, provider: str, citations: list[str], brands: list[dict
 
 
 def _fake_dynamodb(search_items: list[dict], crawled_items: list[dict] | None = None) -> tuple[MagicMock, MagicMock]:
-    """Fake boto3 resource: search and crawl tables answer the supplied rows."""
+    """Fake boto3 resource: search and crawl tables answer the supplied rows.
+
+    Keyed by the table names the module actually read at import, so a table
+    name another test module defaulted first cannot leave the stubs unused.
+    """
     search_table = fake_table(query={'Items': search_items})
     resource = fake_dynamodb_resource(by_name={
-        'test-search': search_table,
-        'test-crawled': fake_table(query={'Items': crawled_items or []}),
+        _mod.SEARCH_RESULTS_TABLE: search_table,
+        _mod.CRAWLED_CONTENT_TABLE: fake_table(query={'Items': crawled_items or []}),
     })
     return resource, search_table
 
@@ -211,6 +215,27 @@ class TestSourceClassification:
         assert (gap['title'], gap['domain_authority']) == ('Best hotels', 42)
         assert gap['seo_analysis'] == {'score': 71}
         assert gap['last_crawled'] == '2026-08-18T00:00:00'
+
+    def test_marks_a_youtube_video_source_as_video_content(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item(
+                '2026-08-19T00:00:00', 'gemini',
+                ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://gap.com/x'],
+                [COMPETITOR_BRAND],
+            ),
+        ])
+
+        assert {gap['url']: gap['content_type'] for gap in result['gaps']} == {
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ': 'video',
+            'https://gap.com/x': 'page',
+        }
+
+    def test_marks_a_covered_source_with_its_content_type(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://covered.com/page'], [FIRST_PARTY_BRAND]),
+        ])
+
+        assert result['covered_sources'][0]['content_type'] == 'page'
 
     def test_summarises_gaps_per_domain_with_the_most_gaps_first(self, monkeypatch) -> None:
         result = _analyze(monkeypatch, [

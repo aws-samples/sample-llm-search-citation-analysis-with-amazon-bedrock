@@ -7,6 +7,9 @@ import type {
 import {
   MAX_SCOPE_KEYWORD_IDS, cappedSectionSelection, effectiveSelectionLimit, hasSelectionCap, knownIdsInInputOrder
 } from './KeywordScopePicker-selection';
+import {
+  scopeMarketIds, withMarketIds
+} from '../Markets/marketScope';
 
 const SCOPE_CAP_HINT = `Runs take at most ${MAX_SCOPE_KEYWORD_IDS.toLocaleString('en-US')} selected keywords. Run whole groups to include more; group runs have no cap.`;
 
@@ -349,10 +352,10 @@ function ScopedIdPicker({
       <GroupIdPicker
         groups={groups}
         selectedIds={groupIds}
-        onChange={(nextGroupIds) => onChange({
+        onChange={(nextGroupIds) => onChange(withMarketIds({
           mode: 'groups',
           group_ids: nextGroupIds,
-        })}
+        }, scopeMarketIds(scope)))}
         maxSelected={maxGroups}
         disabled={disabled}
       />
@@ -370,10 +373,10 @@ function ScopedIdPicker({
         keywords={keywords}
         groups={groups}
         selectedIds={keywordIds}
-        onChange={(nextKeywordIds) => onChange({
+        onChange={(nextKeywordIds) => onChange(withMarketIds({
           mode: 'keywords',
           keyword_ids: nextKeywordIds,
-        })}
+        }, scopeMarketIds(scope)))}
         maxSelected={maxKeywords ?? MAX_SCOPE_KEYWORD_IDS}
         capHint={maxKeywords === undefined ? SCOPE_CAP_HINT : undefined}
         disabled={disabled}
@@ -397,7 +400,7 @@ function ScopedKeywordScopePicker({
         {displayedModes.map((mode) => (
           <label key={mode} className="inline-flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
             <input type="radio" name={modeControlName} checked={scope.mode === mode}
-              onChange={() => onChange(emptyScopeForMode(mode))} disabled={disabled}
+              onChange={() => onChange(withMarketIds(emptyScopeForMode(mode), scopeMarketIds(scope)))} disabled={disabled}
               className="w-4 h-4 text-gray-900 border-gray-300 focus:ring-gray-900" />
             <span>{modeLabel(mode)}</span>
           </label>

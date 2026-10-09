@@ -1,6 +1,9 @@
-import type {
-  AlertItem, AlertMetricValue, AlertSeverity, AlertType
+import {
+  GLOBAL_MARKET_ID,
+  type AlertItem, type AlertMetricValue, type AlertSeverity, type AlertType, type Market
 } from '../../types';
+import { MarketBadge } from '../Markets/MarketBadge';
+import { useMarketSelection } from '../Markets/marketSelectionContext';
 import { formatDate } from '../../formatting/dateFormatter';
 import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
@@ -55,10 +58,12 @@ interface AlertRowProps {
   readonly isAdmin: boolean;
   readonly acknowledging: boolean;
   readonly onAcknowledge: (id: string) => Promise<unknown>;
+  /** Configured markets, to name the market of an alert raised in one. */
+  readonly markets: readonly Market[];
 }
 
 function AlertRow({
-  alertItem, isAdmin, acknowledging, onAcknowledge
+  alertItem, isAdmin, acknowledging, onAcknowledge, markets
 }: AlertRowProps) {
   return (
     <li className="p-4 sm:p-5">
@@ -72,7 +77,12 @@ function AlertRow({
               {ALERT_TYPE_LABELS[alertItem.type]}
             </span>
           </div>
-          <p className="mt-2 text-sm font-medium text-gray-900">{alertItem.group_name}</p>
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
+            {alertItem.group_name}
+            {alertItem.market_id && alertItem.market_id !== GLOBAL_MARKET_ID && (
+              <MarketBadge marketId={alertItem.market_id} markets={markets} />
+            )}
+          </p>
           <p className="mt-1 text-sm text-gray-700">{alertItem.message}</p>
           <MetricChange alertItem={alertItem} />
           {alertItem.content_change !== undefined && (
@@ -116,6 +126,7 @@ export function AlertsPanel() {
     acknowledge,
   } = useOpenAlerts();
   const { isAdmin } = useIsAdmin();
+  const { catalog } = useMarketSelection();
 
   return (
     <section
@@ -158,6 +169,7 @@ export function AlertsPanel() {
               isAdmin={isAdmin}
               acknowledging={acknowledgingIds.includes(alertItem.id)}
               onAcknowledge={acknowledge}
+              markets={catalog.markets}
             />
           ))}
         </ul>

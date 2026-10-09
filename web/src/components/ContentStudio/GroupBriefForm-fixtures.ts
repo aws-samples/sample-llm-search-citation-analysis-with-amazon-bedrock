@@ -14,6 +14,7 @@ import type {
   ContentBriefScope, ContentBriefTemplate, Keyword, KeywordGroup
 } from '../../types';
 import { buildTabContentKeyword } from '../Layout/TabContent-fixtures';
+import { renderWithMarketSelection } from '../Markets/markets-fixtures';
 import { GroupBriefForm } from './GroupBriefForm';
 import {
   GROUP_BRIEF_DEFAULT_TEMPLATES,
@@ -129,6 +130,24 @@ export function renderGroupBriefForm(
   return props;
 }
 
+/**
+ * The form with Chile and Brazil configured: "Alpha keyword" is Chilean,
+ * "Beta keyword" has no market, both in "Generic Group".
+ */
+export function renderGroupBriefFormWithMarkets(): ComponentProps<typeof GroupBriefForm> {
+  const props = buildGroupBriefFormProps({
+    keywords: [
+      buildKeyword({ market_id: 'cl-es' }),
+      buildKeyword({
+        id: 'keyword-2',
+        keyword: 'Beta keyword',
+      }),
+    ],
+  });
+  renderWithMarketSelection(createElement(GroupBriefForm, props));
+  return props;
+}
+
 export async function selectGroupForBrief(): Promise<void> {
   await userEvent.click(screen.getByRole('radio', { name: 'Groups' }));
   await userEvent.click(screen.getByRole('checkbox', { name: 'Generic Group' }));
@@ -137,6 +156,9 @@ export async function selectGroupForBrief(): Promise<void> {
 async function selectKeywordForBrief(name = 'Alpha keyword'): Promise<void> {
   await userEvent.click(screen.getByRole('checkbox', { name }));
 }
+
+/** Ticks the market named `name` in the brief's market filter. */
+export const tickBriefMarket = (name: string) => selectKeywordForBrief(name);
 
 export async function chooseGroupBriefMode(name: RegExp): Promise<void> {
   await userEvent.click(screen.getByRole('radio', { name }));

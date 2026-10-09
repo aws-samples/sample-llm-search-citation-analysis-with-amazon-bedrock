@@ -88,8 +88,9 @@ def active_keyword(
     keyword: str,
     *,
     group_ids: set[str] | None = None,
+    market_id: str | None = None,
 ) -> dict[str, object]:
-    """Return one active authoritative keyword row."""
+    """Return one active authoritative keyword row (global unless ``market_id`` names its market)."""
     item: dict[str, object] = {
         'id': keyword_id,
         'keyword': keyword,
@@ -97,6 +98,8 @@ def active_keyword(
     }
     if group_ids is not None:
         item['group_ids'] = group_ids
+    if market_id is not None:
+        item['market_id'] = market_id
     return item
 
 
@@ -147,3 +150,8 @@ def build_batch_brief(**overrides: object) -> dict[str, object]:
     brief = _brief_content_defaults()
     brief.update(overrides)
     return brief
+
+
+def keyword_scope(*keyword_ids: str, **fields: object) -> dict[str, object]:
+    """A selected-keyword scope of ``keyword_ids``; ``fields`` adds e.g. ``market_ids``."""
+    return {'mode': 'keywords', 'keyword_ids': list(keyword_ids), **fields}

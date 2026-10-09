@@ -1,5 +1,6 @@
 import type { CitationGap } from '../../types';
 import { safeHref } from '../../infrastructure';
+import { VideoBadge } from '../Citations/VideoBadge';
 
 const PRIORITY_STYLES: Record<string, string> = {
   high: 'bg-red-100 text-red-800',
@@ -20,7 +21,10 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
           >
             {gap.title ?? gap.url}
           </a>
-          <div className="text-xs text-gray-400 truncate">{gap.domain}</div>
+          <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
+            <span className="truncate">{gap.domain}</span>
+            {gap.content_type === 'video' && <VideoBadge />}
+          </div>
         </div>
         <span className={`px-2 py-1 rounded text-xs ml-2 ${PRIORITY_STYLES[gap.priority] ?? PRIORITY_STYLES.low}`}>
           {gap.priority}

@@ -97,6 +97,9 @@ def handler(event, context, url=None, keyword=None, limit=50, include_screenshot
     # Sort by crawled_at descending
     items.sort(key=lambda x: x.get('crawled_at', ''), reverse=True)
 
+    # Rows are returned whole: a YouTube video's `content_type`, `provider`,
+    # `author_name`, `author_url` and `thumbnail_url` (crawler oEmbed read)
+    # pass through as stored.
     return success_response({
         'items': items,
         'count': len(items)

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.scope_params import (
+    MARKET_PARAM,
     MAX_KEYWORD_IDS,
     SCOPE_KEYWORDS_CAP,
     SCOPE_MAX_WORKERS,
@@ -196,10 +197,106 @@ class TestScopeQueryParams:
             'group_id': {'type': str, 'max_length': 64},
             'keyword_ids': {'type': str, 'max_length': 8000},
             'scope': {'type': str, 'choices': ['all']},
+            'market_id': {'type': str, 'max_length': 32},
         }
 
-    def test_parameter_names_follow_the_validation_rules(self):
-        assert SCOPE_PARAMS == tuple(SCOPE_QUERY_PARAMS)
+    def test_mutually_exclusive_names_are_every_rule_but_the_market_filter(self):
+        assert (*SCOPE_PARAMS, MARKET_PARAM) == tuple(SCOPE_QUERY_PARAMS)
+
+
+MARKET_ACTIVE = [
+    {'id': 'k1', 'keyword': 'hotel coruna spa', 'status': 'active', 'group_ids': {'coruna'}},
+    {'id': 'k2', 'keyword': 'hotel coruña balneario', 'status': 'active', 'group_ids': {'coruna'}, 'market_id': 'es-es'},
+    {'id': 'k3', 'keyword': 'hotel corunha termas', 'status': 'active', 'group_ids': {'marino'}, 'market_id': 'pt-pt'},
+]
+
+
+class TestMarketFilter:
+    def test_market_alone_covers_every_active_keyword_of_that_market(self):
+        scope = _parsed({'market_id': 'es-es'}, _keywords_table(MARKET_ACTIVE))
+
+        assert (scope.kind, scope.keywords, scope.market_id) == ('all', ('hotel coruña balneario',), 'es-es')
+
+    def test_global_market_alone_covers_the_keywords_without_a_market(self):
+        scope = _parsed({'market_id': 'global'}, _keywords_table(MARKET_ACTIVE))
+
+        assert scope.keywords == ('hotel coruna spa',)
+
+    def test_narrows_a_group_scope_to_the_market(self):
+        scope = _parsed({'group_id': 'coruna', 'market_id': 'es-es'}, _keywords_table(MARKET_ACTIVE))
+
+        assert (scope.kind, scope.keywords) == ('group', ('hotel coruña balneario',))
+
+    def test_narrows_scope_all_to_the_market(self):
+        scope = _parsed({'scope': 'all', 'market_id': 'pt-pt'}, _keywords_table(MARKET_ACTIVE))
+
+        assert (scope.kind, scope.keywords) == ('all', ('hotel corunha termas',))
+
+    def test_narrows_a_keyword_id_scope_to_the_market(self):
+        scope = _parsed({'keyword_ids': 'k1,k2', 'market_id': 'global'}, _keywords_table(MARKET_ACTIVE))
+
+        assert scope.keywords == ('hotel coruna spa',)
+
+    def test_a_single_keyword_ignores_the_market(self):
+        table = _keywords_table(MARKET_ACTIVE)
+
+        scope = _parsed({'keyword': 'hotel coruna spa', 'market_id': 'es-es'}, table)
+
+        assert (scope.keywords, scope.market_id) == (('hotel coruna spa',), None)
+        table.query.assert_not_called()
+
+    def test_records_the_market_in_the_scope_descriptor_and_echoes_it(self):
+        scope = _parsed({'group_id': 'coruna', 'market_id': 'es-es'}, _keywords_table(MARKET_ACTIVE))
+
+        assert scope.scope == {'mode': 'groups', 'group_ids': ['coruna'], 'market_ids': ['es-es']}
+        assert scope.describe() == {
+            'mode': 'groups', 'group_ids': ['coruna'], 'market_ids': ['es-es'], 'kind': 'group',
+            'label': '1 group(s), market es-es', 'keyword_count': 1, 'market_id': 'es-es',
+        }
+
+    def test_describes_a_scope_without_a_market_without_a_market_id(self):
+        scope = _parsed({'group_id': 'coruna'}, _keywords_table(MARKET_ACTIVE))
+
+        assert 'market_id' not in scope.describe()
+
+    def test_resolves_an_unknown_market_to_no_keywords(self):
+        scope = _parsed({'market_id': 'fr-fr'}, _keywords_table(MARKET_ACTIVE))
+
+        assert scope.keywords == ()
+
+    @pytest.mark.parametrize('value', ['ES-ES', 'a', 'x' * 33, 'es_es', '-es'])
+    def test_rejects_a_malformed_market_id(self, value):
+        assert parse_scope_params({'market_id': value}, _keywords_table(MARKET_ACTIVE)) == (
+            None, "market_id must be a market id or 'global'",
+        )
+
+    def test_treats_a_blank_market_as_absent(self):
+        assert parse_scope_params({'market_id': '  '}, _keywords_table(MARKET_ACTIVE)) == (None, None)
+
+    def test_market_does_not_count_as_a_second_scope_parameter(self):
+        scope, error = parse_scope_params({'scope': 'all', 'market_id': 'es-es'}, _keywords_table(MARKET_ACTIVE))
+
+        assert (error, scope is not None) == (None, True)
+
+    def test_answers_400_for_a_market_with_no_active_keyword(self):
+        keywords, rejected = scope_keywords_from_request(EVENT, {'market_id': 'fr-fr'}, _keywords_table(MARKET_ACTIVE))
+
+        assert keywords is None
+        assert _rejection(rejected) == (
+            400, {'error': 'No active keywords match the selected scope (all active keywords, market fr-fr).', 'field': 'scope'},
+        )
+
+    def test_a_market_satisfies_a_required_scope(self):
+        scope, rejected = scope_from_request(EVENT, {'market_id': 'pt-pt'}, _keywords_table(MARKET_ACTIVE), required=True)
+
+        assert rejected is None
+        assert scope is not None
+        assert scope.keywords == ('hotel corunha termas',)
+
+    def test_report_scope_market_defaults_to_every_market(self):
+        scope = ReportScope(kind='all', keywords=(), scope={'mode': 'all'}, label='all active keywords')
+
+        assert scope.market_id is None
 
 
 class TestKeywordsTableName:

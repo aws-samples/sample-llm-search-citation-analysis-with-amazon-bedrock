@@ -5,9 +5,12 @@ import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS 
+  CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS
 } from '../ui/iconPaths';
-import type { UrlBreakdown } from '../../exporters/citationParser';
+import {
+  isVideoCitation, type UrlBreakdown
+} from '../../exporters/citationParser';
+import { VideoBadge } from './VideoBadge';
 
 interface CitationRowProps {
   citation: TopUrl;
@@ -65,6 +68,7 @@ export const CitationRow = ({
             >
               {citation.url.length > 60 ? citation.url.substring(0, 60) + '...' : citation.url}
             </a>
+            {isVideoCitation(citation) && <VideoBadge />}
             <button
               onClick={(e) => onViewDetails(citation.url, e)}
               className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"

@@ -31,6 +31,11 @@ vi.mock('./AlertsConfig', () => ({
   ),
 }));
 vi.mock('./BedrockModelsConfig', () => ({ BedrockModelsConfig: () => <div data-testid="bedrock-models-config">Bedrock Models Config</div> }));
+vi.mock('./MarketsConfig', () => ({
+  MarketsConfig: ({ isAdmin }: { isAdmin: boolean }) => (
+    <div data-testid="markets-config">Markets Config admin: {String(isAdmin)}</div>
+  ),
+}));
 vi.mock('./UsersConfig', () => ({ UsersConfig: () => <div data-testid="users-config">Users Config</div> }));
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 
@@ -42,7 +47,7 @@ const mockUseBrandConfig = vi.mocked(useBrandConfig);
 const mockUseProviderConfig = vi.mocked(useProviderConfig);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
-const NON_ADMIN_SECTIONS = ['keywords', 'brand tracking', 'personas', 'ai providers', 'alerts', 'ai assistants'];
+const NON_ADMIN_SECTIONS = ['keywords', 'markets', 'brand tracking', 'personas', 'ai providers', 'alerts', 'ai assistants'];
 const NON_ADMIN = buildAdminMembership({ isAdmin: false });
 /** Admin-only sections: name, link name, URL and the test id of their (mocked) content. */
 const ADMIN_SECTIONS = [
@@ -92,6 +97,7 @@ describe('SettingsView', () => {
   describe('section navigation', () => {
     it.each([
       ['keywords', '/settings/keywords'],
+      ['markets', '/settings/markets'],
       ['brand tracking', '/settings/brand'],
       ['personas', '/settings/personas'],
       ['ai providers', '/settings/providers'],
@@ -107,6 +113,7 @@ describe('SettingsView', () => {
 
     it.each([
       ['brand tracking', 'text-violet-500'],
+      ['markets', 'text-cyan-500'],
       ['ai assistants', 'text-indigo-500'],
     ])('tints the %s icon with its accent %s', (section, tone) => {
       renderSettingsView();
@@ -162,6 +169,17 @@ describe('SettingsView', () => {
   });
 
   describe('section captions', () => {
+    it('opens the markets section read-only for non-admin users', () => {
+      renderSettingsView('/settings/markets', {}, NON_ADMIN);
+
+      expect(screen.getByTestId('markets-config')).toHaveTextContent('Markets Config admin: false');
+    });
+
+    it('shows the market count under the markets link', () => {
+      renderSettingsView();
+
+      expect(getSectionLinkElement('markets')).toHaveTextContent('Countries and languages');
+    });
     it('shows the keyword count under the keywords link', () => {
       renderSettingsView('/settings', { keywords: [existingKeywordFixture, createdKeywordFixture] });
 

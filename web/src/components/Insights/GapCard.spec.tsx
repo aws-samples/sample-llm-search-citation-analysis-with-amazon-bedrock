@@ -88,4 +88,16 @@ describe('GapCard', () => {
     }} />);
     expect(screen.getByText('Keyword: test keyword')).toBeInTheDocument();
   });
+
+  it.each([
+    ['video', true],
+    ['page', false],
+    [undefined, false],
+  ] as const)('tags the gap as a video only for content type %s → %s', (contentType, tagged) => {
+    render(<GapCard gap={{
+      ...baseGap,
+      content_type: contentType 
+    }} />);
+    expect(screen.queryAllByText('Video')).toHaveLength(tagged ? 1 : 0);
+  });
 });

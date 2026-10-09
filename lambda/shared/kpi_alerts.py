@@ -16,6 +16,7 @@ from typing import Any
 
 from shared.constants import UNRANKED_SENTINEL
 from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
+from shared.markets import GLOBAL_MARKET_ID, market_scoped_key
 from shared.string_lists import normalize_string_list
 from shared.utils import parse_timestamp
 from shared.visibility_score import finite_number
@@ -173,9 +174,15 @@ def deterministic_alert_id(
     group_id: str,
     alert_type: str,
     entity: str,
+    *,
+    market_id: str | None = None,
 ) -> str:
-    """Stable alert identity across retries of one execution."""
-    raw = f'{execution_id}\0{group_id}\0{alert_type}\0{entity.casefold()}'
+    """Stable alert identity across retries of one execution.
+
+    A non-global ``market_id`` is part of the identity (one group raises the
+    same alert in two markets); the global market keeps the pre-markets id.
+    """
+    raw = f'{execution_id}\0{market_scoped_key(group_id, market_id)}\0{alert_type}\0{entity.casefold()}'
     return f"alert-{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
 
@@ -393,8 +400,13 @@ def build_alert_item(
     group_name: str,
     created_at: str,
     run_timestamp: str,
+    market_id: str = GLOBAL_MARKET_ID,
 ) -> dict[str, Any]:
-    """Add durable identity/status metadata to a pure alert specification."""
+    """Add durable identity/status metadata to a pure alert specification.
+
+    ``group_id`` is the plain keyword group id and ``market_id`` the market the
+    group's snapshot covers (``'global'`` for the keywords without one).
+    """
     entity = str(specification.get('entity', ''))
     return {
         'id': deterministic_alert_id(
@@ -402,9 +414,11 @@ def build_alert_item(
             group_id,
             str(specification['type']),
             entity,
+            market_id=market_id,
         ),
         'group_id': group_id,
         'group_name': group_name,
+        'market_id': market_id,
         'execution_id': execution_id,
         'created_at': created_at,
         'run_timestamp': run_timestamp,

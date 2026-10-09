@@ -24,6 +24,8 @@ import { OnboardingModal } from './components/Onboarding';
 import { ProviderHealthBanner } from './components/ProviderHealth';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
+import { MarketSelectionProvider } from './components/Markets/MarketSelectionProvider';
+import { MarketSelector } from './components/Markets/MarketSelector';
 import { Spinner } from './components/ui/Spinner';
 import type { SettingsTab } from './components/Settings';
 import {
@@ -229,6 +231,7 @@ function AppHeader({
           </span>
         )}
         <PrintToPdfButton />
+        <MarketSelector />
         <ThemeToggle />
         <button
           onClick={signOutQuietly}
@@ -327,86 +330,88 @@ function MainApp() {
 
   return (
     <DashboardGate loading={loading} stats={stats} error={error}>
-      <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${isPrintMode ? 'print-mode' : ''}`}>
-        {!isPrintMode && (
-          <Sidebar
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-            keywordsCount={keywords.length}
-            schedulesCount={schedules.length}
-            isRunning={isRunning}
-            isOpen={sidebarOpen}
-            onToggle={() => setSidebarOpen(!sidebarOpen)}
-          />
-        )}
+      <MarketSelectionProvider keywords={keywords}>
+        <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 ${isPrintMode ? 'print-mode' : ''}`}>
+          {!isPrintMode && (
+            <Sidebar
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              keywordsCount={keywords.length}
+              schedulesCount={schedules.length}
+              isRunning={isRunning}
+              isOpen={sidebarOpen}
+              onToggle={() => setSidebarOpen(!sidebarOpen)}
+            />
+          )}
 
-        <main className={`${isPrintMode ? '' : 'lg:ml-64'} min-h-screen`}>
-          <AppHeader
-            isPrintMode={isPrintMode}
-            title={PAGE_TITLES[activeTab]}
-            lastUpdate={lastUpdate}
-            refreshing={loading}
-            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-            onShowAbout={() => setShowAbout(true)}
-          />
+          <main className={`${isPrintMode ? '' : 'lg:ml-64'} min-h-screen`}>
+            <AppHeader
+              isPrintMode={isPrintMode}
+              title={PAGE_TITLES[activeTab]}
+              lastUpdate={lastUpdate}
+              refreshing={loading}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              onShowAbout={() => setShowAbout(true)}
+            />
 
-          <div className="p-4 sm:p-6 lg:p-8">
-            <div className="max-w-7xl mx-auto">
-              {/* Sits above the view content so a silently failing provider is
+            <div className="p-4 sm:p-6 lg:p-8">
+              <div className="max-w-7xl mx-auto">
+                {/* Sits above the view content so a silently failing provider is
                   visible from every tab, not just Settings. Suppressed in print
                   mode, like the other app-wide chrome. */}
-              {!isPrintMode && (
-                <ProviderHealthBanner onNavigateToProviders={() => handleNavigateToSettings('providers')} />
-              )}
-
-              <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconcileKeywords}>
-                {isReportRoute ? (
-                  <ReportsRouter keywords={keywords} />
-                ) : (
-                  <TabContent
-                    activeTab={activeTab}
-                    stats={stats}
-                    citations={citations}
-                    searches={searches}
-                    keywords={keywords}
-                    setKeywords={setKeywords}
-                    schedules={schedules}
-                    setSchedules={setSchedules}
-                    execution={execution}
-                    triggerAnalysis={triggerAnalysis}
-                    rawResponsesPath={rawResponsesPath}
-                    setActiveTab={setActiveTab}
-                    onNavigateToRawResponses={handleNavigateToRawResponses}
-                  />
+                {!isPrintMode && (
+                  <ProviderHealthBanner onNavigateToProviders={() => handleNavigateToSettings('providers')} />
                 )}
-              </KEYWORD_RECONCILIATION_CONTEXT.Provider>
+
+                <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconcileKeywords}>
+                  {isReportRoute ? (
+                    <ReportsRouter keywords={keywords} />
+                  ) : (
+                    <TabContent
+                      activeTab={activeTab}
+                      stats={stats}
+                      citations={citations}
+                      searches={searches}
+                      keywords={keywords}
+                      setKeywords={setKeywords}
+                      schedules={schedules}
+                      setSchedules={setSchedules}
+                      execution={execution}
+                      triggerAnalysis={triggerAnalysis}
+                      rawResponsesPath={rawResponsesPath}
+                      setActiveTab={setActiveTab}
+                      onNavigateToRawResponses={handleNavigateToRawResponses}
+                    />
+                  )}
+                </KEYWORD_RECONCILIATION_CONTEXT.Provider>
+              </div>
             </div>
-          </div>
-        </main>
+          </main>
 
-        <ConfirmModal
-          isOpen={showLeaveConfirm}
-          onClose={() => { setShowLeaveConfirm(false); setPendingPath(null); }}
-          onConfirm={confirmLeaveExecution}
-          title="Leave Execution Page"
-          message="An analysis is currently running. Are you sure you want to leave this page? (The analysis will continue in the background)"
-          confirmText="Leave"
-          confirmVariant="primary"
-        />
-
-        {/* First-run setup guide; mounts app-wide so it is visible regardless
-            of which tab is active when the setup status resolves. */}
-        {!isPrintMode && (
-          <OnboardingModal
-            keywordsCount={keywords.length}
-            hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
-            setActiveTab={setActiveTab}
-            onNavigateToSettings={handleNavigateToSettings}
+          <ConfirmModal
+            isOpen={showLeaveConfirm}
+            onClose={() => { setShowLeaveConfirm(false); setPendingPath(null); }}
+            onConfirm={confirmLeaveExecution}
+            title="Leave Execution Page"
+            message="An analysis is currently running. Are you sure you want to leave this page? (The analysis will continue in the background)"
+            confirmText="Leave"
+            confirmVariant="primary"
           />
-        )}
 
-        <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
-      </div>
+          {/* First-run setup guide; mounts app-wide so it is visible regardless
+            of which tab is active when the setup status resolves. */}
+          {!isPrintMode && (
+            <OnboardingModal
+              keywordsCount={keywords.length}
+              hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
+              setActiveTab={setActiveTab}
+              onNavigateToSettings={handleNavigateToSettings}
+            />
+          )}
+
+          <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
+        </div>
+      </MarketSelectionProvider>
     </DashboardGate>
   );
 }

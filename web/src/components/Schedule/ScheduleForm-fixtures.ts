@@ -1,7 +1,9 @@
 import {
   createElement, type ComponentProps
 } from 'react';
-import { render } from '@testing-library/react';
+import {
+  render, type RenderOptions
+} from '@testing-library/react';
 import { vi } from 'vitest';
 import type {
   AnalysisScope, ScheduleFormData
@@ -44,12 +46,13 @@ function buildScheduleFormProps(
 
 export function renderScheduleForm(
   scope: AnalysisScope = { mode: 'all' },
-  formDataOverrides: Partial<ScheduleFormData> = {}
+  formDataOverrides: Partial<ScheduleFormData> = {},
+  renderOptions: RenderOptions = {}
 ): ComponentProps<typeof ScheduleForm> {
   const props = buildScheduleFormProps({
     ...formDataOverrides,
     scope,
   });
-  render(createElement(ScheduleForm, props));
+  render(createElement(ScheduleForm, props), renderOptions);
   return props;
 }

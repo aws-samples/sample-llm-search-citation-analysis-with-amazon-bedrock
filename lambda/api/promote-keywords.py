@@ -27,7 +27,9 @@ from shared.keyword_store import (
     DEFAULT_KEYWORD_PRIORITY,
     DEFAULT_KEYWORD_STATUS,
     build_keyword_item,
+    keyword_reference,
     put_keyword_if_absent,
+    validate_keyword_market,
     validate_keyword_text,
 )
 from shared.requested_group_ids import validate_requested_group_ids
@@ -69,6 +71,10 @@ DEFAULT_PRIORITY = DEFAULT_KEYWORD_PRIORITY
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'
 
+# The market list (BrandConfig item `markets`), read only when a request names a market.
+BRAND_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_BRAND_CONFIG', required=False, default='CitationAnalysis-BrandConfig')
+brand_config_table = dynamodb.Table(BRAND_CONFIG_TABLE)
+
 
 @parse_json_body
 def _promote_keywords(event, context, body):
@@ -87,6 +93,10 @@ def _promote_keywords(event, context, body):
     if group_error:
         return validation_error(group_error['message'], event, group_error['field'])
 
+    market_id, market_error = _validated_market_id(body)
+    if market_error:
+        return validation_error(market_error, event, 'market_id')
+
     try:
         if group_ids:
             existing_items = load_keyword_items_by_identity(keywords_table)
@@ -95,11 +105,11 @@ def _promote_keywords(event, context, body):
             existing_items = {}
             existing_keys = load_keyword_identities(keywords_table)
     except Exception as error:
-        logger.exception('Failed to read existing keywords for promotion: %s', error)
+        logger.exception('Failed to read existing keywords for promotion')
         return error_response(error, event)
 
     to_create, skipped = partition_keywords(keywords, existing_keys)
-    items = create_items(to_create, status, priority)
+    items = create_items(to_create, status, priority, market_id=market_id)
     grouped_keywords = []
     if group_ids:
         requested_group_ids = set(group_ids)
@@ -140,6 +150,18 @@ def _validated_group_ids(body):
     if message:
         return None, {'message': message, 'field': 'group_ids'}
     return group_ids, None
+
+
+def _validated_market_id(body):
+    """The optional ``market_id`` of every promoted keyword: ``(id, None)``, ``(None, None)`` = global, or ``(None, error)``.
+
+    The rules of ``manage-keywords``: ``''`` / ``null`` / ``'global'`` / absent
+    is the global market, any other id must be a configured market.
+    """
+    reference, message = keyword_reference(body, 'market_id')
+    if reference is None:
+        return None, message
+    return validate_keyword_market(reference.value, brand_config_table)
 
 
 @api_handler
@@ -380,8 +402,8 @@ def write_grouped_items(table, items, group_ids):
     return created_items, skipped, grouped_keywords
 
 
-def create_items(to_create, status, priority):
-    """Build keyword-table items, applying each optional status override."""
+def create_items(to_create, status, priority, *, market_id=None):
+    """Build keyword-table items, applying each optional status override and the request's market."""
     timestamp = get_timestamp()
 
     return [
@@ -391,6 +413,7 @@ def create_items(to_create, status, priority):
             status=entry.get('status', status),
             priority=priority,
             notes=build_notes(entry),
+            market_id=market_id,
         )
         for entry in to_create
     ]

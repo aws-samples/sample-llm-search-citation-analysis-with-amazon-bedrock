@@ -368,3 +368,136 @@ def test_classifies_empty_content_when_short_page_has_no_block_pattern(crawler_r
     )
 
     assert (is_blocked, reason) == (True, 'empty_content')
+
+
+def test_stores_page_content_type_when_an_ordinary_page_is_crawled(uncached_runtime, citation):
+    uncached_runtime.module.crawl_citation(citation)
+
+    assert _stored_fields(uncached_runtime, 'content_type') == ('page',)
+
+
+# --- YouTube videos: oEmbed instead of a browser ---------------------------------
+
+_VIDEO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+
+
+@pytest.fixture
+def video_citation():
+    return {
+        'normalized_url': _VIDEO_URL,
+        'keyword': _KEYWORD,
+        'citation_count': 3,
+        'citing_providers': ['gemini'],
+    }
+
+
+@pytest.fixture
+def video_runtime(crawler_runtime, monkeypatch):
+    """The crawler with an oEmbed reader answering one video's details."""
+    module = crawler_runtime.module
+    reader = MagicMock(return_value=module.VideoMetadata(
+        title='Family hotel tour',
+        author_name='Hotel Sol',
+        author_url='https://www.youtube.com/@hotelsol',
+        thumbnail_url='https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    ))
+    module.__dict__['fetch_video_metadata'] = reader
+    monkeypatch.setattr(module.time, 'monotonic', MagicMock(side_effect=[20.0, 20.25]))
+    crawler_runtime.oembed = reader
+    return crawler_runtime
+
+
+def test_reads_a_youtube_video_through_oembed_without_starting_a_browser(video_runtime, video_citation):
+    result = video_runtime.module.crawl_citation(video_citation)
+
+    assert result == {'url': _VIDEO_URL, 'status': 'success'}
+    video_runtime.oembed.assert_called_once_with('dQw4w9WgXcQ')
+    video_runtime.browser_factory.assert_not_called()
+
+
+def test_skips_bedrock_analysis_when_a_youtube_video_is_read(video_runtime, video_citation):
+    video_runtime.module.crawl_citation(video_citation)
+
+    video_runtime.module.analyze_content_combined.assert_not_called()
+
+
+def test_stores_the_oembed_fields_on_the_video_crawl(video_runtime, video_citation):
+    video_runtime.module.crawl_citation(video_citation)
+
+    assert _stored_fields(
+        video_runtime, 'content_type', 'provider', 'title', 'author_name', 'author_url', 'thumbnail_url',
+    ) == (
+        'video',
+        'youtube',
+        'Family hotel tour',
+        'Hotel Sol',
+        'https://www.youtube.com/@hotelsol',
+        'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    )
+
+
+def test_stores_a_short_summary_and_content_from_the_oembed_fields(video_runtime, video_citation):
+    video_runtime.module.crawl_citation(video_citation)
+
+    assert _stored_fields(video_runtime, 'summary', 'content') == (
+        'YouTube video "Family hotel tour" by Hotel Sol.',
+        f'Family hotel tour\nChannel: Hotel Sol\nhttps://www.youtube.com/@hotelsol\n{_VIDEO_URL}',
+    )
+
+
+def test_stores_the_video_as_a_complete_success_the_crawl_cache_reuses(video_runtime, video_citation):
+    video_runtime.module.crawl_citation(video_citation)
+
+    assert _stored_fields(video_runtime, 'status', 'cache_status', 'analysis_status', 'cache_scope') == (
+        'success',
+        'success',
+        'complete',
+        success_cache_scope(_VIDEO_URL, _KEYWORD),
+    )
+
+
+def test_records_the_oembed_read_time_and_content_length(video_runtime, video_citation):
+    video_runtime.module.crawl_citation(video_citation)
+
+    stored = video_runtime.table.put_item.call_args.kwargs['Item']
+    assert stored['metadata'] == {'page_load_time_ms': 250, 'content_length': len(stored['content'])}
+
+
+def test_stores_an_error_crawl_when_youtube_refuses_the_video_details(video_runtime, video_citation):
+    message = 'YouTube video not found: removed or private (HTTP 404)'
+    video_runtime.oembed.side_effect = video_runtime.module.VideoMetadataError(message)
+
+    result = video_runtime.module.crawl_citation(video_citation)
+
+    assert result == {'url': _VIDEO_URL, 'status': 'error', 'error': message}
+    assert _stored_fields(video_runtime, 'status', 'error_message', 'content_type') == ('error', message, 'video')
+
+
+def test_returns_the_cached_video_crawl_without_reading_oembed_again(video_runtime, video_citation):
+    crawled_at = datetime.now(UTC).isoformat()
+    result = _crawl_with_cache_rows(
+        video_runtime,
+        video_citation,
+        same_keyword=[{'cache_status': 'success', 'analysis_status': 'complete', 'crawled_at': crawled_at}],
+    )
+
+    assert result == {'url': _VIDEO_URL, 'status': 'success', 'cached': True, 'crawled_at': crawled_at}
+    video_runtime.oembed.assert_not_called()
+
+
+def test_refuses_a_restricted_video_url_before_reading_oembed(video_runtime, video_citation):
+    video_runtime.module.validate_url_safe.return_value = (False, _RESTRICTED)
+
+    assert video_runtime.module.crawl_citation(video_citation)['error'] == _RESTRICTED
+    video_runtime.oembed.assert_not_called()
+
+
+def test_crawls_a_youtube_channel_page_in_the_browser(uncached_runtime, citation):
+    channel = {**citation, 'normalized_url': 'https://www.youtube.com/@hotelsol'}
+    reader = MagicMock()
+    uncached_runtime.module.__dict__['fetch_video_metadata'] = reader
+
+    uncached_runtime.module.crawl_citation(channel)
+
+    reader.assert_not_called()
+    uncached_runtime.browser_factory.assert_called_once_with(uncached_runtime.module.config)

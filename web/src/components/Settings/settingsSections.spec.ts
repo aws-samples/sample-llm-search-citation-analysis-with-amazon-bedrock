@@ -8,6 +8,7 @@ import {
 describe('settingsPath', () => {
   it.each([
     ['keywords', '/settings/keywords'],
+    ['markets', '/settings/markets'],
     ['brand-config', '/settings/brand'],
     ['query-prompts', '/settings/personas'],
     ['providers', '/settings/providers'],
@@ -23,6 +24,7 @@ describe('settingsPath', () => {
 describe('sectionFromPath', () => {
   it.each([
     ['/settings/brand', 'brand-config'],
+    ['/settings/markets', 'markets'],
     ['/settings/personas', 'query-prompts'],
     ['/settings/users', 'users'],
     ['/settings/bedrock-models', 'bedrock-models'],

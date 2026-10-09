@@ -2,6 +2,7 @@
 # All dependencies come from the crawler-layer:
 # - bedrock-agentcore (browser automation)
 # - playwright (CDP client for AgentCore)
+# - requests (YouTube oEmbed reads through shared.safe_fetch)
 # - shared modules (config, browser_tools, etc.)
 #
 # boto3 is provided by Lambda runtime

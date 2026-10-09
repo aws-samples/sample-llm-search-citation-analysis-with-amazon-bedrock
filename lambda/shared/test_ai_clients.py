@@ -32,11 +32,13 @@ from shared.ai_clients import (
     run_web_search,
 )
 from testing.env import cleared_env
+from testing.provider_response_fixtures import PERPLEXITY_AGENT_RESPONSE, PERPLEXITY_AGENT_TEXT
 
 _PERPLEXITY, _OPENAI, _GEMINI = WEB_SEARCH_PROVIDERS
 # A fixed ``time.time()`` for ``x-ratelimit-reset`` epoch arithmetic.
 _NOW = 1_800_000_000.0
 _QUESTION = [{'role': 'user', 'content': 'q'}]
+_ANSWER = {'output': []}
 
 
 def _http_error_response(status_code: int, text: str, error: str) -> MagicMock:
@@ -98,15 +100,24 @@ class TestGetWebSearchClients:
 
 
 class TestTextExtraction:
-    def test_perplexity_text_comes_from_first_choice_message_content(self):
-        text = _PERPLEXITY.extract_text(
-            {'choices': [{'message': {'content': 'perplexity says'}}]}
-        )
+    def test_perplexity_text_comes_from_the_agent_api_message_item(self):
+        assert _PERPLEXITY.extract_text(PERPLEXITY_AGENT_RESPONSE) == PERPLEXITY_AGENT_TEXT
 
-        assert text == 'perplexity says'
+    def test_perplexity_joins_the_text_parts_of_every_message_item_in_order(self):
+        response = {'output': [
+            {'type': 'message', 'content': [{'type': 'output_text', 'text': 'uno '}, {'type': 'output_text', 'text': 'dos'}]},
+            {'type': 'search_results', 'results': [{'url': 'https://a.cl'}]},
+            {'type': 'message', 'content': [{'type': 'output_text', 'text': ' tres'}, {'type': 'output_text'}]},
+        ]}
 
-    def test_perplexity_returns_empty_string_when_response_has_no_choices(self):
-        assert _PERPLEXITY.extract_text({'choices': []}) == ''
+        assert _PERPLEXITY.extract_text(response) == 'uno dos tres'
+
+    @pytest.mark.parametrize('response', [
+        {'output': []}, {}, {'output': None}, {'output': [{'type': 'search_results', 'results': []}]},
+        {'choices': [{'message': {'content': 'a retired Sonar answer'}}]},
+    ], ids=['no-items', 'no-output', 'null-output', 'only-search-results', 'sonar-shape'])
+    def test_perplexity_returns_empty_string_when_the_response_has_no_message(self, response):
+        assert _PERPLEXITY.extract_text(response) == ''
 
     def test_openai_text_comes_from_output_message_blocks(self):
         text = _OPENAI.extract_text({
@@ -135,11 +146,17 @@ class TestTextExtraction:
 class TestRunWebSearch:
     def test_returns_the_extracted_text_from_the_provider_response(self):
         client = MagicMock()
-        client.chat_completion.return_value = {
-            'choices': [{'message': {'content': 'perplexity says'}}],
-        }
+        client.agent_response.return_value = PERPLEXITY_AGENT_RESPONSE
 
-        assert run_web_search(_PERPLEXITY, client, 'prompt') == 'perplexity says'
+        assert run_web_search(_PERPLEXITY, client, 'prompt') == PERPLEXITY_AGENT_TEXT
+
+    def test_asks_perplexity_the_prompt_with_the_retry_budget(self):
+        client = MagicMock()
+        client.agent_response.return_value = PERPLEXITY_AGENT_RESPONSE
+
+        run_web_search(_PERPLEXITY, client, 'prompt', max_retries=2)
+
+        client.agent_response.assert_called_once_with('prompt', max_retries=2)
 
     def test_passes_the_retry_budget_through_to_the_client(self):
         client = MagicMock()
@@ -160,7 +177,7 @@ class TestRunWebSearch:
     def test_propagates_the_provider_error_instead_of_swallowing_it(self):
         client = MagicMock()
         error = RuntimeError('rate limited')
-        client.chat_completion.side_effect = error
+        client.agent_response.side_effect = error
 
         with pytest.raises(RuntimeError) as raised:
             run_web_search(_PERPLEXITY, client, 'prompt')
@@ -176,7 +193,7 @@ class TestClientBehavior:
     def test_perplexity_client_retries_a_rate_limited_request_after_the_throttle_wait(self, headers, expected_wait):
         rate_limited = MagicMock(status_code=429, text='slow down', headers=headers)
         ok = MagicMock(status_code=200)
-        ok.json.return_value = {'choices': []}
+        ok.json.return_value = _ANSWER
 
         with (
             patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, ok]) as post,
@@ -184,16 +201,14 @@ class TestClientBehavior:
             patch.object(ai_clients.time, 'sleep') as sleep,
             patch.object(ai_clients.random, 'uniform', return_value=0.25),
         ):
-            result = PerplexityClient('sk-test').chat_completion(
-                _QUESTION
-            )
+            result = PerplexityClient('sk-test').agent_response('q')
 
-        assert result == {'choices': []}
+        assert result == _ANSWER
         assert post.call_count == 2
         sleep.assert_called_once_with(expected_wait)
 
     def test_throttling_earns_extra_attempts_beyond_the_callers_retry_budget(self):
-        """The research worker allows two attempts (sized for OpenAI's 90s timeout).
+        """The research worker allows two attempts (two of its HTTP timeouts must fit its Lambda).
 
         A 429 answers instantly and is cheap to wait out, so it must not be
         spent from that budget: with ``max_retries=2`` the client keeps
@@ -201,7 +216,7 @@ class TestClientBehavior:
         """
         rate_limited = MagicMock(status_code=429, text='slow down', headers={})
         ok = MagicMock(status_code=200)
-        ok.json.return_value = {'choices': []}
+        ok.json.return_value = _ANSWER
         responses = [rate_limited, rate_limited, rate_limited, rate_limited, ok]
 
         with (
@@ -209,11 +224,9 @@ class TestClientBehavior:
             patch.object(ai_clients.time, 'sleep') as sleep,
             patch.object(ai_clients.random, 'uniform', return_value=0.0),
         ):
-            result = PerplexityClient('sk-test').chat_completion(
-                _QUESTION, max_retries=2
-            )
+            result = PerplexityClient('sk-test').agent_response('q', max_retries=2)
 
-        assert result == {'choices': []}
+        assert result == _ANSWER
         assert post.call_count == 5
         assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.5, 5.0, 9.5]
 
@@ -233,7 +246,7 @@ class TestClientBehavior:
             patch.object(ai_clients.random, 'uniform', return_value=0.0),
             pytest.raises(ai_clients.requests.exceptions.HTTPError, match='429 Client Error'),
         ):
-            PerplexityClient('sk-test').chat_completion(_QUESTION, max_retries=2)
+            PerplexityClient('sk-test').agent_response('q', max_retries=2)
 
         assert post.call_count == expected_attempts
 
@@ -246,7 +259,7 @@ class TestClientBehavior:
             patch.object(ai_clients.time, 'sleep') as sleep,
             pytest.raises(ai_clients.requests.exceptions.HTTPError, match='503 Server Error'),
         ):
-            PerplexityClient('sk-test').chat_completion(_QUESTION, max_retries=2)
+            PerplexityClient('sk-test').agent_response('q', max_retries=2)
 
         assert post.call_count == 2
         sleep.assert_called_once_with(1.0)
@@ -350,17 +363,14 @@ class TestClientPayloads:
 
     def test_clients_default_to_the_shared_default_models(self):
         assert (
-            OpenAIClient('sk-test').model, ai_clients.GeminiClient('gm-test').model, ai_clients.ClaudeClient('ck-test').model,
-        ) == ('gpt-5-mini', 'gemini-3-flash-preview', 'claude-sonnet-4-5')
+            OpenAIClient('sk-test').model, PerplexityClient('pk-test').model,
+            ai_clients.GeminiClient('gm-test').model, ai_clients.ClaudeClient('ck-test').model,
+        ) == ('gpt-5-mini', 'perplexity/sonar', 'gemini-3.6-flash', 'claude-sonnet-5-5')
 
-    def test_openai_web_search_payload_is_the_one_runs_and_the_model_check_send(self):
-        assert ai_clients.openai_web_search_payload('query text', 'gpt-5.2') == {
-            'model': 'gpt-5.2',
-            'tools': [{'type': 'web_search_preview'}],
-            'tool_choice': 'auto',
-            'include': ['web_search_call.action.sources'],
-            'input': 'query text',
-        }
+    def test_openai_web_search_payload_requires_the_current_web_search_tool(self):
+        payload = ai_clients.openai_web_search_payload('query text', 'gpt-5.2')
+
+        assert (payload['model'], payload['tools'], payload['tool_choice']) == ('gpt-5.2', [{'type': 'web_search'}], 'required')
 
     def test_gemini_grounded_payload_asks_for_google_search(self):
         assert ai_clients.gemini_grounded_payload('query text') == {
@@ -368,30 +378,35 @@ class TestClientPayloads:
             'tools': [{'googleSearch': {}}],
         }
 
-    def test_perplexity_client_defaults_to_sonar(self):
-        assert ai_clients.PerplexityClient('pk-test').model == 'sonar'
+    def test_perplexity_agent_payload_always_gives_the_model_the_web_search_tool(self):
+        assert ai_clients.perplexity_agent_payload('query text', 'perplexity/sonar') == {
+            'model': 'perplexity/sonar',
+            'input': 'query text',
+            'tools': [{'type': 'web_search'}],
+            'max_output_tokens': 4096,
+        }
 
     def test_perplexity_sends_the_clients_model(self):
-        with patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as request:
-            ai_clients.PerplexityClient('pk-test', model='sonar-pro').chat_completion(_QUESTION)
+        with patch.object(PerplexityClient, '_make_request', return_value={}) as request:
+            PerplexityClient('pk-test', model='openai/gpt-6-luna').agent_response('q')
 
-        assert request.call_args.args[0] == {'model': 'sonar-pro', 'messages': _QUESTION}
+        assert request.call_args.args[0]['model'] == 'openai/gpt-6-luna'
 
     def test_perplexity_sends_a_model_given_for_one_call(self):
-        with patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as request:
-            ai_clients.PerplexityClient('pk-test').chat_completion(_QUESTION, model='sonar-reasoning-pro')
+        with patch.object(PerplexityClient, '_make_request', return_value={}) as request:
+            PerplexityClient('pk-test').agent_response('q', model='perplexity/kimi-k3')
 
-        assert request.call_args.args[0]['model'] == 'sonar-reasoning-pro'
+        assert request.call_args.args[0]['model'] == 'perplexity/kimi-k3'
 
-    def test_claude_sends_the_clients_model_with_the_web_search_tool(self):
+    def test_claude_sends_the_clients_model_with_the_newest_web_search_tool(self):
         with patch.object(ai_clients.ClaudeClient, '_make_request', return_value={}) as request:
             ai_clients.ClaudeClient('ck-test', model='claude-opus-4-7').generate_content('q', system_prompt='cite sources')
 
         assert request.call_args.args[0] == {
             'model': 'claude-opus-4-7',
-            'max_tokens': 1024,
+            'max_tokens': 4096,
             'messages': _QUESTION,
-            'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 5}],
+            'tools': [{'type': 'web_search_20260318', 'name': 'web_search'}],
             'system': 'cite sources',
         }
 
@@ -407,20 +422,20 @@ class TestClientPayloads:
             {'x-api-key': 'ck-test', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
         )
 
-    def test_perplexity_posts_to_the_sonar_chat_api(self):
+    def test_perplexity_posts_to_the_agent_api_with_a_bearer_key(self):
         with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=dict)) as post:
-            ai_clients.PerplexityClient('pk-test').chat_completion(_QUESTION, max_retries=0)
+            PerplexityClient('pk-test').agent_response('q', max_retries=0)
 
-        assert post.call_args.args[0] == 'https://api.perplexity.ai/chat/completions'
+        assert (post.call_args.args[0], post.call_args.kwargs['headers']['Authorization']) == (
+            'https://api.perplexity.ai/v1/agent', 'Bearer pk-test',
+        )
 
     def test_openai_and_perplexity_calls_allow_five_retries_by_default(self):
         with (
             patch.object(OpenAIClient, '_make_request', return_value={}) as openai_request,
-            patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as perplexity_request,
+            patch.object(PerplexityClient, '_make_request', return_value={}) as perplexity_request,
         ):
             OpenAIClient('sk-test').responses_with_web_search('query text')
-            ai_clients.PerplexityClient('pk-test').chat_completion([{'role': 'user', 'content': 'query text'}])
+            PerplexityClient('pk-test').agent_response('query text')
 
-        assert (openai_request.call_args.kwargs, perplexity_request.call_args.kwargs) == (
-            {'max_retries': 5}, {'max_retries': 5},
-        )
+        assert (openai_request.call_args.kwargs['max_retries'], perplexity_request.call_args.kwargs['max_retries']) == (5, 5)

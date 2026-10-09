@@ -22,6 +22,7 @@ from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import collect_capped_items
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
+from shared.youtube import CONTENT_TYPES, stored_content_type
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -66,10 +67,10 @@ def _detect_brand_in_url(url_lower, tracked_brands):
 
 
 # Cap paginated scans/queries to prevent runaway cost and Lambda timeouts.
-# At 1 MB per page (DynamoDB limit), 25 pages is ~25 MB of item data — plenty
-# for the Citations table which is bounded to ~20 items per keyword after
-# deduplication, and a safety net if the table ever grows unexpectedly.
-# See audit item 13.
+# At 1 MB per page (DynamoDB limit), 25 pages is ~25 MB of item data. The
+# Citations table keeps every deduplicated citation of a keyword (a few
+# hundred bytes each), so even thousands of citations per keyword fit; the
+# cap is a safety net if the table ever grows unexpectedly. See audit item 13.
 _MAX_SCAN_PAGES = 25
 
 
@@ -117,7 +118,9 @@ def _aggregate_citations(items, tracked_brands):
     """
     Aggregate citations by normalized_url across all keywords.
     Each item in the Citations table has: keyword, normalized_url, citation_count,
-    citing_providers, priority, first_seen, last_updated.
+    citing_providers, priority, content_type, first_seen, last_updated.
+    Rows stored before ``content_type`` existed carry none; theirs is derived
+    from the URL (``shared.youtube.stored_content_type``).
     """
     # Group by normalized_url across keywords
     url_data = defaultdict(lambda: {
@@ -125,6 +128,7 @@ def _aggregate_citations(items, tracked_brands):
         'keywords': set(),
         'providers': set(),
         'provider_counts': Counter(),
+        'content_type': None,
     })
 
     provider_totals = Counter()
@@ -141,6 +145,8 @@ def _aggregate_citations(items, tracked_brands):
 
         entry = url_data[url]
         entry['total_count'] += count
+        if entry['content_type'] is None:
+            entry['content_type'] = stored_content_type(item.get('content_type'), url)
         if kw:
             entry['keywords'].add(kw)
         for p in providers:
@@ -157,6 +163,14 @@ def _aggregate_citations(items, tracked_brands):
         brand_mentions[detected_brand] += count
 
     return url_data, provider_totals, brand_mentions
+
+
+def content_type_counts(top_urls: list[dict[str, Any]]) -> dict[str, int]:
+    """Distinct URLs per content type, every type present (``{'video': 2, 'page': 40}``)."""
+    counts: dict[str, int] = dict.fromkeys(CONTENT_TYPES, 0)
+    for top_url in top_urls:
+        counts[top_url['content_type']] += 1
+    return counts
 
 
 @api_handler
@@ -197,6 +211,7 @@ def handler(event, context, **scope_params):
                 'by_provider': dict(data['provider_counts']),
                 'keyword_count': len(data['keywords']),
                 'keywords': sorted(data['keywords']),
+                'content_type': data['content_type'],
             }
             for url, data in url_data.items()
         ],
@@ -217,6 +232,7 @@ def handler(event, context, **scope_params):
         'scope': report_scope.describe() if report_scope is not None else None,
         'total_citations': len(items),
         'top_urls': top_urls,
+        'content_type_counts': content_type_counts(top_urls),
         'provider_stats': provider_stats,
         'brand_stats': brand_stats,
     }, event)

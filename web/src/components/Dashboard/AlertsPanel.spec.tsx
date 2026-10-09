@@ -11,6 +11,7 @@ import { AlertsPanel } from './AlertsPanel';
 import {
   buildAlertsPanelHookResult, buildAlertsPanelMembership
 } from './AlertsPanel-fixtures';
+import { renderWithMarketSelection } from '../Markets/markets-fixtures';
 
 vi.mock('../../hooks/useAlerts', () => ({ useOpenAlerts: vi.fn() }));
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
@@ -151,5 +152,26 @@ describe('AlertsPanel', () => {
     render(<AlertsPanel />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('Failed to process alert request');
+  });
+});
+
+describe('AlertsPanel markets', () => {
+  it('names the market of an alert raised in one', () => {
+    mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({ items: [buildAlertItem({ market_id: 'cl-es' })] }));
+
+    renderWithMarketSelection(<AlertsPanel />);
+
+    expect(screen.getByTitle('Market Chile (Spanish): Chile, Spanish')).toHaveTextContent('Market: Chile (Spanish)');
+  });
+
+  it.each([
+    ['of keywords without one', { market_id: 'global' }],
+    ['raised before markets existed', {}],
+  ])('shows no market for an alert %s', (_description, overrides) => {
+    mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({ items: [buildAlertItem(overrides)] }));
+
+    renderWithMarketSelection(<AlertsPanel />);
+
+    expect(screen.queryByText('Market:')).not.toBeInTheDocument();
   });
 });

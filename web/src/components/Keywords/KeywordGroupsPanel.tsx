@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import type { KeywordGroup } from '../../types';
+import type {
+  Keyword, KeywordGroup
+} from '../../types';
 import type { MutationOutcome } from '../../hooks/useKeywordGroups';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
@@ -16,6 +18,15 @@ export type GroupFilter = 'all' | 'ungrouped' | { groupId: string };
 
 export function isGroupFilterFor(filter: GroupFilter, groupId: string): boolean {
   return typeof filter === 'object' && filter.groupId === groupId;
+}
+
+/** Keywords visible under the current group filter. */
+export function filterKeywords(keywords: Keyword[], filter: GroupFilter, knownGroupIds: ReadonlySet<string>): Keyword[] {
+  if (filter === 'all') return keywords;
+  if (filter === 'ungrouped') {
+    return keywords.filter((keyword) => !(keyword.group_ids ?? []).some((id) => knownGroupIds.has(id)));
+  }
+  return keywords.filter((keyword) => keyword.group_ids?.includes(filter.groupId));
 }
 
 interface KeywordGroupsPanelProps {

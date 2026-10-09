@@ -85,6 +85,14 @@ describe('alert runtime decoders', () => {
       expect(isAlertsResponse(buildSingleItemList(BACKEND_ALERT_WIRE_FIXTURE))).toBe(true);
     });
 
+    it('accepts an alert raised in a market', () => {
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItemCandidate({ market_id: 'cl-es' })))).toBe(true);
+    });
+
+    it('rejects an alert with a numeric market', () => {
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItemCandidate({ market_id: 4 })))).toBe(false);
+    });
+
     it.each(SUPPORTED_ALERT_FIELD_VALUES)('accepts $value when the alert $field is supported', ({
       field, value
     }) => {

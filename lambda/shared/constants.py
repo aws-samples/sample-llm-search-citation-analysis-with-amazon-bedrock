@@ -42,9 +42,9 @@ UNRANKED_SENTINEL = 999
 # ---------------------------------------------------------------------------
 # Deduplication limits — used by deduplication/handler.py.
 #
-# `MAX_CITATIONS_PER_KEYWORD` bounds how many deduplicated citations survive
-# the prioritize step. Raising this grows the Citations table and the payload
-# size to downstream consumers; lowering it drops lower-priority sources.
+# `MAX_CITATIONS_PER_KEYWORD` caps the citations of a keyword handed to the
+# crawl Map (they travel in the Step Functions state, 256 KiB) and so the
+# crawl cost; the Citations table keeps every citation (2.37.0).
 # Env var `MAX_CITATIONS_PER_KEYWORD` overrides at runtime.
 # ---------------------------------------------------------------------------
 MAX_CITATIONS_PER_KEYWORD_DEFAULT = 20

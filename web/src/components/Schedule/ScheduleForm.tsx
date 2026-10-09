@@ -2,6 +2,10 @@ import type {
   AnalysisScope, Keyword, KeywordGroup, ScheduleFormData
 } from '../../types';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
+import { MarketScopeFilter } from '../Markets/MarketScopeFilter';
+import {
+  keywordsInMarkets, scopeMarketIds, withMarketIds
+} from '../Markets/marketScope';
 import {
   DAYS_OF_WEEK, MAX_DAY_OF_MONTH, isScheduleFrequency, timezoneOptions
 } from './scheduleFormModel';
@@ -194,15 +198,16 @@ interface ScheduleScopeFieldProps {
 }
 
 function scopeForMode(mode: ScopeMode, previous: AnalysisScope): AnalysisScope {
-  if (mode === 'groups') return {
+  const markets = scopeMarketIds(previous);
+  if (mode === 'groups') return withMarketIds({
     mode,
     group_ids: previous.mode === 'groups' ? previous.group_ids : []
-  };
-  if (mode === 'keywords') return {
+  }, markets);
+  if (mode === 'keywords') return withMarketIds({
     mode,
     keyword_ids: previous.mode === 'keywords' ? previous.keyword_ids : []
-  };
-  return { mode: 'all' };
+  }, markets);
+  return withMarketIds({ mode: 'all' }, markets);
 }
 
 /**
@@ -265,10 +270,10 @@ const ScheduleScopeField = ({
         <GroupPicker
           groups={groups}
           selectedIds={scope.group_ids}
-          onChange={(groupIds) => onChange({
+          onChange={(groupIds) => onChange(withMarketIds({
             mode: 'groups',
             group_ids: groupIds
-          })}
+          }, scopeMarketIds(scope)))}
         />
       )}
       {scope.mode === 'keywords' && (
@@ -276,16 +281,20 @@ const ScheduleScopeField = ({
           <KeywordScopePicker
             idPrefix="schedule-keyword-scope"
             name="schedule-keyword-ids"
-            keywords={keywords}
+            keywords={keywordsInMarkets(keywords, scopeMarketIds(scope))}
             groups={groups}
             selectedIds={scope.keyword_ids}
-            onChange={(keywordIds) => onChange({
+            onChange={(keywordIds) => onChange(withMarketIds({
               mode: 'keywords',
               keyword_ids: keywordIds
-            })}
+            }, scopeMarketIds(scope)))}
           />
         </div>
       )}
+      <div className="mt-3">
+        <MarketScopeFilter idPrefix="schedule" selectedIds={scopeMarketIds(scope)}
+          onChange={(marketIds) => onChange(withMarketIds(scope, marketIds))} />
+      </div>
     </fieldset>
   );
 };

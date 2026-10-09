@@ -2,6 +2,7 @@ import {
   CUSTOM_REPORT_DAYS, type CustomReportDays
 } from '../../../api/customReports';
 import type { ReportScope } from '../../../types';
+import { reportPathWithQuery } from '../scopeReport/scopeReportRoute';
 
 /**
  * The URLs of custom reports. A saved report opens at
@@ -27,15 +28,19 @@ export interface ReportViewSettings {
   readonly competitor: string | null;
 }
 
-/** The URL of report `id` showing `view`; the saved period stays out of it. */
-export function customReportViewPath(id: string, savedDays: CustomReportDays, view: ReportViewSettings): string {
+/**
+ * The URL of report `id` showing `view`; the saved period stays out of it.
+ * `market` (the `?market=` value on screen) is kept across view changes.
+ */
+export function customReportViewPath(
+  id: string, savedDays: CustomReportDays, view: ReportViewSettings, market: string | null = null
+): string {
   const search = new URLSearchParams();
   if (view.scope.kind === 'keyword') search.set('keyword', view.scope.keyword);
   if (view.scope.kind === 'group') search.set('group', view.scope.groupId);
   if (view.days !== savedDays) search.set('days', String(view.days));
   if (view.competitor !== null) search.set('competitor', view.competitor);
-  const query = search.toString();
-  return query === '' ? customReportPath(id) : `${customReportPath(id)}?${query}`;
+  return reportPathWithQuery(customReportPath(id), search, market);
 }
 
 function isCustomReportDays(value: number): value is CustomReportDays {

@@ -11,8 +11,16 @@ a narrative written from them alone, keeps the items
 ``CitationAnalysis-ReportInsights``.
 
 ``POST /api/reports/insights/regenerate`` invokes it asynchronously with
-``{"group_id": ...}``: the narrative is then written again for the group's
-latest runs.
+``{"group_id": ...}`` (and an optional ``"market_id"``): the narrative is then
+written again for the group's latest runs.
+
+Narratives are per (group, market) (2.37.0), like KpiAlerts' snapshots: the
+pairs come from ``alerts.snapshot_scopes`` (older executions name only
+``snapshot_group_ids``, the global market). A pair covers the group's
+keywords of that market, uses the market's competitors and first-party
+aliases (``shared.markets.brand_config_for_market``) and is written in the
+market's language; the global market keeps the ``group#<id>`` scope key and
+any other market's key is ``group#<id>#<market_id>``.
 
 A group that fails (a Bedrock error, an unreadable answer, output that is
 not JSON) is logged and counted; it never fails the run. The state machine
@@ -46,6 +54,15 @@ from shared.insights_narrative import (
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
 from shared.kpi_engine import Answer, answers_from_rows, brand_kpis, owned_domains_from
 from shared.llm_json import parse_llm_json
+from shared.markets import (
+    GLOBAL_MARKET_ID,
+    Market,
+    brand_config_for_market,
+    keyword_market_id,
+    load_markets,
+    market_scoped_key,
+    markets_by_id,
+)
 from shared.models import ModelRole, get_model_id, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
@@ -82,36 +99,61 @@ class UnparseableNarrativeError(ValueError):
 # Requests
 # ---------------------------------------------------------------------------
 
-def _requests(event: Any) -> tuple[list[str], str | None]:
-    """The groups to write for and the run to read (``None``: each keyword's latest run)."""
+def _scopes_from_alerts(alerts: Mapping[str, Any]) -> list[tuple[str, str]] | None:
+    """KpiAlerts' snapshotted (group, market) pairs; executions before markets name only groups (global)."""
+    scopes = alerts.get('snapshot_scopes')
+    if isinstance(scopes, list):
+        return [
+            (str(entry['group_id']), str(entry.get('market_id') or GLOBAL_MARKET_ID))
+            for entry in scopes
+            if isinstance(entry, Mapping) and entry.get('group_id')
+        ]
+    group_ids = alerts.get('snapshot_group_ids')
+    if not isinstance(group_ids, list):
+        return None
+    return [(str(value), GLOBAL_MARKET_ID) for value in group_ids if value]
+
+
+def _requests(event: Any) -> tuple[list[tuple[str, str]], str | None]:
+    """The (group, market) pairs to write for and the run to read (``None``: each keyword's latest run)."""
     if not isinstance(event, Mapping):
         return [], None
     group_id = event.get('group_id')
     if isinstance(group_id, str) and group_id:
-        return [group_id], None
+        market_id = event.get('market_id')
+        return [(group_id, market_id if isinstance(market_id, str) and market_id else GLOBAL_MARKET_ID)], None
     alerts = event.get('alerts')
     if not isinstance(alerts, Mapping) or alerts.get('status') != 'completed':
         return [], None
     run_timestamp = alerts.get('run_timestamp')
-    group_ids = alerts.get('snapshot_group_ids')
-    if not isinstance(run_timestamp, str) or not run_timestamp or not isinstance(group_ids, list):
+    scopes = _scopes_from_alerts(alerts)
+    if not isinstance(run_timestamp, str) or not run_timestamp or scopes is None:
         return [], None
-    return [str(value) for value in group_ids if value], run_timestamp
+    return scopes, run_timestamp
 
 
-def _group_keywords(group_ids: Iterable[str]) -> dict[str, list[str]]:
-    """The active keywords of each group, in name order and capped as a report scope is."""
-    wanted = set(group_ids)
-    members: dict[str, list[str]] = {group_id: [] for group_id in wanted}
+def _group_keywords(requests: Iterable[tuple[str, str]]) -> dict[tuple[str, str], list[str]]:
+    """The active keywords of each (group, market) pair, in name order and capped as a report scope is."""
+    wanted = set(requests)
+    members: dict[tuple[str, str], list[str]] = {pair: [] for pair in wanted}
     for item in query_active_keywords(dynamodb.Table(KEYWORDS_TABLE)):
         keyword = item.get('keyword')
         if isinstance(keyword, str) and keyword:
-            for group_id in keyword_group_ids(item) & wanted:
-                members[group_id].append(keyword)
+            market_id = keyword_market_id(item)
+            for group_id in keyword_group_ids(item):
+                if (group_id, market_id) in wanted:
+                    members[(group_id, market_id)].append(keyword)
     return {
-        group_id: sorted(set(keywords), key=str.casefold)[:SCOPE_KEYWORDS_CAP]
-        for group_id, keywords in members.items()
+        pair: sorted(set(keywords), key=str.casefold)[:SCOPE_KEYWORDS_CAP]
+        for pair, keywords in members.items()
     }
+
+
+def _markets_for(requests: Iterable[tuple[str, str]]) -> dict[str, Market]:
+    """The configured markets the requests name (read only when one is not global)."""
+    if all(market_id == GLOBAL_MARKET_ID for _group_id, market_id in requests):
+        return {}
+    return markets_by_id(load_markets(dynamodb.Table(BRAND_CONFIG_TABLE)))
 
 
 # ---------------------------------------------------------------------------
@@ -209,27 +251,48 @@ def _narrative(prompt: str) -> Any:
 
 @dataclass(frozen=True)
 class GroupRun:
-    """One group to write for: its active keywords and the run to read (``None``: each keyword's latest run)."""
+    """One group to write for: its active keywords and the run to read (``None``: each keyword's latest run).
+
+    ``market`` is the market the keywords belong to (``None``: the global market).
+    """
 
     group_id: str
     keywords: list[str]
     run_timestamp: str | None
+    market: Market | None = None
+
+    @property
+    def market_id(self) -> str:
+        return self.market.market_id if self.market is not None else GLOBAL_MARKET_ID
+
+    def outcome(self, **fields: Any) -> dict[str, Any]:
+        """The step's report for this group (``market_id`` named only outside the global market)."""
+        market = {} if self.market is None else {'market_id': self.market.market_id}
+        return {'group_id': self.group_id, **market, **fields}
+
+
+def _language(run: GroupRun) -> str:
+    """The market's language when the narrative can be written in it, else the keywords' language."""
+    if run.market is not None and run.market.lang in LANGUAGE_NAMES:
+        return run.market.lang
+    return keyword_language(run.keywords)
 
 
 def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
     """Write, validate and store the narrative of one group; the outcome as the step reports it."""
-    group_id, keywords, run_timestamp = run.group_id, run.keywords, run.run_timestamp
+    keywords, run_timestamp = run.keywords, run.run_timestamp
+    brand_config = brand_config_for_market(brand_config, run.market)
     owned_domains = owned_domains_from(brand_config)
     answers = _run_answers(keywords, run_timestamp)
     if not answers:
-        return {'group_id': group_id, 'status': 'skipped', 'reason': 'no_answers'}
+        return run.outcome(status='skipped', reason='no_answers')
     computed = compute_insights(
         answers, owned_domains, _history(keywords, owned_domains), competitor_domains_from(brand_config),
     )
     if not computed['insights']:
-        return {'group_id': group_id, 'status': 'skipped', 'reason': 'no_insights'}
+        return run.outcome(status='skipped', reason='no_insights')
     kpis = brand_kpis(answers, owned_domains)
-    language = keyword_language(keywords)
+    language = _language(run)
     narrative, dropped = validate_narrative(
         _narrative(narrative_prompt(brand_config, language, kpis, computed['insights'])),
         computed['insights'],
@@ -237,7 +300,7 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
     )
     timestamp = run_timestamp or max(answer.timestamp for answer in answers)
     dynamodb.Table(REPORT_INSIGHTS_TABLE).put_item(Item=convert_floats_to_decimal(narrative_item(
-        scope_key=group_scope_key(group_id),
+        scope_key=market_scoped_key(group_scope_key(run.group_id), run.market_id),
         run_timestamp=timestamp,
         narrative=narrative,
         model=get_model_id(ModelRole.ANALYSIS),
@@ -246,17 +309,32 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
         generated_at=get_timestamp(),
     )))
     logger.info('Narrative stored for a group run: %d item(s) kept, %d dropped', sum(map(len, narrative.values())), dropped)
-    return {'group_id': group_id, 'status': 'generated', 'dropped': dropped}
+    return run.outcome(status='generated', dropped=dropped)
 
 
 def _guarded(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
     if not run.keywords:
-        return {'group_id': run.group_id, 'status': 'skipped', 'reason': 'no_active_keywords'}
+        return run.outcome(status='skipped', reason='no_active_keywords')
     try:
         return generate_group_narrative(run, brand_config)
     except Exception:
         logger.exception('Narrative generation failed for one group')
-        return {'group_id': run.group_id, 'status': 'failed'}
+        return run.outcome(status='failed')
+
+
+def _group_runs(requests: list[tuple[str, str]], run_timestamp: str | None) -> list[GroupRun]:
+    """One ``GroupRun`` per requested (group, market) pair, in request order.
+
+    A market that is no longer configured has no keywords left to write for.
+    """
+    members = _group_keywords(requests)
+    markets = _markets_for(requests)
+    runs: list[GroupRun] = []
+    for group_id, market_id in requests:
+        market = markets.get(market_id)
+        known = market_id == GLOBAL_MARKET_ID or market is not None
+        runs.append(GroupRun(group_id, members[(group_id, market_id)] if known else [], run_timestamp, market))
+    return runs
 
 
 def _summary(outcomes: list[dict[str, Any]], run_timestamp: str | None) -> dict[str, Any]:
@@ -276,11 +354,10 @@ def _summary(outcomes: list[dict[str, Any]], run_timestamp: str | None) -> dict[
 
 def handler(event: Any, context: Any) -> dict[str, Any]:
     """Write the narrative of every requested group; one group's failure never fails the others or the run."""
-    group_ids, run_timestamp = _requests(event)
-    if not group_ids:
+    requests, run_timestamp = _requests(event)
+    if not requests:
         return {'status': 'skipped', 'reason': 'no_complete_groups', 'groups': 0}
-    members = _group_keywords(group_ids)
-    runs = [GroupRun(group_id, members[group_id], run_timestamp) for group_id in group_ids]
+    runs = _group_runs(requests, run_timestamp)
     brand_config = get_brand_config(BRAND_CONFIG_TABLE)
     with ThreadPoolExecutor(max_workers=min(GROUP_WORKERS, len(runs))) as pool:
         outcomes = list(pool.map(lambda run: _guarded(run, brand_config), runs))

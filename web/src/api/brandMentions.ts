@@ -17,10 +17,13 @@ export class InvalidBrandMentionsResponseError extends TypeError {
   }
 }
 
-export async function fetchBrandMentionsAtRun(scope: ReportScope, timestamp: string): Promise<BrandMentionsResponse> {
+/** `marketId` is the header's market choice (`null` = every market). */
+export async function fetchBrandMentionsAtRun(
+  scope: ReportScope, timestamp: string, marketId: string | null = null
+): Promise<BrandMentionsResponse> {
   const payload = await apiGet<unknown>('/brand-mentions', {
     params: {
-      ...reportScopeParams(scope),
+      ...reportScopeParams(scope, marketId),
       timestamp,
     },
   });

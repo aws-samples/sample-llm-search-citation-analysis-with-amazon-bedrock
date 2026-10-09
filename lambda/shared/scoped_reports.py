@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from shared.scope_params import (
+    MARKET_PARAM,
     SCOPE_KEYWORDS_CAP,
     SCOPE_PARAMS,
     ReportScope,
@@ -40,7 +41,7 @@ def _scope_decorator(
     keywords_table: Callable[[], Any],
     resolve: Callable[[dict[str, Any], dict[str, Any], Any], tuple[Any, dict[str, Any] | None]],
 ) -> Decorator:
-    """Pop the scope parameters ``@validate`` injected, resolve them, and hand the result to the handler.
+    """Pop the scope parameters (and ``market_id``) ``@validate`` injected, resolve them, and hand the result to the handler.
 
     ``resolve`` answers ``(value, None)`` to call the handler with ``value`` as
     its third argument, or ``(None, response)`` to answer that 400 instead.
@@ -50,7 +51,7 @@ def _scope_decorator(
     def decorate(handler: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any] | None]:
         @functools.wraps(handler)
         def with_scope(event: dict[str, Any], context: Any, **params: Any) -> dict[str, Any] | None:
-            scope_params = {name: params.pop(name, None) for name in SCOPE_PARAMS}
+            scope_params = {name: params.pop(name, None) for name in (*SCOPE_PARAMS, MARKET_PARAM)}
             value, rejected = resolve(event, scope_params, keywords_table())
             if rejected:
                 return rejected

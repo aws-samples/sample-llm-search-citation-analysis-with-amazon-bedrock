@@ -45,6 +45,8 @@ export interface AlertItem {
   threshold: AlertMetricValue;
   message: string;
   content_change?: ContentChangeMarker;
+  /** The market the alert was raised in; absent, null or `'global'` for keywords without one. */
+  market_id?: string | null;
 }
 
 export interface AlertsResponse {
@@ -236,7 +238,8 @@ function isAlertItem(candidate: unknown): candidate is AlertItem {
     && hasAlertIdentity(candidate)
     && hasAlertClassification(candidate)
     && hasAlertMetrics(candidate)
-    && (candidate.content_change === undefined || isContentChangeMarker(candidate.content_change));
+    && (candidate.content_change === undefined || isContentChangeMarker(candidate.content_change))
+    && (candidate.market_id === undefined || candidate.market_id === null || typeof candidate.market_id === 'string');
 }
 
 export function isAlertsResponse(candidate: unknown): candidate is AlertsResponse {

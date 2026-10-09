@@ -112,11 +112,14 @@ def _string_list(description: str, max_items: int | None = None) -> JsonObject:
 
 
 SCOPE_ARGUMENTS = ('group_id', 'keyword_ids', 'keyword', 'all')
+MARKET_ARGUMENT = 'market_id'
+_MARKET_PROPERTY: JsonObject = _string("Narrows any scope to one market id ('global' = keywords without a market); alone = all its keywords")
 _SCOPE_PROPERTIES: JsonObject = {
     'group_id': _string('Scope: a keyword group id'),
     'keyword_ids': _string_list('Scope: keyword ids', max_items=100),
     'keyword': _string('Scope: one keyword text'),
     'all': {'type': 'boolean', 'description': 'Scope: true = every active keyword'},
+    MARKET_ARGUMENT: _MARKET_PROPERTY,
 }
 _SCOPE_RULE = 'Scope: one of group_id, keyword_ids, keyword, all.'
 
@@ -161,23 +164,32 @@ def _given_scope(arguments: JsonObject, names: Sequence[str], *, required: bool)
 
 
 def _scope_query(arguments: JsonObject, *, required: bool) -> dict[str, str]:
-    """The scope parameter the report handlers expect, from the tool's scope arguments."""
-    name = _given_scope(arguments, SCOPE_ARGUMENTS, required=required)
+    """The scope parameters the report handlers expect, from the tool's scope arguments.
+
+    ``market_id`` is passed on next to the scope; on its own it is a scope
+    (every active keyword of the market), so it satisfies a required one.
+    """
+    market = {MARKET_ARGUMENT: str(arguments[MARKET_ARGUMENT])} if arguments.get(MARKET_ARGUMENT) else {}
+    name = _given_scope(arguments, SCOPE_ARGUMENTS, required=required and not market)
     if name is None:
-        return {}
+        return market
     if name == 'all':
-        return {'scope': 'all'}
-    return {name: _query_value(arguments[name])}
+        return {'scope': 'all', **market}
+    return {name: _query_value(arguments[name]), **market}
 
 
 def scope_descriptor(arguments: JsonObject, names: Sequence[str]) -> JsonObject:
-    """The ``{"mode": ...}`` scope body the run and Content Studio handlers take (``shared.keyword_groups``)."""
+    """The ``{"mode": ...}`` scope body the run and Content Studio handlers take (``shared.keyword_groups``).
+
+    A ``market_id`` argument becomes the descriptor's ``market_ids``.
+    """
     name = _given_scope(arguments, names, required=True)
+    market = {'market_ids': [arguments[MARKET_ARGUMENT]]} if arguments.get(MARKET_ARGUMENT) else {}
     if name == 'group_id':
-        return {'mode': 'groups', 'group_ids': [arguments['group_id']]}
+        return {'mode': 'groups', 'group_ids': [arguments['group_id']], **market}
     if name == 'keyword_ids':
-        return {'mode': 'keywords', 'keyword_ids': list(arguments['keyword_ids'])}
-    return {'mode': 'all'}
+        return {'mode': 'keywords', 'keyword_ids': list(arguments['keyword_ids']), **market}
+    return {'mode': 'all', **market}
 
 
 def _get_route(router: str, path: str, *params: str, scope: bool | None = None) -> RouteBuilder:
@@ -210,7 +222,8 @@ def _keyword_mgmt(method: str, resource: str, body: JsonObject, item_id: str | N
     return Route('keyword-mgmt', method, path, resource, path_params, None, body)
 
 
-_KEYWORD_FIELDS = ('keyword', 'status', 'region', 'language', 'category', 'priority', 'notes', 'group_ids')
+_KEYWORD_FIELDS = ('keyword', 'status', 'region', 'language', 'category', 'priority', 'notes', 'group_ids',
+                   MARKET_ARGUMENT, 'concept_id')
 
 
 def _create_group_route(arguments: JsonObject) -> Route:
@@ -464,7 +477,7 @@ _CONTENT_STUDIO = 'Content Studio'
 _EXAMPLE_CONFIRMATION = 'value-from-the-estimate'
 
 _RUN_SCOPE_RULE = 'Scope: one of group_id, keyword_ids, all.'
-_RUN_SCHEMA = _schema({name: _SCOPE_PROPERTIES[name] for name in RUN_SCOPE_ARGUMENTS})
+_RUN_SCHEMA = _schema({name: _SCOPE_PROPERTIES[name] for name in (*RUN_SCOPE_ARGUMENTS, MARKET_ARGUMENT)})
 _RUN_TAGS = ('analysis run', 'start', 'trigger', 'launch', 'execute', 'analyse', 'analyze', 'refresh data',
              'new run', 'cost', 'how much', 'estimate', 'price', 'spend', 'credit')
 _RESEARCH_SCHEMA = _schema({
@@ -489,6 +502,7 @@ _RESEARCH_TAGS = ('keyword research', 'research', 'expand', 'expansion', 'new ke
 _CONTENT_SCHEMA = _schema({
     'group_id': _string('Scope: a keyword group id'),
     'keyword_ids': _string_list('Scope: keyword ids', max_items=50),
+    MARKET_ARGUMENT: _string("Only the scope's keywords of this market id ('global' = keywords without a market)"),
     'content_angle': _enum('What to write, default create_new_landing_page', CONTENT_ANGLES),
     'template_id': _string('Content brief template id; default the built-in one of the angle'),
     'landing_url': _string('improve_current_url: the page to improve'),
@@ -586,7 +600,7 @@ OPERATIONS: tuple[Tool, ...] = (
         'Change keywords and groups. action=create_group(name) | update_group(group_id) | add(keyword) | '
         'update(keyword_id, keyword) | set_status(keyword_id, keyword, status) | set_membership(group_id, add/remove ids).',
         ('create', 'update', 'add keyword', 'pause', 'deactivate', 'status', 'group membership', 'move keyword',
-         'rename group', 'edit', 'new group'),
+         'rename group', 'edit', 'new group', 'market', 'translation', 'localize'),
         _schema({
             'action': _enum('What to change', tuple(_MANAGE_ACTIONS)),
             'name': _string('Group name'),
@@ -601,6 +615,8 @@ OPERATIONS: tuple[Tool, ...] = (
             'priority': _enum('Priority', _PRIORITIES),
             'notes': _string('Notes'),
             'group_ids': _string_list('Whole group membership of the keyword (add, update)'),
+            MARKET_ARGUMENT: _string("Market id of the keyword (add, update); '' or 'global' = no market"),
+            'concept_id': _string("Id of the keyword this one translates (add, update); '' = none"),
             'add_keyword_ids': _string_list('Keyword ids to add to the group (set_membership)'),
             'remove_keyword_ids': _string_list('Keyword ids to remove from the group (set_membership)'),
         }, ('action',)),
@@ -624,10 +640,12 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'get_dashboard_stats', 'Dashboard',
-        'Dashboard totals: searches, citations, crawled pages, unique keywords and the last run time.',
-        ('stats', 'totals', 'counts', 'summary', 'last run', 'dashboard', 'how many'),
-        _schema({'provider': _PROVIDER}), _get_route('stats-insights', '/api/stats', 'provider'),
-        ({}, {'provider': 'openai'}),
+        'Dashboard totals: searches, citations, crawled pages, unique keywords and the last run time; market_id '
+        'counts one market only.',
+        ('stats', 'totals', 'counts', 'summary', 'last run', 'dashboard', 'how many', 'market'),
+        _schema({'provider': _PROVIDER, MARKET_ARGUMENT: _string("Count only this market id ('global' = keywords without a market)")}),
+        _get_route('stats-insights', '/api/stats', 'provider', MARKET_ARGUMENT),
+        ({}, {'provider': 'openai'}, {MARKET_ARGUMENT: 'cl-es'}),
     ),
     _tool(
         'get_brand_mentions', _BRAND_MENTIONS,

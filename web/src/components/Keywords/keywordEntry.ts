@@ -111,22 +111,24 @@ export function parseBulkKeywords(input: string): string[] {
     });
 }
 
-/** Request body for creating a keyword; `group_ids` is sent only when non-empty. */
-export function buildCreateKeywordBody(keyword: string, groupIds: readonly string[] = []): {
+/** Request body for creating a keyword; `group_ids` and `market_id` are sent only when set. */
+export function buildCreateKeywordBody(keyword: string, groupIds: readonly string[] = [], marketId = ''): {
   keyword: string;
-  group_ids?: string[] 
+  group_ids?: string[];
+  market_id?: string;
 } {
-  return groupIds.length > 0 ? {
+  return {
     keyword,
-    group_ids: [...groupIds] 
-  } : { keyword };
+    ...(groupIds.length > 0 ? { group_ids: [...groupIds] } : {}),
+    ...(marketId === '' ? {} : { market_id: marketId }),
+  };
 }
 
-export async function processBulkKeyword(keyword: string, groupIds: readonly string[] = []): Promise<BulkKeywordResult> {
+export async function processBulkKeyword(keyword: string, groupIds: readonly string[] = [], marketId = ''): Promise<BulkKeywordResult> {
   try {
     const response = await apiPost<unknown>(
       '/keywords',
-      buildCreateKeywordBody(keyword, groupIds),
+      buildCreateKeywordBody(keyword, groupIds, marketId),
       { allowStructured4xx: true }
     );
     return {

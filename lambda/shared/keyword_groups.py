@@ -21,6 +21,7 @@ from botocore.exceptions import ClientError
 
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import is_conditional_check_failure
+from shared.markets import GLOBAL_MARKET_ID, MAX_MARKETS, is_market_filter_id, keyword_market_id
 from shared.string_lists import normalize_string_list
 from shared.utils import get_timestamp
 
@@ -32,6 +33,8 @@ MAX_GROUP_DESCRIPTION_LENGTH = 500
 MAX_GROUPS_PER_KEYWORD = None
 MAX_GROUP_ID_LENGTH = 64
 MAX_SCOPE_IDS = 1000
+#: Every configured market plus the global one.
+MAX_SCOPE_MARKET_IDS = MAX_MARKETS + 1
 
 SCOPE_MODES = ('all', 'groups', 'keywords')
 _SCOPE_ID_FIELDS = {'groups': 'group_ids', 'keywords': 'keyword_ids'}
@@ -107,6 +110,27 @@ def _group_id_entry(entry: str) -> str | None:
     return candidate if candidate and len(candidate) <= MAX_GROUP_ID_LENGTH else None
 
 
+def validate_scope_market_ids(value: Any) -> tuple[list[str] | None, str | None]:
+    """The optional ``scope.market_ids`` filter: ``(None, None)`` when absent, else the deduplicated ids.
+
+    Every scope that takes a market filter validates it here (run and schedule
+    scopes through ``validate_scope``, Content Studio group briefs directly).
+    """
+    if value is None:
+        return None, None
+    if not isinstance(value, list) or not value:
+        return None, 'scope.market_ids must be a non-empty array of market ids'
+    if len(value) > MAX_SCOPE_MARKET_IDS:
+        return None, f'scope.market_ids accepts at most {MAX_SCOPE_MARKET_IDS} entries'
+    ids: list[str] = []
+    for entry in value:
+        if not is_market_filter_id(entry):
+            return None, f"scope.market_ids entries must be market ids or '{GLOBAL_MARKET_ID}'"
+        if entry not in ids:
+            ids.append(entry)
+    return ids, None
+
+
 def validate_scope(value: Any) -> tuple[dict[str, Any] | None, str | None]:
     """Validate a scope descriptor.
 
@@ -115,14 +139,22 @@ def validate_scope(value: Any) -> tuple[dict[str, Any] | None, str | None]:
         {"mode": "all"}
         {"mode": "groups", "group_ids": ["..."]}
         {"mode": "keywords", "keyword_ids": ["..."]}
+
+    Every mode takes an optional ``"market_ids": ["cl-es", "global", ...]``
+    that keeps only the keywords of those markets (``'global'`` is the
+    keywords without one); absent means every market.
     """
     if not isinstance(value, dict):
         return None, 'scope must be an object'
     mode = value.get('mode')
     if mode not in SCOPE_MODES:
         return None, f"scope.mode must be one of {', '.join(SCOPE_MODES)}"
+    market_ids, market_error = validate_scope_market_ids(value.get('market_ids'))
+    if market_error:
+        return None, market_error
+    markets = {} if market_ids is None else {'market_ids': market_ids}
     if mode == 'all':
-        return {'mode': 'all'}, None
+        return {'mode': 'all', **markets}, None
 
     field = _SCOPE_ID_FIELDS[mode]
     ids, error = validate_id_list(value.get(field), field=f'scope.{field}', limit=MAX_SCOPE_IDS)
@@ -130,7 +162,7 @@ def validate_scope(value: Any) -> tuple[dict[str, Any] | None, str | None]:
         return None, error
     if not ids:
         return None, f'scope.{field} must contain at least one id'
-    return {'mode': mode, field: ids}, None
+    return {'mode': mode, field: ids, **markets}, None
 
 
 def load_existing_group_ids(groups_table: Any, group_ids: list[str]) -> set[str]:
@@ -210,6 +242,10 @@ def resolve_scope(scope: dict[str, Any], keywords_table: Any) -> list[dict[str, 
         selected = [item for item in active if item.get('id') in wanted]
     else:
         selected = active
+    market_ids = scope.get('market_ids')
+    if market_ids is not None:
+        markets = set(market_ids)
+        selected = [item for item in selected if keyword_market_id(item) in markets]
 
     by_id: dict[str, dict[str, Any]] = {}
     for item in selected:
@@ -223,9 +259,21 @@ def resolve_scope(scope: dict[str, Any], keywords_table: Any) -> list[dict[str, 
 
 def describe_scope(scope: dict[str, Any]) -> str:
     """Short human-readable label for logs and API messages."""
+    return _describe_keywords(scope) + _describe_markets(scope.get('market_ids'))
+
+
+def _describe_keywords(scope: dict[str, Any]) -> str:
     mode = scope.get('mode')
     if mode == 'groups':
         return f"{len(scope.get('group_ids', []))} group(s)"
     if mode == 'keywords':
         return f"{len(scope.get('keyword_ids', []))} selected keyword(s)"
     return 'all active keywords'
+
+
+def _describe_markets(market_ids: Any) -> str:
+    if not isinstance(market_ids, list) or not market_ids:
+        return ''
+    if len(market_ids) == 1:
+        return f', market {market_ids[0]}'
+    return f', {len(market_ids)} markets'

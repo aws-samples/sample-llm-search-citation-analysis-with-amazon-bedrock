@@ -2,11 +2,13 @@ import type {
   PeriodType, ReportScope
 } from '../../../types';
 import { ALL_SCOPE } from '../../ui/reportScope';
+import { MARKET_SEARCH_PARAM } from '../../Markets/marketSelection';
 
 /**
  * The URL of a scope report: `?keyword=<keyword>` or `?group=<id>` narrows
- * it (every keyword otherwise) and `?days=<n>` picks the trend period, so a
- * shared link or a `?print=1` tab reopens exactly the same report.
+ * it (every keyword otherwise), `?days=<n>` picks the trend period and
+ * `?market=<id>` the market, so a shared link or a `?print=1` tab reopens
+ * exactly the same report.
  */
 
 /** The trend periods the scope reports offer, in days. */
@@ -50,12 +52,22 @@ export function daysFromSearch(search: URLSearchParams): ScopeReportDays {
   return isScopeReportDays(days) ? days : DEFAULT_SCOPE_REPORT_DAYS;
 }
 
+/**
+ * `path` with `search` as its query, the market (the `?market=` value on
+ * screen) added so changing a report view does not drop the market a shared
+ * link names; no `?` when the query is empty.
+ */
+export function reportPathWithQuery(path: string, search: URLSearchParams, market: string | null): string {
+  if (market !== null) search.set(MARKET_SEARCH_PARAM, market);
+  const query = search.toString();
+  return query === '' ? path : `${path}?${query}`;
+}
+
 /** The path of the report at `basePath` for `scope` over `days`; the defaults stay out of the URL. */
-export function scopeReportPath(basePath: string, scope: ReportScope, days: ScopeReportDays): string {
+export function scopeReportPath(basePath: string, scope: ReportScope, days: ScopeReportDays, market: string | null = null): string {
   const search = new URLSearchParams();
   if (scope.kind === 'keyword') search.set('keyword', scope.keyword);
   if (scope.kind === 'group') search.set('group', scope.groupId);
   if (days !== DEFAULT_SCOPE_REPORT_DAYS) search.set('days', String(days));
-  const query = search.toString();
-  return query === '' ? basePath : `${basePath}?${query}`;
+  return reportPathWithQuery(basePath, search, market);
 }

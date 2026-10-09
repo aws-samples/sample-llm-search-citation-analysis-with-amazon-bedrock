@@ -20,13 +20,15 @@ sys.path.insert(0, '/opt/python')
 
 from shared.ai_clients import (
     ANTHROPIC_API_BASE,
-    PERPLEXITY_CHAT_URL,
+    CLAUDE_DIRECT_CALLERS,
+    PERPLEXITY_AGENT_URL,
+    PERPLEXITY_MODELS_URL,
     anthropic_headers,
     claude_web_search_payload,
     gemini_generate_url,
     gemini_grounded_payload,
     openai_web_search_payload,
-    perplexity_chat_payload,
+    perplexity_agent_payload,
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
@@ -42,6 +44,7 @@ from shared.provider_health import (
 from shared.provider_models import (
     CONFIGURABLE_MODEL_PROVIDERS,
     DEFAULT_PROVIDER_MODELS,
+    current_model_id,
     default_model,
     effective_model,
     is_valid_model_id,
@@ -345,9 +348,9 @@ def _post(url: str, **kwargs: Any) -> dict[str, Any]:
     return {'method': 'post', 'url': url, **kwargs}
 
 
-def _perplexity_chat(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """A POST of ``payload`` to Perplexity's chat completions."""
-    return _post(PERPLEXITY_CHAT_URL, headers=_bearer_json_headers(api_key), json=payload)
+def _perplexity_agent(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A POST of ``payload`` to Perplexity's Agent API."""
+    return _post(PERPLEXITY_AGENT_URL, headers=_bearer_json_headers(api_key), json=payload)
 
 
 def _claude_messages(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -434,7 +437,7 @@ def _claude_result(response: Any) -> dict:
 # --- The probe each provider answers ----------------------------------------
 
 # Listing models or running a one-result search answers within a few seconds;
-# the 1-token completions (Perplexity, Anthropic, Firecrawl) wait on a model
+# the 1-token completion (Anthropic) and Firecrawl's search wait on a model
 # and are given twice as long. Both bound the outbound call so a stalled
 # provider cannot hold this Lambda for its full duration.
 _LISTING_PROBE_TIMEOUT = 5
@@ -446,15 +449,9 @@ def _openai_request(api_key: str) -> dict[str, Any]:
 
 
 def _perplexity_request(api_key: str) -> dict[str, Any]:
-    # Perplexity has no cheap list endpoint, but /chat/completions
-    # returns 401 for bad keys immediately on a 1-token request.
-    # Cost: 1 input token + 1 output token if the key IS valid, so
-    # ≤ $0.001 per validation.
-    return _perplexity_chat(api_key, {
-        'model': 'sonar',
-        'messages': [{'role': 'user', 'content': 'ping'}],
-        'max_tokens': 1,
-    })
+    # The Agent API model listing needs the key (401 without a valid one) and
+    # costs nothing.
+    return _get(PERPLEXITY_MODELS_URL, headers={'Authorization': f'Bearer {api_key}'})
 
 
 def _gemini_request(api_key: str) -> dict[str, Any]:
@@ -531,7 +528,7 @@ class _KeyProbe:
 _KEY_PROBES: dict[str, _KeyProbe] = {
     # LLM providers
     'openai': _KeyProbe(_openai_request, partial(_listing_result, key='data')),
-    'perplexity': _KeyProbe(_perplexity_request, _probe_result, _COMPLETION_PROBE_TIMEOUT),
+    'perplexity': _KeyProbe(_perplexity_request, partial(_listing_result, key='data')),
     'gemini': _KeyProbe(_gemini_request, partial(_listing_result, key='models')),
     'claude': _KeyProbe(_claude_request, _claude_result, _COMPLETION_PROBE_TIMEOUT),
     # Search providers
@@ -572,13 +569,14 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
 # --- Model selection ---------------------------------------------------------
 
 # A real answer from the chosen model with the exact tool configuration runs
-# send: web search for OpenAI and Claude, Google Search grounding for Gemini,
-# a Sonar model (which always searches) for Perplexity. That is the only
+# send (no market): web search for OpenAI, Claude and Perplexity's Agent API,
+# Google Search grounding for Gemini. That is the only
 # reliable way to learn a model accepts it — a model without web-search
 # support answers 400, and three terminal failures in a run would
 # auto-disable the provider. A few seconds and a fraction of a cent.
 _MODEL_CHECK_TIMEOUT = 20
 _MODEL_CHECK_PROMPT = 'Reply with the single word OK.'
+_MODEL_CHECK_MAX_TOKENS = 64
 
 
 def _openai_model_check(api_key: str, model: str) -> dict[str, Any]:
@@ -590,7 +588,8 @@ def _openai_model_check(api_key: str, model: str) -> dict[str, Any]:
 
 
 def _perplexity_model_check(api_key: str, model: str) -> dict[str, Any]:
-    return _perplexity_chat(api_key, perplexity_chat_payload([{'role': 'user', 'content': _MODEL_CHECK_PROMPT}], model))
+    # A short reply keeps the check to a fraction of a cent.
+    return _perplexity_agent(api_key, perplexity_agent_payload(_MODEL_CHECK_PROMPT, model, max_output_tokens=_MODEL_CHECK_MAX_TOKENS))
 
 
 def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
@@ -602,8 +601,16 @@ def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
 
 
 def _claude_model_check(api_key: str, model: str) -> dict[str, Any]:
-    # One search at most and a short reply keep the check to a cent or so.
-    return _claude_messages(api_key, claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=64, max_uses=1))
+    # A short reply keeps the check to a cent or so; the prompt needs no search.
+    return _claude_messages(api_key, claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=_MODEL_CHECK_MAX_TOKENS))
+
+
+def _claude_direct_model_check(api_key: str, model: str) -> dict[str, Any]:
+    """The check runs fall back to for a model that refuses dynamic filtering."""
+    payload = claude_web_search_payload(
+        _MODEL_CHECK_PROMPT, model, max_tokens=_MODEL_CHECK_MAX_TOKENS, allowed_callers=CLAUDE_DIRECT_CALLERS,
+    )
+    return _claude_messages(api_key, payload)
 
 
 def _claude_listing_request(api_key: str) -> dict[str, Any]:
@@ -700,12 +707,20 @@ def _claude_model_ids(payload: Any) -> list[str]:
     ]
 
 
-# The Sonar Chat Completions API has no listing: Perplexity's `GET /v1/models`
-# lists Agent API models (third-party ids such as `openai/gpt-5.5`), which
-# the Sonar endpoint this system calls does not serve. `sonar-deep-research`
-# is left out on purpose: one answer takes minutes, beyond the 60 s a query
-# may take in a run.
-PERPLEXITY_SONAR_MODELS = ('sonar', 'sonar-pro', 'sonar-reasoning-pro')
+# Perplexity's own models (`perplexity/sonar`, ...) lead the picker; the
+# third-party ids the Agent API also serves (`openai/gpt-6-luna`, ...) follow
+# in the API's order.
+_PERPLEXITY_OWN_PREFIX = 'perplexity/'
+
+
+def _perplexity_model_ids(payload: Any) -> list[str]:
+    """Agent API ids from ``GET /v1/models``, Perplexity's own first."""
+    entries = payload.get('data') if isinstance(payload, dict) else None
+    ids = [
+        entry['id'] for entry in entries or []
+        if isinstance(entry, dict) and is_valid_model_id(entry.get('id'), 'perplexity')
+    ]
+    return sorted(ids, key=lambda model_id: not model_id.startswith(_PERPLEXITY_OWN_PREFIX))
 
 
 def _listing_models(response: Any, read_ids: Callable[[Any], list[str]]) -> dict:
@@ -724,36 +739,44 @@ class _ModelSupport(NamedTuple):
 
     check: Callable[[str, str], dict[str, Any]]
     """``(api_key, model)`` → ``requests.request`` arguments for a real answer."""
-    listing: Callable[[str], dict[str, Any]] | None
-    """``api_key`` → ``requests.request`` arguments for the model listing; ``None`` when the provider has none."""
+    listing: Callable[[str], dict[str, Any]]
+    """``api_key`` → ``requests.request`` arguments for the model listing."""
     read_ids: Callable[[Any], list[str]]
-    """Listing payload → the ids worth offering in the picker (with no listing: ``None`` → the fixed ids)."""
-
-
-def _fixed_ids(models: tuple[str, ...]) -> Callable[[Any], list[str]]:
-    """``read_ids`` for a provider without a listing: always ``models``."""
-    return lambda _payload: list(models)
+    """Listing payload → the ids worth offering in the picker."""
+    fallback_check: Callable[[str, str], dict[str, Any]] | None = None
+    """The check to send when the model refuses ``check``'s tool configuration the way runs fall back from."""
 
 
 _MODEL_SUPPORT: dict[str, _ModelSupport] = {
     'openai': _ModelSupport(_openai_model_check, _openai_request, _openai_model_ids),
-    'perplexity': _ModelSupport(_perplexity_model_check, None, _fixed_ids(PERPLEXITY_SONAR_MODELS)),
+    'perplexity': _ModelSupport(_perplexity_model_check, _perplexity_request, _perplexity_model_ids),
     'gemini': _ModelSupport(_gemini_model_check, _gemini_listing_request, _gemini_model_ids),
-    'claude': _ModelSupport(_claude_model_check, _claude_listing_request, _claude_model_ids),
+    'claude': _ModelSupport(_claude_model_check, _claude_listing_request, _claude_model_ids, _claude_direct_model_check),
 }
 
 
+def _is_caller_refusal(result: dict) -> bool:
+    """Whether a failed model check is Claude refusing dynamic filtering (its reason names ``allowed_callers``)."""
+    return not result.get('valid') and 'allowed_callers' in str(result.get('error', ''))
+
+
 def validate_model(provider_id: str, api_key: str, model: str) -> dict:
-    """Prove ``model`` answers a web-search prompt for ``provider_id`` with ``api_key``."""
+    """Prove ``model`` answers a web-search prompt for ``provider_id`` with ``api_key``.
+
+    A Claude model that refuses dynamic filtering is checked again with
+    direct callers, the configuration runs fall back to for it.
+    """
     support = _MODEL_SUPPORT[provider_id]
-    return _send(support.check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, f'model check for {provider_id}')
+    label = f'model check for {provider_id}'
+    result = _send(support.check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, label)
+    if support.fallback_check is not None and _is_caller_refusal(result):
+        result = _send(support.fallback_check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, label)
+    return result
 
 
 def list_models(provider_id: str, api_key: str) -> dict:
     """The models ``api_key`` can use for ``provider_id``, filtered to answer-capable ones."""
     support = _MODEL_SUPPORT[provider_id]
-    if support.listing is None:
-        return {'valid': True, 'models': support.read_ids(None)}
     return _send(
         support.listing(api_key), _LISTING_PROBE_TIMEOUT,
         partial(_listing_models, read_ids=support.read_ids), f'model listing for {provider_id}',
@@ -860,14 +883,16 @@ def _requested_model(provider_id: str, value: object) -> tuple[bool, str | None]
     """``(well_formed, override)`` for a requested ``value``.
 
     Blank, ``null`` or the provider's default itself mean "use the default"
-    (override ``None``); anything else must be a safe model id.
+    (override ``None``), and so does a retired id that is read as the default
+    (``sonar`` for Perplexity); anything else must be a safe model id.
     """
     model = value.strip() if isinstance(value, str) else value
-    if model is None or model in ('', default_model(provider_id)):
+    if model is None or model == '':
         return True, None
-    if isinstance(model, str) and is_valid_model_id(model):
-        return True, model
-    return False, None
+    if not isinstance(model, str) or not is_valid_model_id(model, provider_id):
+        return False, None
+    model = current_model_id(provider_id, model)
+    return True, None if model == default_model(provider_id) else model
 
 
 def _apply_model(provider_id: str, body: dict, event: dict) -> dict | None:
@@ -882,7 +907,8 @@ def _apply_model(provider_id: str, body: dict, event: dict) -> dict | None:
     well_formed, model = _requested_model(provider_id, body['model'])
     if not well_formed:
         return validation_error(
-            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)',
+            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)'
+            + (', after a vendor prefix such as perplexity/' if provider_id == 'perplexity' else ''),
             event, 'model',
         )
     if model is not None and body.get('validate', True):
@@ -922,7 +948,7 @@ def _enable_probe(provider_id: str, api_key: str, config: dict) -> dict:
     accepted". The search providers run the key probe, a one-result search.
     """
     if provider_id in CONFIGURABLE_MODEL_PROVIDERS:
-        return validate_model(provider_id, api_key, config.get('model') or default_model(provider_id))
+        return validate_model(provider_id, api_key, effective_model(provider_id, config))
     return validate_api_key(provider_id, api_key)
 
 
@@ -994,10 +1020,9 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
 def handle_list_models(event: dict, context: Any, provider_id: str) -> dict:
     """GET /providers/{id}/models - Models the stored key can use, for the Settings picker.
 
-    Admin-only, like every route that spends the stored key. AI engines only
-    (Perplexity's list is fixed: the Sonar API has no listing); the list is
-    filtered to models that can answer a prompt, and whatever is chosen is
-    still proven by the model check on save.
+    Admin-only, like every route that spends the stored key. AI engines only;
+    the list is filtered to models that can answer a prompt, and whatever is
+    chosen is still proven by the model check on save.
     """
     if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
         return validation_error('The model of this provider cannot be changed', event, 'id')

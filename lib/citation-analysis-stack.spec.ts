@@ -922,12 +922,13 @@ describe('SearchAllProviders parallel search', () => {
       .toStrictEqual(['Parallel', '$.provider_results', 'MergeProviderResults']);
   });
 
-  it('sends each branch the keyword, timestamp, query prompts and only its own provider', () => {
+  it('sends each branch the keyword, timestamp, query prompts, market and only its own provider', () => {
     expect(SEARCH_PROVIDER_IDS.map((id) => resolvePath(searchTask(id), ['Parameters', 'Payload'])))
       .toStrictEqual(SEARCH_PROVIDER_IDS.map((id) => ({
         'keyword.$': '$.keyword',
         'timestamp.$': '$.timestamp',
         'query_prompts.$': '$.query_prompts',
+        'market.$': '$.market',
         providers: [id],
       })));
   });
@@ -2350,7 +2351,7 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
     const tierEnvironments = bedrockTierEnvironments(template);
 
-    expect(tierEnvironments).toHaveLength(16);
+    expect(tierEnvironments).toHaveLength(17);
     expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 

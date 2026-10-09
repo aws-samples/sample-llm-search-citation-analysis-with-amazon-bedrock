@@ -39,6 +39,7 @@ from shared.scope_params import (
 )
 from shared.search_results import latest_run
 from shared.utils import extract_domain, get_brand_config
+from shared.youtube import content_type_for
 
 # Classification runs in at most six threads, then final response enrichment
 # runs in a separate pool capped at ten. The phases never nest, so ten is both
@@ -230,6 +231,7 @@ def _gaps_and_covered_sources(
         source_info = {
             'url': url,
             'domain': data['domain'],
+            'content_type': content_type_for(url),
             'citation_count': data['citation_count'],
             'providers': list(data['providers']),
             'provider_count': len(data['providers']),

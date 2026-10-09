@@ -6,6 +6,7 @@ import { reportScopeParams } from '../components/ui/reportScope';
 import {
   brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
+import { useMarketScopedFetch } from './useMarketScopedFetch';
 
 /** The one `/visibility` shape of every scope: its scope, pooled KPIs, brand leaderboard and keyword rows. */
 function isVisibilityResponse(value: unknown): value is VisibilityResponse {
@@ -21,8 +22,8 @@ const visibilityMetricsEndpoint = {
   logMessage: '[visibility] Error fetching metrics:',
   isValidResponse: isVisibilityResponse,
   ...fetchErrors('VisibilityFetchError', 'Failed to fetch visibility metrics'),
-  buildRequest: (scope: ReportScope, queryPromptId?: string, brand?: string) => {
-    const params = brandFilterParams(reportScopeParams(scope), brand, queryPromptId);
+  buildRequest: (marketId: string | null, scope: ReportScope, queryPromptId?: string, brand?: string) => {
+    const params = brandFilterParams(reportScopeParams(scope, marketId), brand, queryPromptId);
     return {
       path: '/visibility',
       params,
@@ -37,8 +38,9 @@ const visibilityMetricsEndpoint = {
  */
 export function useVisibilityMetrics() {
   const {
-    data, loading, error, fetchData: fetchVisibilityMetrics
+    data, loading, error, fetchData
   } = useAnalysisEndpoint(visibilityMetricsEndpoint);
+  const fetchVisibilityMetrics = useMarketScopedFetch(fetchData);
 
   return {
     data,
