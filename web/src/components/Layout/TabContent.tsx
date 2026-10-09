@@ -15,6 +15,12 @@ import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule, AnalysisScope
 } from '../../types';
 import { StrokeIcon } from '../ui/StrokeIcon';
+import { ErrorAlert } from '../ui/ErrorAlert';
+import { useMarketDashboard } from '../../hooks/useMarketDashboard';
+import {
+  marketName, type MarketChoice
+} from '../Markets/marketSelection';
+import { useMarketSelection } from '../Markets/marketSelectionContext';
 
 const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
 const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(module => ({ default: module.ScheduleManager })));
@@ -70,6 +76,17 @@ function LazyTab({ children }: { readonly children: ReactNode }) {
         {children}
       </Suspense>
     </ErrorBoundary>
+  );
+}
+
+/** "Totals and charts · Chile (Spanish)" while the header narrows the dashboard to one market. */
+function DashboardMarketNote({ marketId }: { readonly marketId: MarketChoice }) {
+  const { catalog } = useMarketSelection();
+  if (marketId === null) return null;
+  return (
+    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+      Totals and charts · {marketName(marketId, catalog.markets)}
+    </p>
   );
 }
 
@@ -147,12 +164,20 @@ function QuickActions({
 function DashboardContent({
   stats, citations, keywords, setActiveTab
 }: QuickActionsProps & { readonly stats: Stats | null }) {
+  const view = useMarketDashboard({
+    stats,
+    citations,
+  });
   return (
     <ErrorBoundary>
-      <DashboardStats stats={stats} />
-      <DashboardCharts citations={citations} />
+      <section aria-label="Totals and charts" aria-busy={view.loading}>
+        <DashboardMarketNote marketId={view.marketId} />
+        <ErrorAlert message={view.error} spacingClassName="mb-4 " />
+        <DashboardStats stats={view.stats} />
+        <DashboardCharts citations={view.citations} />
+      </section>
       <AlertsPanel />
-      <QuickActions citations={citations} keywords={keywords} setActiveTab={setActiveTab} />
+      <QuickActions citations={view.citations} keywords={keywords} setActiveTab={setActiveTab} />
     </ErrorBoundary>
   );
 }

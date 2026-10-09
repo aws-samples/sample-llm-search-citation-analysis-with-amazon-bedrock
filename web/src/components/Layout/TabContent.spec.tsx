@@ -7,6 +7,13 @@ import {
 import type { Keyword } from '../../types';
 import { TabContent } from './TabContent';
 import { buildTabContentProps } from './TabContent-fixtures';
+import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
+import {
+  buildMarketSelectionMock, renderWithMarketSelection
+} from '../Markets/markets-fixtures';
+import {
+  answerChileanPanels, COMBINED_PANELS
+} from '../../hooks/useMarketDashboard-fixtures';
 
 vi.mock('../ContentStudio', () => ({
   ContentStudioView: ({ keywords }: { keywords: Keyword[] }) => (
@@ -16,6 +23,43 @@ vi.mock('../ContentStudio', () => ({
 vi.mock('../Dashboard/ProviderChart', () => ({ ProviderChart: () => <div>Provider chart marker</div> }));
 vi.mock('../Dashboard/BrandChart', () => ({ BrandChart: () => <div>Brand chart marker</div> }));
 vi.mock('../Dashboard/AlertsPanel', () => ({ AlertsPanel: () => <section>Alerts panel marker</section> }));
+vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
+
+/** The dashboard over `COMBINED_PANELS` with `market` picked in the header; the market reads answer Chile's figures. */
+function renderDashboardFor(market: string | null) {
+  answerChileanPanels();
+  return renderWithMarketSelection(
+    <TabContent {...buildTabContentProps({
+      activeTab: 'dashboard',
+      ...COMBINED_PANELS,
+    })} />,
+    buildMarketSelectionMock({ selectedMarketId: market }),
+  );
+}
+
+describe('TabContent dashboard market', () => {
+  it('shows the combined totals without a market note when every market is shown', () => {
+    renderDashboardFor(null);
+
+    expect(screen.getByText('120')).toBeInTheDocument();
+    expect(screen.queryByText(/Totals and charts ·/)).not.toBeInTheDocument();
+    expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
+  });
+
+  it('names the picked market above the totals', async () => {
+    renderDashboardFor('cl-es');
+    await screen.findByText('21');
+
+    expect(screen.getByText('Totals and charts · Chile (Spanish)')).toBeInTheDocument();
+  });
+
+  it('shows the picked market totals instead of the combined ones', async () => {
+    renderDashboardFor('cl-es');
+
+    expect(await screen.findByText('21')).toBeInTheDocument();
+    expect(screen.queryByText('120')).not.toBeInTheDocument();
+  });
+});
 
 describe('TabContent content studio wiring', () => {
   it('passes the existing dashboard keywords to Content Studio', async () => {

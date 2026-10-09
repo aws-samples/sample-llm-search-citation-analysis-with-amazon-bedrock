@@ -225,6 +225,12 @@ CLAUDE_CITATION_SYSTEM_PROMPT = (
     "Include the source URL for every claim you make in your answer."
 )
 
+# Attempts (timeouts and 5xx) for the engines with long per-attempt timeouts
+# (OpenAI 180 s, Claude 120 s). The default five would let one stalled answer
+# outlast the provider Lambda's 900 s; three keep a persona under ~9 minutes
+# in the worst case, and a 429 still gets its extra throttle attempts.
+SLOW_ENGINE_MAX_ATTEMPTS = 3
+
 
 ProviderResult = dict[str, Any]
 """One provider's answer to one query: ``provider``, ``response``, ``citations``, ``status``, ``metadata``, ..."""
@@ -336,7 +342,9 @@ def query_openai(
 ) -> ProviderResult:
     """Query OpenAI API with native web search via Responses API."""
     def request(query: str) -> dict[str, Any]:
-        return OpenAIClient(api_key).responses_with_web_search(query=query, model=model, market=market)
+        return OpenAIClient(api_key).responses_with_web_search(
+            query=query, model=model, market=market, max_retries=SLOW_ENGINE_MAX_ATTEMPTS,
+        )
 
     return _query_llm(Provider.OPENAI, keyword, query_template, request, _parse_openai_response, model=model)
 
@@ -538,7 +546,7 @@ def query_claude(
     """Query Claude API with web search."""
     def request(query: str) -> dict[str, Any]:
         return ClaudeClient(api_key, model=model).generate_content(
-            query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT, market=market,
+            query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT, market=market, max_retries=SLOW_ENGINE_MAX_ATTEMPTS,
         )
 
     return _query_llm(

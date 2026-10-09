@@ -94,4 +94,31 @@ describe('promoteKeywords', () => {
       }
     );
   });
+
+  it.each([
+    {
+      condition: 'a market is chosen',
+      marketId: 'cl-es',
+      body: {
+        keywords: [researchKeywordFixture],
+        market_id: 'cl-es',
+      },
+    },
+    {
+      condition: 'no market is chosen',
+      marketId: null,
+      body: { keywords: [researchKeywordFixture] },
+    },
+  ])('sends the promoted keywords market only when $condition', async ({
+    marketId, body
+  }) => {
+    mockApiPost.mockResolvedValue(legacyPromotionResponseFixture);
+
+    await promoteKeywords({
+      keywords: [researchKeywordFixture],
+      marketId,
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith('/keywords/promote', body, expect.anything());
+  });
 });

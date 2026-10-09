@@ -11,7 +11,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 from shared.constants import MAX_KEYWORD_LENGTH
-from shared.keyword_groups import MAX_GROUP_ID_LENGTH, resolve_scope, validate_id_list
+from shared.keyword_groups import MAX_GROUP_ID_LENGTH, resolve_scope, validate_id_list, validate_scope_market_ids
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.safe_fetch import fetch_following_validated_redirects
 from shared.url_validator import validate_url_safe
@@ -297,12 +297,30 @@ def _legacy_keyword_ids(idea: dict[str, Any]) -> list[str] | ContentBriefValidat
 
 
 def _scope_shape_issue(scope: dict[str, Any], mode: str, field: str) -> ContentBriefValidationIssue | None:
-    expected = {'mode', field}
-    if set(scope) != expected:
+    if not {'mode', field} <= set(scope) <= {'mode', field, 'market_ids'}:
         return ContentBriefValidationIssue(
-            'scope', f'scope for {mode} mode must contain exactly mode and {field}'
+            'scope', f'scope for {mode} mode must contain mode and {field}, and optionally market_ids'
         )
     return None
+
+
+def _market_filter(scope: dict[str, Any]) -> dict[str, Any] | ContentBriefValidationIssue:
+    """The optional ``market_ids`` of a brief scope, validated like every scope's (``validate_scope``)."""
+    market_ids, error = validate_scope_market_ids(scope.get('market_ids'))
+    if error:
+        return ContentBriefValidationIssue('scope.market_ids', error)
+    return {} if market_ids is None else {'market_ids': market_ids}
+
+
+def _scope_markets(scope: Any) -> dict[str, Any]:
+    """``{'market_ids': [...]}`` of a validated brief scope, ``{}`` when it covers every market."""
+    market_ids = scope.get('market_ids') if isinstance(scope, dict) else None
+    return {'market_ids': list(market_ids)} if isinstance(market_ids, list) else {}
+
+
+def _in_markets(scope: dict[str, Any]) -> str:
+    """The suffix naming a scope's market filter in a refusal (none without one)."""
+    return ' of the selected markets' if 'market_ids' in scope else ''
 
 
 def _validate_scope_descriptor(
@@ -331,7 +349,10 @@ def _validate_scope_descriptor(
         return ContentBriefValidationIssue(
             'scope.keyword_ids', 'scope.keyword_ids must contain between 1 and 50 active keyword ids'
         )
-    return {'mode': mode, field: ids}
+    markets = _market_filter(value)
+    if isinstance(markets, ContentBriefValidationIssue):
+        return markets
+    return {'mode': mode, field: ids, **markets}
 
 
 def _normalized_scope(
@@ -491,11 +512,11 @@ def _resolve_new_group_scope(
     members = _sorted_members(resolve_scope(scope, keywords_table))
     if not members:
         return [], None, ContentBriefValidationIssue(
-            'scope.group_ids', 'Keyword group has no active keywords'
+            'scope.group_ids', f'Keyword group has no active keywords{_in_markets(scope)}'
         )
     if len(members) > MAX_SELECTED_KEYWORDS:
         return [], None, ContentBriefValidationIssue(
-            'scope.group_ids', 'Keyword group has more than 50 active keywords'
+            'scope.group_ids', f'Keyword group has more than 50 active keywords{_in_markets(scope)}'
         )
     return members, group, None
 
@@ -509,7 +530,7 @@ def _resolve_selected_scope(
     if any(keyword_id not in by_id for keyword_id in selected_ids):
         return [], ContentBriefValidationIssue(
             'scope.keyword_ids',
-            'scope.keyword_ids must contain only active existing keywords',
+            f'scope.keyword_ids must contain only active existing keywords{_in_markets(scope)}',
         )
     return _sorted_members([by_id[keyword_id] for keyword_id in selected_ids]), None
 
@@ -574,10 +595,11 @@ def canonicalize_group_brief(
 
     keyword_ids = [member['id'] for member in members]
     keywords = [member['keyword'] for member in members]
+    markets = _scope_markets(fields['scope'])
     scope = (
-        {'mode': 'groups', 'group_ids': [group['id']]}
+        {'mode': 'groups', 'group_ids': [group['id']], **markets}
         if group is not None and fields['legacy_group_id'] is None
-        else {'mode': 'keywords', 'keyword_ids': keyword_ids}
+        else {'mode': 'keywords', 'keyword_ids': keyword_ids, **markets}
     )
     label = _scope_label(members, group)
     canonical: dict[str, Any] = {
@@ -618,7 +640,7 @@ def single_keyword_brief(
         'title': f'Group Brief: {keyword}',
         'description': 'Generate a complete landing page from 1 selected active keyword.',
         'keyword': keyword,
-        'scope': {'mode': 'keywords', 'keyword_ids': [keyword_id]},
+        'scope': {'mode': 'keywords', 'keyword_ids': [keyword_id], **_scope_markets(canonical.get('scope'))},
         'scope_label': keyword,
         'keyword_ids': [keyword_id],
         'keywords': [keyword],

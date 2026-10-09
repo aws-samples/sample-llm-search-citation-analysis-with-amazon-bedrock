@@ -127,8 +127,12 @@ def _split_ids(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(',') if part.strip()]
 
 
-def _market_param(params: dict[str, Any]) -> tuple[str | None, str | None]:
-    """The ``market_id`` filter: ``(id, None)``, ``(None, None)`` when absent, or ``(None, error)``."""
+def market_param(params: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The ``market_id`` filter: ``(id, None)``, ``(None, None)`` when absent, or ``(None, error)``.
+
+    Shared by the scoped reports and ``GET /api/stats``, so every read
+    endpoint accepts and refuses the same values with the same message.
+    """
     value = str(params.get(MARKET_PARAM) or '').strip()
     if not value:
         return None, None
@@ -156,7 +160,7 @@ def parse_scope_params(params: dict[str, Any] | None, keywords_table: Any) -> tu
     a single keyword ignores it (a keyword has exactly one market).
     """
     params = params or {}
-    market_id, market_error = _market_param(params)
+    market_id, market_error = market_param(params)
     if market_error:
         return None, market_error
     present = [name for name in SCOPE_PARAMS if str(params.get(name) or '').strip()]

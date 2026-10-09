@@ -143,6 +143,8 @@ export interface CitationGap {
   title?: string;
   seo_analysis?: Record<string, unknown>;
   keyword?: string;
+  /** `video` for a cited YouTube video (absent from older API answers: a page). */
+  content_type?: 'video' | 'page';
 }
 
 interface DomainGapSummary {
