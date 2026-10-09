@@ -9,6 +9,18 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.37.2] - 2026-10-09
+
+### Security
+
+- `aws-cdk-lib` 2.273.0 (was 2.265.0) and the `aws-cdk` CLI 2.1145.0. `aws-cdk-lib` bundles `brace-expansion`, which
+  npm overrides cannot reach; 2.273.0 ships 5.0.12, fixing the three Dependabot alerts on it (GHSA-6j4f-fj2g-mc7p,
+  GHSA-qhr7-859c-m2p7, GHSA-q2hr-2g5m-vwhr: denial of service through crafted brace patterns, reachable only through
+  glob patterns this repository passes at synth time). `npm audit` is clean at the root. The synthesized templates
+  change only in asset hashes, CDK's own metadata and its bucket-deployment helper Lambda moving to arm64.
+- Still reported in `web/` only: the `braces` advisory with no patched release, reached through Tailwind 3's file
+  watcher at build time (the fix is the Tailwind 4 migration).
+
 ## [2.37.1] - 2026-10-09
 
 ### Changed
