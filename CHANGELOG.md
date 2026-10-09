@@ -9,6 +9,20 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.37.3] - 2026-10-09
+
+### Fixed
+
+- The MCP stack deployed again. Its managed-login branding resource (2.37.0, #174) failed its first real deploy three
+  ways, each found against the live user pool: Cognito answers an existing style with
+  `ManagedLoginBrandingExistsException` (the handler caught `InvalidParameterException`, so a console-made or
+  partially created style failed the stack); the logo SVGs were handed to boto3 still base64-encoded, so Cognito saw
+  text and refused every asset; and the theme used invented settings keys (`components.link`, `globalHeader`,
+  `light`/`dark`), which Cognito rejects as `UnknownProperty`. The handler now patches only keys present in the
+  document `DescribeManagedLoginBrandingByClient` returns (`lightMode`/`darkMode`, RGBA hex, `componentClasses.link`),
+  skipping and logging any the schema lacks. The handler was run against the account before the deploy; the pages
+  carry the dashboard palette (gray-900 buttons, blue-600 links, 8 px radius) and both logos.
+
 ## [2.37.2] - 2026-10-09
 
 ### Security

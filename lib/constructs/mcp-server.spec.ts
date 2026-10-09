@@ -28,6 +28,7 @@ import {
   extractAuthorizationScopesByVerb,
   extractBrandingCustomResource,
   extractBrandingHandlerActions,
+  extractBrandingHandlerCode,
   extractClientOAuthScopes,
   extractDistribution,
   extractAllowedResourceIds,
@@ -135,6 +136,25 @@ describe('Managed login', () => {
     expect(branding.logoLightBase64.length).toBeGreaterThan(0);
     expect(branding.logoDarkBase64.length).toBeGreaterThan(0);
     expect(branding.logoLightBase64).not.toBe(branding.logoDarkBase64);
+  });
+
+  it('themes a branding that already exists for the client instead of failing the deploy', () => {
+    // Cognito answers CreateManagedLoginBranding with this exception when the
+    // client already has a style (console-made, or a re-run); the handler must
+    // catch exactly it and fall through to describe/patch (2.37.2 deploy failure).
+    const code = extractBrandingHandlerCode(template);
+
+    expect(code).toContain('except cognito.exceptions.ManagedLoginBrandingExistsException');
+    expect(code).not.toContain('except cognito.exceptions.InvalidParameterException');
+  });
+
+  it('hands Cognito the decoded logo bytes, not the base64 text the properties carry', () => {
+    // boto3 base64-encodes `Bytes` itself; passing the property string through
+    // made Cognito reject every asset as text/plain (2.37.2 deploy failure).
+    const code = extractBrandingHandlerCode(template);
+
+    expect(code).toContain("base64.b64decode(properties['logoLightBase64'])");
+    expect(code).toContain("base64.b64decode(properties['logoDarkBase64'])");
   });
 
   it('grants the branding handler only the three managed-login branding actions', () => {
