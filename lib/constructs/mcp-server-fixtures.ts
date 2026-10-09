@@ -179,6 +179,14 @@ export function extractBrandingHandlerActions(template: Template): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
+/** The inline Python of the branding handler Lambda, as synthesized. */
+export function extractBrandingHandlerCode(template: Template): string {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: 'CitationAnalysis-McpBrandingHandler' },
+  });
+  return resolveString(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Code', 'ZipFile']);
+}
+
 /** `ScopeName`s of the one resource server, in declaration order. */
 export function extractResourceServerScopeNames(template: Template): string[] {
   const scopes = resolvePath(soleResourceProperties(template, 'AWS::Cognito::UserPoolResourceServer'), ['Scopes']);

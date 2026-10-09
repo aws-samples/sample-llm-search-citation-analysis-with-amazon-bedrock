@@ -80,43 +80,68 @@ def _physical_id(client_id):
     return f'{PHYSICAL_ID_PREFIX}{client_id}'
 
 
-def _set_path(settings, path, value):
-    """Set settings[path[0]][path[1]]... = value, creating intermediate dicts."""
+def _rgba(hex_colour):
+    """Cognito stores colours as 8 hex digits (RGBA) without a hash: '#111827' -> '111827ff'."""
+    return f"{hex_colour.lstrip('#').lower()}ff"
+
+
+def _patch(settings, path, value):
+    """Set a leaf that already exists in Cognito's document; a missing key is a schema drift, logged and skipped.
+
+    Only existing keys are patched: Cognito rejects any property outside its
+    schema (UnknownProperty), so an invented key would fail the whole update.
+    """
     node = settings
     for key in path[:-1]:
-        node = node.setdefault(key, {})
+        node = node.get(key) if isinstance(node, dict) else None
+        if node is None:
+            logger.warning('Settings schema has no %s; skipping', '.'.join(path))
+            return
+    if not isinstance(node, dict) or path[-1] not in node:
+        logger.warning('Settings schema has no %s; skipping', '.'.join(path))
+        return
     node[path[-1]] = value
 
 
 def _apply_theme(settings, theme):
-    """Patch only the keys this app themes; every other Cognito default is left untouched."""
-    # Component colours (categories vary by Cognito version; set every
-    # location practitioner reports and the API reference describe so the
-    # branding editor's own schema picks up whichever ones it defines).
-    colour_paths = [
-        (['components', 'pageBackground', 'light', 'backgroundColor'], theme['lightPage']),
-        (['components', 'pageBackground', 'dark', 'backgroundColor'], theme['darkPage']),
-        (['components', 'form', 'light', 'backgroundColor'], theme['lightSurface']),
-        (['components', 'form', 'dark', 'backgroundColor'], theme['darkSurface']),
-        (['components', 'form', 'light', 'borderColor'], theme['border']),
-        (['components', 'form', 'light', 'borderRadius'], theme['radius']),
-        (['components', 'primaryButton', 'light', 'backgroundColor'], theme['header']),
-        (['components', 'primaryButton', 'light', 'textColor'], theme['lightSurface']),
-        (['components', 'primaryButton', 'light', 'borderRadius'], theme['radius']),
-        (['components', 'primaryButton', 'dark', 'backgroundColor'], theme['lightSurface']),
-        (['components', 'primaryButton', 'dark', 'textColor'], theme['header']),
-        (['components', 'globalHeader', 'light', 'backgroundColor'], theme['lightSurface']),
-        (['components', 'globalHeader', 'dark', 'backgroundColor'], theme['darkSurface']),
-        (['components', 'link', 'light', 'textColor'], theme['link']),
-        (['components', 'link', 'dark', 'textColor'], theme['link']),
-        (['components', 'pageText', 'light', 'textColor'], theme['textLight']),
-        (['components', 'pageText', 'dark', 'textColor'], theme['textDark']),
+    """Patch only the keys this app themes; every other Cognito default is left untouched.
+
+    Paths follow the document DescribeManagedLoginBrandingByClient returns
+    (components.*.lightMode/darkMode, componentClasses.link.*): read from a
+    live user pool on 2026-10-09.
+    """
+    header, surface, dark_surface = _rgba(theme['header']), _rgba(theme['lightSurface']), _rgba(theme['darkSurface'])
+    link, border = _rgba(theme['link']), _rgba(theme['border'])
+    radius = float(theme['radius'])
+    components = [
+        (['components', 'pageBackground', 'lightMode', 'color'], _rgba(theme['lightPage'])),
+        (['components', 'pageBackground', 'darkMode', 'color'], _rgba(theme['darkPage'])),
+        (['components', 'form', 'lightMode', 'backgroundColor'], surface),
+        (['components', 'form', 'lightMode', 'borderColor'], border),
+        (['components', 'form', 'darkMode', 'backgroundColor'], dark_surface),
+        (['components', 'form', 'borderRadius'], radius),
+        (['components', 'pageHeader', 'lightMode', 'background', 'color'], surface),
+        (['components', 'pageHeader', 'lightMode', 'borderColor'], border),
+        (['components', 'pageHeader', 'darkMode', 'background', 'color'], dark_surface),
+        (['components', 'pageHeader', 'logo', 'enabled'], True),
+        (['components', 'form', 'logo', 'enabled'], True),
+        (['components', 'pageText', 'lightMode', 'headingColor'], _rgba(theme['textLight'])),
+        (['components', 'pageText', 'darkMode', 'headingColor'], _rgba(theme['textDark'])),
     ]
-    for path, value in colour_paths:
-        try:
-            _set_path(settings, path, value)
-        except (TypeError, AttributeError):
-            logger.warning('Could not set %s on this settings schema; skipping', '.'.join(path))
+    for mode, background, text in (('lightMode', header, surface), ('darkMode', surface, header)):
+        for state in ('defaults', 'hover', 'active'):
+            components.append((['components', 'primaryButton', mode, state, 'backgroundColor'], background))
+            components.append((['components', 'primaryButton', mode, state, 'textColor'], text))
+    classes = [
+        (['componentClasses', 'link', 'lightMode', 'defaults', 'textColor'], link),
+        (['componentClasses', 'link', 'lightMode', 'hover', 'textColor'], header),
+        (['componentClasses', 'link', 'darkMode', 'defaults', 'textColor'], link),
+        (['componentClasses', 'focusState', 'lightMode', 'borderColor'], link),
+        (['componentClasses', 'buttons', 'borderRadius'], radius),
+        (['componentClasses', 'input', 'borderRadius'], radius),
+    ]
+    for path, value in components + classes:
+        _patch(settings, path, value)
 
 
 def _logo_assets(logo_light_bytes, logo_dark_bytes):
@@ -138,8 +163,11 @@ def handler(event, context):
     user_pool_id = properties['userPoolId']
     client_id = properties['clientId']
     theme = json.loads(properties['theme'])
-    logo_light_bytes = properties['logoLightBase64']
-    logo_dark_bytes = properties['logoDarkBase64']
+    # The resource properties carry the SVGs base64-encoded (CloudFormation
+    # properties are text); boto3 encodes the Bytes field itself, so hand it
+    # the raw bytes or Cognito receives ASCII and answers "Media type not supported".
+    logo_light_bytes = base64.b64decode(properties['logoLightBase64'])
+    logo_dark_bytes = base64.b64decode(properties['logoDarkBase64'])
 
     cognito = boto3.client('cognito-idp')
     physical_id = _physical_id(client_id)
@@ -158,9 +186,10 @@ def handler(event, context):
                 UseCognitoProvidedValues=True,
             )
             logger.info('Created default managed-login branding for client %s', client_id)
-        except cognito.exceptions.InvalidParameterException as error:
-            # A style already exists for this client (re-run after a partial
-            # failure); fall through to the describe/patch below.
+        except cognito.exceptions.ManagedLoginBrandingExistsException as error:
+            # A style already exists for this client (set up in the console,
+            # or a re-run after a partial failure); fall through to the
+            # describe/patch below, which themes whatever is there.
             logger.info('Default branding already exists for %s: %s', client_id, error)
 
     described = cognito.describe_managed_login_branding_by_client(
