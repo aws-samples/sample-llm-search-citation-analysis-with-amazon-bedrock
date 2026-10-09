@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.37.1",
+  "version": "2.37.2",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -41,7 +41,7 @@
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^20.17.0",
     "@vitest/eslint-plugin": "^1.6.13",
-    "aws-cdk": "^2.1115.0",
+    "aws-cdk": "^2.1145.0",
     "eslint": "^9.39.2",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
@@ -57,7 +57,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.260.0",
+    "aws-cdk-lib": "^2.273.0",
     "constructs": "^10.6.0"
   },
   "overrides": {
