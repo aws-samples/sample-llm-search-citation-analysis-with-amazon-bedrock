@@ -1,5 +1,6 @@
-# Local CodeQL run (scripts/codeql-local.sh): what GitHub's code-quality review
-# scans, minus generated and vendored code.
+# Local CodeQL run (scripts/codeql-local.sh): what GitHub's code scanning sees,
+# minus generated, vendored and local-only files (built layers, bundled deps,
+# synthesized templates, build output, test reports, caches).
 name: citation-analysis-local
 paths-ignore:
   - '**/node_modules/**'
@@ -9,8 +10,9 @@ paths-ignore:
   - 'cdk.out/**'
   - '**/cdk.out*/**'
   - 'web/dist/**'
-  - 'coverage/**'
+  - '**/coverage/**'
   - '.venv/**'
   - '.kiro/**'
   - '.hypothesis/**'
   - 'mutants/**'
+  - '.codeql-local/**'

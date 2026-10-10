@@ -52,6 +52,7 @@ from functools import wraps
 from typing import Any
 
 from shared.api_response import forbidden_response
+from shared.log_safety import log_text
 
 logger = logging.getLogger(__name__)
 
@@ -261,13 +262,14 @@ def require_group(*allowed_groups: str) -> Callable:
 
             if not (caller_groups & allowed):
                 # Log enough to investigate, nothing sensitive: group names are
-                # not secrets and the token never appears here.
+                # not secrets and the token never appears here. The claims come
+                # from the request, so they are logged as one escaped line.
                 logger.warning(
-                    "Authorization denied for %s: caller %r is not in %s (has %s)",
+                    "Authorization denied for %s: caller %s is not in %s (has %s)",
                     func.__name__,
-                    get_caller_identity(event) or '<unauthenticated>',
+                    log_text(get_caller_identity(event) or '<unauthenticated>'),
                     sorted(allowed),
-                    sorted(caller_groups) or '<no groups>',
+                    log_text(sorted(caller_groups) or '<no groups>'),
                 )
                 return forbidden_response(
                     'You do not have permission to perform this action', event

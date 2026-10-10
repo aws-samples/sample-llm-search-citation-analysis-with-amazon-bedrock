@@ -251,7 +251,10 @@ def map_scope_keywords[ResultT](
     A keyword whose ``compute`` raises is logged and answered with
     ``fallback(keyword)``: one broken partition must not sink a group report.
     """
-    def guarded(keyword: str) -> ResultT:
+    # No return annotation on the inner function: CodeQL's Python extractor does
+    # not scope PEP 695 type parameters into nested definitions and would report
+    # `ResultT` as an uninitialized local; pyright infers the type from `compute`.
+    def guarded(keyword: str):
         try:
             return compute(keyword)
         except Exception:

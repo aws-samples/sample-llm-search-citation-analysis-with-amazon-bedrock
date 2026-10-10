@@ -414,6 +414,9 @@ class TestSettingsValidation:
             'alice.@example.com',
             'al..ice@example.com',
             f'{"a" * 65}@example.com',
+            f'ops@{"b" * 64}.example.com',
+            'ops@-example.com',
+            'ops@example-.com',
             TOO_LONG_EMAIL,
         ],
     )

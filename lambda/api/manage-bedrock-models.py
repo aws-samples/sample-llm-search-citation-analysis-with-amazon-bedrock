@@ -35,6 +35,7 @@ from shared.api_response import api_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
 from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
+from shared.log_safety import log_text
 from shared.models import (
     ModelTier,
     RequestStyle,
@@ -637,7 +638,9 @@ def handle_save(event: dict, context: Any, body: dict | None = None) -> dict:
     row = save_tier_model(tier, model, check)
     if row is None:
         return api_response(500, {'error': 'Failed to save model'}, event)
-    logger.info('Bedrock %s tier set to %s by %s', tier.value, model or 'the default', get_caller_identity(event))
+    logger.info(
+        'Bedrock %s tier set to %s by %s', tier.value, log_text(model or 'the default'), log_text(get_caller_identity(event))
+    )
     return success_response(tier_view(tier, row), event)
 
 
