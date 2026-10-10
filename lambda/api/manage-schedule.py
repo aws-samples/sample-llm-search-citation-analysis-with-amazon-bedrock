@@ -49,6 +49,7 @@ from shared.api_response import api_response, not_found_response, success_respon
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler
 from shared.keyword_groups import describe_scope, load_existing_group_ids, validate_scope
+from shared.log_safety import log_text
 from shared.utils import get_timestamp_compact
 
 logger = logging.getLogger(__name__)
@@ -520,7 +521,7 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     except scheduler.exceptions.ValidationException as exc:
         return validation_error(_validation_exception_message(exc), event)
 
-    logger.info('Updated schedule %s (%r, %s)', schedule_id, display_name, describe_scope(scope))
+    logger.info('Updated schedule %s (%s, %s)', log_text(schedule_id), log_text(display_name), log_text(describe_scope(scope)))
     return success_response(
         _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule updated successfully'),
         event,
@@ -573,7 +574,7 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
         name=execution_name,
         input=json.dumps(execution_input),
     )
-    logger.info('Started %s for schedule %s (%s)', execution_name, schedule_id, schedule['scope_summary'])
+    logger.info('Started %s for schedule %s (%s)', execution_name, log_text(schedule_id), log_text(schedule['scope_summary']))
     return success_response({
         'execution_arn': response['executionArn'],
         'execution_name': execution_name,

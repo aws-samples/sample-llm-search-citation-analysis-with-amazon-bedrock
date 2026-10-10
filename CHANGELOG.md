@@ -9,6 +9,37 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.38.3] - 2026-10-10
+
+### Changed
+
+- **CodeQL now sees the whole attack surface.** The local gate (`npm run quality:codeql`, also the pre-push hook) ran
+  only the code-quality suites, and CodeQL's security queries start from "remote flow sources" it knows for web
+  frameworks (Flask, Django, ...) — never for an AWS Lambda handler's `event`. So the security queries had nothing to
+  start from on this codebase: 0 results meant 0 sources, not 0 problems. The gate now runs the `security-and-quality`
+  suites (Python 172 rules, JavaScript/TypeScript 201, GitHub Actions 27, up from 101 + 98) with a repository model
+  pack (`scripts/codeql/python-lambda-models`) that declares the API Gateway `event` reaching every decorated handler
+  as attacker-controlled input. GitHub's default setup, which cannot load repository model packs, was switched from
+  the `default` to the `extended` query suite. The local config also stops scanning `web/coverage/` (a test report,
+  not source), which had produced the one finding the broader suites showed.
+
+### Fixed
+
+What the newly reachable queries found, and the fixes:
+
+- **Log injection (CWE-117, 5 places).** Request-derived values (the caller identity and groups from the token in
+  `require_group`'s denial line, a schedule id and name, a Bedrock model id) were logged as they came; a value with a
+  line break would have started a forged log record. `shared.log_safety.log_text` escapes line breaks and bounds the
+  length, and those lines use it.
+- **Polynomial regular expression (CWE-1333).** The notification-email pattern's domain labels
+  (`[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?`) could be matched in several ways and backtrack; the pattern is now
+  unambiguous (`[A-Za-z0-9](?:-*[A-Za-z0-9])*`) and anchored, and the 63-character label limit it used to carry is
+  checked in code with the address and local-part limits (the input was already capped at 254 characters, so this was
+  not exploitable).
+- **A false positive avoided:** CodeQL does not scope PEP 695 type parameters into nested functions and reported
+  `ResultT` in `shared.scope_params.map_scope_keywords` as an uninitialized local; the inner function's return
+  annotation is gone (pyright infers it).
+
 ## [2.38.2] - 2026-10-10
 
 ### Changed

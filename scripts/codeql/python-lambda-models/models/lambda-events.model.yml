@@ -1,0 +1,31 @@
+# CodeQL data extension: the API Gateway event is attacker-controlled input.
+#
+# CodeQL's Python security queries (log injection, SSRF, path and regex
+# injection, URL redirection, ...) start from "remote flow sources", which the
+# standard library only knows for web frameworks (Flask, Django, FastAPI, ...).
+# An AWS Lambda handler's `event` parameter is not one of them, so without this
+# file every taint query reports nothing on this codebase whatever the handlers
+# do with the request. These rows mark the first parameter of the function each
+# shared decorator wraps — whichever decorator is innermost sees the real
+# handler — as remote input of the `remote` threat model (active by default).
+#
+# Paths are the models-as-data syntax: the type is the top-level module, then
+# `Member[...]` down to the decorator, `Argument[0]` for the function it is
+# applied to and `Parameter[0]` for that function's `event`. A decorator factory
+# (`route_handler({...})`, `validate({...})`, `require_group(...)`) returns the
+# decorator, hence the extra `ReturnValue`.
+#
+# Used by scripts/codeql-local.sh (`--model-packs`); GitHub's default setup
+# cannot load repository model packs, so this is the local gate's advantage.
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: sourceModel
+    data:
+      - ['shared', 'Member[decorators].Member[api_handler].Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[decorators].Member[parse_json_body].Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[decorators].Member[cors_preflight].Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[decorators].Member[paginate].Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[decorators].Member[route_handler].ReturnValue.Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[decorators].Member[validate].ReturnValue.Argument[0].Parameter[0]', 'remote']
+      - ['shared', 'Member[auth].Member[require_group].ReturnValue.Argument[0].Parameter[0]', 'remote']

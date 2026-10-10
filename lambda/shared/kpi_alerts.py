@@ -41,11 +41,20 @@ DEFAULT_ALERT_SETTINGS: dict[str, Any] = {
 _LEGACY_SETTING_NAMES = {'mention_rate_drop': 'citation_rate_drop'}
 
 _SETTINGS_FIELDS = frozenset(DEFAULT_ALERT_SETTINGS)
+# Every quantified group here matches in exactly one way (a domain label is one
+# alphanumeric, then any number of "optional hyphens + one alphanumeric"), so a
+# hostile address cannot make the match backtrack; the label and address
+# lengths are checked in code (``_notification_email``). ``^`` and ``$`` repeat
+# what ``fullmatch`` already guarantees, for readers (and analyzers) that look
+# at the pattern alone.
 _EMAIL_PATTERN = re.compile(
-    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
-    r'(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+'
-    r'[A-Za-z]{2,63}'
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r'(?:[A-Za-z0-9](?:-*[A-Za-z0-9])*\.)+'
+    r'[A-Za-z]{2,63}$'
 )
+_MAX_EMAIL_LENGTH = 254
+_MAX_LOCAL_PART_LENGTH = 64
+_MAX_LABEL_LENGTH = 63
 
 
 def _metric(mapping: dict[str, Any], name: str) -> float | None:
@@ -75,13 +84,14 @@ def normalize_notification_emails(value: Any) -> tuple[list[str] | None, str | N
 def _notification_email(entry: str) -> str | None:
     """``entry`` trimmed and lowercased, or ``None`` when it is not a deliverable address."""
     email = entry.strip().lower()
-    local = email.partition('@')[0]
+    local, _at, domain = email.partition('@')
     if (
-        len(email) > 254
-        or len(local) > 64
+        len(email) > _MAX_EMAIL_LENGTH
+        or len(local) > _MAX_LOCAL_PART_LENGTH
         or local.startswith('.')
         or local.endswith('.')
         or '..' in local
+        or any(len(label) > _MAX_LABEL_LENGTH for label in domain.split('.'))
         or _EMAIL_PATTERN.fullmatch(email) is None
     ):
         return None
