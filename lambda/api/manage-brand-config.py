@@ -22,6 +22,7 @@ sys.path.insert(0, '/opt/python')
 from shared import kpi_engine
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
+from shared.brand_names import normalize_brand_key
 from shared.decorators import (
     RouteNotHandledError,
     api_handler,
@@ -212,11 +213,8 @@ def _wrapped_brands(brands: list, *, when_empty: str = "") -> str:
 
 
 def normalize_brand(name: str) -> str:
-    """Normalize brand name for comparison - remove accents, lowercase, trim."""
-    import unicodedata
-    normalized = unicodedata.normalize('NFD', name)
-    without_accents = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
-    return without_accents.lower().strip()
+    """Normalize brand name for comparison - remove accents, lowercase, trim (``shared.brand_names``)."""
+    return normalize_brand_key(name)
 
 
 def find_duplicates(brands: list) -> list:

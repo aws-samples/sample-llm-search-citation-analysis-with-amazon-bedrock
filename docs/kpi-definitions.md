@@ -16,7 +16,7 @@ These are not answers and are excluded from every KPI:
 
 A row is an answer when its `provider` is an AI engine; the provider decides the type. A row without `status` counts as successful.
 
-**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-insensitively.
+**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively.
 
 **Sighting.** One brand named in one answer. A brand named several times in the same answer is still one sighting, at its best position (and with the sentiment of that sighting). Otherwise a long answer that repeats a name would outweigh a short one.
 

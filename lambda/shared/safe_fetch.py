@@ -88,8 +88,9 @@ def fetch_following_validated_redirects(
                 stream=stream,
             )
         except requests.RequestException as error:
-            logger.warning('Request failed for validated URL: %s', type(error).__name__)
-            return None, None, 'Could not fetch the requested URL'
+            # The caller reports the failure in its own terms; the error class
+            # (SSLError, ReadTimeout, ...) is the only safe detail worth passing on.
+            return None, None, f'Could not fetch the requested URL ({type(error).__name__})'
 
         if response.status_code not in _REDIRECT_STATUSES:
             return response, current_url, ''

@@ -891,6 +891,13 @@ describe('Per-provider search functions', () => {
       .toStrictEqual(Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [searchFunctionName(id), '12'])));
   });
 
+  it('paces Perplexity to its one request a second and Firecrawl to five searches a minute, and no other function', () => {
+    expect(synthesized.providerSearch.minIntervalSecondsByFunction).toStrictEqual({
+      [searchFunctionName('perplexity')]: '1.1',
+      [searchFunctionName('firecrawl')]: '12',
+    });
+  });
+
   it('removes the single CitationAnalysis-Search function', () => {
     expect(synthesized.providerSearch.legacyFunctionLogicalId).toBe('');
   });
@@ -1014,6 +1021,7 @@ describe('Search and crawl concurrency overrides', () => {
   const app = new cdk.App({
     context: {
       providerConcurrency: '{"perplexity":5,"firecrawl":0}',
+      providerPacing: '{"perplexity":0,"firecrawl":6,"exa":0.5}',
       crawlConcurrency: '4',
       processKeywordsConcurrency: '7',
     },
@@ -1024,6 +1032,13 @@ describe('Search and crawl concurrency overrides', () => {
 
   it('applies -c providerConcurrency caps and keeps the defaults of providers it does not name', () => {
     expect(providerSearch.reservedConcurrency).toStrictEqual({ ...DEFAULT_PROVIDER_CAPS, perplexity: 5, firecrawl: undefined });
+  });
+
+  it('applies -c providerPacing intervals, 0 lifting a default and a new value pacing an unpaced provider', () => {
+    expect(providerSearch.minIntervalSecondsByFunction).toStrictEqual({
+      [searchFunctionName('firecrawl')]: '6',
+      [searchFunctionName('exa')]: '0.5',
+    });
   });
 
   it('runs -c crawlConcurrency citations at a time per keyword', () => {
@@ -1048,6 +1063,20 @@ describe('Invalid -c providerConcurrency', () => {
 
     expect(() => new CitationAnalysisStack(app, 'InvalidProviderConcurrencyStack'))
       .toThrow(`CDK context 'providerConcurrency': ${message}`);
+  });
+});
+
+describe('Invalid -c providerPacing', () => {
+  it.each([
+    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl)"],
+    ['sets a negative interval', { perplexity: -1 }, "'perplexity' must be a number of seconds >= 0 (0 for no pacing), got -1"],
+    ['sets an interval as a string', { firecrawl: '12' }, "'firecrawl' must be a number of seconds >= 0 (0 for no pacing), got \"12\""],
+    ['is not JSON', 'firecrawl=12', 'must be a JSON object, got firecrawl=12'],
+  ])('fails synth when the value %s', (_case, providerPacing, message) => {
+    const app = new cdk.App({ context: { providerPacing } });
+
+    expect(() => new CitationAnalysisStack(app, 'InvalidProviderPacingStack'))
+      .toThrow(`CDK context 'providerPacing': ${message}`);
   });
 });
 

@@ -14,9 +14,10 @@ from botocore.exceptions import ClientError
 
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, deterministic_alert_id
 from shared.kpi_engine import Answer, answers_from_rows
-from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource
+from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
 from testing.map_run_fixtures import RESULTS_BUCKET, fake_s3_objects
+from testing.markets_fixtures import CHILE, markets_item
 from testing.search_result_fixtures import successful_answer_row
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -86,12 +87,14 @@ def _answers() -> list[Answer]:
     ])
 
 
-def _single_group_tables() -> tuple[MagicMock, MagicMock, MagicMock]:
+def _single_group_tables(**tables: MagicMock) -> tuple[MagicMock, MagicMock, MagicMock]:
+    """The snapshots and alerts tables and a resource serving them (plus ``tables``, by name)."""
     snapshots = MagicMock()
     alerts = MagicMock()
     resource = fake_dynamodb_resource(by_name={
         'snapshots': snapshots,
         'alerts': alerts,
+        **tables,
     })
     return snapshots, alerts, resource
 
@@ -115,11 +118,16 @@ _SHARED_KEYWORD_IN_TWO_GROUPS = [{
 }]
 
 
+#: The brand configuration of the hotel: its owned domain, no tracked competitor.
+_HOTEL_BRAND_CONFIG = {'first_party_domains': ['hotel-mine.com']}
+
+
 def _complete_group_patches(
     worker_module,
     resource: MagicMock,
     settings: dict,
     answers: list[Answer] | None,
+    brand_config: dict = _HOTEL_BRAND_CONFIG,
 ):
     return patch.multiple(
         worker_module,
@@ -130,7 +138,7 @@ def _complete_group_patches(
         }]),
         _load_groups=MagicMock(return_value=[{'id': 'group-1', 'name': 'Group One'}]),
         _settings=MagicMock(return_value=settings),
-        get_brand_config=MagicMock(return_value={'first_party_domains': ['hotel-mine.com']}),
+        get_brand_config=MagicMock(return_value=brand_config),
         _load_run_answers=MagicMock(return_value={'shared keyword': answers}),
         dynamodb=resource,
     )
@@ -142,10 +150,13 @@ def _complete_group_run(
     resource: MagicMock,
     settings: dict,
     previous_snapshot: dict | None = None,
+    *,
+    answers: list[Answer] | None = None,
+    brand_config: dict = _HOTEL_BRAND_CONFIG,
 ) -> Generator[None, None, None]:
-    """One complete group whose exact-run answers are `_answers()`, with notification stubbed out."""
+    """One complete group whose exact-run answers are `_answers()` unless given, with notification stubbed out."""
     with (
-        _complete_group_patches(worker_module, resource, settings, _answers()),
+        _complete_group_patches(worker_module, resource, settings, _answers() if answers is None else answers, brand_config),
         patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
         patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
     ):
@@ -335,6 +346,16 @@ class TestCompleteSnapshotEvaluation:
 
     def test_records_the_best_position_of_each_competitor(self, worker_module) -> None:
         assert _recorded_snapshot(worker_module)['competitors'] == [{'name': 'Rival', 'best_position': 1}]
+
+    def test_limits_the_snapshot_competitors_to_the_configured_ones(self, worker_module) -> None:
+        snapshots, _alerts, resource = _single_group_tables()
+        answers = answers_from_rows([_row('openai', ('Rival', 'competitor', 1), ('Guide', 'competitor', 2))])
+
+        with _complete_group_run(worker_module, resource, _ALERTS_DISABLED, answers=answers,
+                                 brand_config={'tracked_brands': {'competitors': ['rival']}}):
+            worker_module.handler(_event(), None)
+
+        assert snapshots.put_item.call_args.kwargs['Item']['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
     def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
         _snapshots, alerts, resource = _single_group_tables()
@@ -573,18 +594,29 @@ def _market_event(processed: list[str], scope: dict | None = None) -> dict:
 class MarketRun:
     """One worker invocation over ``_MARKET_KEYWORDS``, recording snapshots, alerts and the lookups by key."""
 
-    def __init__(self, module, event: dict, *, settings: dict = _ALERTS_DISABLED, specifications: list | None = None) -> None:
-        self.snapshots, self.alerts, resource = _single_group_tables()
+    def __init__(
+        self,
+        module,
+        event: dict,
+        *,
+        settings: dict = _ALERTS_DISABLED,
+        specifications: list | None = None,
+        brand_config: dict | None = None,
+        markets: tuple[dict, ...] = (),
+        answers: list[Answer] | None = None,
+    ) -> None:
+        self.brand_config_table = fake_table(get_item={'Item': markets_item(*markets)})
+        self.snapshots, self.alerts, resource = _single_group_tables(**{'brand-config': self.brand_config_table})
         self.previous = MagicMock(return_value={'snapshot_at': '2026-09-01T10:00:00Z'})
         self.content_change = MagicMock(return_value=None)
-        answers = {keyword: _answers() for keyword in _ALL_MARKETS_PROCESSED}
+        run_answers = {keyword: _answers() if answers is None else answers for keyword in _ALL_MARKETS_PROCESSED}
         with patch.multiple(
             module,
             query_active_keywords=MagicMock(return_value=_MARKET_KEYWORDS),
             _load_groups=MagicMock(return_value=[{'id': 'altiplano', 'name': 'Altiplano'}]),
             _settings=MagicMock(return_value=settings),
-            get_brand_config=MagicMock(return_value={}),
-            _load_run_answers=MagicMock(return_value=answers),
+            get_brand_config=MagicMock(return_value=brand_config or {}),
+            _load_run_answers=MagicMock(return_value=run_answers),
             _previous_snapshot=self.previous,
             _content_change=self.content_change,
             _notify=MagicMock(return_value={'status': 'not_sent'}),
@@ -595,6 +627,13 @@ class MarketRun:
 
     def snapshot_field(self, name: str) -> list:
         return [call.kwargs['Item'][name] for call in self.snapshots.put_item.call_args_list]
+
+    def competitors_by_market(self) -> dict[str, list[str]]:
+        """The competitor names of each snapshot, by its market."""
+        return {
+            market_id: [row['name'] for row in competitors]
+            for market_id, competitors in zip(self.snapshot_field('market_id'), self.snapshot_field('competitors'), strict=True)
+        }
 
     def alert_items(self) -> list[dict]:
         return [call.kwargs['Item'] for call in self.alerts.put_item.call_args_list]
@@ -644,6 +683,34 @@ class TestSnapshotPerMarket:
     ])
     def test_reads_the_scope_markets_from_every_scope_field(self, worker_module, execution_input, market_ids) -> None:
         assert worker_module._scope_market_ids(execution_input) == market_ids
+
+
+class TestTrackedCompetitorsPerMarket:
+    """A snapshot's competitors are the configured ones: the brand config's list plus the market's own."""
+
+    @pytest.fixture
+    def run(self, worker_module) -> MarketRun:
+        answers = answers_from_rows([
+            _row('openai', ('Sky Airline', 'competitor', 1), ('Condor Sur', 'competitor', 2), ('JetPuma', 'competitor', 3)),
+        ])
+        return MarketRun(
+            worker_module,
+            _market_event(_ALL_MARKETS_PROCESSED),
+            brand_config={'tracked_brands': {'competitors': ['Condor Sur']}},
+            markets=(CHILE,),
+            answers=answers,
+        )
+
+    def test_keeps_the_markets_extra_competitor_in_that_markets_snapshot(self, run) -> None:
+        assert run.competitors_by_market()['cl-es'] == ['Sky Airline', 'Condor Sur']
+
+    def test_keeps_only_the_configured_competitors_in_the_other_snapshots(self, run) -> None:
+        by_market = run.competitors_by_market()
+
+        assert (by_market['global'], by_market['br-pt']) == (['Condor Sur'], ['Condor Sur'])
+
+    def test_reads_the_markets_once_from_the_brand_config_table(self, run) -> None:
+        run.brand_config_table.get_item.assert_called_once_with(Key={'config_id': 'markets'})
 
 
 class TestAlertsPerMarket:

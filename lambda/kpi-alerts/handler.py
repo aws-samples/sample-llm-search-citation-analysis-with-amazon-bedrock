@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NamedTuple
 
@@ -47,7 +48,15 @@ from shared.kpi_alerts import (
     ttl_for_timestamp,
 )
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
-from shared.markets import GLOBAL_MARKET_ID, keyword_market_id, market_scoped_key
+from shared.markets import (
+    GLOBAL_MARKET_ID,
+    Market,
+    brand_config_for_market,
+    keyword_market_id,
+    load_markets,
+    market_scoped_key,
+    markets_by_id,
+)
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -372,6 +381,17 @@ def _settings() -> dict[str, Any]:
     return resolve_settings(response.get('Item'))
 
 
+def _tracked_competitors(brand_config: Mapping[str, Any], markets: Mapping[str, Market], market_id: str) -> list[str]:
+    """The competitors configured for one market: the brand config's list plus the market's own.
+
+    The snapshot's ``competitors`` (the new-competitor rule) are limited to
+    these names; the extraction model's own competitor labels are not trusted.
+    """
+    tracked = brand_config_for_market(brand_config, markets.get(market_id)).get('tracked_brands')
+    competitors = tracked.get('competitors') if isinstance(tracked, Mapping) else None
+    return [name for name in competitors if isinstance(name, str)] if isinstance(competitors, list) else []
+
+
 def _message(alerts: list[dict[str, Any]], execution_id: str) -> str:
     visible = alerts[:20]
     lines = [
@@ -457,7 +477,10 @@ def handler(event: object, context: Any) -> dict[str, Any]:
     }, key=str.casefold)
 
     settings = _settings()
-    owned_domains = owned_domains_from(get_brand_config(BRAND_CONFIG_TABLE))
+    brand_config = get_brand_config(BRAND_CONFIG_TABLE)
+    owned_domains = owned_domains_from(brand_config)
+    # The markets, read once: each (group, market) pair tracks the market's extra competitors.
+    markets = markets_by_id(load_markets(dynamodb.Table(BRAND_CONFIG_TABLE)))
     answers_by_keyword = _load_run_answers(unique_keywords, run_timestamp)
 
     # The (group, market) pairs snapshotted, in that order: exactly the pairs this run fully covers.
@@ -471,8 +494,8 @@ def handler(event: object, context: Any) -> dict[str, Any]:
             skipped_partial += 1
             continue
         group_name = str(groups_by_id[pair.group_id].get('name') or pair.group_id)
-        snapshot = _snapshot(pair, group_name, execution_id, execution_input, report, run_timestamp,
-                             snapshot_metrics(group_answers, owned_domains))
+        metrics = snapshot_metrics(group_answers, owned_domains, _tracked_competitors(brand_config, markets, pair.market_id))
+        snapshot = _snapshot(pair, group_name, execution_id, execution_input, report, run_timestamp, metrics)
         new_alerts.extend(_record_snapshot(pair, group_name, snapshot, execution_id, run_timestamp, settings))
         snapshotted.append(pair)
 

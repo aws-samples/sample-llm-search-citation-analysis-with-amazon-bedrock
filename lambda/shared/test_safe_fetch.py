@@ -14,6 +14,7 @@ changed is that each destination is checked before the next request.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -196,12 +197,19 @@ class TestChainLimits:
 class TestTransportFailures:
     """A network error must not surface as an unhandled exception."""
 
-    def test_returns_a_generic_error_when_the_request_raises(self) -> None:
+    def test_returns_a_generic_error_naming_the_failure_class_when_the_request_raises(self) -> None:
         request_exception = safe_fetch.requests.RequestException('connection reset')
         (response, _, error), _ = fetch_through(request_exception, 'https://site.example/')
 
         assert response is None
-        assert error == 'Could not fetch the requested URL'
+        assert error == 'Could not fetch the requested URL (RequestException)'
+
+    def test_logs_nothing_itself_when_the_request_raises(self, caplog) -> None:
+        # The callers report the failure once, in their own terms.
+        with caplog.at_level(logging.DEBUG, logger=safe_fetch.__name__):
+            fetch_through(safe_fetch.requests.RequestException('connection reset'), 'https://site.example/')
+
+        assert caplog.records == []
 
 
 class TestHostMatches:

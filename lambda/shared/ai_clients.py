@@ -233,6 +233,13 @@ RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 THROTTLE_EXTRA_ATTEMPTS = 3
 THROTTLE_EXTRA_ATTEMPTS_ENV = 'PROVIDER_THROTTLE_EXTRA_ATTEMPTS'
 THROTTLE_MAX_WAIT_SECONDS = 30.0
+# A wait the provider itself asked for is honoured up to this, beyond the
+# jittered cap above: Firecrawl's per-minute window asks for up to a minute.
+THROTTLE_MAX_PROVIDER_WAIT_SECONDS = 120.0
+# A refused (429) request answered in milliseconds and retried a second later
+# is the pacing mechanism working, not a fault: the first waits are reported
+# at INFO, and a provider that keeps refusing is a WARNING from this attempt on.
+THROTTLE_WARN_FROM_ATTEMPT = 3
 # ``x-ratelimit-reset`` values above this are epoch seconds (Perplexity sends
 # those); smaller positive values are seconds from now.
 _EPOCH_THRESHOLD = 1e9
@@ -295,16 +302,27 @@ def _throttle_wait_seconds(response: Any, attempt: int) -> float:
     """How long to wait after a 429 before attempt ``attempt + 1``.
 
     Never earlier than the provider asked (``Retry-After`` or
-    ``x-ratelimit-reset``) and never less patient than exponential backoff:
-    the longer of the two. Full jitter is added so parallel calls that were
-    throttled together do not retry in lockstep and collide again — three
-    Perplexity steps fired within 100ms of each other did exactly that, one
-    1.0s sleep each, and one of them lost. Capped at
-    ``THROTTLE_MAX_WAIT_SECONDS``.
+    ``x-ratelimit-reset``, honoured up to ``THROTTLE_MAX_PROVIDER_WAIT_SECONDS``:
+    a retry inside a still-closed per-minute window is refused again and, on
+    plans that count refused requests, spends quota) and never less patient
+    than exponential backoff. Full jitter is added to the longer of the two so
+    parallel calls that were throttled together do not retry in lockstep and
+    collide again — three Perplexity steps fired within 100ms of each other did
+    exactly that, one 1.0s sleep each, and one of them lost. The jittered wait
+    is capped at ``THROTTLE_MAX_WAIT_SECONDS``.
     """
     headers = getattr(response, 'headers', None) or {}
-    base = max(_provider_wait_seconds(headers) or 0.0, _backoff_seconds(attempt))
-    return min(base + random.uniform(0, base), THROTTLE_MAX_WAIT_SECONDS)
+    provider_wait = _provider_wait_seconds(headers) or 0.0
+    base = max(provider_wait, _backoff_seconds(attempt))
+    jittered = min(base + random.uniform(0, base), THROTTLE_MAX_WAIT_SECONDS)
+    return max(jittered, min(provider_wait, THROTTLE_MAX_PROVIDER_WAIT_SECONDS))
+
+
+def _retry_log_level(throttled: bool, attempt: int) -> int:
+    """INFO for the first throttled waits (the pacing working), WARNING for a provider that keeps refusing or any 5xx."""
+    if throttled and attempt + 1 < THROTTLE_WARN_FROM_ATTEMPT:
+        return logging.INFO
+    return logging.WARNING
 
 
 def _status_retry_wait(
@@ -320,7 +338,7 @@ def _status_retry_wait(
     A 429 draws on ``throttle_attempts`` with jittered, ``Retry-After``-aware
     waits; every other retryable status draws on ``max_retries`` with plain
     backoff. Logs the attempt either way — the ``_RETRY`` / ``_FAILED`` tags
-    are what ``scripts/quick-error-check.sh`` filters on.
+    are what ``scripts/quick-error-check.sh`` filters on (by text, not level).
     """
     error_body = response.text[:200] if response.text else "No error body"
     throttled = response.status_code == 429
@@ -331,7 +349,8 @@ def _status_retry_wait(
         )
         return None
     wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
-    logger.warning(
+    logger.log(
+        _retry_log_level(throttled, attempt),
         '[%s_RETRY] Status %s | Attempt %s/%s | Waiting %.1fs | Error: %s', provider_name, response.status_code, attempt + 1, budget, wait_time, error_body
     )
     return wait_time

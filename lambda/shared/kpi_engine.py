@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from shared.brand_names import COMPETITOR, FIRST_PARTY, normalize_brand_key
 from shared.config import LLM_PROVIDERS
 from shared.constants import UNRANKED_SENTINEL
 
@@ -64,8 +65,7 @@ POSITION_WEIGHT_CAP = 10
 TREND_BAND_POINTS = 2.0
 TREND_BAND_POSITIONS = 0.5
 
-FIRST_PARTY = 'first_party'
-COMPETITOR = 'competitor'
+#: The brand classifications (``FIRST_PARTY`` and ``COMPETITOR`` are those of ``shared.brand_names``).
 OTHER = 'other'
 #: The sentiment labels a brand mention can carry; any other label counts as unlabelled.
 SENTIMENT_LABELS: tuple[str, ...] = ('positive', 'neutral', 'mixed', 'negative')
@@ -84,7 +84,7 @@ class Sighting:
     """One brand named in one answer."""
 
     key: str
-    """Case-insensitive identity: the same brand under two spellings of case is one brand."""
+    """Case-, accent- and whitespace-insensitive identity (``normalize_brand_key``): "SKY Airline" and "Sky Airline" are one brand."""
     name: str
     classification: str
     rank: int | None
@@ -128,18 +128,19 @@ def _rank(value: object) -> int | None:
 
 
 def sighting_from_brand(brand: object) -> Sighting | None:
-    """The sighting one stored brand dict makes, or ``None`` for a brand without a name."""
+    """The sighting one stored brand dict makes, or ``None`` for a brand without a name (a blank, or marks alone)."""
     if not isinstance(brand, Mapping):
         return None
     name = str(brand.get('name') or '').strip()
-    if not name:
+    key = normalize_brand_key(name)
+    if not key:
         return None
     classification = brand.get('classification')
     sentiment = brand.get('sentiment')
     label = sentiment.lower() if isinstance(sentiment, str) else None
     reason = brand.get('sentiment_reason')
     return Sighting(
-        key=name.lower(),
+        key=key,
         name=name,
         classification=classification if classification in {FIRST_PARTY, COMPETITOR} else OTHER,
         rank=_rank(brand.get('rank')),
