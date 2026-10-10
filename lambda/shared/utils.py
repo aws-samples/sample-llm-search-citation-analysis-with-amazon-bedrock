@@ -172,14 +172,9 @@ def normalize_url(url: str) -> str:
         logger.warning('Error normalizing URL %s: %s', url, e)
         return url
 
-    # Remove tracking parameters
-    query_params = parse_qs(parsed.query)
-    tracking_params = [
-        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-        'fbclid', 'gclid', 'msclkid', 'ref', 'source', '_ga', 'mc_cid', 'mc_eid'
-    ]
-    clean_params = {k: v for k, v in query_params.items()
-                   if k not in tracking_params}
+    clean_params = {
+        key: value for key, value in parse_qs(parsed.query).items() if not is_tracking_parameter(key)
+    }
 
     # Rebuild URL with domain + path + clean params
     clean_query = urlencode(clean_params, doseq=True)
@@ -188,6 +183,50 @@ def normalize_url(url: str) -> str:
         normalized += f"?{clean_query}"
 
     return normalized
+
+
+# Query parameters that only say where a visitor came from, never which page
+# or content is served: stripping them gives one citation one URL across the
+# SearchResults, Citations and CrawledContent tables. Everything else is kept,
+# because a parameter such as ``id``, ``page``, ``q`` or ``lang`` can select
+# the content. Names are compared case-insensitively. Short or generic names
+# (``s``, ``t``, ``tag``, ``trk``) stay out of the list: they mean something
+# on too many sites to be stripped blind.
+TRACKING_PARAMETERS = frozenset({
+    # Ad-click identifiers (Google Ads, DoubleClick, Meta, Microsoft, Yandex, X, TikTok)
+    'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid', 'fbclid', 'msclkid', 'yclid', 'twclid', 'ttclid',
+    # Google Analytics cross-domain linking and Google Merchant/Shopping result tracking
+    '_ga', '_gl', 'srsltid',
+    # Share tracking (Instagram, Facebook)
+    'igshid', 'igsh', 'mibextid', 'fb_action_ids', 'fb_action_types', 'fb_ref', 'fb_source',
+    # Email and marketing automation (Mailchimp, HubSpot, Marketo, Eloqua, Vero, Klaviyo, ConvertKit, Omeda, Drip, Bronto)
+    'mc_cid', 'mc_eid', '_hsenc', '_hsmi', '__hssc', '__hstc', '__hsfp', 'hsctatracking', 'mkt_tok',
+    'elqtrackid', 'elqtrack', 'vero_id', 'vero_conv', '_ke', '_kx', 'ck_subscriber_id', 'oly_anon_id', 'oly_enc_id',
+    '_bta_tid', '_bta_c',
+    # Analytics campaign tags (Adobe, Matomo/Piwik, Webtrekk, Yandex Metrica, ActiveCampaign)
+    's_kwcid', 'ef_id', 'pk_campaign', 'pk_kwd', 'pk_source', 'pk_medium', 'pk_content', 'pk_cid',
+    'wt_mc', 'wt_zmc', '_openstat', 'vgo_ee',
+    # Publisher and referrer attribution
+    'ref', 'source', 'ref_src', 'ref_url', 'cmpid', 'ncid', 'spm', 'rb_clickid', 'wickedid',
+    '_branch_match_id', '_branch_referrer',
+})
+"""Tracking-only query parameter names, lower-case (see ``is_tracking_parameter``)."""
+
+TRACKING_PARAMETER_PREFIXES = (
+    # The UTM family (utm_source ... utm_id, utm_source_platform, utm_creative_format, utm_marketing_tactic)
+    'utm_',
+    # HubSpot ads (hsa_acc, hsa_cam, hsa_grp, ...), Matomo (mtm_campaign, mtm_kwd, ...)
+    'hsa_', 'mtm_',
+    # Amazon product-page referral tracking (pd_rd_i, pd_rd_r, pf_rd_p, ...)
+    'pd_rd_', 'pf_rd_',
+)
+"""Prefixes of tracking-only parameter families, lower-case."""
+
+
+def is_tracking_parameter(name: str) -> bool:
+    """Whether query parameter ``name`` only tracks where a visitor came from (``TRACKING_PARAMETERS`` and the prefix families)."""
+    lowered = name.lower()
+    return lowered in TRACKING_PARAMETERS or lowered.startswith(TRACKING_PARAMETER_PREFIXES)
 
 
 def utc_now() -> datetime:

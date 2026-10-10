@@ -9,6 +9,22 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.38.2] - 2026-10-10
+
+### Changed
+
+- Citation URLs drop every tracking-only query parameter, not just the UTM classics (`shared.utils.normalize_url`,
+  the one normalizer behind the SearchResults citations, the Citations table keys and the crawl cache). The list now
+  covers the whole `utm_` family, ad-click ids (`gclid`, `gbraid`, `wbraid`, `dclid`, `fbclid`, `msclkid`, `yclid`,
+  `twclid`, `ttclid`), Google Analytics linking and Shopping tracking (`_ga`, `_gl`, `srsltid`), share tracking
+  (`igshid`, `igsh`, `mibextid`, `fb_*`), marketing-automation ids (Mailchimp, HubSpot incl. `hsa_*`, Marketo,
+  Eloqua, Vero, Klaviyo, ConvertKit, Omeda, Bronto), analytics campaign tags (Adobe, Matomo `pk_*`/`mtm_*`,
+  Webtrekk, Yandex, ActiveCampaign), referrer attribution (`ref`, `source`, `ref_src`, `cmpid`, `ncid`, `spm`,
+  Branch) and Amazon referral tracking (`pd_rd_*`, `pf_rd_*`); names match in any letter case. Parameters that can
+  select content (`id`, `page`, `q`, `lang`, `variant`, and short or generic names such as `s`, `t`, `tag`, `trk`)
+  are kept. Rows stored before this release keep their original keys, so a page cited under a now-stripped
+  parameter appears once more as a new URL after its first clean citation.
+
 ## [2.38.1] - 2026-10-10
 
 Findings of the first full market run (30 keywords, Chile, Brazil and global): every row and KPI was right, but the
