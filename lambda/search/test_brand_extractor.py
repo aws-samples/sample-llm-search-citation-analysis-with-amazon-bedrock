@@ -150,6 +150,29 @@ class TestExtractionPrompt:
         ) in prompt
         assert 'BRAND EXAMPLES' not in prompt
 
+    def test_tells_the_model_that_programmes_and_products_are_not_separate_brands(self) -> None:
+        extractor = extractor_with(tracked_brands=tracking(['Altiplano Air'], ['Condor Sur']))
+
+        prompt = extractor._build_extraction_prompt(TEXT)
+
+        assert (
+            '   - Report the company that is recommended, not its products: loyalty programmes (e.g. a frequent-flyer '
+            'or rewards programme), cabin or fare products, and alliances are not separate brands — fold their '
+            'mentions into the parent company\'s entry, unless that programme or product is itself listed among the '
+            'tracked names above\n'
+        ) in prompt
+        assert 'inherit the parent classification' not in prompt
+
+    def test_asks_for_the_tracked_spelling_of_a_tracked_brands_name(self) -> None:
+        prompt = brand_extractor.LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert (
+            "For each brand found, provide:\n"
+            "- name: The company's canonical name (when it is one of the tracked brands, use that tracked spelling exactly)\n"
+            "- parent_company: Parent company if identifiable (or null)\n"
+            '- classification: REQUIRED'
+        ) in prompt
+
     def test_asks_for_sentiment_fields_by_default(self) -> None:
         prompt = brand_extractor.LLMBrandExtractor()._build_extraction_prompt(TEXT)
 
@@ -389,6 +412,45 @@ class TestExtractMentions:
         bedrock.side_effect = RuntimeError('ThrottlingException')
 
         assert brand_extractor.LLMBrandExtractor().extract_mentions(TEXT) == []
+
+
+AIRLINE_ANSWER = json.dumps([
+    {'name': 'SKY Airline', 'classification': 'competitor', 'rank': 1},
+    {'name': 'Sky', 'classification': 'competitor', 'rank': 3},
+    {'name': 'Condor Sur', 'classification': 'other', 'rank': 2},
+    {'name': 'JetPuma', 'classification': 'other', 'rank': 4},
+])
+
+
+class TestTrackedBrandCanonicalization:
+    """The model's spellings of a tracked brand are stored under the configured name and classification."""
+
+    @pytest.fixture
+    def airline_mentions(self, bedrock) -> list[dict[str, Any]]:
+        bedrock.return_value = AIRLINE_ANSWER
+        extractor = extractor_with(tracked_brands=tracking(['Altiplano Air'], ['Sky Airline', 'Condor Sur']))
+        return extractor.extract_mentions(TEXT)
+
+    def test_stores_every_spelling_of_a_tracked_competitor_under_its_configured_name(self, airline_mentions) -> None:
+        assert [(brand['name'], brand['classification']) for brand in airline_mentions[:2]] == [
+            ('Sky Airline', 'competitor'), ('Sky Airline', 'competitor'),
+        ]
+
+    def test_corrects_the_classification_of_a_tracked_competitor_the_model_called_other(self, airline_mentions) -> None:
+        assert airline_mentions[2] == {'name': 'Condor Sur', 'classification': 'competitor', 'rank': 2}
+
+    def test_keeps_an_untracked_brand_as_the_model_named_it(self, airline_mentions) -> None:
+        assert airline_mentions[3] == {'name': 'JetPuma', 'classification': 'other', 'rank': 4}
+
+    def test_keeps_every_other_field_of_a_rewritten_brand(self, airline_mentions) -> None:
+        assert airline_mentions[0] == {'name': 'Sky Airline', 'classification': 'competitor', 'rank': 1}
+
+    def test_rewrites_nothing_when_no_brand_is_tracked(self, bedrock) -> None:
+        bedrock.return_value = AIRLINE_ANSWER
+
+        names = [brand['name'] for brand in brand_extractor.LLMBrandExtractor().extract_mentions(TEXT)]
+
+        assert names == ['SKY Airline', 'Sky', 'Condor Sur', 'JetPuma']
 
 
 def mentions() -> list[dict[str, Any]]:

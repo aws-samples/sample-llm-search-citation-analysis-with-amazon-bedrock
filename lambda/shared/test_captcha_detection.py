@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 import types
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ _fake_sync_api = _stub_module(
     "playwright.sync_api",
     Browser=object,
     BrowserContext=object,
+    Error=type("Error", (Exception,), {}),
     Page=object,
     sync_playwright=lambda: None,
 )
@@ -150,6 +152,19 @@ def test_returns_navigation_error_when_captcha_body_text_cannot_be_read(tools_wi
     }
 
 
+def test_reports_a_page_that_cannot_be_loaded_in_one_line_without_a_traceback(tools_with_page, caplog):
+    tools_with_page.page.goto.side_effect = browser_tools.PlaywrightError(
+        "Page.goto: net::ERR_INVALID_AUTH_CREDENTIALS at http://feed.example/item\nCall log:\n  - navigating to ..."
+    )
+
+    with caplog.at_level(logging.INFO, logger=browser_tools.__name__):
+        result = tools_with_page.navigate_to_url("http://feed.example/item")
+
+    failures = [(record.levelname, record.getMessage(), record.exc_info) for record in caplog.records if "Navigation" in record.getMessage()]
+    assert failures == [("WARNING", "Navigation failed: Page.goto: net::ERR_INVALID_AUTH_CREDENTIALS at http://feed.example/item", None)]
+    assert result["error"] == "Page.goto: net::ERR_INVALID_AUTH_CREDENTIALS at http://feed.example/item"
+
+
 def test_returns_not_blocked_when_document_body_is_missing(tools_with_page):
     tools_with_page.page.evaluate.return_value = ""
 
@@ -203,14 +218,20 @@ def test_returns_success_result_when_navigation_finds_normal_page(normal_page):
 
 
 @pytest.mark.usefixtures("frozen_timestamp")
-def test_installs_context_redirect_guard_before_navigation(normal_page):
+def test_pauses_document_requests_only_and_before_navigation(normal_page):
     events: list[str] = []
-    normal_page.context.route.side_effect = lambda *_args: events.append("route")
+    session = normal_page.context.new_cdp_session.return_value
+    session.send.side_effect = lambda method, _params: events.append(method)
     normal_page.page.goto.side_effect = lambda *_args, **_kwargs: events.append("goto")
 
     normal_page.navigate_to_url("https://example.com/article")
 
-    assert events == ["route", "goto"]
+    normal_page.context.new_cdp_session.assert_called_once_with(normal_page.page)
+    session.on.assert_called_once_with("Fetch.requestPaused", normal_page._guard_document_request)
+    session.send.assert_called_once_with(
+        "Fetch.enable", {"patterns": [{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}]}
+    )
+    assert events == ["Fetch.enable", "goto"]
 
 
 def test_returns_safety_error_when_delayed_document_redirect_is_aborted(tools_with_page):
@@ -302,33 +323,64 @@ def test_raises_clear_error_when_agentcore_session_has_no_context(initialized_se
         initialized_session.tools.initialize_browser_session()
 
 
-def test_aborts_document_request_when_redirect_destination_is_unsafe(tools_with_page, monkeypatch):
-    route = MagicMock()
-    route.request.resource_type = "document"
-    route.request.url = "http://169.254.169.254/latest/meta-data"
+def _paused_document(url: str) -> dict:
+    """A ``Fetch.requestPaused`` event for the document request of ``url``."""
+    return {"requestId": "interception-7", "request": {"url": url, "method": "GET"}, "resourceType": "Document"}
+
+
+@pytest.fixture
+def guarded_session(tools_with_page):
+    """The CDP session the document guard answers paused requests on."""
+    tools_with_page.cdp_session = MagicMock()
+    return tools_with_page.cdp_session
+
+
+@pytest.fixture
+def safe_destination(monkeypatch):
+    """Every destination passes the SSRF check."""
+    monkeypatch.setattr(browser_tools, "validate_url_safe", MagicMock(return_value=(True, None)))
+
+
+def test_fails_document_request_when_redirect_destination_is_unsafe(tools_with_page, guarded_session, monkeypatch):
     monkeypatch.setattr(
         browser_tools,
         "validate_url_safe",
         MagicMock(return_value=(False, "URL points to a restricted address")),
     )
 
-    tools_with_page._guard_document_request(route)
+    tools_with_page._guard_document_request(_paused_document("http://169.254.169.254/latest/meta-data"))
 
-    route.abort.assert_called_once_with("blockedbyclient")
-    route.continue_.assert_not_called()
+    guarded_session.send.assert_called_once_with(
+        "Fetch.failRequest", {"requestId": "interception-7", "errorReason": "BlockedByClient"}
+    )
     assert tools_with_page._navigation_guard_error == "URL points to a restricted address"
 
 
-def test_continues_subresource_without_dns_check_when_request_is_not_document(tools_with_page, monkeypatch):
-    route = MagicMock()
-    route.request.resource_type = "image"
-    validator = MagicMock()
-    monkeypatch.setattr(browser_tools, "validate_url_safe", validator)
+@pytest.mark.usefixtures("safe_destination")
+def test_continues_document_request_when_destination_is_safe(tools_with_page, guarded_session):
+    tools_with_page._guard_document_request(_paused_document("https://example.com/article"))
 
-    tools_with_page._guard_document_request(route)
+    guarded_session.send.assert_called_once_with("Fetch.continueRequest", {"requestId": "interception-7"})
+    assert tools_with_page._navigation_guard_error is None
 
-    route.continue_.assert_called_once_with()
-    validator.assert_not_called()
+
+@pytest.mark.usefixtures("safe_destination")
+def test_swallows_the_closed_connection_when_a_paused_request_outlives_the_page(tools_with_page, guarded_session, caplog):
+    guarded_session.send.side_effect = browser_tools.PlaywrightError("Target page, context or browser has been closed")
+
+    with caplog.at_level(logging.INFO, logger=browser_tools.__name__):
+        tools_with_page._guard_document_request(_paused_document("https://example.com/article"))
+
+    assert [record.levelno for record in caplog.records if record.levelno >= logging.INFO] == []
+
+
+@pytest.mark.usefixtures("safe_destination")
+def test_leaves_a_paused_request_alone_when_the_guard_session_is_already_released(tools_with_page):
+    tools_with_page.cdp_session = None
+
+    tools_with_page._guard_document_request(_paused_document("https://example.com/article"))
+
+    assert tools_with_page._navigation_guard_error is None
 
 
 def test_returns_empty_content_when_document_body_is_missing(tools_with_page):
@@ -384,12 +436,18 @@ def test_releases_resources_in_shutdown_order_when_cleanup_runs(cleanup_runtime)
     assert events == ["browser", "playwright", "browser_client"]
 
 
-def test_never_calls_the_page_to_remove_routes_when_cleanup_runs(cleanup_runtime):
-    # A hung page never answers unroute_all, which stalled crawls until the
-    # Lambda timeout; teardown must not depend on the page responding.
+def test_never_calls_the_page_to_remove_the_guard_when_cleanup_runs(cleanup_runtime):
+    # A hung page never answers unroute_all or Fetch.disable, which stalled
+    # crawls until the Lambda timeout; teardown must not depend on the page.
+    session = MagicMock()
+    cleanup_runtime.tools.cdp_session = session
+
     cleanup_runtime.tools.cleanup()
 
     cleanup_runtime.context.unroute_all.assert_not_called()
+    session.send.assert_not_called()
+    session.detach.assert_not_called()
+    assert cleanup_runtime.tools.cdp_session is None
 
 
 def test_does_not_release_resources_again_when_cleanup_repeats(cleanup_runtime):

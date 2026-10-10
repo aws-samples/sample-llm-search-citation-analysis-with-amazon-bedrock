@@ -1402,6 +1402,8 @@ export interface ProviderSearchSnapshot {
   searchRoleLogicalId: string;
   /** `PROVIDER_THROTTLE_EXTRA_ATTEMPTS` of every function in the stack that sets it, by function name. */
   throttleExtraAttemptsByFunction: Record<string, unknown>;
+  /** `PROVIDER_MIN_INTERVAL_SECONDS` of every function in the stack that sets it, by function name. */
+  minIntervalSecondsByFunction: Record<string, unknown>;
   /** Logical ids of the single pre-2.28.0 search function and its log group ('' when gone). */
   legacyFunctionLogicalId: string;
   legacyLogGroupLogicalId: string;
@@ -1413,6 +1415,7 @@ export const EMPTY_PROVIDER_SEARCH_SNAPSHOT: ProviderSearchSnapshot = {
   roleLogicalIds: {},
   searchRoleLogicalId: '',
   throttleExtraAttemptsByFunction: {},
+  minIntervalSecondsByFunction: {},
   legacyFunctionLogicalId: '',
   legacyLogGroupLogicalId: '',
 };
@@ -1421,20 +1424,26 @@ function byProvider<T>(read: (functionName: string) => T): Record<string, T> {
   return Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [id, read(searchFunctionName(id))]));
 }
 
-export function extractProviderSearchSnapshot(template: Template): ProviderSearchSnapshot {
-  const throttleExtraAttemptsByFunction: Record<string, unknown> = {};
+/** The value of environment variable `name` on every function of the stack that sets it, by function name. */
+function environmentByFunction(template: Template, name: string): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
   for (const resource of Object.values(template.findResources('AWS::Lambda::Function'))) {
-    const value = resolvePath(resource, ['Properties', 'Environment', 'Variables', 'PROVIDER_THROTTLE_EXTRA_ATTEMPTS']);
+    const value = resolvePath(resource, ['Properties', 'Environment', 'Variables', name]);
     if (value !== undefined) {
-      throttleExtraAttemptsByFunction[resolveString(resource, ['Properties', 'FunctionName'])] = value;
+      values[resolveString(resource, ['Properties', 'FunctionName'])] = value;
     }
   }
+  return values;
+}
+
+export function extractProviderSearchSnapshot(template: Template): ProviderSearchSnapshot {
   return {
     reservedConcurrency: byProvider((name) => extractReservedConcurrency(template, name)),
     timeoutSeconds: byProvider((name) => extractFunctionTimeout(template, name)),
     roleLogicalIds: byProvider((name) => findFunctionRoleLogicalId(template, name)),
     searchRoleLogicalId: findLogicalIdByName(template, 'AWS::IAM::Role', 'RoleName', 'CitationAnalysis-SearchLambdaRole'),
-    throttleExtraAttemptsByFunction,
+    throttleExtraAttemptsByFunction: environmentByFunction(template, 'PROVIDER_THROTTLE_EXTRA_ATTEMPTS'),
+    minIntervalSecondsByFunction: environmentByFunction(template, 'PROVIDER_MIN_INTERVAL_SECONDS'),
     legacyFunctionLogicalId: findLambdaLogicalId(template, 'CitationAnalysis-Search'),
     legacyLogGroupLogicalId: findLogicalIdByName(
       template, 'AWS::Logs::LogGroup', 'LogGroupName', '/aws/lambda/CitationAnalysis-Search'

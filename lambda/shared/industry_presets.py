@@ -35,7 +35,7 @@ DEFAULT_INDUSTRY_ID = "general"
 # (search/brand_extractor) and the dashboard's default prompt template
 # (api/manage-brand-config) describe them. The extractor puts its
 # ``classification`` line between the two blocks.
-BRAND_NAME_FIELDS = """- name: Full brand/company name as mentioned
+BRAND_NAME_FIELDS = """- name: The company's canonical name (when it is one of the tracked brands, use that tracked spelling exactly)
 - parent_company: Parent company if identifiable (or null)"""
 BRAND_POSITION_FIELDS = """- mention_count: Number of times mentioned
 - first_position: Character position of first mention (approximate)

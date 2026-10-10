@@ -13,6 +13,7 @@ import json
 import logging
 from typing import Any
 
+from shared.brand_names import BrandIndex, canonicalize_brands
 from shared.industry_presets import BRAND_NAME_FIELDS, BRAND_POSITION_FIELDS, DEFAULT_INDUSTRY_ID, get_preset
 from shared.kpi_engine import SENTIMENT_LABELS
 from shared.llm_json import parse_llm_json
@@ -148,6 +149,8 @@ class LLMBrandExtractor:
         self.config = config or DEFAULT_EXTRACTION_CONFIG
         self.industry = self.config.get("industry") or DEFAULT_INDUSTRY_ID
         self.industry_preset = get_preset(self.industry)
+        # The tracked brands by any spelling: the model's names are mapped back onto the configured ones.
+        self._brand_index = BrandIndex.from_config(self.config)
 
     def extract_mentions(self, text: str) -> list[dict[str, Any]]:
         """
@@ -175,8 +178,10 @@ class LLMBrandExtractor:
             logger.warning("Empty response from Bedrock")
             return []
 
-        # Classify brands as first_party, competitor, or other
-        brands = self._classify_brands(self._parse_llm_response(response_text))
+        # Classify brands as first_party, competitor, or other, then put every tracked
+        # brand under its configured spelling and classification ("SKY Airline" and
+        # "Sky" both become the configured "Sky Airline").
+        brands = canonicalize_brands(self._classify_brands(self._parse_llm_response(response_text)), self._brand_index)
         include_sentiment = bool(self.config.get("include_sentiment", True))
         for brand in brands:
             _normalize_sentiment_fields(brand, include_sentiment)
@@ -237,7 +242,7 @@ CRITICAL CLASSIFICATION RULES - USE INTELLIGENT MATCHING:
 2. Match by brand family/parent company:
    - If a parent company is tracked, ALL its sub-brands and subsidiaries should be classified the same way
    - Use your knowledge of corporate ownership and brand portfolios in this industry
-   - Sub-brands, loyalty programs, and acquired brands all inherit the parent classification
+   - Report the company that is recommended, not its products: loyalty programmes (e.g. a frequent-flyer or rewards programme), cabin or fare products, and alliances are not separate brands — fold their mentions into the parent company's entry, unless that programme or product is itself listed among the tracked names above
 3. Match by ownership knowledge:
    - Use your knowledge of which brands own which properties or subsidiaries
    - Individual property or product names may belong to larger groups

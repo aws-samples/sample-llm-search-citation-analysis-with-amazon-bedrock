@@ -31,6 +31,14 @@ interface SearchProvider {
    * requests in flight through the repo's own client code).
    */
   readonly defaultConcurrency: number;
+  /**
+   * Default seconds between two requests to this provider across every slot
+   * (`PROVIDER_MIN_INTERVAL_SECONDS`, paced through a shared send-time ledger
+   * in the ProviderConfig table — `lambda/shared/provider_pacing.py`). The cap
+   * above bounds requests in flight, not how often they start; a per-second or
+   * per-minute limit needs this too. Omitted: not paced.
+   */
+  readonly defaultMinIntervalSeconds?: number;
 }
 
 const SEARCH_PROVIDERS: readonly SearchProvider[] = [
@@ -41,8 +49,10 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
   // 11/20 (429s). With the reset-aware 429 waits and 12 extra attempts, 3 and
   // 4 in flight were 20/20 (15 waited-out 429s each) at ~29-32 calls a minute,
   // against ~14 at 1; the 2.28.0 live run at 1 queued keywords ~2 minutes for
-  // a slot. 3 keeps most of the gain with the fewest 429s.
-  { id: 'perplexity', type: 'llm', defaultConcurrency: 3 },
+  // a slot. 3 keeps most of the gain with the fewest 429s. Three slots sending
+  // every ~15 s still met in the same second about one call in five (2.38.1
+  // run: 8 refused and retried calls in 30); the 1.1 s interval spaces them.
+  { id: 'perplexity', type: 'llm', defaultConcurrency: 3, defaultMinIntervalSeconds: 1.1 },
   // 20 in flight: 20/20 (p50 22 s), same headroom as OpenAI.
   { id: 'gemini', type: 'llm', defaultConcurrency: 10 },
   // Not benchmarked (disabled in our deployment). Anthropic's entry tier has the
@@ -58,12 +68,16 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
   // Async client (submit, then poll the free Search Archive): 5 in flight gave
   // 10/10 with no retries, max 84 s.
   { id: 'serpapi', type: 'search', defaultConcurrency: 5 },
-  // ~6 searches per minute on our plan, no rate headers. 2 in flight needed the
-  // same 10 throttle retries as 1, so 2 doubles throughput for free; 3 needed 16.
-  { id: 'firecrawl', type: 'search', defaultConcurrency: 2 },
+  // ~6 searches per minute on our plan, counted per minute with refused
+  // requests included (a 429 reads "Consumed (req/min): 11, Remaining: 0").
+  // 2 in flight needed the same 10 throttle retries as 1, so 2 doubles
+  // throughput for free; 3 needed 16. The 12 s interval keeps two slots at
+  // five searches a minute, so the retries are no longer the pacing.
+  { id: 'firecrawl', type: 'search', defaultConcurrency: 2, defaultMinIntervalSeconds: 12 },
 ];
 
 const PROVIDER_CONCURRENCY_CONTEXT = 'providerConcurrency';
+const PROVIDER_PACING_CONTEXT = 'providerPacing';
 
 /**
  * Extra client-side attempts after a 429 in the analysis search path
@@ -87,45 +101,77 @@ const PROVIDER_THROTTLE_EXTRA_ATTEMPTS = 12;
  */
 const PROVIDER_SLOT_RETRY_ATTEMPTS = 120;
 
-/** Thrown at synth time when `-c providerConcurrency=...` is not usable. */
-class InvalidProviderConcurrencyError extends Error {
-  constructor(message: string) {
-    super(`CDK context '${PROVIDER_CONCURRENCY_CONTEXT}': ${message}`);
-    this.name = 'InvalidProviderConcurrencyError';
+/** Thrown at synth time when `-c providerConcurrency=...` or `-c providerPacing=...` is not usable. */
+class InvalidProviderSettingError extends Error {
+  constructor(contextKey: string, message: string) {
+    super(`CDK context '${contextKey}': ${message}`);
+    this.name = 'InvalidProviderSettingError';
   }
 }
 
 const KNOWN_PROVIDER_IDS = SEARCH_PROVIDERS.map((provider) => provider.id);
 
-function parseJsonOverride(raw: string): unknown {
+function parseJsonOverride(contextKey: string, raw: string): unknown {
   try {
     const parsed: unknown = JSON.parse(raw);
     return parsed;
   } catch {
-    throw new InvalidProviderConcurrencyError(`must be a JSON object, got ${raw}`);
+    throw new InvalidProviderSettingError(contextKey, `must be a JSON object, got ${raw}`);
   }
 }
 
-function parseOverrideObject(raw: unknown): Record<string, unknown> {
-  const parsed = typeof raw === 'string' ? parseJsonOverride(raw) : raw;
+function parseOverrideObject(contextKey: string, raw: unknown): Record<string, unknown> {
+  const parsed = typeof raw === 'string' ? parseJsonOverride(contextKey, raw) : raw;
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new InvalidProviderConcurrencyError(`must be a JSON object, got ${JSON.stringify(raw)}`);
+    throw new InvalidProviderSettingError(contextKey, `must be a JSON object, got ${JSON.stringify(raw)}`);
   }
   return Object.fromEntries(Object.entries(parsed));
 }
 
-function validatedCap(providerId: string, value: unknown): number {
+function knownProvider(contextKey: string, providerId: string): void {
   if (!KNOWN_PROVIDER_IDS.includes(providerId)) {
-    throw new InvalidProviderConcurrencyError(
-      `unknown provider '${providerId}' (known: ${KNOWN_PROVIDER_IDS.join(', ')})`
+    throw new InvalidProviderSettingError(
+      contextKey, `unknown provider '${providerId}' (known: ${KNOWN_PROVIDER_IDS.join(', ')})`
     );
   }
+}
+
+function validatedCap(providerId: string, value: unknown): number {
+  knownProvider(PROVIDER_CONCURRENCY_CONTEXT, providerId);
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new InvalidProviderConcurrencyError(
-      `'${providerId}' must be a positive integer, or 0 for no cap, got ${JSON.stringify(value)}`
+    throw new InvalidProviderSettingError(
+      PROVIDER_CONCURRENCY_CONTEXT, `'${providerId}' must be a positive integer, or 0 for no cap, got ${JSON.stringify(value)}`
     );
   }
   return value;
+}
+
+function validatedInterval(providerId: string, value: unknown): number {
+  knownProvider(PROVIDER_PACING_CONTEXT, providerId);
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new InvalidProviderSettingError(
+      PROVIDER_PACING_CONTEXT, `'${providerId}' must be a number of seconds >= 0 (0 for no pacing), got ${JSON.stringify(value)}`
+    );
+  }
+  return value;
+}
+
+/** The per-provider defaults of `pick`, overridden by the JSON object in CDK context `contextKey` (validated by `validate`). */
+function readProviderSettings(
+  scope: Construct,
+  contextKey: string,
+  pick: (provider: SearchProvider) => number,
+  validate: (providerId: string, value: unknown) => number,
+): ReadonlyMap<string, number> {
+  const settings = new Map(SEARCH_PROVIDERS.map((provider) => [provider.id, pick(provider)]));
+  const raw: unknown = scope.node.tryGetContext(contextKey);
+  if (raw === undefined || raw === null || raw === '') {
+    return settings;
+  }
+  for (const [providerId, value] of Object.entries(parseOverrideObject(contextKey, raw))) {
+    settings.set(providerId, validate(providerId, value));
+  }
+  return settings;
 }
 
 /**
@@ -142,15 +188,20 @@ function validatedCap(providerId: string, value: unknown): number {
  * 0, and raise the limit through Service Quotas before running at scale.
  */
 export function readProviderConcurrency(scope: Construct): ReadonlyMap<string, number> {
-  const caps = new Map(SEARCH_PROVIDERS.map((provider) => [provider.id, provider.defaultConcurrency]));
-  const raw: unknown = scope.node.tryGetContext(PROVIDER_CONCURRENCY_CONTEXT);
-  if (raw === undefined || raw === null || raw === '') {
-    return caps;
-  }
-  for (const [providerId, value] of Object.entries(parseOverrideObject(raw))) {
-    caps.set(providerId, validatedCap(providerId, value));
-  }
-  return caps;
+  return readProviderSettings(scope, PROVIDER_CONCURRENCY_CONTEXT, (provider) => provider.defaultConcurrency, validatedCap);
+}
+
+/**
+ * The seconds between two requests to each provider across every slot: the
+ * defaults above (0 for a provider without one), overridden per deployment with
+ * `-c providerPacing='{"perplexity":0,"firecrawl":6}'` once a paid plan allows
+ * more. `0` means no pacing. Unknown ids and negative or non-numeric values
+ * fail synth.
+ */
+export function readProviderPacing(scope: Construct): ReadonlyMap<string, number> {
+  return readProviderSettings(
+    scope, PROVIDER_PACING_CONTEXT, (provider) => provider.defaultMinIntervalSeconds ?? 0, validatedInterval
+  );
 }
 
 export interface ProviderSearchProps {
@@ -161,6 +212,8 @@ export interface ProviderSearchProps {
   readonly environment: Record<string, string>;
   /** From {@link readProviderConcurrency}. */
   readonly concurrency: ReadonlyMap<string, number>;
+  /** From {@link readProviderPacing}. */
+  readonly pacing: ReadonlyMap<string, number>;
 }
 
 interface ProviderFunction {
@@ -234,6 +287,13 @@ export class ProviderSearch extends Construct {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
     const cap = props.concurrency.get(provider.id) ?? provider.defaultConcurrency;
+    const interval = props.pacing.get(provider.id) ?? provider.defaultMinIntervalSeconds ?? 0;
+    // Only a paced provider carries the interval; the search handler reads it per request.
+    const pacingEnvironment: Record<string, string> = interval > 0
+      ? {
+        PROVIDER_MIN_INTERVAL_SECONDS: String(interval),
+      }
+      : {};
 
     return new lambda.Function(this, `${label}Function`, {
       functionName,
@@ -251,6 +311,7 @@ export class ProviderSearch extends Construct {
       environment: {
         ...props.environment,
         PROVIDER_THROTTLE_EXTRA_ATTEMPTS: String(PROVIDER_THROTTLE_EXTRA_ATTEMPTS),
+        ...pacingEnvironment,
       },
     });
   }

@@ -289,6 +289,24 @@ class TestSnapshotMetrics:
     def test_records_the_best_position_of_each_competitor_only(self) -> None:
         assert snapshot_metrics(self.ANSWERS)['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
+    #: One answer where the model also labels "Guide", which nobody configured, a competitor.
+    GUIDE_LABELLED_COMPETITOR = {
+        'hotel beach': answers_from_rows([_row('hotel beach', ('Rival', 'competitor', 2), ('Guide', 'competitor', 1))]),
+    }
+
+    def test_drops_a_competitor_the_model_labelled_but_nobody_configured(self) -> None:
+        competitors = snapshot_metrics(self.GUIDE_LABELLED_COMPETITOR, tracked_competitors=['Rival'])['competitors']
+
+        assert competitors == [{'name': 'Rival', 'best_position': 2}]
+
+    def test_keeps_a_configured_competitor_spelled_in_another_case(self) -> None:
+        assert snapshot_metrics(self.ANSWERS, tracked_competitors=['RIVAL'])['competitors'] == [{'name': 'Rival', 'best_position': 1}]
+
+    def test_keeps_every_competitor_when_none_is_configured(self) -> None:
+        competitors = snapshot_metrics(self.GUIDE_LABELLED_COMPETITOR, tracked_competitors=[])['competitors']
+
+        assert [row['name'] for row in competitors] == ['Guide', 'Rival']
+
 
 class TestSettingsValidation:
     def test_normalizes_and_deduplicates_valid_emails(self) -> None:

@@ -30,7 +30,7 @@ ${entityDesc}
 {{TRACKED_BRANDS}}
 
 For each brand found, provide:
-- name: Full brand/company name as mentioned
+- name: The company's canonical name (when it is one of the tracked brands, use that tracked spelling exactly)
 - parent_company: Parent company if identifiable (or null)
 - mention_count: Number of times mentioned
 - first_position: Character position of first mention (approximate)

@@ -34,6 +34,7 @@ from shared.markets import GLOBAL_MARKET_ID, Market, brand_config_for_market, ma
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
 from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
+from shared.provider_pacing import provider_min_interval_seconds, wait_for_send_slot
 from shared.safe_fetch import fetch_following_validated_redirects, host_matches
 from shared.secrets import get_api_key
 from shared.step_function_response import log_error
@@ -428,9 +429,9 @@ def resolve_gemini_redirect(redirect_url: str, timeout: int = 5) -> str:
     )
 
     if fetch_error or not final_url:
-        logger.warning(
-            'Failed to resolve Gemini redirect %s...: %s', redirect_url[:50], fetch_error
-        )
+        # Handled by design (the citation keeps the wrapper URL); the answer-level
+        # summary in ``_gemini_grounding_citations`` warns when none resolved.
+        logger.info('Failed to resolve Gemini redirect %s...: %s', redirect_url[:50], fetch_error)
         return redirect_url
 
     logger.info('Resolved Gemini redirect: %s... -> %s', redirect_url[:50], final_url)
@@ -440,14 +441,21 @@ def resolve_gemini_redirect(redirect_url: str, timeout: int = 5) -> str:
 def _gemini_grounding_citations(grounding: dict[str, Any]) -> list[str]:
     """Real URLs behind the grounding chunks' redirect wrappers, deduplicated in order."""
     citations: list[str] = []
+    wrappers = 0
+    unresolved = 0
     for chunk in grounding.get('groundingChunks', []):
         redirect_url = chunk['web'].get('uri') if 'web' in chunk else None
         if not redirect_url:
             continue
         # Resolve the vertex redirect to get the real URL, then clean it
-        cleaned_url = clean_url(resolve_gemini_redirect(redirect_url))
+        resolved_url = resolve_gemini_redirect(redirect_url)
+        wrappers += 1
+        unresolved += resolved_url == redirect_url
+        cleaned_url = clean_url(resolved_url)
         if cleaned_url and cleaned_url not in citations:
             citations.append(cleaned_url)
+    if wrappers > 1 and unresolved == wrappers:
+        logger.warning('None of the %s Gemini redirects of this answer resolved; citations keep the wrapper host', wrappers)
     # Also check webSearchQueries if available
     if 'webSearchQueries' in grounding:
         logger.info('Gemini search queries: %s', grounding['webSearchQueries'])
@@ -675,6 +683,8 @@ def execute_all_providers(
             continue
 
         logger.info('Querying %s...', label)
+        # The provider's shared send-time ledger: no two slots send inside its interval.
+        wait_for_send_slot(dynamodb.Table(PROVIDER_CONFIG_TABLE), provider_id, provider_min_interval_seconds())
         try:
             result = run_query(keyword, api_key, query_template, market)
         except ProviderConfigUnavailableError:

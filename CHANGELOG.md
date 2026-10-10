@@ -9,6 +9,45 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.38.1] - 2026-10-10
+
+Findings of the first full market run (30 keywords, Chile, Brazil and global): every row and KPI was right, but the
+crawler logged Playwright tracebacks, two providers were refused and retried at WARNING, and the alerts named cabin
+products and loyalty programmes as competitors. All four are fixed at the root.
+
+### Fixed
+
+- **Crawler teardown noise.** The SSRF guard intercepted every browser request (`context.route("**/*")`), so each
+  image, script and beacon cost a round-trip through the Lambda and dozens were still in flight when a slow page was
+  torn down: Playwright 1.63 then logged `Exception in callback Connection.dispatch._done_callback … CancelledError`
+  (7 of 601 invocations) and asyncio `pipe closed by peer` (61 lines). The guard now runs on a CDP session with
+  `Fetch.enable` limited to document requests (`lambda/shared/browser_tools.py`): the page, its frames and every
+  redirect hop are still checked before they are sent, nothing else pauses, and teardown still never talks to the
+  page (the session dies with the connection). A paused request that outlives the page is logged at DEBUG, not ERROR.
+- **Alerts about things that are not competitors.** `new_competitor_top` fired for "Delta One", "AAdvantage",
+  "Avios" and "American": the extraction model may label anything a competitor and name it as the answer spelled it.
+  Extracted brands are now canonicalized against the configured brands (global list plus the market's competitors
+  and local names; `lambda/shared/brand_names.py`): case, accents, spacing, ®/™ and a one-word prefix ("Sky",
+  "SKY Airline S.A.") all map onto the configured spelling and classification, so "SKY Airline", "Sky" and
+  "Sky Airline" are one leaderboard row and "American" counts as American Airlines. The extraction prompt now asks
+  for the company, not its loyalty programme, cabin or fare product, and the new-competitor rule considers only the
+  competitors configured for the group's market. The KPI engine's brand identity is case-, accent- and
+  whitespace-insensitive (`docs/kpi-definitions.md`); the KPI formulas are unchanged.
+- **Rate limits are paced, not retried.** Reserved concurrency bounds how many requests to a provider are in flight,
+  not how often they start: three Perplexity slots sending every ~15 s met in the same second about one call in five
+  (8 refused calls in 30; Perplexity allows one request a second per key), and two Firecrawl slots overran its
+  per-minute plan, which counts refused requests too. Each paced provider now claims its send time from a shared
+  ledger (`pacer#<provider>` in the ProviderConfig table, one conditional write; `lambda/shared/provider_pacing.py`)
+  so no two requests leave within its interval across all slots: Perplexity 1.1 s, Firecrawl 12 s (five searches a
+  minute at two slots). Per deployment: `-c providerPacing='{"perplexity":0,"firecrawl":6}'` (0 = no pacing). A 429
+  that still happens honours the provider's own `Retry-After` / reset for up to 120 s (the 30 s cap had made Firecrawl
+  retry inside a still-closed window and spend quota on it).
+- **Less logging that says nothing is wrong.** A refused request retried a second later is the pacing working: the
+  first two throttled waits are INFO, a provider that keeps refusing is a WARNING from the third attempt, and the
+  `[<PROVIDER>_RETRY]` / `_FAILED` tags are unchanged. A publisher block page or CAPTCHA is an expected, recorded
+  outcome (INFO, was WARNING). A Gemini redirect that cannot be resolved is INFO with the failure class, logged once
+  instead of twice, and one WARNING names the answer when none of its redirects resolved.
+
 ## [2.38.0] - 2026-10-10
 
 ### Added

@@ -24,7 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
-import { ProviderSearch, readProviderConcurrency } from './constructs/provider-search';
+import { ProviderSearch, readProviderConcurrency, readProviderPacing } from './constructs/provider-search';
 import type { McpServerInputs } from './constructs/mcp-server';
 import {
   PYTHON_ASSET_EXCLUDES, lambdaSourceCode, pythonLayer
@@ -642,6 +642,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Read first so a bad `-c providerConcurrency=...` fails synth before any
     // asset is staged.
     const providerConcurrency = readProviderConcurrency(this);
+    const providerPacing = readProviderPacing(this);
 
     provisionBedrockModelAccess(this);
 
@@ -1176,6 +1177,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       role: searchLambdaRole,
       layers: [sharedLayer],
       concurrency: providerConcurrency,
+      pacing: providerPacing,
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,

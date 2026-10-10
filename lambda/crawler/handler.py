@@ -416,8 +416,9 @@ def _capture_page(browser_tools: SimpleBrowserTools, url: str) -> _PageCapture:
             block_reason=nav_result.get('block_reason', 'captcha'),
         )
     if nav_result['status'] != 'success':
+        # Already reported by the browser tools; this records the outcome.
         error_message = nav_result.get('error', 'Navigation failed')
-        logger.error("Navigation failed: %s", error_message)
+        logger.info("Recording failed navigation: %s", error_message[:200])
         return _PageCapture(status='error', page_load_time_ms=page_load_time_ms, error_message=error_message)
 
     content_result = browser_tools.extract_page_content()
@@ -481,7 +482,9 @@ def _persist_capture(
 
     is_blocked, block_reason = detect_blocked_page(capture.content, capture.title)
     if is_blocked:
-        logger.warning("Publisher block page detected (%s)", block_reason)
+        # An expected outcome of crawling publishers, recorded as a blocked
+        # row; it is not a fault of this system, so not a warning.
+        logger.info("Publisher block page detected (%s)", block_reason)
         return _blocked_result(
             target,
             block_reason,

@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from typing import Any
 
+from shared.brand_names import normalize_brand_key
 from shared.constants import UNRANKED_SENTINEL
 from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
 from shared.markets import GLOBAL_MARKET_ID, market_scoped_key
@@ -348,13 +349,25 @@ def _improvement_alert(
     )]
 
 
-def snapshot_metrics(answers_by_keyword: Mapping[str, Iterable[Answer]], owned_domains: Iterable[str] = ()) -> dict[str, Any]:
+def snapshot_metrics(
+    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    owned_domains: Iterable[str] = (),
+    tracked_competitors: Iterable[str] = (),
+) -> dict[str, Any]:
     """The measured part of a group snapshot, from the answers of each of the group's keywords in one run.
 
     ``kpis`` pools every answer (the group report's run value); ``keywords``
     and ``competitors`` feed the lost-mention and new-competitor rules.
+
+    ``competitors`` keeps only the brands configured as competitors when
+    ``tracked_competitors`` names them (any spelling): the new-competitor rule
+    is about the competitors the administrator tracks, not about every name
+    the extraction model labelled a competitor — a cabin product, a loyalty
+    programme or an untracked airline would otherwise raise an alert. Without
+    ``tracked_competitors`` every competitor row is kept.
     """
     domains = list(owned_domains)
+    tracked = {key for key in map(normalize_brand_key, tracked_competitors) if key}
     per_keyword = {keyword: list(answers) for keyword, answers in answers_by_keyword.items()}
     keyword_kpis = {keyword: brand_kpis(answers, domains) for keyword, answers in per_keyword.items()}
     pooled = [answer for answers in per_keyword.values() for answer in answers]
@@ -368,7 +381,7 @@ def snapshot_metrics(answers_by_keyword: Mapping[str, Iterable[Answer]], owned_d
         'competitors': [
             {'name': row['name'], 'best_position': row['best_position']}
             for row in brand_table(pooled)
-            if row['classification'] == COMPETITOR
+            if row['classification'] == COMPETITOR and (not tracked or normalize_brand_key(row['name']) in tracked)
         ],
     }
 

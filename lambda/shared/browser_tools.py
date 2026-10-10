@@ -16,20 +16,36 @@ import base64
 import logging
 import os
 import time
+from typing import TYPE_CHECKING, Any
 
 # Both SDKs are pinned in the crawler layer (crawler-layer/requirements.txt),
 # the only layer whose Lambda imports this module.
 from bedrock_agentcore.tools.browser_client import BrowserClient
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Error as PlaywrightError
 
 from shared.url_validator import validate_url_safe
 from shared.utils import get_timestamp, get_timestamp_compact
+
+if TYPE_CHECKING:
+    from playwright.sync_api import CDPSession
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _SESSION_NOT_INITIALIZED = "Browser session not initialized - call initialize_browser_session() first"
 _BODY_TEXT_JAVASCRIPT = "() => document.body?.innerText ?? ''"
+
+# The CDP ``Fetch`` interception the SSRF guard runs on: document requests
+# (the page and its frames, every redirect hop) pause before they are sent;
+# images, scripts, XHR and the rest never leave the browser. Playwright's
+# ``context.route("**/*")`` paused every request of every type, so each one
+# cost a round-trip through this process and dozens were still in flight when
+# the page was torn down — the asyncio "Exception in callback" tracebacks and
+# "pipe closed by peer" warnings of every slow crawl.
+_DOCUMENT_REQUEST_PATTERNS = [{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}]
+_FETCH_REQUEST_PAUSED = "Fetch.requestPaused"
+_BLOCKED_BY_CLIENT = "BlockedByClient"
 
 
 class BrowserConfigurationError(RuntimeError):
@@ -47,6 +63,7 @@ class SimpleBrowserTools:
         self.browser: Browser | None = None
         self.context: BrowserContext | None = None
         self.page: Page | None = None
+        self.cdp_session: CDPSession | None = None
         self.session_id = None
         self._navigation_guard_error: str | None = None
 
@@ -119,21 +136,42 @@ class SimpleBrowserTools:
         page_text = self._active_page().evaluate(_BODY_TEXT_JAVASCRIPT)
         return page_text if isinstance(page_text, str) else ""
 
-    def _guard_document_request(self, route) -> None:
-        """Abort any document navigation whose destination fails SSRF checks."""
-        request = route.request
-        if request.resource_type != "document":
-            route.continue_()
-            return
+    def _install_document_guard(self) -> None:
+        """Pause every document request at the CDP level and run its destination through the SSRF check.
 
-        is_safe, error_message = validate_url_safe(request.url)
+        A CDP session on the page with ``Fetch`` enabled for document requests
+        only: the page itself, its frames and every redirect hop pause before
+        they are sent; nothing else does. The session goes away with the
+        browser connection, so teardown never has to reach the page.
+        """
+        session = self._active_context().new_cdp_session(self._active_page())
+        self.cdp_session = session
+        session.on(_FETCH_REQUEST_PAUSED, self._guard_document_request)
+        session.send("Fetch.enable", {"patterns": _DOCUMENT_REQUEST_PATTERNS})
+
+    def _guard_document_request(self, event: dict[str, Any]) -> None:
+        """Abort a paused document request whose destination fails SSRF checks; let any other go."""
+        request_id = event.get("requestId")
+        request = event.get("request")
+        url = request.get("url", "") if isinstance(request, dict) else ""
+        is_safe, error_message = validate_url_safe(url)
         if is_safe:
-            route.continue_()
+            self._answer_paused_request("Fetch.continueRequest", request_id)
             return
 
         self._navigation_guard_error = error_message
         logger.warning("Blocked unsafe browser document navigation")
-        route.abort("blockedbyclient")
+        self._answer_paused_request("Fetch.failRequest", request_id, errorReason=_BLOCKED_BY_CLIENT)
+
+    def _answer_paused_request(self, method: str, request_id: Any, **params: Any) -> None:
+        """Send ``method`` for the paused request; a page already torn down has nothing left to answer."""
+        session = self.cdp_session
+        if session is None:
+            return
+        try:
+            session.send(method, {"requestId": request_id, **params})
+        except PlaywrightError:
+            logger.debug("%s skipped: the browser connection is closed", method)
 
     @property
     def navigation_guard_error(self) -> str | None:
@@ -152,10 +190,9 @@ class SimpleBrowserTools:
         """Navigate to a URL and return basic page information."""
         try:
             page = self._active_page()
-            context = self._active_context()
             logger.info("Navigating to cited page")
             self._navigation_guard_error = None
-            context.route("**/*", self._guard_document_request)
+            self._install_document_guard()
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             if self._navigation_guard_error:
@@ -169,7 +206,7 @@ class SimpleBrowserTools:
             # publisher permits verified bots; otherwise we record the block
             # and never attempt to solve or bypass it.
             if self._detect_captcha_block():
-                logger.warning("CAPTCHA-protected page; recording as blocked")
+                logger.info("CAPTCHA-protected page; recording as blocked")
                 return {
                     "status": "blocked",
                     "url": url,
@@ -184,6 +221,13 @@ class SimpleBrowserTools:
                 "timestamp": get_timestamp(),
             }
 
+        except PlaywrightError as exc:
+            # A page that cannot be loaded (timeout, refused credentials, no
+            # such host) is an expected outcome of crawling third-party URLs,
+            # recorded as a failed crawl: one line, no traceback.
+            error_message = self._navigation_guard_error or str(exc).splitlines()[0]
+            logger.warning("Navigation failed: %s", error_message[:300])
+            return self._navigation_error_result(url, error_message)
         except Exception as exc:
             error_message = self._navigation_guard_error or str(exc)
             logger.exception("Navigation error: %s", error_message)
@@ -270,13 +314,13 @@ class SimpleBrowserTools:
         playwright = self.playwright
         browser_client = self.browser_client
 
-        # Routes are deliberately NOT removed here. `unroute_all` (any behavior)
-        # needs a round-trip to the page, and a page that has already stopped
-        # responding (every observed case followed a screenshot timeout) never
-        # answers — the crawl then hangs until the Lambda timeout. Closing the
-        # connection drops the routes; late handler diagnostics are only noise.
+        # Nothing here talks to the page: a page that has stopped responding
+        # (every observed case followed a screenshot timeout) never answers, and
+        # the crawl would hang until the Lambda timeout. Closing the connection
+        # drops the CDP session and its document interception with it.
         self.page = None
         self.context = None
+        self.cdp_session = None
         self.browser = None
         self.playwright = None
         self.browser_client = None

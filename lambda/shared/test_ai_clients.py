@@ -18,6 +18,8 @@ and the registry replaces keyword-research's drifted simplified copies
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -185,6 +187,28 @@ class TestRunWebSearch:
         assert raised.value is error
 
 
+def _ok_answer() -> MagicMock:
+    """A 200 whose body is the Perplexity answer."""
+    ok = MagicMock(status_code=200)
+    ok.json.return_value = _ANSWER
+    return ok
+
+
+def _retry_through(statuses: tuple[int, ...]) -> SimpleNamespace:
+    """Perplexity answering ``statuses`` (each retryable) and then the answer, waits and jitter stubbed out.
+
+    Returns the answer and the ``post`` / ``sleep`` mocks (``result``, ``post``, ``sleep``).
+    """
+    failures = [MagicMock(status_code=status, text='slow down', headers={}) for status in statuses]
+    with (
+        patch.object(ai_clients.requests, 'post', side_effect=[*failures, _ok_answer()]) as post,
+        patch.object(ai_clients.time, 'sleep') as sleep,
+        patch.object(ai_clients.random, 'uniform', return_value=0.0),
+    ):
+        result = PerplexityClient('sk-test').agent_response('q', max_retries=2)
+    return SimpleNamespace(result=result, post=post, sleep=sleep)
+
+
 class TestClientBehavior:
     @pytest.mark.parametrize(('headers', 'expected_wait'), [
         ({}, 1.25),
@@ -192,11 +216,9 @@ class TestClientBehavior:
     ], ids=['backoff-without-headers', 'waits-for-x-ratelimit-reset'])
     def test_perplexity_client_retries_a_rate_limited_request_after_the_throttle_wait(self, headers, expected_wait):
         rate_limited = MagicMock(status_code=429, text='slow down', headers=headers)
-        ok = MagicMock(status_code=200)
-        ok.json.return_value = _ANSWER
 
         with (
-            patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, ok]) as post,
+            patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, _ok_answer()]) as post,
             patch.object(ai_clients.time, 'time', return_value=_NOW),
             patch.object(ai_clients.time, 'sleep') as sleep,
             patch.object(ai_clients.random, 'uniform', return_value=0.25),
@@ -214,21 +236,25 @@ class TestClientBehavior:
         spent from that budget: with ``max_retries=2`` the client keeps
         retrying a throttled request for three more attempts.
         """
-        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
-        ok = MagicMock(status_code=200)
-        ok.json.return_value = _ANSWER
-        responses = [rate_limited, rate_limited, rate_limited, rate_limited, ok]
+        retried = _retry_through((429, 429, 429, 429))
 
-        with (
-            patch.object(ai_clients.requests, 'post', side_effect=responses) as post,
-            patch.object(ai_clients.time, 'sleep') as sleep,
-            patch.object(ai_clients.random, 'uniform', return_value=0.0),
-        ):
-            result = PerplexityClient('sk-test').agent_response('q', max_retries=2)
+        assert retried.result == _ANSWER
+        assert retried.post.call_count == 5
+        assert [call.args[0] for call in retried.sleep.call_args_list] == [1.0, 2.5, 5.0, 9.5]
 
-        assert result == _ANSWER
-        assert post.call_count == 5
-        assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.5, 5.0, 9.5]
+    @pytest.mark.parametrize(('statuses', 'levels'), [
+        pytest.param((429, 429, 429), ['INFO', 'INFO', 'WARNING'], id='throttling-warns-from-the-third-attempt'),
+        pytest.param((503,), ['WARNING'], id='every-server-error-retry-warns'),
+    ])
+    def test_reports_a_retry_at_the_level_its_cause_deserves(self, caplog, statuses, levels):
+        with caplog.at_level(logging.INFO, logger=ai_clients.__name__):
+            _retry_through(statuses)
+
+        retries = [record for record in caplog.records if '_RETRY' in record.getMessage()]
+        assert [record.levelname for record in retries] == levels
+        assert [record.getMessage()[:41] for record in retries] == [
+            f'[PERPLEXITY_RETRY] Status {status} | Attempt {attempt}' for attempt, status in enumerate(statuses, start=1)
+        ]
 
     @pytest.mark.parametrize(('env', 'expected_attempts'), [
         ({}, 5),
@@ -275,7 +301,8 @@ class TestClientBehavior:
 
     @pytest.mark.parametrize(('headers', 'attempt', 'expected'), [
         ({'Retry-After': 'Fri, 19 Sep 2026 10:00:00 GMT'}, 2, 5.0),
-        ({'Retry-After': '120'}, 0, ai_clients.THROTTLE_MAX_WAIT_SECONDS),
+        ({'Retry-After': '120'}, 0, 120.0),
+        ({'Retry-After': '300'}, 0, ai_clients.THROTTLE_MAX_PROVIDER_WAIT_SECONDS),
         ({'x-ratelimit-reset': str(_NOW + 6)}, 0, 6.0),
         ({'x-ratelimit-reset': '3'}, 0, 3.0),
         ({'x-ratelimit-reset': str(_NOW - 10)}, 2, 5.0),
@@ -283,7 +310,7 @@ class TestClientBehavior:
         ({'x-ratelimit-reset': '2'}, 3, 9.5),
         ({'Retry-After': '7', 'x-ratelimit-reset': str(_NOW + 2)}, 0, 7.0),
     ], ids=[
-        'unusable-retry-after-uses-backoff', 'capped',
+        'unusable-retry-after-uses-backoff', 'providers-wait-honoured-past-the-jitter-cap', 'providers-wait-capped',
         'epoch-reset-in-6s', 'reset-as-seconds', 'reset-in-the-past-uses-backoff',
         'unparseable-reset-uses-backoff', 'backoff-longer-than-reset-wins', 'retry-after-wins-over-reset',
     ])

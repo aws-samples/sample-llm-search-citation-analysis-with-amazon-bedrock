@@ -136,6 +136,12 @@ class TestAnswerFromRow:
         assert answer is not None
         assert [sighting.name for sighting in answer.sightings] == [RIVAL]
 
+    def test_counts_the_accented_and_the_plain_spelling_of_a_brand_once(self):
+        answer = answer_from_row(_row('k', 'openai', _brand('Aerolínea Cóndor', 'competitor', 2), _brand('Aerolinea  Condor', 'competitor', 1)))
+
+        assert answer is not None
+        assert [(sighting.key, sighting.rank) for sighting in answer.sightings] == [('aerolinea condor', 1)]
+
     @pytest.mark.parametrize(('classification', 'expected'), [
         ('first_party', 'first_party'), ('competitor', 'competitor'), ('other', 'other'), ('partner', 'other'), (None, 'other'),
     ])
@@ -388,6 +394,17 @@ class TestBrandTable:
         row = brand_table(answers_from_rows([_row('k', 'openai', _brand(RIVAL, 'competitor'))]))[0]
 
         assert (row['average_position'], row['best_position'], row['visibility_score']) == (None, None, 38.7)
+
+    def test_counts_the_spellings_of_one_brand_as_one_row(self):
+        rows = [
+            _row('k', 'openai', _brand('SKY Airline', 'competitor', 1)),
+            _row('k', 'gemini', _brand('Sky Airline', 'competitor', 2)),
+            _row('k', 'claude', _brand('sky airline ', 'competitor', 1)),
+        ]
+
+        table = brand_table(answers_from_rows(rows))
+
+        assert [(row['name'], row['mentions']) for row in table] == [('SKY Airline', 3)]
 
     def test_is_empty_for_an_empty_pool(self):
         assert brand_table([]) == []
