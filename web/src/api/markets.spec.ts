@@ -2,13 +2,13 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  fetchMarkets, MarketsError, MarketsInUseError, saveMarkets, suggestMarketKeywords
+  fetchMarkets, MarketsError, MarketsInUseError, proposeMarket, saveMarkets, suggestMarketKeywords
 } from './markets';
 import {
   mockApiGet, mockApiPost, mockApiPut
 } from './clientMock-fixtures';
 import {
-  BRAZIL, CHILE, SANTIAGO
+  BRAZIL, buildMarketProposal, CHILE, SANTIAGO, SANTIAGO_REQUEST
 } from '../components/Markets/markets-fixtures';
 
 vi.mock('./client', () => import('./clientMock-fixtures'));
@@ -193,5 +193,69 @@ describe('suggestMarketKeywords', () => {
     mockApiPost.mockResolvedValue({ suggestions: [{ market_id: 'cl-es' }] });
 
     await expect(suggestMarketKeywords('flights', ['cl-es'])).rejects.toThrow('Markets API returned invalid suggestions');
+  });
+});
+
+describe('proposeMarket', () => {
+  it('posts the choice under "propose", keeping the 400 and 502 bodies readable', async () => {
+    mockApiPost.mockResolvedValue(buildMarketProposal());
+    const controller = new AbortController();
+
+    await proposeMarket(SANTIAGO_REQUEST, controller.signal);
+
+    expect(mockApiPost).toHaveBeenCalledWith('/markets', { propose: SANTIAGO_REQUEST }, {
+      signal: controller.signal,
+      acceptedJsonStatuses: [400, 502],
+    });
+  });
+
+  it('returns the proposed market and whether its id is already configured', async () => {
+    mockApiPost.mockResolvedValue({
+      market: SANTIAGO,
+      market_id_taken: true,
+    });
+
+    await expect(proposeMarket(SANTIAGO_REQUEST)).resolves.toStrictEqual({
+      market: SANTIAGO,
+      market_id_taken: true,
+    });
+  });
+
+  it('drops members of the proposed market the dashboard does not know', async () => {
+    mockApiPost.mockResolvedValue({
+      market: {
+        ...CHILE,
+        confidence: 0.9,
+      },
+      market_id_taken: false,
+    });
+
+    await expect(proposeMarket(SANTIAGO_REQUEST)).resolves.toStrictEqual(buildMarketProposal({ market: CHILE }));
+  });
+
+  it.each([
+    ['the refused field', 'propose.country is not valid'],
+    ['the model failing', 'The model could not describe this market; fill the fields in by hand'],
+  ])('throws the refusal naming %s', async (_description, error) => {
+    mockApiPost.mockResolvedValue({ error });
+
+    await expect(proposeMarket(SANTIAGO_REQUEST)).rejects.toThrow(MarketsError);
+    await expect(proposeMarket(SANTIAGO_REQUEST)).rejects.toThrow(error);
+  });
+
+  it.each([
+    ['no market', { market_id_taken: false }],
+    ['a market without a time zone', {
+      market: {
+        ...CHILE,
+        timezone: undefined,
+      },
+      market_id_taken: false,
+    }],
+    ['no word on the id', { market: CHILE }],
+  ])('refuses a proposal with %s', async (_description, payload) => {
+    mockApiPost.mockResolvedValue(payload);
+
+    await expect(proposeMarket(SANTIAGO_REQUEST)).rejects.toThrow('Markets API returned an invalid market proposal');
   });
 });

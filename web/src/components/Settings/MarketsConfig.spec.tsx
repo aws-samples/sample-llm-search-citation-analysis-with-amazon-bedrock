@@ -3,15 +3,18 @@ import {
   screen, within
 } from '@testing-library/react';
 import {
-  describe, expect, it
+  describe, expect, it, vi
 } from 'vitest';
+import { mockApiPost } from '../../api/clientMock-fixtures';
 import type { MarketsController } from '../../hooks/useMarkets';
 import {
   MarketsConfig, saveProblem
 } from './MarketsConfig';
 import {
-  BRAZIL, buildMarket, buildMarketSelectionMock, CHILE, renderWithMarketSelection
+  BRAZIL, buildMarket, buildMarketProposal, buildMarketSelectionMock, CHILE, renderWithMarketSelection
 } from '../Markets/markets-fixtures';
+
+vi.mock('../../api/client', () => import('../../api/clientMock-fixtures'));
 
 /** The section for an admin or not, over `catalog` (Chile and Brazil by default); returns the catalog it reads. */
 function renderMarketsConfig(isAdmin: boolean, catalog: Partial<MarketsController> = {}) {
@@ -66,28 +69,32 @@ describe('MarketsConfig', () => {
     expect(screen.getByText('Only administrators can change markets.')).toBeInTheDocument();
   });
 
-  it('saves the list with a new market appended', async () => {
+  it('saves the list with a new market appended once its proposal is confirmed', async () => {
+    mockApiPost.mockResolvedValue(buildMarketProposal({ market: BRAZIL }));
     const catalog = renderMarketsConfig(true, { markets: [CHILE] });
     await userEvent.click(screen.getByRole('button', { name: 'Add market' }));
     const form = within(screen.getByRole('form', { name: 'Add market' }));
-    for (const [label, value] of [
-      [/Market id/u, 'br-pt'], [/Country code/u, 'br'], [/Country name/u, 'Brazil'], [/Language tag/u, 'pt-BR'],
-      [/Language name/u, 'Portuguese'], [/Currency/u, 'BRL'], [/Time zone/u, 'America/Sao_Paulo'],
-    ] as const) {
-      await userEvent.type(form.getByLabelText(label), value);
-    }
+    await userEvent.selectOptions(form.getByRole('combobox', { name: /^Country/u }), 'BR');
+    await userEvent.selectOptions(form.getByRole('combobox', { name: /^Language/u }), 'pt');
+    await userEvent.click(form.getByRole('button', { name: 'Next: describe this market' }));
+    await form.findByText('Proposed by the model. Check the details, edit what is wrong, then save.');
+
     await userEvent.click(form.getByRole('button', { name: 'Save market' }));
 
     expect(catalog.save).toHaveBeenCalledWith([CHILE, BRAZIL]);
   });
 
   it('refuses an incomplete market before saving', async () => {
+    mockApiPost.mockResolvedValue({ error: 'The model could not describe this market; fill the fields in by hand' });
     const catalog = await renderAdminSectionAndClick('Add market');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /^Country/u }), 'MX');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /^Language/u }), 'es');
+    await userEvent.click(screen.getByRole('button', { name: 'Next: describe this market' }));
+    await screen.findByRole('alert');
 
-    await userEvent.type(screen.getByLabelText(/Market id/u), 'mx-es');
     await userEvent.click(screen.getByRole('button', { name: 'Save market' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('country is required');
+    expect(screen.getByText('market_id must be 2-32 lower-case letters, digits or dashes')).toBeInTheDocument();
     expect(catalog.save).not.toHaveBeenCalledWith(expect.anything());
   });
 

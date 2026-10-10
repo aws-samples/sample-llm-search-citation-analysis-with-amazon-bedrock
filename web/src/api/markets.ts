@@ -17,7 +17,7 @@ import {
 } from './contentStudioDecoderPrimitives';
 import { refusalMessage } from './providerModels';
 import type {
-  Market, MarketKeywordSuggestion, MarketsListing
+  Market, MarketKeywordSuggestion, MarketProposal, MarketProposalRequest, MarketsListing
 } from '../types';
 
 const MARKETS_PATH = '/markets';
@@ -109,6 +109,16 @@ export function decodeMarketSuggestions(payload: unknown): MarketKeywordSuggesti
   }));
 }
 
+export function decodeMarketProposal(payload: unknown): MarketProposal {
+  if (!isRecord(payload) || !isMarket(payload.market) || typeof payload.market_id_taken !== 'boolean') {
+    throw new MarketsError('Markets API returned an invalid market proposal');
+  }
+  return {
+    market: toMarket(payload.market),
+    market_id_taken: payload.market_id_taken,
+  };
+}
+
 /** The error a refusal body stands for, or `null` when `payload` is not a refusal. */
 function refusal(payload: unknown): MarketsError | null {
   const message = refusalMessage(payload);
@@ -129,19 +139,31 @@ export async function saveMarkets(markets: readonly Market[]): Promise<MarketsLi
   return decodeMarketsListing(payload);
 }
 
-/** How a local user in each of `marketIds` would type `keyword` (local wording, not a literal translation). */
-export async function suggestMarketKeywords(
-  keyword: string, marketIds: readonly string[], signal?: AbortSignal
-): Promise<MarketKeywordSuggestion[]> {
-  const payload = await apiPost<unknown>(MARKETS_PATH, {
-    keyword,
-    market_ids: marketIds,
-  }, {
+/** `POST /markets` with `body`, the refusal bodies thrown as errors: 400 names the refused field, 502 says the model could not answer. */
+async function postMarkets(body: object, signal: AbortSignal | undefined): Promise<unknown> {
+  const payload = await apiPost<unknown>(MARKETS_PATH, body, {
     signal,
-    // 400 names the refused field; 502 says the model could not answer. Both carry `{error}`.
     acceptedJsonStatuses: [400, 502],
   });
   const refused = refusal(payload);
   if (refused !== null) throw refused;
-  return decodeMarketSuggestions(payload);
+  return payload;
+}
+
+/** How a local user in each of `marketIds` would type `keyword` (local wording, not a literal translation). */
+export async function suggestMarketKeywords(
+  keyword: string, marketIds: readonly string[], signal?: AbortSignal
+): Promise<MarketKeywordSuggestion[]> {
+  return decodeMarketSuggestions(await postMarkets({
+    keyword,
+    market_ids: marketIds,
+  }, signal));
+}
+
+/**
+ * Ask Bedrock to describe the market of a country and language (and city): names, currency, time zone,
+ * coordinates, local competitors and local brand names. The administrator confirms it before saving.
+ */
+export async function proposeMarket(request: MarketProposalRequest, signal?: AbortSignal): Promise<MarketProposal> {
+  return decodeMarketProposal(await postMarkets({ propose: request }, signal));
 }

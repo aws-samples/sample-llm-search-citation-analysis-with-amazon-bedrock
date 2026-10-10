@@ -9,12 +9,20 @@ Routes (behind the ConfigMgmt router, ``/api/markets``):
   list (``shared.markets.validate_markets``). 400 ``{error, field: "markets"}``
   on a validation error; 409 ``{error, market_ids: [...]}`` when the new list
   drops a market that keywords still use. Answers like ``GET``.
-- ``POST /api/markets`` (Admin): body ``{"keyword": "...", "market_ids": [...]}``
-  (1-10 configured ids) → ``{"suggestions": [{"market_id", "keyword"}, ...]}``:
-  Bedrock proposes the keyword as a local user in each market would type it
-  (local wording, not a literal translation; ``shared.market_keywords``), in
-  the requested market order. A market the model gave no usable keyword for
-  is left out. 502 when the model fails or answers no JSON.
+- ``POST /api/markets`` (Admin), two actions told apart by the body:
+  - ``{"propose": {"country": "CL", "language": "es", "city": "Santiago"?}}`` →
+    ``{"market": Market.to_json(), "market_id_taken": bool}``: Bedrock describes
+    the market (English names, currency, the city's time zone, region and
+    coordinates, local competitors and local brand names;
+    ``shared.market_proposal``), validated like a hand-typed market. The
+    administrator confirms or edits it in the form before saving. 502 when the
+    model fails or its answer does not validate.
+  - ``{"keyword": "...", "market_ids": [...]}`` (1-10 configured ids) →
+    ``{"suggestions": [{"market_id", "keyword"}, ...]}``: Bedrock proposes the
+    keyword as a local user in each market would type it (local wording, not a
+    literal translation; ``shared.market_keywords``), in the requested market
+    order. A market the model gave no usable keyword for is left out. 502 when
+    the model fails or answers no JSON.
 
 The list is one BrandConfig item (``config_id = 'markets'``).
 """
@@ -39,6 +47,7 @@ from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_store import validate_keyword_text
 from shared.market_keywords import MAX_SUGGESTION_MARKETS, suggest_local_keywords
+from shared.market_proposal import propose_market, validate_proposal_request
 from shared.markets import (
     MARKETS_CONFIG_ID,
     Market,
@@ -141,7 +150,32 @@ def _requested_markets(raw: object) -> tuple[list[Market] | None, str | None]:
 
 
 @_admin_json_route
-def _suggest_keywords(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
+def _post_markets(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
+    """The two POST actions: ``{"propose": {...}}`` proposes a market, anything else suggests local keywords.
+
+    One route for both because the API is a few resources short of the
+    CloudFormation limit; the body names the action.
+    """
+    if 'propose' in body:
+        return _propose_market(event, body['propose'])
+    return _suggest_keywords(event, body)
+
+
+def _propose_market(event: dict[str, Any], raw_request: object) -> dict[str, Any]:
+    request, error = validate_proposal_request(raw_request)
+    if request is None:
+        return validation_error(str(error), event, 'propose')
+    brand_config = brand_config_table.get_item(Key={'config_id': 'default'}).get('Item') or {}
+    try:
+        market = propose_market(request, brand_config)
+    except Exception:
+        logger.exception('Market proposal failed for %s/%s', request['country'], request['language'])
+        return api_response(502, {'error': 'The model could not describe this market; fill the fields in by hand'}, event)
+    taken = {configured.market_id for configured in load_markets(brand_config_table)}
+    return api_response(200, {'market': market.to_json(), 'market_id_taken': market.market_id in taken}, event)
+
+
+def _suggest_keywords(event: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     keyword, error = validate_keyword_text(body.get('keyword'))
     if keyword is None:
         return validation_error(str(error), event, 'keyword')
@@ -161,7 +195,7 @@ def _suggest_keywords(event: dict[str, Any], context: Any, body: dict[str, Any])
 @route_handler({
     'GET': _get_markets,
     'PUT': _put_markets,
-    'POST': _suggest_keywords,
+    'POST': _post_markets,
 })
 def handler(_event: dict[str, Any], _context: object) -> dict[str, Any]:
     """``/api/markets``: the routes answer every request; reaching this body is a routing bug."""
