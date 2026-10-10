@@ -15,9 +15,7 @@ from unittest.mock import MagicMock, patch
 from botocore.exceptions import ClientError
 
 from testing.admin_authz_fixtures import ADMIN_EMAIL, caller_event
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+from testing.module_loader import API_DIR, load_handler_module
 
 USER_POOL_ID = 'us-east-1_testpool'
 CALLER = ADMIN_EMAIL
@@ -54,7 +52,7 @@ _test_env = {
 }
 
 with patch('boto3.client', return_value=mock_cognito), patch.dict(os.environ, _test_env):
-    handler_module = load_handler_module(_API_DIR, 'manage-users.py', 'manage_users')
+    handler_module = load_handler_module(API_DIR, 'manage-users.py', 'manage_users')
 
 
 def cognito_user(username: str, enabled: bool = True, status: str = 'CONFIRMED') -> dict[str, Any]:

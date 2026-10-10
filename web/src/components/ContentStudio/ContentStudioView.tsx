@@ -1,7 +1,6 @@
 import {
-  useState, useEffect, useCallback
+  useState, useEffect, useCallback, useId
 } from 'react';
-import type { ReactNode } from 'react';
 import { useContentStudio } from '../../hooks/useContentStudio';
 import { ContentIdeaCard } from './ContentIdeaCard';
 import { ContentHistory } from './ContentHistory';
@@ -9,6 +8,10 @@ import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
 import { CenteredEmpty } from '../ui/CenteredState';
+import { RefreshTextButton } from '../ui/RefreshTextButton';
+import {
+  TabBar, TabPanel
+} from '../ui/TabBar';
 import {
   ContentIdeasSkeleton, TabBadgeSkeleton
 } from './ContentStudioSkeletons';
@@ -22,7 +25,7 @@ import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
 import { OverlayDialog } from './OverlayDialog';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  BOLT_PATHS, DOCUMENT_TEXT_PATHS, LIGHTBULB_PATHS, REFRESH_PATHS, WARNING_PATHS 
+  BOLT_PATHS, DOCUMENT_TEXT_PATHS, LIGHTBULB_PATHS, WARNING_PATHS 
 } from '../ui/iconPaths';
 
 type TabType = 'ideas' | 'brief' | 'history';
@@ -159,59 +162,6 @@ function ConfirmGenerateModal({
   );
 }
 
-interface HeaderProps {
-  loading: boolean;
-  onRefresh: () => void;
-}
-
-const Header = ({
-  loading, onRefresh
-}: HeaderProps) => (
-  <div className="flex items-center justify-between">
-    <div>
-      <p className="text-sm text-gray-500 mt-1">
-        AI-powered content suggestions based on your visibility gaps and competitor analysis
-      </p>
-    </div>
-    <button
-      onClick={onRefresh}
-      disabled={loading}
-      className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 flex items-center gap-2"
-    >
-      {loading ? (
-        <Spinner size="sm" />
-      ) : (
-        <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
-      )}
-      Refresh
-    </button>
-  </div>
-);
-
-interface TabButtonProps {
-  tab: TabType;
-  activeTab: TabType;
-  setActiveTab: (tab: TabType) => void;
-  /** Appended to the base classes, before the active-state classes. */
-  positionClassName?: string;
-  children: ReactNode;
-}
-
-const TabButton = ({
-  tab, activeTab, setActiveTab, positionClassName = '', children
-}: TabButtonProps) => (
-  <button
-    onClick={() => setActiveTab(tab)}
-    className={`pb-3 text-sm font-medium border-b-2 transition-colors${positionClassName} ${
-      activeTab === tab
-        ? 'border-gray-900 text-gray-900'
-        : 'border-transparent text-gray-500 hover:text-gray-700'
-    }`}
-  >
-    {children}
-  </button>
-);
-
 interface TabsProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
@@ -220,6 +170,8 @@ interface TabsProps {
   ideasPending: boolean;
   unviewedCount: number;
   historyLength: number;
+  /** The `TabPanel` the tabs control. */
+  panelId: string;
 }
 
 /** The Content Ideas badge, or its placeholder while the count is unknown, so the tabs after it stay put. */
@@ -238,38 +190,58 @@ const HighPriorityBadge = ({
   );
 };
 
+/** The Generated Content badge: unviewed pieces pulse; otherwise the size of the history. */
+const HistoryBadge = ({
+  unviewedCount, historyLength
+}: {
+  readonly unviewedCount: number;
+  readonly historyLength: number;
+}) => {
+  if (unviewedCount > 0) {
+    return (
+      <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
+        {unviewedCount} new
+      </span>
+    );
+  }
+  if (historyLength === 0) return null;
+  return (
+    <span className="ml-2 px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded-full">
+      {historyLength}
+    </span>
+  );
+};
+
 /** The ideas tab is open and its first ideas are still on their way, so their counts are unknown. */
 function ideasPending(activeTab: TabType, loading: boolean, ideas: readonly ContentIdea[]): boolean {
   return activeTab === 'ideas' && loading && ideas.length === 0;
 }
 
 const Tabs = ({
-  activeTab, setActiveTab, highPriorityCount, ideasPending, unviewedCount, historyLength
+  activeTab, setActiveTab, highPriorityCount, ideasPending, unviewedCount, historyLength, panelId
 }: TabsProps) => (
-  <div className="border-b border-gray-200">
-    <nav className="flex gap-8 overflow-x-auto">
-      <TabButton tab="ideas" activeTab={activeTab} setActiveTab={setActiveTab}>
-        Content Ideas
-        <HighPriorityBadge count={highPriorityCount} pending={ideasPending} />
-      </TabButton>
-      <TabButton tab="brief" activeTab={activeTab} setActiveTab={setActiveTab}>
-        Content Brief
-      </TabButton>
-      <TabButton tab="history" activeTab={activeTab} setActiveTab={setActiveTab} positionClassName=" relative">
-        Generated Content
-        {unviewedCount > 0 && (
-          <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
-            {unviewedCount} new
-          </span>
-        )}
-        {unviewedCount === 0 && historyLength > 0 && (
-          <span className="ml-2 px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded-full">
-            {historyLength}
-          </span>
-        )}
-      </TabButton>
-    </nav>
-  </div>
+  <TabBar
+    label="Content Studio"
+    tabs={[
+      {
+        id: 'ideas',
+        label: 'Content Ideas',
+        badge: <HighPriorityBadge count={highPriorityCount} pending={ideasPending} />,
+      },
+      {
+        id: 'brief',
+        label: 'Content Brief',
+      },
+      {
+        id: 'history',
+        label: 'Generated Content',
+        badge: <HistoryBadge unviewedCount={unviewedCount} historyLength={historyLength} />,
+      },
+    ]}
+    activeId={activeTab}
+    onChange={setActiveTab}
+    panelId={panelId}
+  />
 );
 
 interface GeneratingIndicatorProps {keyword: string;}
@@ -289,6 +261,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   const [selectedIdea, setSelectedIdea] = useState<ContentIdea | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingIdea, setPendingIdea] = useState<ContentIdea | null>(null);
+  const panelId = useId();
 
   const {
     ideas,
@@ -374,7 +347,12 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   return (
     <div className="space-y-6">
       {activeTab === 'brief' ? null : (
-        <Header loading={loading} onRefresh={handleRefresh} />
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            AI-powered content suggestions based on your visibility gaps and competitor analysis
+          </p>
+          <RefreshTextButton onRefresh={handleRefresh} loading={loading} showIcon />
+        </div>
       )}
 
       <Tabs
@@ -384,6 +362,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
         ideasPending={ideasPending(activeTab, loading, ideas)}
         unviewedCount={unviewedCount}
         historyLength={history.length}
+        panelId={panelId}
       />
 
       {error && (
@@ -392,42 +371,44 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
         </div>
       )}
 
-      {activeTab === 'ideas' && (
-        <div className="space-y-4">
-          <IdeasTabContent
-            loading={loading}
-            ideas={ideas}
-            actionableIdeas={actionableIdeas}
+      <TabPanel id={panelId} activeId={activeTab}>
+        {activeTab === 'ideas' && (
+          <div className="space-y-4">
+            <IdeasTabContent
+              loading={loading}
+              ideas={ideas}
+              actionableIdeas={actionableIdeas}
+              generating={generating}
+              selectedIdea={selectedIdea}
+              onCreateContent={handleCreateContent}
+            />
+            <NonActionableIdeas ideas={ideas} />
+          </div>
+        )}
+
+        {activeTab === 'brief' && (
+          <GroupBriefForm
+            keywords={keywords}
             generating={generating}
-            selectedIdea={selectedIdea}
-            onCreateContent={handleCreateContent}
+            onGenerate={handleGenerateGroupBrief}
+            onGenerateBatch={handleGenerateGroupBriefBatch}
           />
-          <NonActionableIdeas ideas={ideas} />
-        </div>
-      )}
+        )}
 
-      {activeTab === 'brief' && (
-        <GroupBriefForm
-          keywords={keywords}
-          generating={generating}
-          onGenerate={handleGenerateGroupBrief}
-          onGenerateBatch={handleGenerateGroupBriefBatch}
-        />
-      )}
-
-      {activeTab === 'history' && (
-        <div className="space-y-4">
-          {activeBatches.map((batch) => (
-            <ContentBriefBatchProgress key={batch.batch_id} batch={batch} />
-          ))}
-          <ContentHistory
-            history={history}
-            loading={loading}
-            onDelete={deleteContent}
-            onMarkViewed={markViewed}
-          />
-        </div>
-      )}
+        {activeTab === 'history' && (
+          <div className="space-y-4">
+            {activeBatches.map((batch) => (
+              <ContentBriefBatchProgress key={batch.batch_id} batch={batch} />
+            ))}
+            <ContentHistory
+              history={history}
+              loading={loading}
+              onDelete={deleteContent}
+              onMarkViewed={markViewed}
+            />
+          </div>
+        )}
+      </TabPanel>
 
       {generating && selectedIdea?.keyword && (
         <GeneratingIndicator keyword={selectedIdea.keyword} />

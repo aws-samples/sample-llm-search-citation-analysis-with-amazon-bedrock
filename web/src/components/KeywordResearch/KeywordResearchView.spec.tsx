@@ -55,7 +55,7 @@ describe('KeywordResearchView', () => {
     it('orders the tabs with the research agent last', () => {
       render(<KeywordResearchView />);
 
-      const tabs = within(screen.getByRole('navigation')).getAllByRole('button');
+      const tabs = within(screen.getByRole('tablist', { name: 'Keyword research' })).getAllByRole('tab');
       expect(tabs.map((tab) => tab.textContent)).toStrictEqual([
         'Related KeywordsExpand',
         'Competitor AnalysisCompetitor',
@@ -92,7 +92,7 @@ describe('KeywordResearchView', () => {
     }) => {
       render(<KeywordResearchView />);
 
-      await userEvent.click(screen.getByRole('button', { name: tab }));
+      await userEvent.click(screen.getByRole('tab', { name: tab }));
 
       expect(screen.getByTestId(view)).toBeInTheDocument();
     });
@@ -101,7 +101,7 @@ describe('KeywordResearchView', () => {
       const research = buildMockResearch();
       mockUseKeywordResearch.mockReturnValue(research);
       render(<KeywordResearchView />);
-      await userEvent.click(screen.getByRole('button', { name: /history/i }));
+      await userEvent.click(screen.getByRole('tab', { name: /history/i }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Retry agent run' }));
 
@@ -118,14 +118,14 @@ describe('KeywordResearchView', () => {
     });
   });
 
-  describe('active tab styling', () => {
-    it('highlights the active tab', async () => {
+  describe('active tab', () => {
+    it('marks the clicked tab as the selected one', async () => {
       render(<KeywordResearchView />);
 
-      const historyTab = screen.getByRole('button', { name: /history/i });
+      const historyTab = screen.getByRole('tab', { name: /history/i });
       await userEvent.click(historyTab);
 
-      expect(historyTab).toHaveClass('border-gray-900');
+      expect(historyTab).toHaveAttribute('aria-selected', 'true');
     });
   });
 });

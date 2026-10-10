@@ -1,8 +1,10 @@
 import {
-  useCallback, useEffect, useRef, useState
+  useCallback, useEffect, useMemo, useRef
 } from 'react';
 import { getErrorMessage } from '../infrastructure';
-import { useLatestRequest } from './useLatestRequest';
+import {
+  useGuardedLoad, type GuardedLoadSource
+} from './useGuardedLoad';
 
 type ErrorScope = Parameters<typeof getErrorMessage>[1];
 
@@ -63,6 +65,18 @@ function orderTemplates<TTemplate extends SavedTemplate>(
   return [...builtins, ...saved];
 }
 
+/** The guarded load of `source`'s list, ordered as the hook shows it. */
+function templatesLoad<TTemplate extends SavedTemplate, TDraft, TChanges>(
+  source: SavedTemplatesSource<TTemplate, TDraft, TChanges>
+): GuardedLoadSource<TTemplate[]> {
+  return {
+    initial: [],
+    load: async () => orderTemplates(await source.list(), source.compareSaved),
+    errorMessage: (failure) => getErrorMessage(failure, source.errorScope),
+    logMessage: `${source.logTag} Error loading ${source.subject}s:`,
+  };
+}
+
 function immutableTemplateOutcome<TTemplate>(
   action: 'updated' | 'deleted'
 ): SavedTemplateOutcome<TTemplate> {
@@ -83,6 +97,21 @@ function savedOutcome<TTemplate extends SavedTemplate>(
   };
 }
 
+/** The list with `template` added. */
+function appended<TTemplate>(template: TTemplate): (templates: TTemplate[]) => TTemplate[] {
+  return (templates) => [...templates, template];
+}
+
+/** The list with the template at `id` replaced by `template`. */
+function replaced<TTemplate extends SavedTemplate>(id: string, template: TTemplate): (templates: TTemplate[]) => TTemplate[] {
+  return (templates) => templates.map((item) => (item.id === id ? template : item));
+}
+
+/** The list without the template at `id`. */
+function removed<TTemplate extends SavedTemplate>(id: string): (templates: TTemplate[]) => TTemplate[] {
+  return (templates) => templates.filter((item) => item.id !== id);
+}
+
 /**
  * A list of templates (built-ins first, then the saved ones) with create,
  * update and remove. The latest operation wins: a late answer from an older
@@ -92,72 +121,40 @@ function savedOutcome<TTemplate extends SavedTemplate>(
 export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChanges>(
   source: SavedTemplatesSource<TTemplate, TDraft, TChanges>
 ): SavedTemplatesReturn<TTemplate, TDraft, TChanges> {
-  const [templates, setTemplates] = useState<TTemplate[]>([]);
-  // Stryker disable next-line BooleanLiteral: The mount effect starts refresh before the first observable commit, and refresh sets this same loading state true.
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const templatesRef = useRef<TTemplate[]>([]);
-  const { beginRequest } = useLatestRequest();
-
-  // Stryker disable ArrayDeclaration: React's state setter and this hook's refs are stable; the replacement constant dependency is stable across renders.
-  const replaceTemplates = useCallback((next: TTemplate[]) => {
-    const ordered = orderTemplates(next, source.compareSaved);
-    templatesRef.current = ordered;
-    setTemplates(ordered);
-  }, [source]);
-  // Stryker restore ArrayDeclaration
-
-  // Stryker disable ArrayDeclaration: Every dependency is a callback with a proven stable identity, so omitting the list cannot stale refresh.
-  const refresh = useCallback(async (): Promise<void> => {
-    const request = beginRequest();
-    setLoading(true);
-    try {
-      const items = await source.list();
-      if (!request.isCurrent()) return;
-      replaceTemplates(items);
-      setError(null);
-    } catch (requestError) {
-      if (!request.isCurrent()) return;
-      setError(getErrorMessage(requestError, source.errorScope));
-      console.error(`${source.logTag} Error loading ${source.subject}s:`, requestError);
-    } finally {
-      if (request.isCurrent()) setLoading(false);
-      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
-      request.finish();
-    }
-  }, [beginRequest, replaceTemplates, source]);
-  // Stryker restore ArrayDeclaration
-
-  // Stryker disable ArrayDeclaration: refresh has a proven stable identity, so omitting it cannot stale this mount effect.
+  // Stryker disable next-line ArrayDeclaration: source is the caller's module-level constant, so omitting it cannot stale the load.
+  const listing = useMemo(() => templatesLoad(source), [source]);
+  const {
+    data: templates, loading, error, reload: refresh, setData: setTemplates, mutate
+  } = useGuardedLoad(listing);
+  // The built-in guard reads the list synchronously, outside React's render.
+  const templatesRef = useRef(templates);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    templatesRef.current = templates;
+  }, [templates]);
+
+  // Stryker disable ArrayDeclaration: React's state setter is stable and source is the caller's module-level constant, so omitting them cannot stale replaceTemplates.
+  const replaceTemplates = useCallback((edit: (current: TTemplate[]) => TTemplate[]) => {
+    setTemplates((current) => orderTemplates(edit(current), source.compareSaved));
+  }, [setTemplates, source]);
   // Stryker restore ArrayDeclaration
 
-  // Stryker disable ArrayDeclaration: beginRequest has a proven stable identity, so omitting it cannot stale mutation ordering.
+  // Stryker disable ArrayDeclaration: mutate has a proven stable identity and source is the caller's constant, so omitting them cannot stale mutation ordering.
   const runMutation = useCallback(async <TResult,>(
     action: MutationAction,
     request: () => Promise<TResult>,
     apply: (result: TResult) => void,
     outcome: (result: TResult) => SavedTemplateOutcome<TTemplate>
   ): Promise<SavedTemplateOutcome<TTemplate>> => {
-    const operation = beginRequest();
     try {
-      const result = await request();
-      if (operation.isCurrent()) apply(result);
-      return outcome(result);
+      return outcome(await mutate(request, apply));
     } catch (requestError) {
       console.error(`${source.logTag} Error ${action} ${source.subject}:`, requestError);
       return {
         success: false,
         message: getErrorMessage(requestError, source.errorScope),
       };
-    } finally {
-      if (operation.isCurrent()) setLoading(false);
-      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
-      operation.finish();
     }
-  }, [beginRequest, source]);
+  }, [mutate, source]);
   // Stryker restore ArrayDeclaration
 
   // Stryker disable ArrayDeclaration: React dependency list; source is the caller's module-level constant, so omitting it cannot stale the guard
@@ -169,7 +166,7 @@ export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChan
   const create = useCallback(async (draft: TDraft) => runMutation(
     'saving',
     () => source.create(draft),
-    (template) => replaceTemplates([...templatesRef.current, template]),
+    (template) => replaceTemplates(appended(template)),
     (template) => savedOutcome('saved', template)
   ), [replaceTemplates, runMutation, source]);
   // Stryker restore ArrayDeclaration
@@ -180,9 +177,7 @@ export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChan
     return runMutation(
       'updating',
       () => source.update(id, changes),
-      (template) => replaceTemplates(templatesRef.current.map((item) => (
-        item.id === id ? template : item
-      ))),
+      (template) => replaceTemplates(replaced(id, template)),
       (template) => savedOutcome('updated', template)
     );
   }, [isGuardedBuiltin, replaceTemplates, runMutation, source]);
@@ -194,7 +189,7 @@ export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChan
     return runMutation(
       'deleting',
       () => source.remove(id),
-      () => replaceTemplates(templatesRef.current.filter((template) => template.id !== id)),
+      () => replaceTemplates(removed(id)),
       () => ({
         success: true,
         message: 'Template deleted',

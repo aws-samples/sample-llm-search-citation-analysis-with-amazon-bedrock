@@ -6,6 +6,7 @@ Provides reusable decorators to reduce boilerplate in API Lambda handlers.
 Decorators:
 - @api_handler: Wraps handler with try/except, logging, and error response
 - @parse_json_body: Auto-parses JSON body and injects as 'body' kwarg
+- @json_object_body: parse_json_body that also refuses a body that is not an object
 - @validate: Declarative input validation with field injection
 - @route_handler: Routes requests by HTTP method to specific functions
 - @cors_preflight: Handles OPTIONS requests for CORS automatically
@@ -117,6 +118,33 @@ def parse_json_body(func: Callable) -> Callable:
         kwargs['body'] = body
         return func(event, context, *args, **kwargs)
     return wrapper
+
+
+def json_object_body(func: Callable) -> Callable:
+    """
+    ``parse_json_body`` for a handler that reads fields from the body: a body
+    that is not a JSON object answers 400 on field ``body`` before the handler runs.
+
+    ``parse_json_body`` injects whatever the body decodes to — a list, a string,
+    a number or ``None`` included — and neither it nor ``@validate`` refuses
+    those (``validate`` reads body fields with ``.get`` and raises, so a ``[]``
+    body surfaced as a 500). Every handler that needed the rule used to spell
+    it out itself; this is its one home.
+
+    Usage:
+        @api_handler
+        @require_group(ADMIN_GROUP)
+        @json_object_body
+        def handler(event, context, body):
+            # A list, string, number or null body was already answered with a 400.
+            return start_run(body.get('scope'), event)
+    """
+    @wraps(func)
+    def wrapper(event: ApiEvent, context: Any, *args, body: Any, **kwargs) -> ApiResponse:
+        if not isinstance(body, dict):
+            return validation_error('Request body must be a JSON object', event, 'body')
+        return func(event, context, *args, body=body, **kwargs)
+    return parse_json_body(wrapper)
 
 
 # =============================================================================

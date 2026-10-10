@@ -11,6 +11,7 @@ vi.mock('../../hooks/useKeywordGroups');
 
 import { usePromptInsights } from '../../hooks/usePromptInsights';
 import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
+import { tabLabels } from '../ui/TabBar-fixtures';
 import {
   describeScopeSelection, mockCorunaKeywordGroups, neverSettlingFetch
 } from './useScopeSelection-fixtures';
@@ -37,14 +38,10 @@ describe('PromptInsights', () => {
       expect(screen.getByText('Prompt Insights')).toBeInTheDocument();
     });
 
-    it('renders the three tab buttons with zero counts when no data has loaded', () => {
+    it('renders the three tabs with zero counts when no data has loaded', () => {
       renderWithInsights();
 
-      expect(screen.getAllByRole('button').map((tab) => tab.textContent)).toStrictEqual([
-        'Winning (0)',
-        'Losing (0)',
-        'Opportunities (0)',
-      ]);
+      expect(tabLabels()).toStrictEqual(['Winning (0)', 'Losing (0)', 'Opportunities (0)']);
     });
 
     it('fetches insights on mount', () => {
@@ -58,7 +55,7 @@ describe('PromptInsights', () => {
     it('holds each tab count with a placeholder while loading', () => {
       renderWithInsights({ loading: true });
 
-      expect(screen.getByRole('button', { name: /^Losing/u }).querySelector('.skeleton')).not.toBeNull();
+      expect(screen.getByRole('tab', { name: /^Losing/u }).querySelector('.skeleton')).not.toBeNull();
     });
 
     it('shows the insights skeleton when loading', () => {

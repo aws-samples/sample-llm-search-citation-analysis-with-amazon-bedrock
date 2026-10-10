@@ -18,7 +18,6 @@ Scope: the request takes the report scope every KPI endpoint accepts
 
 import json
 import logging
-import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -43,7 +42,7 @@ from shared.scope_params import (
     load_sibling_function,
 )
 from shared.scoped_reports import optional_scope_keywords
-from shared.search_results import latest_run
+from shared.search_results import latest_run, search_results_table_name
 from shared.utils import get_brand_config, get_timestamp, recommendation_id
 
 logger = logging.getLogger(__name__)
@@ -52,7 +51,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 
 
 @dataclass(frozen=True)

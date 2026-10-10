@@ -13,7 +13,6 @@ Optional: ``query_prompt_id`` keeps one persona's answers of the latest run;
 """
 
 import logging
-import os
 import sys
 from typing import Any
 
@@ -32,6 +31,7 @@ from shared.scope_params import (
     scoped_dynamodb_resource,
 )
 from shared.scoped_reports import capped_scope, required_report_scope
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
 
@@ -42,7 +42,7 @@ logger.setLevel(logging.INFO)
 dynamodb = scoped_dynamodb_resource()
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 

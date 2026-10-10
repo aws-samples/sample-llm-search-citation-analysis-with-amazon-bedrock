@@ -8,7 +8,6 @@ or reaching AWS.
 
 from __future__ import annotations
 
-import os
 import sys
 from collections.abc import Iterator, Mapping
 from types import ModuleType
@@ -17,9 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from testing.module_loader import load_handler_module_offline
-
-_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+from testing.module_loader import API_DIR, load_handler_module_offline
 
 # Every sub-handler `keyword-mgmt.py` can dispatch to.
 KEYWORD_MGMT_SUB_HANDLERS = (
@@ -39,7 +36,7 @@ def load_stubbed_keyword_mgmt(module_name: str) -> tuple[ModuleType, RouterStubs
     Each stub answers ``{'statusCode': 200, 'handler': <filename>}`` so results
     are distinguishable; returns ``(module, stubs_by_filename)``.
     """
-    module = load_handler_module_offline(_API_DIR, 'keyword-mgmt.py', module_name)
+    module = load_handler_module_offline(API_DIR, 'keyword-mgmt.py', module_name)
     stubs: RouterStubs = {}
     for name in KEYWORD_MGMT_SUB_HANDLERS:
         stub = MagicMock(name=f'{name}_handler', return_value={'statusCode': 200, 'handler': name})

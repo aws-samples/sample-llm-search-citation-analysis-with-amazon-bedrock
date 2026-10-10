@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
 
 from testing.env import KEYWORD_RESEARCH_ENV, setdefault_env
-from testing.module_loader import load_handler_module_offline
-
-_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+from testing.module_loader import API_DIR, load_handler_module_offline
 
 _HISTORY_PATH = '/api/keyword-research/history'
 
@@ -18,7 +15,7 @@ _HISTORY_PATH = '/api/keyword-research/history'
 def load_keyword_research(module_name: str) -> ModuleType:
     """``keyword-research.py`` loaded as ``module_name`` with its import-time env defaulted and boto3 stubbed."""
     setdefault_env(KEYWORD_RESEARCH_ENV)
-    return load_handler_module_offline(_API_DIR, 'keyword-research.py', module_name)
+    return load_handler_module_offline(API_DIR, 'keyword-research.py', module_name)
 
 
 def research_table_stub(item: dict | None = None, items: list[dict] | None = None) -> MagicMock:

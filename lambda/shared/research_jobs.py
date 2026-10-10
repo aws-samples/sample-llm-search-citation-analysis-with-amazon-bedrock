@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any
 
 from shared.research_agent import (
+    AGENT_MAX_QUERIES_PER_ROUND,
     LEGACY_AUDIENCE,
     LEGACY_DIMENSION_CATALOG,
     LEGACY_SUBJECT,
@@ -175,25 +176,36 @@ def _utf8_prefix(value: Any, max_bytes: int) -> tuple[str, bool]:
     return encoded[:max_bytes].decode('utf-8', errors='ignore'), True
 
 
-def _bounded_round_queries(value: Any) -> tuple[list[dict[str, str]], int, bool]:
+def _bounded_query_list(
+    value: Any, *, query_limit: int, dimension_limit: int, rationale_limit: int | None = None,
+) -> tuple[list[dict[str, str]], int, bool]:
+    """Keep the first ``AGENT_MAX_QUERIES_PER_ROUND`` well-formed queries, each string cut to its byte limit.
+
+    Returns the kept queries, how many entries arrived and whether anything was dropped or cut;
+    ``rationale`` is carried only when a limit is given for it.
+    """
     if not isinstance(value, list):
         return [], 0, False
     queries: list[dict[str, str]] = []
-    strings_truncated = False
-    for entry in value[:8]:
+    truncated = False
+    for entry in value[:AGENT_MAX_QUERIES_PER_ROUND]:
         if not isinstance(entry, dict):
             continue
-        query, query_truncated = _utf8_prefix(entry.get('query'), 400)
-        dimension, dimension_truncated = _utf8_prefix(entry.get('dimension'), 40)
-        rationale, rationale_truncated = _utf8_prefix(entry.get('rationale'), 300)
-        strings_truncated = strings_truncated or query_truncated or dimension_truncated or rationale_truncated
+        query, query_truncated = _utf8_prefix(entry.get('query'), query_limit)
+        dimension, dimension_truncated = _utf8_prefix(entry.get('dimension'), dimension_limit)
+        truncated = truncated or query_truncated or dimension_truncated
+        bounded = {'query': query, 'dimension': dimension or 'other'}
+        if rationale_limit is not None:
+            rationale, rationale_truncated = _utf8_prefix(entry.get('rationale'), rationale_limit)
+            truncated = truncated or rationale_truncated
+            bounded['rationale'] = rationale
         if query:
-            queries.append({
-                'query': query,
-                'dimension': dimension or 'other',
-                'rationale': rationale,
-            })
-    return queries, len(value), strings_truncated or len(value) > 8
+            queries.append(bounded)
+    return queries, len(value), truncated or len(value) > AGENT_MAX_QUERIES_PER_ROUND
+
+
+def _bounded_round_queries(value: Any) -> tuple[list[dict[str, str]], int, bool]:
+    return _bounded_query_list(value, query_limit=400, dimension_limit=40, rationale_limit=300)
 
 
 def bound_round_plan(round_info: dict[str, Any]) -> dict[str, Any]:
@@ -337,22 +349,6 @@ def _ranked_candidates(entries: Any, limit: int) -> tuple[list[dict[str, Any]], 
     return [candidate for _index, candidate in candidates[:limit]], received, strings_truncated
 
 
-def _bounded_queries(value: Any) -> tuple[list[dict[str, str]], bool]:
-    if not isinstance(value, list):
-        return [], False
-    queries: list[dict[str, str]] = []
-    truncated = False
-    for entry in value[:8]:
-        if not isinstance(entry, dict):
-            continue
-        query, query_truncated = _bounded_text(entry.get('query'), KEYWORD_TEXT_LIMIT)
-        dimension, dimension_truncated = _bounded_text(entry.get('dimension'), CANDIDATE_LABEL_LIMIT)
-        truncated = truncated or query_truncated or dimension_truncated
-        if query:
-            queries.append({'query': query, 'dimension': dimension or 'other'})
-    return queries, truncated or len(value) > 8
-
-
 def _bounded_warnings(value: Any) -> tuple[list[str], bool]:
     """Cap a step's warnings to ``WARNING_COUNT_LIMIT`` entries of ``WARNING_TEXT_LIMIT`` characters each."""
     if not isinstance(value, list):
@@ -483,7 +479,9 @@ def bound_step_result(step: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             bounded[field] = value
 
-    queries, queries_truncated = _bounded_queries(step.get('queries'))
+    queries, _received, queries_truncated = _bounded_query_list(
+        step.get('queries'), query_limit=KEYWORD_TEXT_LIMIT, dimension_limit=CANDIDATE_LABEL_LIMIT,
+    )
     strings_truncated = strings_truncated or queries_truncated
     if queries:
         bounded['queries'] = queries

@@ -256,7 +256,7 @@ describe('CompetitorAnalysis', () => {
       }) => {
         renderCompetitorResult(competitorResultFixture);
 
-        await userEvent.click(screen.getByRole('button', { name: tabName }));
+        await userEvent.click(screen.getByRole('tab', { name: tabName }));
 
         expect(screen.getAllByRole('checkbox')).toHaveLength(keywords.length);
         expect(
@@ -272,7 +272,7 @@ describe('CompetitorAnalysis', () => {
       renderCompetitorResult(competitorResultFixture);
       await userEvent.click(selectKeywordCheckbox(firstPrimaryKeyword.keyword));
 
-      await userEvent.click(screen.getByRole('button', { name: /Secondary Keywords/ }));
+      await userEvent.click(screen.getByRole('tab', { name: /Secondary Keywords/ }));
 
       expect(screen.getByText(selectionCountText(0))).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);

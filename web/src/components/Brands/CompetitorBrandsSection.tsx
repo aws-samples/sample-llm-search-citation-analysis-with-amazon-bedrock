@@ -1,7 +1,6 @@
 import { Spinner } from '../ui/Spinner';
-import { BrandExpansionPanel } from './BrandExpansionPanel';
+import { BrandListBody } from './BrandListBody';
 import { CompetitorDiscoveryPanel } from './CompetitorDiscoveryPanel';
-import { BrandTagList } from './BrandTagList';
 import type {
   BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
@@ -62,10 +61,8 @@ function CompetitorActions({
 }
 
 export function CompetitorBrandsSection({
-  brands, newBrand, selectedBrand, expandingBrand, expansionResult, discoveryResult, expansionTarget,
-  pendingBrands, hasFirstPartyBrands, canExpand, canFindCompetitors, brandExists,
-  onNewBrandChange, onAddBrand, onRemoveBrand, onSelectBrand, onExpandAll, onFindCompetitors,
-  onTogglePending, onAcceptExpansion, onCancelExpansion
+  expandingBrand, discoveryResult, hasFirstPartyBrands, canExpand, canFindCompetitors, brandExists,
+  onExpandAll, onFindCompetitors, ...list
 }: CompetitorBrandsSectionProps) {
   if (!hasFirstPartyBrands) {
     return (
@@ -83,9 +80,9 @@ export function CompetitorBrandsSection({
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-amber-800">Competitor Brands</h3>
         <CompetitorActions
-          hasBrands={brands.length > 0}
+          hasBrands={list.brands.length > 0}
           expanding={expandingBrand === 'competitor'}
-          expansionResult={expansionResult}
+          expansionResult={list.expansionResult}
           discoveryResult={discoveryResult}
           canExpand={canExpand}
           canFindCompetitors={canFindCompetitors}
@@ -93,27 +90,19 @@ export function CompetitorBrandsSection({
           onFindCompetitors={onFindCompetitors}
         />
       </div>
-      <p className="text-xs text-amber-700 mb-3">Click a competitor to select it, then use "Expand Brand" to discover their sub-brands.</p>
-      <div className="flex gap-2 mb-3">
-        <input
-          id="new-competitor-brand"
-          type="text"
-          value={newBrand}
-          onChange={(e) => onNewBrandChange(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && onAddBrand()}
-          placeholder="Enter competitor name..."
-          aria-label="New competitor brand"
-          className="flex-1 p-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white text-sm"
-        />
-        <button onClick={onAddBrand} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm">Add</button>
-      </div>
-      {expansionResult && expansionTarget === 'competitor' && (
-        <BrandExpansionPanel result={expansionResult} target="competitor" pendingBrands={pendingBrands} onToggleBrand={onTogglePending} onAccept={onAcceptExpansion} onCancel={onCancelExpansion} />
-      )}
-      {discoveryResult && expansionTarget === 'competitor' && (
-        <CompetitorDiscoveryPanel result={discoveryResult} existingCompetitors={brands} pendingBrands={pendingBrands} brandExists={brandExists} onToggleBrand={onTogglePending} onAccept={onAcceptExpansion} onCancel={onCancelExpansion} />
-      )}
-      <BrandTagList brands={brands} selectedBrand={selectedBrand} colorScheme="amber" onSelect={onSelectBrand} onRemove={onRemoveBrand} />
+      <BrandListBody
+        {...list}
+        target="competitor"
+        colorScheme="amber"
+        hint='Click a competitor to select it, then use "Expand Brand" to discover their sub-brands.'
+        inputId="new-competitor-brand"
+        inputLabel="New competitor brand"
+        placeholder="Enter competitor name..."
+      >
+        {discoveryResult && list.expansionTarget === 'competitor' && (
+          <CompetitorDiscoveryPanel result={discoveryResult} existingCompetitors={list.brands} pendingBrands={list.pendingBrands} brandExists={brandExists} onToggleBrand={list.onTogglePending} onAccept={list.onAcceptExpansion} onCancel={list.onCancelExpansion} />
+        )}
+      </BrandListBody>
     </div>
   );
 }

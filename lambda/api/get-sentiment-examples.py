@@ -13,7 +13,6 @@ Selection and ordering live in ``shared.sentiment_examples``.
 """
 
 import logging
-import os
 import sys
 from typing import Any
 
@@ -26,6 +25,7 @@ from shared.decorators import api_handler, optional_provider, validate
 from shared.kpi_engine import FIRST_PARTY, SENTIMENT_LABELS
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import capped_scope, required_report_scope
+from shared.search_results import search_results_table_name
 from shared.sentiment_examples import (
     DEFAULT_LIMIT,
     EXAMPLE_ATTRIBUTE_NAMES,
@@ -42,7 +42,7 @@ logger.setLevel(logging.INFO)
 dynamodb = scoped_dynamodb_resource()
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 

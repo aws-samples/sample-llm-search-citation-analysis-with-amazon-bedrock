@@ -26,6 +26,7 @@ from shared.decorators import (
     RouteNotHandledError,
     api_handler,
     cors_preflight,
+    json_object_body,
     paginate,
     parse_json_body,
     route_handler,
@@ -35,6 +36,7 @@ from testing.cors_fixtures import CONFIGURED_ORIGIN, configured_cors_origin, cre
 from testing.events import parse_response_lenient
 
 PATH_PARAM = 'prompt-42'
+NOT_AN_OBJECT = {'error': 'Request body must be a JSON object', 'field': 'body'}
 
 
 def make_event(
@@ -62,6 +64,11 @@ def echo_positional(event: dict[str, Any], context: Any, received: str, **kwargs
     return {'statusCode': 200, 'body': json.dumps({'received': received})}
 
 
+def echo_body(event: dict[str, Any], context: Any, body: Any) -> dict[str, Any]:
+    """Handler that answers with whatever body the stack injected."""
+    return {'statusCode': 200, 'body': json.dumps({'body': body})}
+
+
 class TestPositionalArgumentForwarding:
     """
     Each decorator must pass a caller's positional argument through untouched.
@@ -75,6 +82,7 @@ class TestPositionalArgumentForwarding:
         [
             ('api_handler', api_handler),
             ('parse_json_body', parse_json_body),
+            ('json_object_body', json_object_body),
             ('validate', validate({})),
             ('cors_preflight', cors_preflight),
             ('paginate', paginate()),
@@ -204,6 +212,39 @@ class TestKeywordOnlyCallsStillWork:
 
         assert status == 400
         assert payload['field'] == 'name'
+
+
+class TestJsonObjectBody:
+    """The object check every handler that reads body fields used to hand-write."""
+
+    @pytest.mark.parametrize(
+        ('raw_body', 'rejection'),
+        [
+            pytest.param('["Quarterly visibility"]', NOT_AN_OBJECT, id='list'),
+            pytest.param('"Quarterly visibility"', NOT_AN_OBJECT, id='string'),
+            pytest.param('null', NOT_AN_OBJECT, id='null'),
+            pytest.param('3', NOT_AN_OBJECT, id='number'),
+            pytest.param('{"name": ', {'error': 'Invalid JSON format'}, id='malformed-json-as-parse_json_body-answers-it'),
+        ],
+    )
+    def test_refuses_a_body_that_is_not_an_object_without_running_the_handler(self, raw_body: str, rejection) -> None:
+        event = {**make_event(method='POST'), 'body': raw_body}
+
+        status, payload = parse_response_lenient(json_object_body(echo_body)(event, None))
+
+        assert (status, payload) == (400, rejection)
+
+    def test_injects_an_object_body(self) -> None:
+        status, payload = parse_response_lenient(
+            json_object_body(echo_body)(make_event(method='POST', body={'name': 'Fresh'}), None)
+        )
+
+        assert (status, payload) == (200, {'body': {'name': 'Fresh'}})
+
+    def test_reads_a_missing_body_as_an_empty_object(self) -> None:
+        _status, payload = parse_response_lenient(json_object_body(echo_body)(make_event(method='POST'), None))
+
+        assert payload == {'body': {}}
 
 
 class TestCorsPreflight:

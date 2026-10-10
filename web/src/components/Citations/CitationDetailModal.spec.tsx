@@ -35,7 +35,7 @@ describe('CitationDetailModal overview', () => {
 /** Renders the modal for a page with `seoAnalysis` and opens its SEO Analysis tab. */
 function renderSeoTab(seoAnalysis: SEOAnalysis) {
   render(<CitationDetailModal citation={buildCrawledContent({ seo_analysis: seoAnalysis })} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: 'SEO Analysis' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'SEO Analysis' }));
 }
 
 describe('CitationDetailModal SEO analysis', () => {

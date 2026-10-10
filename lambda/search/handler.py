@@ -36,6 +36,7 @@ from shared.provider_health import record_provider_failure, record_provider_succ
 from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
 from shared.provider_pacing import provider_min_interval_seconds, wait_for_send_slot
 from shared.safe_fetch import fetch_following_validated_redirects, host_matches
+from shared.search_results import search_results_table_name
 from shared.secrets import get_api_key
 from shared.step_function_response import log_error
 
@@ -66,7 +67,7 @@ def get_extraction_config() -> dict[str, Any]:
     return _extraction_config
 
 # Environment variables
-DYNAMODB_TABLE_SEARCH_RESULTS = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+DYNAMODB_TABLE_SEARCH_RESULTS = search_results_table_name()
 RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
 # Provider config table. Default mirrors the CDK resource name so a bootstrap
 # deploy works even before env vars flow through. Audit #12.

@@ -1,5 +1,5 @@
 import {
-  useEffect, useState 
+  useEffect, useId, useState
 } from 'react';
 import { usePromptInsights } from '../../hooks/usePromptInsights';
 import type { Keyword } from '../../types';
@@ -11,24 +11,28 @@ import {
   Skeleton, SkeletonRegion
 } from '../ui/Skeleton';
 import {
+  TabBar, TabPanel
+} from '../ui/TabBar';
+import {
   CountSkeleton, InsightCardGridSkeleton, StatTilesSkeleton
 } from './InsightsSkeletons';
 
+/** Each tab is underlined in the colour of its summary tile. */
 const TABS = [
   {
     id: 'winning',
     label: 'Winning',
-    color: 'green' 
+    activeClassName: 'border-green-500 text-green-600',
   },
   {
     id: 'losing',
     label: 'Losing',
-    color: 'red' 
+    activeClassName: 'border-red-500 text-red-600',
   },
   {
     id: 'opportunities',
     label: 'Opportunities',
-    color: 'yellow' 
+    activeClassName: 'border-yellow-500 text-yellow-600',
   }
 ] as const;
 
@@ -115,6 +119,18 @@ export function PromptInsights({ keywords }: Props) {
   };
 
   const prompts = getPrompts();
+  const panelId = useId();
+  const tabs = TABS.map((tab) => ({
+    ...tab,
+    label: (
+      <>
+        {/* A fixed-width count slot, so the tabs keep their place when the counts arrive. */}
+        {tab.label} (<span className="inline-block min-w-[1.5rem] text-center tabular-nums">
+          {pending ? <CountSkeleton /> : getCount(tab.id)}
+        </span>)
+      </>
+    ),
+  }));
 
   return (
     <div className="space-y-6">
@@ -133,44 +149,27 @@ export function PromptInsights({ keywords }: Props) {
 
       <SummaryTiles insights={insights} pending={pending} />
 
-      <div className="border-b border-gray-200 overflow-x-auto">
-        <nav className="flex gap-2 sm:gap-4">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`py-2 px-1 border-b-2 text-sm font-medium ${
-                activeTab === tab.id
-                  ? `border-${tab.color}-500 text-${tab.color}-600`
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {/* A fixed-width count slot, so the tabs keep their place when the counts arrive. */}
-              {tab.label} (<span className="inline-block min-w-[1.5rem] text-center tabular-nums">
-                {pending ? <CountSkeleton /> : getCount(tab.id)}
-              </span>)
-            </button>
-          ))}
-        </nav>
-      </div>
+      <TabBar tabs={tabs} activeId={activeTab} onChange={setActiveTab} label="Prompt outcomes" panelId={panelId} />
 
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
-      {pending ? (
-        <SkeletonRegion label="Loading insights">
-          <InsightCardGridSkeleton cardClassName="h-[153px]" />
-        </SkeletonRegion>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {prompts.map(prompt => <PromptCard key={prompt.keyword} prompt={prompt} />)}
-        </div>
-      )}
+      <TabPanel id={panelId} activeId={activeTab}>
+        {pending ? (
+          <SkeletonRegion label="Loading insights">
+            <InsightCardGridSkeleton cardClassName="h-[153px]" />
+          </SkeletonRegion>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {prompts.map(prompt => <PromptCard key={prompt.keyword} prompt={prompt} />)}
+          </div>
+        )}
 
-      {prompts.length === 0 && !pending && (
-        <div className="text-center py-8 text-gray-500">
-          No {activeTab} prompts found. Run more analyses to gather data.
-        </div>
-      )}
+        {prompts.length === 0 && !pending && (
+          <div className="text-center py-8 text-gray-500">
+            No {activeTab} prompts found. Run more analyses to gather data.
+          </div>
+        )}
+      </TabPanel>
     </div>
   );
 }

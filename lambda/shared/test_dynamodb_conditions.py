@@ -5,10 +5,44 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.dynamodb_conditions import applied_conditionally, delete_existing_item, is_conditional_check_failure
+from shared.dynamodb_conditions import (
+    applied_conditionally,
+    delete_existing_item,
+    is_conditional_check_failure,
+    set_update_expression,
+)
 from testing.dynamodb_stubs import conditional_check_failure
 
 _THROTTLED = ClientError({'Error': {'Code': 'ThrottlingException', 'Message': 'slow down'}}, 'PutItem')
+_STAMP = '2026-10-07T09:00:00Z'
+
+
+class TestSetUpdateExpression:
+    def test_aliases_every_attribute_so_reserved_words_need_no_special_case(self):
+        kwargs = set_update_expression({'name': 'Aurora Airways', 'status': 'active'}, timestamp=_STAMP)
+
+        assert kwargs == {
+            'UpdateExpression': 'SET #f0 = :v0, #f1 = :v1, #f2 = :v2',
+            'ExpressionAttributeNames': {'#f0': 'name', '#f1': 'status', '#f2': 'updated_at'},
+            'ExpressionAttributeValues': {':v0': 'Aurora Airways', ':v1': 'active', ':v2': _STAMP},
+        }
+
+    def test_keeps_insertion_order_so_the_same_changes_build_the_same_write(self):
+        first = set_update_expression({'b': 2, 'a': 1}, timestamp=_STAMP)
+        second = set_update_expression({'b': 2, 'a': 1}, timestamp=_STAMP)
+
+        assert first == second
+        assert list(first['ExpressionAttributeNames'].values()) == ['b', 'a', 'updated_at']
+
+    def test_stamps_the_requested_timestamp_field_over_a_same_named_change(self):
+        kwargs = set_update_expression({'modified_at': 'stale', 'size': 3}, timestamp=_STAMP, timestamp_field='modified_at')
+
+        assert kwargs['ExpressionAttributeNames'] == {'#f0': 'modified_at', '#f1': 'size'}
+        assert kwargs['ExpressionAttributeValues'] == {':v0': _STAMP, ':v1': 3}
+
+    def test_refuses_an_empty_change_set(self):
+        with pytest.raises(ValueError, match='at least one attribute'):
+            set_update_expression({}, timestamp=_STAMP)
 
 
 @pytest.mark.parametrize(('error', 'expected'), [

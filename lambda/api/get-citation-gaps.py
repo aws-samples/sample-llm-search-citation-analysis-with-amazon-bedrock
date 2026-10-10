@@ -37,7 +37,7 @@ from shared.scope_params import (
     keywords_table_name,
     scope_from_request,
 )
-from shared.search_results import latest_run
+from shared.search_results import latest_run, search_results_table_name
 from shared.utils import extract_domain, get_brand_config
 from shared.youtube import content_type_for
 
@@ -63,7 +63,7 @@ LATEST_RUN_ITEM_LIMIT = 50
 _KEYWORD_ANALYSIS_WORKERS = 6
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 

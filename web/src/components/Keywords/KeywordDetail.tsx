@@ -5,6 +5,7 @@ import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
 import type { Search } from '../../types';
+import { summarizeSearches } from '../../formatting/searchSummary';
 import { Spinner } from '../ui/Spinner';
 import { useTheme } from '../../hooks/useTheme';
 import { getChartTheme } from '../ui/chartTheme';
@@ -78,24 +79,14 @@ export const KeywordDetail = ({
       );
       const json: unknown = await response.json();
       const data: SearchResponse = isSearchResponse(json) ? json : { searches: [] };
-      const searches: Search[] = data.searches ?? [];
-
-      const totalCitations = searches.reduce(
-        (sum: number, s: Search) => sum + (s.citations?.length ?? 0),
-        0
-      );
-      const searchCount = searches.length;
-      const firstSearch = searchCount > 0 ? searches[0] : null;
-      const sortedSearches = [...searches].sort(
-        (a: Search, b: Search) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
+      const {
+        sorted, latestTimestamp, ...totals
+      } = summarizeSearches(data.searches ?? []);
 
       setStats({
-        totalRuns: searchCount,
-        totalCitations,
-        avgCitationsPerRun: searchCount > 0 ? totalCitations / searchCount : 0,
-        lastRun: firstSearch?.timestamp ?? '',
-        searches: sortedSearches,
+        ...totals,
+        lastRun: latestTimestamp ?? '',
+        searches: sorted,
       });
     } catch (err) {
       console.error('Error fetching keyword stats:', err);

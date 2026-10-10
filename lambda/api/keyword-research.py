@@ -49,7 +49,7 @@ from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
-from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
 from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
@@ -662,18 +662,9 @@ def _update_template(
     if not changes:
         return validation_error('Nothing to update', event)
 
-    names = {'#n': 'name'}
-    values: dict[str, Any] = {':ts': get_timestamp()}
-    sets = ['updated_at = :ts']
-    for index, (field, value) in enumerate(changes.items()):
-        alias = '#n' if field == 'name' else field
-        values[f':v{index}'] = value
-        sets.append(f'{alias} = :v{index}')
     response = templates_table.update_item(
         Key={'id': template_id},
-        UpdateExpression=f"SET {', '.join(sets)}",
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
+        **set_update_expression(changes, timestamp=get_timestamp()),
         ReturnValues='ALL_NEW',
     )
     return success_response(_template_view(response['Attributes']), event)

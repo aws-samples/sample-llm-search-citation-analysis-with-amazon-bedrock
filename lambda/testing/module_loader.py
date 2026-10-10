@@ -14,6 +14,10 @@ from unittest.mock import MagicMock, patch
 
 from shared.module_files import exec_module_file
 
+# ``lambda/api``: where the hyphenated API handler files live, for the fixture
+# modules that load them from ``lambda/testing``.
+API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+
 
 def module_name_for(filename: str, suffix: str = '_under_test') -> str:
     """``get-reports-overview.py`` -> ``get_reports_overview_under_test``."""

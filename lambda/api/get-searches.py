@@ -5,7 +5,6 @@ Returns search results with optional filtering by keyword or provider.
 """
 
 import logging
-import os
 import sys
 from typing import Any
 
@@ -18,6 +17,7 @@ from shared.api_response import success_response
 from shared.bounded_reads import newest_items
 from shared.config import PROVIDERS
 from shared.decorators import api_handler, optional_limit, validate
+from shared.search_results import search_results_table_name
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -25,7 +25,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 _PROVIDER_INDEX = 'ProviderIndex'
 

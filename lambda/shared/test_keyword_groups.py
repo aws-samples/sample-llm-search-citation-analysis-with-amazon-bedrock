@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from shared import keyword_groups
+from testing.dynamodb_stubs import fake_dynamodb_resource
 
 
 def _keyword(item_id: str, text: str, *, groups: set[str] | None = None, status: str = 'active') -> dict:
@@ -314,3 +315,32 @@ class TestGroupNameKey:
             'created_at': '2026-09-18T00:00:00Z',
             'updated_at': '2026-09-18T00:00:00Z',
         }
+
+
+class TestOpenKeywordTables:
+    """The table wiring ``manage-keywords`` and ``promote-keywords`` share, with the groups table optional."""
+
+    @pytest.fixture
+    def tables(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, MagicMock]:
+        """One stub per configured table name; only the Keywords variable is set."""
+        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords-table')
+        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORD_GROUPS', raising=False)
+        return {'keywords-table': MagicMock(name='keywords'), 'groups-table': MagicMock(name='groups')}
+
+    def test_opens_both_tables_when_the_groups_variable_is_set(self, monkeypatch, tables) -> None:
+        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORD_GROUPS', 'groups-table')
+
+        opened = keyword_groups.open_keyword_tables(fake_dynamodb_resource(by_name=tables))
+
+        assert opened == (tables['keywords-table'], tables['groups-table'])
+
+    def test_leaves_the_groups_table_unset_when_its_variable_is_absent(self, tables) -> None:
+        opened = keyword_groups.open_keyword_tables(fake_dynamodb_resource(by_name=tables))
+
+        assert opened == (tables['keywords-table'], None)
+
+    def test_requires_the_keywords_variable(self, monkeypatch, tables) -> None:
+        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS')
+
+        with pytest.raises(KeyError, match='DYNAMODB_TABLE_KEYWORDS is not set'):
+            keyword_groups.open_keyword_tables(fake_dynamodb_resource(by_name=tables))

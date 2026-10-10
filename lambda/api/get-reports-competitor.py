@@ -58,7 +58,7 @@ from shared.api_response import success_response, validation_error
 from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.scope_params import load_sibling_function
-from shared.search_results import latest_run, query_keyword_items, scan_keyword_texts
+from shared.search_results import latest_run, query_keyword_items, scan_keyword_texts, search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 
 

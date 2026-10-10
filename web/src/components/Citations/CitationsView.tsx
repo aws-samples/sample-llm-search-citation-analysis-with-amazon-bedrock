@@ -13,7 +13,7 @@ import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
-import { PaginationControls } from './PaginationControls';
+import { PaginationHeader } from '../ui/PaginationHeader';
 import { Spinner } from '../ui/Spinner';
 import { paginate } from '../ui/pagination';
 import { 
@@ -76,7 +76,7 @@ export const CitationsView = ({
   );
 
   const {
-    pageItems: paginatedCitations, totalItems, showAll, totalPages, startIndex, endIndex 
+    pageItems: paginatedCitations, totalItems, startIndex
   } = paginate(filteredCitations, currentPage, itemsPerPage);
 
   // Stats
@@ -191,16 +191,14 @@ export const CitationsView = ({
 
         {/* Table */}
         <div className="bg-white rounded-lg border border-gray-200">
-          <PaginationControls
-            currentPage={currentPage}
-            totalPages={totalPages}
-            itemsPerPage={itemsPerPage}
-            totalItems={totalItems}
-            startIndex={startIndex}
-            endIndex={endIndex}
-            showAll={showAll}
+          <PaginationHeader
+            page={currentPage}
+            pageSize={itemsPerPage}
+            total={totalItems}
             onPageChange={setCurrentPage}
-            onItemsPerPageChange={handleItemsPerPageChange}
+            onPageSizeChange={handleItemsPerPageChange}
+            idPrefix="citations"
+            label="Citations pagination"
           />
 
           <div className="overflow-x-auto">

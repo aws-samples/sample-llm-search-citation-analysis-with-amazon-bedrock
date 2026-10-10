@@ -21,9 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from testing.env import KEYWORDS_TABLE_ENV, cleared_env
-from testing.module_loader import load_handler_module_offline
-
-_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+from testing.module_loader import API_DIR, load_handler_module_offline
 
 
 def promotion_handler_fixture(module_name: str):
@@ -38,7 +36,7 @@ def promotion_handler_fixture(module_name: str):
     @pytest.fixture(scope='module')
     def _loaded_handler() -> Iterator[ModuleType]:
         with patch.dict(os.environ, KEYWORDS_TABLE_ENV):
-            module = load_handler_module_offline(_API_DIR, 'promote-keywords.py', module_name)
+            module = load_handler_module_offline(API_DIR, 'promote-keywords.py', module_name)
         with cleared_env(*KEYWORDS_TABLE_ENV):
             yield module
         sys.modules.pop(module_name, None)

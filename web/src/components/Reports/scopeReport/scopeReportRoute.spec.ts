@@ -18,6 +18,15 @@ describe('scopeFromSearch', () => {
   ] as const)('reads %s as its scope', (search, scope) => {
     expect(scopeFromSearch(new URLSearchParams(search))).toStrictEqual(scope);
   });
+
+  it.each([
+    ['a path keyword over a group in the query', '?group=hotel-sol', 'spa', keywordScope('spa')],
+    ['the group in the query when the route has no keyword', '?group=hotel-sol', null, groupScope('hotel-sol')],
+    ['every keyword when the route has no keyword and the query no group', '', null, ALL_SCOPE],
+    ['the query keyword as nothing when the route carries the keyword itself', '?keyword=spa', null, ALL_SCOPE],
+  ] as const)('reads %s', (_case, search, keyword, scope) => {
+    expect(scopeFromSearch(new URLSearchParams(search), keyword)).toStrictEqual(scope);
+  });
 });
 
 describe('daysFromSearch', () => {

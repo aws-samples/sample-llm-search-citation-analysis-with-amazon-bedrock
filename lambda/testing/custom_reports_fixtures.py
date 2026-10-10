@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -16,7 +15,7 @@ from unittest.mock import MagicMock, patch
 from testing.dynamodb_stubs import fake_table
 from testing.env import setdefault_env
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module_offline
+from testing.module_loader import API_DIR, load_handler_module_offline
 
 CUSTOM_REPORTS_TABLE_NAME = 'test-custom-reports'
 REPORT_ID = '0b9a3c52-2f4e-4d39-9a51-6f1f0f6c1a11'
@@ -25,7 +24,6 @@ CALLER_EMAIL = 'Analyst@Example.com'
 CALLER_USERNAME = 'analyst@example.com'
 YOUTUBE_LINK = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 
-_API_DIRECTORY = os.path.join(os.path.dirname(__file__), '..', 'api')
 # Resolved first: test modules put `lambda/api/..`-style entries on sys.path,
 # and `Path.parents` does not collapse `..` (see test_keyword_identity.py).
 _BLOCK_VECTORS_PATH = Path(__file__).resolve().parents[2] / 'test-fixtures' / 'custom-report-blocks.json'
@@ -44,7 +42,7 @@ CALLER_CLAIMS: Mapping[str, str] = {
 def load_custom_reports_module(module_name: str) -> ModuleType:
     """Load the hyphenated handler under ``module_name`` with its table env in place."""
     setdefault_env({'DYNAMODB_TABLE_CUSTOM_REPORTS': CUSTOM_REPORTS_TABLE_NAME})
-    return load_handler_module_offline(_API_DIRECTORY, 'manage-custom-reports.py', module_name)
+    return load_handler_module_offline(API_DIR, 'manage-custom-reports.py', module_name)
 
 
 def vector_description(vector: Mapping[str, Any]) -> str:

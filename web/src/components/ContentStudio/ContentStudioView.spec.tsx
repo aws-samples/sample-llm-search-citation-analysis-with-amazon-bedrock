@@ -164,7 +164,7 @@ describe('ContentStudioView', () => {
   it('holds the high priority badge slot on the Content Ideas tab while ideas load', () => {
     renderContentStudioView({ loading: true });
 
-    expect(screen.getByRole('button', { name: 'Content Ideas' }).querySelector('.skeleton')).not.toBeNull();
+    expect(screen.getByRole('tab', { name: 'Content Ideas' }).querySelector('.skeleton')).not.toBeNull();
   });
 
   it('renders actionable idea cards when ideas are available', () => {

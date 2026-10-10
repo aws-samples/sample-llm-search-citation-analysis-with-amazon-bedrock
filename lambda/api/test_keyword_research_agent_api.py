@@ -388,8 +388,10 @@ class TestUpdateTemplate:
 
         call = table.update_item.call_args.kwargs
         assert response['statusCode'] == 200
-        assert call['UpdateExpression'] == 'SET updated_at = :ts, #n = :v0'
-        assert call['ExpressionAttributeValues'][':v0'] == 'New'
+        assert call['UpdateExpression'] == 'SET #f0 = :v0, #f1 = :v1'
+        assert (call['ExpressionAttributeNames'], call['ExpressionAttributeValues'][':v0']) == (
+            {'#f0': 'name', '#f1': 'updated_at'}, 'New',
+        )
         assert _body(response)['name'] == 'New'
 
     @pytest.mark.parametrize(('stored', 'body', 'template_id', 'message'), [
@@ -413,8 +415,8 @@ class TestUpdateTemplate:
         response = _call_templates(table, 'PUT', {'dimensions': [{'id': ' Classes ', 'label': 'Classes'}, {'id': 'trainers', 'label': 'Trainers', 'description': 'pt'}]}, template_id='t1')
 
         call = table.update_item.call_args.kwargs
-        assert call['UpdateExpression'] == 'SET updated_at = :ts, dimensions = :v0'
-        assert call['ExpressionAttributeValues'][':v0'] == cleaned
+        assert call['UpdateExpression'] == 'SET #f0 = :v0, #f1 = :v1'
+        assert (call['ExpressionAttributeNames']['#f0'], call['ExpressionAttributeValues'][':v0']) == ('dimensions', cleaned)
         assert _body(response)['dimensions'] == cleaned
 
     def test_returns_404_for_an_unknown_template(self):

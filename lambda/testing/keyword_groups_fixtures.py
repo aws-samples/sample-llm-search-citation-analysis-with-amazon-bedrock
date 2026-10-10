@@ -16,9 +16,7 @@ from unittest.mock import MagicMock, patch
 
 from testing.dynamodb_stubs import fake_dynamodb_resource, reset_tables
 from testing.env import KEYWORDS_TABLE_ENV
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+from testing.module_loader import API_DIR, load_handler_module
 
 GROUPS_TABLE_NAME = 'test-keyword-groups'
 
@@ -38,7 +36,7 @@ def load_with_groups_table(filename: str, module_name: str, keywords_table: Magi
         'DYNAMODB_TABLE_KEYWORD_GROUPS': GROUPS_TABLE_NAME,
         'CORS_ORIGIN_PARAM': '',
     }):
-        return load_handler_module(_API_DIR, filename, module_name)
+        return load_handler_module(API_DIR, filename, module_name)
 
 
 def reset_with_no_keywords(keywords_table: MagicMock, groups_table: MagicMock) -> None:

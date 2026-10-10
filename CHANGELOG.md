@@ -9,6 +9,49 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.39.0] - 2026-10-10
+
+A duplication review of the 158 production clones the jscpd gate had accepted over time classified 17 as the same
+logic written twice (11 TypeScript, 6 Python), 10 as borderline and 131 as structural (import headers, decorated
+handler signatures, the shapes the frameworks mandate). This release removes the 17 — one shared unit each, every
+copy moved onto it — plus two twins the scanner could not see. The borderline ones stay as they are; the structural
+ones stay in the baseline. TypeScript production clones go from 58 to 42, Python from 100 to 97; no behaviour changes
+except the fixes listed below.
+
+### Changed
+
+- **Dashboard.** One `TabBar`/`TabPanel` (`components/ui/TabBar.tsx`, with `role="tablist"`, roving focus and
+  arrow-key navigation) replaces nine hand-rolled tab strips (About, Prompt Insights, Keyword Research, competitor
+  analysis, the brand and citation detail modals, the raw-response file viewer and explorer, Content Studio). One
+  `PaginationHeader` replaces the Citations `PaginationControls` and the Recent Searches copy (`ui/pagination.ts`
+  gains `pageWindow` and exports `SHOW_ALL_ITEMS`). `KpiDefinitionList` renders the KPI definitions once for the
+  Visibility tab and the reports; `RefreshTextButton` gains `loading` and `showIcon` so panels stop drawing their own
+  refresh buttons; `BrandListBody` is the one body behind the first-party and competitor brand lists.
+  `formatting/searchSummary.ts` (`summarizeSearches`) computes the run and citation totals and the newest run once
+  for the keyword detail, the Recent Searches groups and the Searches view. `hooks/useGuardedLoad.ts` is the one
+  load-on-mount/reload/mutate state machine behind `useKeywordGroups`, `useSavedTemplates` and `useMarkets`;
+  `useBrandMentions` runs on `useAnalysisEndpoint` (which gains `reset()`); `useBrandConfig`'s API returns decoded
+  JSON through `apiGet`/`apiPost`. The report scope is derived in one place: `scopeFromSearch` takes the keyword as
+  an optional argument, and the Brand Visibility and Executive Summary reports use it instead of their own copies.
+- **Lambdas.** `shared.decorators.json_object_body` is the one home of "the body must be a JSON object" (alerts,
+  keyword promotion, run triggering, markets, custom reports). `shared.keyword_groups.open_keyword_tables` opens the
+  Keywords and KeywordGroups tables for the handlers that need both. Every module that reads the SearchResults table
+  name does so through `shared.search_results.search_results_table_name()` (12 modules used to spell it three ways).
+  `shared.dynamodb_conditions.set_update_expression` builds the `SET` update for the saved-template edits of
+  Keyword Research and Content Studio. `shared.research_jobs` bounds planned, next-round and signals-step query lists
+  with one loop capped at `AGENT_MAX_QUERIES_PER_ROUND`. The test fixtures take the handler directory from one
+  `testing.module_loader.API_DIR`.
+
+### Fixed
+
+- **Keyword detail showed the wrong "last run".** The detail panel took the first search of the list as the latest;
+  `summarizeSearches` sorts by timestamp, as the Recent Searches tab always did.
+- **Saved-template edits aliased only `name`.** The Keyword Research template update used raw attribute names for
+  every other field, so a field named after a DynamoDB reserved word (`status`, `data`, ...) would have been
+  rejected; the shared builder aliases every attribute.
+- **Tab strips were buttons.** The nine migrated tab strips now expose `tablist`/`tab`/`tabpanel` roles, `aria-selected`
+  and keyboard navigation.
+
 ## [2.38.3] - 2026-10-10
 
 ### Changed

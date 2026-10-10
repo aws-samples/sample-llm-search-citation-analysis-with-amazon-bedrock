@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import {
+  useId, useState
+} from 'react';
 import type { ReactNode } from 'react';
 import type {
   S3Item, RawResponseContent, RawResponseDocument 
@@ -13,6 +15,9 @@ import {
 } from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
 import { providerColor } from '../../constants/providers';
+import {
+  TabBar, TabPanel, type TabDefinition
+} from '../ui/TabBar';
 
 interface FileViewerProps {
   file: S3Item;
@@ -22,6 +27,26 @@ interface FileViewerProps {
 }
 
 type ViewTab = 'overview' | 'raw' | 'extracted' | 'metadata';
+
+const VIEW_TABS: ReadonlyArray<TabDefinition<ViewTab>> = [
+  {
+    id: 'overview',
+    label: 'Overview',
+  },
+  {
+    id: 'raw',
+    label: 'Raw API Response',
+    shortLabel: 'Response',
+  },
+  {
+    id: 'extracted',
+    label: 'Extracted',
+  },
+  {
+    id: 'metadata',
+    label: 'Metadata',
+  },
+];
 
 const getProviderColor = (provider: string): string =>
   providerColor(provider.toLowerCase())?.badge ?? 'bg-gray-100 text-gray-800';
@@ -41,6 +66,7 @@ export const FileViewer = ({
   file, content, onDownload, loading 
 }: FileViewerProps) => {
   const [activeTab, setActiveTab] = useState<ViewTab>('overview');
+  const panelId = useId();
 
   const doc: RawResponseDocument | null = hasDocumentContent(content)
     ? content.content
@@ -64,8 +90,10 @@ export const FileViewer = ({
       {doc && (
         <>
           <QuickInfoCards doc={doc} />
-          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
-          <TabContent doc={doc} activeTab={activeTab} />
+          <TabBar tabs={VIEW_TABS} activeId={activeTab} onChange={setActiveTab} label="File views" panelId={panelId} />
+          <TabPanel id={panelId} activeId={activeTab} className="bg-white border border-gray-200 rounded-lg">
+            <TabContent doc={doc} activeTab={activeTab} />
+          </TabPanel>
         </>
       )}
 
@@ -148,43 +176,6 @@ const QuickInfoCards = ({ doc }: QuickInfoCardsProps) => (
   </div>
 );
 
-interface TabNavigationProps {
-  activeTab: ViewTab;
-  setActiveTab: (tab: ViewTab) => void;
-}
-
-const TabNavigation = ({
-  activeTab, setActiveTab 
-}: TabNavigationProps) => {
-  const tabs: ViewTab[] = ['overview', 'raw', 'extracted', 'metadata'];
-
-  return (
-    <div className="border-b border-gray-200 overflow-x-auto">
-      <nav className="-mb-px flex space-x-4 sm:space-x-8 min-w-max">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`py-3 px-1 border-b-2 font-medium text-xs sm:text-sm capitalize whitespace-nowrap ${
-              activeTab === tab
-                ? 'border-gray-900 text-gray-900'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            {tab === 'raw' ? (
-              <>
-                <span className="hidden sm:inline">Raw API </span>Response
-              </>
-            ) : (
-              tab
-            )}
-          </button>
-        ))}
-      </nav>
-    </div>
-  );
-};
-
 interface TabContentProps {
   doc: RawResponseDocument;
   activeTab: ViewTab;
@@ -193,12 +184,12 @@ interface TabContentProps {
 const TabContent = ({
   doc, activeTab 
 }: TabContentProps) => (
-  <div className="bg-white border border-gray-200 rounded-lg">
+  <>
     {activeTab === 'overview' && <OverviewTab doc={doc} />}
     {activeTab === 'raw' && <JsonTab data={doc.raw_api_response} />}
     {activeTab === 'extracted' && <JsonTab data={doc.extracted} />}
     {activeTab === 'metadata' && <JsonTab data={doc.metadata} />}
-  </div>
+  </>
 );
 
 interface OverviewTabProps {doc: RawResponseDocument;}

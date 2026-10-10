@@ -21,6 +21,7 @@ from botocore.exceptions import ClientError
 
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import is_conditional_check_failure
+from shared.env_vars import resolve_table_env
 from shared.markets import GLOBAL_MARKET_ID, MAX_MARKETS, is_market_filter_id, keyword_market_id
 from shared.string_lists import normalize_string_list
 from shared.utils import get_timestamp
@@ -44,6 +45,19 @@ _SCOPE_ID_FIELDS = {'groups': 'group_ids', 'keywords': 'keyword_ids'}
 # returns active keywords in every mode, so the value lives here rather than as
 # a literal in each caller.
 ACTIVE_KEYWORD_STATUS = 'active'
+
+
+def open_keyword_tables(dynamodb: Any) -> tuple[Any, Any | None]:
+    """The Keywords table and the KeywordGroups table, ``None`` for the latter when it is not configured.
+
+    The groups variable stays optional until every deployment carries the
+    groups table; a handler given ``None`` treats membership requests as
+    unsupported. Both names are read here, once, for every handler that writes
+    keywords.
+    """
+    keywords_table = dynamodb.Table(resolve_table_env('DYNAMODB_TABLE_KEYWORDS'))
+    groups_table_name = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
+    return keywords_table, dynamodb.Table(groups_table_name) if groups_table_name else None
 
 
 def normalize_group_name(name: str) -> str:

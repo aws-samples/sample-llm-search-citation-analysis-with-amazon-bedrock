@@ -58,10 +58,11 @@ from shared.dynamodb_batch import (
     batch_get_items,
     query_latest_per_key,
 )
-from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
 from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.search_results import search_results_table_name
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 from shared.stale_jobs import stale_elapsed_seconds
 from shared.utils import extract_domain, get_brand_config, get_timestamp, utc_now
@@ -71,7 +72,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource("dynamodb")
 
-SEARCH_RESULTS_TABLE = os.environ["DYNAMODB_TABLE_SEARCH_RESULTS"]
+SEARCH_RESULTS_TABLE = search_results_table_name()
 CRAWLED_CONTENT_TABLE = os.environ["DYNAMODB_TABLE_CRAWLED_CONTENT"]
 CONTENT_STUDIO_TABLE = os.environ["DYNAMODB_TABLE_CONTENT_STUDIO"]
 CONTENT_BRIEF_BATCHES_TABLE = os.environ["DYNAMODB_TABLE_CONTENT_BRIEF_BATCHES"]
@@ -2257,26 +2258,14 @@ def _update_template(
     if not changes:
         return validation_error("Nothing to update", event)
 
-    values: dict[str, Any] = {":updated_at": get_timestamp()}
-    names: dict[str, str] = {}
-    assignments = ["updated_at = :updated_at"]
-    for index, (field_name, value) in enumerate(changes.items()):
-        name_token = f"#field{index}"
-        value_token = f":value{index}"
-        names[name_token] = field_name
-        values[value_token] = value
-        assignments.append(f"{name_token} = {value_token}")
+    updated_at = get_timestamp()
     response = table.update_item(
         Key={"id": template_id},
-        UpdateExpression=f"SET {', '.join(assignments)}",
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
+        **set_update_expression(changes, timestamp=updated_at),
         ReturnValues="ALL_NEW",
     )
     attributes = response.get("Attributes")
-    updated = (
-        attributes if isinstance(attributes, dict) else {**existing, **changes, "updated_at": values[":updated_at"]}
-    )
+    updated = attributes if isinstance(attributes, dict) else {**existing, **changes, "updated_at": updated_at}
     return success_response(_template_view(updated), event)
 
 

@@ -187,6 +187,12 @@ class TestSubsetTriggerLegacyKeywords:
 
         assert (status, body['error']) == (400, error)
 
+    def test_rejects_a_body_that_is_not_an_object_without_starting_a_run(self):
+        status, body = _trigger(['hotel coruna spa'])
+
+        assert (status, body) == (400, {'error': 'Request body must be a JSON object', 'field': 'body'})
+        mock_stepfunctions.start_execution.assert_not_called()
+
     def test_refuses_non_admin_callers_before_reading_the_body(self):
         status, _ = _trigger({'keywords': ['a']}, groups=None)
 

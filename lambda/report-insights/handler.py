@@ -66,6 +66,7 @@ from shared.markets import (
 from shared.models import ModelRole, get_model_id, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ NARRATIVE_MAX_TOKENS = 3000
 #: Room for the KPI and insight JSON inside its prompt tag (``prompt_safety`` caps a field at 4000 by default).
 FACTS_MAX_LENGTH = 60000
 
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 BRAND_CONFIG_TABLE = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
 REPORT_INSIGHTS_TABLE = os.environ['DYNAMODB_TABLE_REPORT_INSIGHTS']
