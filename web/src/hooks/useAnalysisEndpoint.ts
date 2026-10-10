@@ -152,14 +152,14 @@ async function fetchAnalysisResponse<TResult>(
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
  *
- * @returns `data`, `loading`, `error` and the configured `fetchData`.
+ * @returns `data`, `loading`, `error`, the configured `fetchData` and `reset`.
  */
 export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>(config: AnalysisEndpointConfig<TArgs, TResponse>) {
   const [data, setData] = useState<TResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const {
-    beginRequest, isMounted
+    beginRequest, isMounted, cancelRequest
   } = useLatestRequest();
   const { errorContext } = config;
 
@@ -202,10 +202,21 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     [config, runRequest],
   );
 
+  // Stryker disable next-line ArrayDeclaration: React dependency list, not behaviour
+  const reset = useCallback((): void => {
+    // The dropped request's own settle no longer clears loading (it is not current), so clear it here.
+    cancelRequest();
+    setData(null);
+    setLoading(false);
+    setError(null);
+  }, [cancelRequest]);
+
   return {
     data,
     loading,
     error,
     fetchData,
+    /** Back to the idle state: the request in flight is dropped, `data` and `error` cleared. */
+    reset,
   };
 }

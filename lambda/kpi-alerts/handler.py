@@ -57,6 +57,7 @@ from shared.markets import (
     market_scoped_key,
     markets_by_id,
 )
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ logger.setLevel(logging.INFO)
 
 _MAX_WORKERS = 10
 
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 KEYWORD_GROUPS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORD_GROUPS']
 BRAND_CONFIG_TABLE = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']

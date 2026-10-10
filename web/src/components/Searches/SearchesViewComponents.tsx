@@ -1,4 +1,5 @@
 import type { Search } from '../../types';
+import { summarizeSearches } from '../../formatting/searchSummary';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_DOWN_PATHS, DOWNLOAD_PATHS 
@@ -10,7 +11,7 @@ export interface KeywordGroup {
   latestTimestamp: string;
   totalRuns: number;
   totalCitations: number;
-  avgCitations: number;
+  avgCitationsPerRun: number;
   providers: string[];
 }
 
@@ -43,25 +44,19 @@ export const groupSearchesByKeyword = (
 };
 
 function buildKeywordGroup(keyword: string, keywordSearches: Search[]): KeywordGroup {
-  const sortedSearches = [...keywordSearches].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-  const latestSearch = sortedSearches[0];
-
-  const totalCitations = keywordSearches.reduce(
-    (sum, s) => sum + (s.citations?.length ?? 0),
-    0
-  );
-  const uniqueProviders = [...new Set(keywordSearches.map((s) => s.provider))];
+  const {
+    latestTimestamp, totalRuns, totalCitations, avgCitationsPerRun
+  } = summarizeSearches(keywordSearches);
 
   return {
     keyword,
     searches: keywordSearches,
-    latestTimestamp: latestSearch.timestamp,
-    totalRuns: keywordSearches.length,
+    // A group is only built for a keyword with at least one search, so the fallback never shows.
+    latestTimestamp: latestTimestamp ?? '',
+    totalRuns,
     totalCitations,
-    avgCitations: totalCitations / keywordSearches.length,
-    providers: uniqueProviders,
+    avgCitationsPerRun,
+    providers: [...new Set(keywordSearches.map((s) => s.provider))],
   };
 }
 
@@ -190,96 +185,6 @@ const DownloadIcon = () => (
   <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
 );
 
-export interface PaginationHeaderProps {
-  totalItems: number;
-  showAll: boolean;
-  startIndex: number;
-  endIndex: number;
-  totalPages: number;
-  currentPage: number;
-  setCurrentPage: (page: number) => void;
-  itemsPerPage: number;
-  onItemsPerPageChange: (value: number) => void;
-}
-
-export const PaginationHeader = ({
-  totalItems,
-  showAll,
-  startIndex,
-  endIndex,
-  totalPages,
-  currentPage,
-  setCurrentPage,
-  itemsPerPage,
-  onItemsPerPageChange,
-}: PaginationHeaderProps) => (
-  <div className="p-3 sm:p-4 border-b border-gray-200">
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm">
-      <div className="flex items-center gap-2">
-        <label htmlFor="searches-items-per-page" className="text-gray-500">Show:</label>
-        <select
-          id="searches-items-per-page"
-          name="searches-items-per-page"
-          value={itemsPerPage}
-          onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-          className="px-2 sm:px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value={25}>25</option>
-          <option value={50}>50</option>
-          <option value={100}>100</option>
-          <option value={-1}>All ({totalItems})</option>
-        </select>
-        <span className="text-gray-500 text-xs sm:text-sm">
-          {showAll
-            ? `All ${totalItems}`
-            : `${startIndex + 1}-${Math.min(endIndex, totalItems)} of ${totalItems}`}
-        </span>
-      </div>
-      {!showAll && totalPages > 1 && (
-        <PaginationControls
-          currentPage={currentPage}
-          totalPages={totalPages}
-          setCurrentPage={setCurrentPage}
-        />
-      )}
-    </div>
-  </div>
-);
-
-interface PaginationControlsProps {
-  currentPage: number;
-  totalPages: number;
-  setCurrentPage: (page: number) => void;
-}
-
-const PaginationControls = ({
-  currentPage, totalPages, setCurrentPage
-}: PaginationControlsProps) => (
-  <div className="flex items-center gap-1 overflow-x-auto">
-    <PageButton label="First" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} />
-    <PageButton label="Prev" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} />
-    <span className="px-2 sm:px-3 py-1 text-gray-700 text-xs sm:text-sm">{currentPage}/{totalPages}</span>
-    <PageButton label="Next" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} />
-    <PageButton label="Last" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} />
-  </div>
-);
-
-const PageButton = ({
-  label, onClick, disabled
-}: {
-  label: string;
-  onClick: () => void;
-  disabled: boolean
-}) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
-    className="px-2 py-1 text-gray-500 hover:bg-gray-100 rounded disabled:opacity-50 text-xs sm:text-sm"
-  >
-    {label}
-  </button>
-);
-
 interface KeywordRowProps {
   group: KeywordGroup;
   isExpanded: boolean;
@@ -311,7 +216,7 @@ export const KeywordRow = ({
       <td className="px-6 py-4 text-sm">
         <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{group.totalCitations}</span>
       </td>
-      <td className="px-6 py-4 text-sm text-gray-500">{group.avgCitations.toFixed(1)}</td>
+      <td className="px-6 py-4 text-sm text-gray-500">{group.avgCitationsPerRun.toFixed(1)}</td>
       <td className="px-6 py-4 text-sm text-gray-500">{new Date(group.latestTimestamp).toLocaleString()}</td>
       <td className="px-6 py-4">
         <button

@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { VISIBILITY_DEFINITIONS } from '../../constants/kpiDefinitions';
 import { Disclosure } from '../ui/Disclosure';
+import { KpiDefinitionList } from '../ui/KpiDefinitionList';
 
 /**
  * Every tooltip of the tab written out: how each KPI and its change are
@@ -12,16 +13,7 @@ export function VisibilityDefinitions() {
   return (
     <section aria-labelledby={headingId} className="bg-white rounded-lg shadow p-4">
       <Disclosure title="How these KPIs are measured" headingLevel={3} headingClassName="text-lg font-medium" headingId={headingId}>
-        <dl className="grid gap-x-6 gap-y-2 text-xs text-gray-600 dark:text-gray-400 md:grid-cols-2">
-          {VISIBILITY_DEFINITIONS.map(({
-            label, definition
-          }) => (
-            <div key={label}>
-              <dt className="font-medium text-gray-900 dark:text-white">{label}</dt>
-              <dd>{definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <KpiDefinitionList definitions={VISIBILITY_DEFINITIONS} />
       </Disclosure>
     </section>
   );

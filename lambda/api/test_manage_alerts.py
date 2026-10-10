@@ -565,3 +565,20 @@ class TestContentChanges:
         assert status == 400
         assert body == {'error': 'Unknown keyword group id', 'field': 'group_id'}
         assert tables.changes.put_item.call_count == 0
+
+
+class TestObjectBodies:
+    """Both admin writes take a JSON object; the guard is ``shared.decorators.json_object_body``."""
+
+    @pytest.mark.parametrize(
+        ('send', 'written'),
+        [
+            pytest.param(_put_settings, 'settings', id='settings'),
+            pytest.param(_post_content_change, 'changes', id='content-change'),
+        ],
+    )
+    def test_rejects_a_list_body_without_writing(self, alert_api, tables, send, written: str) -> None:
+        status, body = send(alert_api, [_PUBLISHED_PAGE])
+
+        assert (status, body) == (400, {'error': 'Request body must be a JSON object', 'field': 'body'})
+        assert getattr(tables, written).put_item.call_count == 0

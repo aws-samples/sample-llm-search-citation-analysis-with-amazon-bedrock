@@ -1,5 +1,6 @@
 import type { KpiDefinition } from '../../../constants/kpiDefinitions';
 import { Disclosure } from '../../ui/Disclosure';
+import { KpiDefinitionList } from '../../ui/KpiDefinitionList';
 import { ReportSection } from './ReportSection';
 
 interface Props {
@@ -21,14 +22,7 @@ export function KpiDefinitionsSection({ definitions }: Props) {
         headingLevel={2}
         headingClassName="text-base font-semibold text-gray-900 dark:text-white"
       >
-        <dl className="grid gap-3 text-xs text-gray-700 dark:text-gray-300 sm:grid-cols-2">
-          {definitions.map((entry) => (
-            <div key={entry.label}>
-              <dt className="font-semibold text-gray-900 dark:text-white">{entry.label}</dt>
-              <dd className="mt-1">{entry.definition}</dd>
-            </div>
-          ))}
-        </dl>
+        <KpiDefinitionList definitions={definitions} />
       </Disclosure>
     </ReportSection>
   );

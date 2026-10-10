@@ -29,10 +29,8 @@ The list is one BrandConfig item (``config_id = 'markets'``).
 
 from __future__ import annotations
 
-import functools
 import logging
 import sys
-from collections.abc import Callable
 from typing import Any
 
 import boto3
@@ -42,7 +40,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared import auth
 from shared.api_response import api_response, validation_error
-from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
+from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, json_object_body, route_handler
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_store import validate_keyword_text
@@ -61,28 +59,11 @@ from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
 
-_BODY_NOT_AN_OBJECT = 'Request body must be a JSON object'
-
 dynamodb = boto3.resource('dynamodb')
 BRAND_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_BRAND_CONFIG')
 KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 brand_config_table = dynamodb.Table(BRAND_CONFIG_TABLE)
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
-
-
-def _admin_json_route(route: Callable[[dict[str, Any], Any, dict[str, Any]], dict[str, Any]]) -> Callable[..., dict[str, Any]]:
-    """An Admin-only route taking a JSON object body (``route(event, context, body)``).
-
-    The group is checked before the body is parsed, and a body that is not an
-    object is answered with a 400 before ``route`` runs.
-    """
-    @functools.wraps(route)
-    def with_object_body(event: dict[str, Any], context: Any, body: Any) -> dict[str, Any]:
-        if isinstance(body, dict):
-            return route(event, context, body)
-        return validation_error(_BODY_NOT_AN_OBJECT, event, 'body')
-
-    return auth.require_group(auth.ADMIN_GROUP)(parse_json_body(with_object_body))
 
 
 def _markets_response(markets: list[Market], updated_at: Any, event: dict[str, Any]) -> dict[str, Any]:
@@ -112,7 +93,8 @@ def _market_ids_in_use() -> set[str]:
     return {row['market_id'] for row in rows if isinstance(row.get('market_id'), str) and row['market_id']}
 
 
-@_admin_json_route
+@auth.require_group(auth.ADMIN_GROUP)
+@json_object_body
 def _put_markets(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
     markets, error = validate_markets(body.get('markets'))
     if markets is None:
@@ -149,7 +131,8 @@ def _requested_markets(raw: object) -> tuple[list[Market] | None, str | None]:
     return [configured[market_id] for market_id in wanted], None
 
 
-@_admin_json_route
+@auth.require_group(auth.ADMIN_GROUP)
+@json_object_body
 def _post_markets(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
     """The two POST actions: ``{"propose": {...}}`` proposes a market, anything else suggests local keywords.
 

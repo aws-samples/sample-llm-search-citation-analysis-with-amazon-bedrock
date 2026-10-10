@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,7 +22,7 @@ from testing.content_brief_fixtures import (
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
 from testing.env import setdefault_env
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 CONTENT_STUDIO_TABLE_NAME = "test-content-studio"
 CONTENT_BRIEF_BATCHES_TABLE_NAME = "test-content-brief-batches"
@@ -47,8 +46,7 @@ _STREAM_SERIALIZER = TypeSerializer()
 def load_content_studio_module(module_name: str) -> Any:
     """Load the hyphenated handler under an isolated name with its required env."""
     setdefault_env(_CONTENT_STUDIO_ENVIRONMENT)
-    api_directory = os.path.join(os.path.dirname(__file__), "..", "api")
-    return load_handler_module(api_directory, "content-studio.py", module_name)
+    return load_handler_module(API_DIR, "content-studio.py", module_name)
 
 
 @contextmanager

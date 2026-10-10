@@ -2,8 +2,8 @@ import {
   useState, useEffect, useCallback
 } from 'react';
 import {
-  API_BASE_URL, authenticatedFetch, ApiRequestError
-} from '../infrastructure';
+  apiGet, apiPost
+} from '../api/client';
 import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult
 } from '../types';
@@ -12,11 +12,12 @@ import {
 } from '../constants/brandConfigDefaults';
 import { decodeSuggestedDomains } from '../api/competitorDomainsDecoders';
 
-interface BrandConfigResponse {config?: BrandConfig;}
+/** The config a mutation echoes back; the hook fills in the defaults for anything it omits. */
+export interface BrandConfigResponse {config?: Partial<BrandConfig>;}
 
-interface PresetsResponse {presets: IndustryPresets;}
+export interface PresetsResponse {presets: IndustryPresets;}
 
-interface ExpandAllBrandsResponse {
+export interface ExpandAllBrandsResponse {
   existing_brands?: string[];
   parent_companies?: string[];
   suggestions?: string[];
@@ -25,7 +26,7 @@ interface ExpandAllBrandsResponse {
   error?: string;
 }
 
-interface FindCompetitorsResponse {
+export interface FindCompetitorsResponse {
   first_party_brands: string[];
   competitors?: string[];
   competitor_details?: unknown;
@@ -33,56 +34,44 @@ interface FindCompetitorsResponse {
   error?: string;
 }
 
-/** API functions for brand config - injectable for testing */
+/**
+ * The brand-config routes, each answering its decoded JSON body and rejecting
+ * a non-2xx status with an `ApiRequestError`; injectable for testing.
+ */
 export interface BrandConfigApi {
-  fetchConfig: () => Promise<Response>;
-  fetchPresets: () => Promise<Response>;
-  saveConfig: (config: Partial<BrandConfig>) => Promise<Response>;
+  /** The stored config; the hook fills in the defaults for anything it omits. */
+  fetchConfig: () => Promise<Partial<BrandConfig>>;
+  fetchPresets: () => Promise<PresetsResponse>;
+  saveConfig: (config: Partial<BrandConfig>) => Promise<BrandConfigResponse>;
   expandAllBrands: (body: {
     existing_brands: string[];
     industry: string;
     brand_type: string
-  }) => Promise<Response>;
+  }) => Promise<ExpandAllBrandsResponse>;
   findCompetitors: (body: {
     first_party_brands: string[];
     industry: string;
     existing_competitors: string[]
-  }) => Promise<Response>;
+  }) => Promise<FindCompetitorsResponse>;
 }
 
-const BRAND_CONFIG_URL = `${API_BASE_URL}/brand-config`;
+const BRAND_CONFIG_PATH = '/brand-config';
 
-function postBrandConfig(path: string, body: unknown): Promise<Response> {
-  return authenticatedFetch(`${BRAND_CONFIG_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
-/** Default API implementation using authenticatedFetch */
+/** The routes as the shared API client calls them. */
 const defaultBrandConfigApi: BrandConfigApi = {
-  fetchConfig: () => authenticatedFetch(BRAND_CONFIG_URL),
-  fetchPresets: () => authenticatedFetch(`${BRAND_CONFIG_URL}/presets`),
-  saveConfig: (config) => postBrandConfig('', config),
-  expandAllBrands: (body) => postBrandConfig('/expand-all', body),
-  findCompetitors: (body) => postBrandConfig('/find-competitors', body),
+  fetchConfig: () => apiGet(BRAND_CONFIG_PATH),
+  fetchPresets: () => apiGet(`${BRAND_CONFIG_PATH}/presets`),
+  saveConfig: (config) => apiPost(BRAND_CONFIG_PATH, config),
+  expandAllBrands: (body) => apiPost(`${BRAND_CONFIG_PATH}/expand-all`, body),
+  findCompetitors: (body) => apiPost(`${BRAND_CONFIG_PATH}/find-competitors`, body),
 };
-
-/** Parses a JSON body, refusing a non-2xx status the same way for every route. */
-async function readJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-  }
-  return await response.json() as T;
-}
 
 /**
  * One brand-expansion call: the decoded answer on success; on any failure the
  * error is logged and `fallback` builds the result from its message.
  */
 async function runExpansion<TResponse, TResult>(
-  request: () => Promise<Response>,
+  request: () => Promise<TResponse>,
   adopt: (data: TResponse) => TResult,
   failure: {
     log: string;
@@ -91,7 +80,7 @@ async function runExpansion<TResponse, TResult>(
   }
 ): Promise<TResult> {
   try {
-    return adopt(await readJson<TResponse>(await request()));
+    return adopt(await request());
   } catch (err) {
     console.error(failure.log, err);
     return failure.fallback(err instanceof Error ? err.message : failure.message);
@@ -111,7 +100,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   const fetchConfig = useCallback(async () => {
     try {
-      const data = await readJson<BrandConfig>(await api.fetchConfig());
+      const data = await api.fetchConfig();
       setConfig({
         ...DEFAULT_CONFIG,
         ...data
@@ -125,7 +114,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   const fetchPresets = useCallback(async () => {
     try {
-      const data = await readJson<PresetsResponse>(await api.fetchPresets());
+      const data = await api.fetchPresets();
       setPresets(data.presets);
     } catch {
       // Use default presets if API fails (e.g., not deployed yet)
@@ -150,20 +139,16 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   }, [fetchConfig, fetchPresets]);
 
   /**
-   * Replaces the local config with the one a mutation echoes back, when the
-   * API answers OK; a failed request leaves the optimistic local state as is.
+   * Replaces the local config with the one a mutation echoes back; a failed
+   * request leaves the optimistic local state as is.
    */
-  const adoptServerConfig = useCallback(async (request: () => Promise<Response>, failureNote: string) => {
+  const adoptServerConfig = useCallback(async (request: () => Promise<BrandConfigResponse>, failureNote: string) => {
     try {
-      const response = await request();
-
-      if (response.ok) {
-        const data = await response.json() as BrandConfigResponse;
-        setConfig({
-          ...DEFAULT_CONFIG,
-          ...data.config
-        });
-      }
+      const data = await request();
+      setConfig({
+        ...DEFAULT_CONFIG,
+        ...data.config
+      });
     } catch {
       console.warn(failureNote);
     }

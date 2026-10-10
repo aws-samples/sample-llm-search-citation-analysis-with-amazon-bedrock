@@ -28,8 +28,8 @@ describe('useBrandConfig default API', () => {
     await renderLoadedHook(() => useBrandConfig());
 
     expect(mockAuthenticatedFetch.mock.calls).toStrictEqual([
-      [BRAND_CONFIG_URL],
-      [`${BRAND_CONFIG_URL}/presets`],
+      [BRAND_CONFIG_URL, { signal: undefined }],
+      [`${BRAND_CONFIG_URL}/presets`, { signal: undefined }],
     ]);
   });
 

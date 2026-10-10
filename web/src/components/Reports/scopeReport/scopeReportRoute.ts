@@ -23,9 +23,13 @@ export function trendPeriodFor(days: number): PeriodType {
   return days > DEFAULT_SCOPE_REPORT_DAYS ? 'week' : 'day';
 }
 
-/** The scope in the URL: a keyword wins over a group; neither means every keyword. */
-export function scopeFromSearch(search: URLSearchParams): ReportScope {
-  const keyword = search.get('keyword');
+/**
+ * The scope in the URL: a keyword wins over a group; neither means every
+ * keyword. A route that carries the keyword outside the query (the path
+ * parameter of `/reports/visibility/:keyword`) passes it as `keyword`,
+ * `null` when it has none; `?keyword=` is read only when it passes nothing.
+ */
+export function scopeFromSearch(search: URLSearchParams, keyword: string | null = search.get('keyword')): ReportScope {
   if (keyword) {
     return {
       kind: 'keyword',

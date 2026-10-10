@@ -19,6 +19,7 @@ import {
   resolveResearchStatus
 } from '../../formatting/researchStatus';
 import { ResearchListSkeleton } from './ResearchListSkeleton';
+import { RefreshTextButton } from '../ui/RefreshTextButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
@@ -50,6 +51,16 @@ const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
 const getItemTitle = (item: KeywordResearchItem): string | undefined =>
   item.type === 'competitor' ? (item.domain ?? item.url) : (item.config?.seed ?? item.seed_keyword);
 
+const EmptyState = () => (
+  <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+    <StrokeIcon className="w-12 h-12 mx-auto text-gray-300" paths={CLOCK_PATHS} />
+    <p className="mt-4 text-sm text-gray-500">No research history yet</p>
+    <p className="text-xs text-gray-400 mt-1">
+      Start by expanding a keyword or analyzing a competitor
+    </p>
+  </div>
+);
+
 export const ResearchHistory = ({
   history,
   loading,
@@ -70,7 +81,12 @@ export const ResearchHistory = ({
 
   return (
     <div className="space-y-4">
-      <Header loading={loading} onRefresh={onRefresh} />
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-600">
+          View your past keyword research and competitor analyses.
+        </p>
+        <RefreshTextButton onRefresh={onRefresh} loading={loading} showIcon />
+      </div>
 
       {loading && history.length === 0 && <ResearchListSkeleton label="Loading history" detailsGapClassName="mt-2" />}
       {!loading && history.length === 0 && <EmptyState />}
@@ -93,39 +109,6 @@ export const ResearchHistory = ({
     </div>
   );
 };
-
-interface HeaderProps {
-  loading: boolean;
-  onRefresh: () => void;
-}
-
-const Header = ({
-  loading, onRefresh
-}: HeaderProps) => (
-  <div className="flex items-center justify-between">
-    <p className="text-sm text-gray-600">
-      View your past keyword research and competitor analyses.
-    </p>
-    <button
-      onClick={onRefresh}
-      disabled={loading}
-      className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2"
-    >
-      <StrokeIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} paths={REFRESH_PATHS} />
-      Refresh
-    </button>
-  </div>
-);
-
-const EmptyState = () => (
-  <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-    <StrokeIcon className="w-12 h-12 mx-auto text-gray-300" paths={CLOCK_PATHS} />
-    <p className="mt-4 text-sm text-gray-500">No research history yet</p>
-    <p className="text-xs text-gray-400 mt-1">
-      Start by expanding a keyword or analyzing a competitor
-    </p>
-  </div>
-);
 
 interface HistoryItemProps extends Pick<ResearchRunViewProps, 'onRetry' | 'onKeywordsAdded'> {
   item: KeywordResearchItem;

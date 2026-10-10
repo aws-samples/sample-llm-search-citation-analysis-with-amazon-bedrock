@@ -6,12 +6,10 @@ import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import {
   KpiDefinitionsSection, ReportLayout
 } from '../layout';
-import type { ReportScope } from '../../../types';
+import { scopeFromSearch } from '../scopeReport/scopeReportRoute';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
-import {
-  ALL_SCOPE, describeReportScope 
-} from '../../ui/reportScope';
+import { describeReportScope } from '../../ui/reportScope';
 import { useExecutiveSummary } from './useExecutiveSummary';
 import { HeadlineSection } from './sections/HeadlineSection';
 import { TrendSnapshotSection } from './sections/TrendSnapshotSection';
@@ -38,13 +36,10 @@ import { NextActionsSection } from './sections/NextActionsSection';
  */
 export function ExecutiveSummaryReport() {
   const [searchParams] = useSearchParams();
+  // The summary has no per-keyword form, so only `?group=` can narrow it.
+  const scope = scopeFromSearch(searchParams, null);
   const navigate = useNavigate();
   const { groups } = useKeywordGroups();
-  const groupId = searchParams.get('group');
-  const scope: ReportScope = groupId ? {
-    kind: 'group',
-    groupId 
-  } : ALL_SCOPE;
   const data = useExecutiveSummary(undefined, scope);
   const overview = {
     data: data.data,

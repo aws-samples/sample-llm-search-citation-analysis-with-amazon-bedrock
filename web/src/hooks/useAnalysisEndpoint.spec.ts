@@ -7,6 +7,7 @@ import {
   createMockMalformedResponse,
   type EndpointMockFetchOptions,
 } from '../test/fetchResponses';
+import { idleEndpointState } from '../test/idleEndpointState';
 import {
   renderProbeEndpoint,
   renderAnsweringProbeEndpoint,
@@ -25,16 +26,14 @@ import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 
 describe('useAnalysisEndpoint', () => {
+  /** The exact state before any fetch and again after `reset`. */
+  const IDLE_STATE = idleEndpointState('fetchData', 'reset');
+
   describe('initial state', () => {
     it('returns null data, loading false, and null error before any fetch', () => {
       const { result } = renderProbeEndpoint();
 
-      expect(result.current).toStrictEqual({
-        data: null,
-        loading: false,
-        error: null,
-        fetchData: expect.any(Function),
-      });
+      expect(result.current).toStrictEqual(IDLE_STATE);
     });
   });
 
@@ -213,6 +212,37 @@ describe('useAnalysisEndpoint', () => {
       await act(() => result.current.fetchData('best hotels'));
 
       expect(mockAuthenticatedFetch.mock.calls[0][0]).toBe('https://api.test.com/probe');
+    });
+  });
+
+  describe('reset', () => {
+    it.each<[outcome: string, answer: Response | EndpointMockFetchOptions<ProbeResponse>]>([
+      ['stored a payload', {}],
+      ['failed', createMockJsonResponse({}, 500)],
+    ])('returns to the idle state after a fetch %s', async (_outcome, answer) => {
+      const { result } = await renderFetchedProbeEndpoint(answer);
+
+      act(() => {
+        result.current.reset();
+      });
+
+      expect(result.current).toStrictEqual(IDLE_STATE);
+    });
+
+    it('aborts the request in flight and drops its answer', async () => {
+      const {
+        deferred, startFetch, respondTo, result
+      } = renderDeferredProbeEndpoint();
+      const dropped = startFetch('best hotels');
+
+      act(() => {
+        result.current.reset();
+      });
+      await respondTo(0, probeResponse);
+
+      expect(deferred.requests[0].signal?.aborted).toBe(true);
+      await expect(dropped).resolves.toBeNull();
+      expect(result.current).toStrictEqual(IDLE_STATE);
     });
   });
 });

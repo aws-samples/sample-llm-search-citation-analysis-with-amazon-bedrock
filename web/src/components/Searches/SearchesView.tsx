@@ -3,7 +3,11 @@ import {
 } from 'react';
 import type { Search } from '../../types';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
+import {
+  PaginationHeader, type PaginationHeaderProps
+} from '../ui/PaginationHeader';
 import { paginate } from '../ui/pagination';
+import { summarizeSearches } from '../../formatting/searchSummary';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import {
   SEARCH_EXCEL_COLUMNS, searchExcelRows
@@ -14,8 +18,6 @@ import {
   groupSearchesByKeyword,
   StatsCards,
   FiltersSection,
-  PaginationHeader,
-  type PaginationHeaderProps,
   KeywordRow,
 } from './SearchesViewComponents';
 
@@ -57,7 +59,7 @@ export const SearchesView = ({
   );
 
   const totalSearches = searches.length;
-  const totalCitations = searches.reduce((sum, s) => sum + (s.citations?.length ?? 0), 0);
+  const totalCitations = useMemo(() => summarizeSearches(searches).totalCitations, [searches]);
 
   const toggleRow = (keyword: string) => {
     setExpandedRow(expandedRow === keyword ? null : keyword);
@@ -74,7 +76,7 @@ export const SearchesView = ({
   };
 
   const {
-    pageItems: paginatedKeywords, totalItems, showAll, totalPages, startIndex, endIndex 
+    pageItems: paginatedKeywords, totalItems
   } = paginate(keywordGroups, currentPage, itemsPerPage);
 
   const handleItemsPerPageChange = (value: number) => {
@@ -118,15 +120,13 @@ export const SearchesView = ({
           onToggleRow={toggleRow}
           onSelectKeyword={setSelectedKeyword}
           pagination={{
-            totalItems,
-            showAll,
-            startIndex,
-            endIndex,
-            totalPages,
-            currentPage,
-            setCurrentPage,
-            itemsPerPage,
-            onItemsPerPageChange: handleItemsPerPageChange,
+            page: currentPage,
+            pageSize: itemsPerPage,
+            total: totalItems,
+            onPageChange: setCurrentPage,
+            onPageSizeChange: handleItemsPerPageChange,
+            idPrefix: 'searches',
+            label: 'Searches pagination',
           }}
           searchQuery={searchQuery}
           providerFilter={providerFilter}

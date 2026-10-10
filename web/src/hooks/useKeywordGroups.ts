@@ -1,10 +1,8 @@
+import { useCallback } from 'react';
 import {
-  useCallback, useEffect, useState
-} from 'react';
-import { useLatestRequest } from './useLatestRequest';
-import {
-  getErrorMessage, isAbortError
-} from '../infrastructure';
+  useGuardedLoad, type GuardedLoadSource
+} from './useGuardedLoad';
+import { getErrorMessage } from '../infrastructure';
 import type {
   Keyword, KeywordGroup
 } from '../types';
@@ -49,6 +47,13 @@ function sortGroups(groups: KeywordGroup[]): KeywordGroup[] {
   return [...groups].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
 }
 
+const KEYWORD_GROUPS_SOURCE: GuardedLoadSource<KeywordGroup[]> = {
+  initial: [],
+  load: async (signal) => sortGroups(await fetchKeywordGroups(signal)),
+  errorMessage: (failure) => getErrorMessage(failure, 'keywords'),
+  logMessage: '[keyword-groups] Error fetching groups:',
+};
+
 /**
  * Keyword groups (folders) with their member counts, plus the mutations the
  * Settings panel and the execution picker need. Every mutation refreshes the
@@ -56,34 +61,9 @@ function sortGroups(groups: KeywordGroup[]): KeywordGroup[] {
  */
 export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeywordGroupsReturn => {
   const { onKeywordsUpdated } = options;
-  const [groups, setGroups] = useState<KeywordGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { beginRequest } = useLatestRequest();
-
-  // Stryker disable ArrayDeclaration: React dependency list; beginRequest has a stable identity, so omitting it cannot stale this callback
-  const refresh = useCallback(async (): Promise<void> => {
-    const request = beginRequest();
-    try {
-      const fetched = await fetchKeywordGroups(request.signal);
-      if (!request.isCurrent()) return;
-      setGroups(sortGroups(fetched));
-      setError(null);
-    } catch (fetchError) {
-      if (isAbortError(fetchError) || !request.isCurrent()) return;
-      console.error('[keyword-groups] Error fetching groups:', fetchError);
-      setError(getErrorMessage(fetchError, 'keywords'));
-    } finally {
-      if (request.isCurrent()) setLoading(false);
-      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
-      request.finish();
-    }
-  }, [beginRequest]);
-  // Stryker restore ArrayDeclaration
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const {
+    data: groups, settled, error, reload: refresh
+  } = useGuardedLoad(KEYWORD_GROUPS_SOURCE);
 
   const runMutation = useCallback(async (
     action: () => Promise<void>,
@@ -160,7 +140,8 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
 
   return {
     groups,
-    loading,
+    // On until the first load settles; the refresh after a mutation keeps the list on screen.
+    loading: !settled,
     error,
     refresh,
     createGroup,

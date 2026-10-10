@@ -8,6 +8,7 @@ import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 import { StrokeIcon } from '../ui/StrokeIcon';
+import { TabBar } from '../ui/TabBar';
 import {
   CHEVRON_RIGHT_PATHS, GLOBE_PATHS 
 } from '../ui/iconPaths';
@@ -237,30 +238,26 @@ interface SectionTabsProps {
   result: CompetitorAnalysisResult;
 }
 
+/** One tab per keyword section, each counting its keywords; the first word stands for the label on narrow screens. */
 export const SectionTabs = ({
   activeSection, setActiveSection, result 
 }: SectionTabsProps) => (
-  <div className="border-b border-gray-200 overflow-x-auto">
-    <nav className="flex min-w-max">
-      {sections.map((section) => (
-        <button
-          key={section.id}
-          onClick={() => setActiveSection(section.id)}
-          className={`flex-1 min-w-[100px] px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-            activeSection === section.id
-              ? 'border-gray-900 text-gray-900'
-              : 'border-transparent text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          <span className="hidden sm:inline">{section.label}</span>
-          <span className="sm:hidden">{section.label.split(' ')[0]}</span>
-          <span className="ml-1 sm:ml-2 text-xs bg-gray-100 text-gray-600 px-1.5 sm:px-2 py-0.5 rounded-full">
-            {getSectionCount(result, section.id)}
-          </span>
-        </button>
-      ))}
-    </nav>
-  </div>
+  <TabBar
+    label="Keyword sections"
+    tabs={sections.map((section) => ({
+      id: section.id,
+      label: section.label,
+      shortLabel: section.label.split(' ')[0],
+      badge: (
+        <span className="ml-1 sm:ml-2 text-xs bg-gray-100 text-gray-600 px-1.5 sm:px-2 py-0.5 rounded-full">
+          {getSectionCount(result, section.id)}
+        </span>
+      ),
+    }))}
+    activeId={activeSection}
+    onChange={setActiveSection}
+    className="px-4 sm:px-6"
+  />
 );
 
 interface KeywordRowProps extends KeywordSelectionProps {

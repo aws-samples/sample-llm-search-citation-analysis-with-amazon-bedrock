@@ -28,7 +28,7 @@ from shared.analysis_runs import (
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.constants import MAX_KEYWORD_LENGTH
-from shared.decorators import api_handler, parse_json_body
+from shared.decorators import api_handler, json_object_body
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 
@@ -78,12 +78,12 @@ def _resolve_scope_request(scope_body: Any, event: dict[str, Any]) -> tuple[dict
 
 @api_handler
 @require_group(ADMIN_GROUP)
-@parse_json_body
-def handler(event: dict[str, Any], context: Any, body: object) -> dict[str, Any]:
+@json_object_body
+def handler(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
     """
     POST /api/trigger-keyword-analysis
 
-    Admin-only, and gated above `@parse_json_body` so an unauthorized request
+    Admin-only, and gated above `@json_object_body` so an unauthorized request
     is refused before its body is parsed. Same spend profile as
     `trigger-analysis` (AUDIT-2026-08-19 §2.3).
 
@@ -99,9 +99,6 @@ def handler(event: dict[str, Any], context: Any, body: object) -> dict[str, Any]
     explicit list travels inline and is refused with a 400 when it would not
     fit the execution input (`shared.analysis_runs.MAX_RUN_INPUT_BYTES`).
     """
-    if not isinstance(body, dict):
-        return validation_error('Request body must be a JSON object', event, 'body')
-
     scope = None
     if 'scope' in body:
         resolved = _resolve_scope_request(body.get('scope'), event)

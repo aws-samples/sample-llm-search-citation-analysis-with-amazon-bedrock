@@ -1,0 +1,24 @@
+import type { KpiDefinition } from '../../constants/kpiDefinitions';
+
+interface Props {
+  /** The definitions of every figure a view shows, in the order it shows them. */
+  readonly definitions: readonly KpiDefinition[];
+}
+
+/**
+ * How each KPI is measured, written out as a two-column description list.
+ * The views that show it keep it in a `Disclosure` titled "How these KPIs
+ * are measured", collapsed on screen and open in print.
+ */
+export function KpiDefinitionList({ definitions }: Props) {
+  return (
+    <dl className="grid gap-3 text-xs text-gray-700 dark:text-gray-300 sm:grid-cols-2">
+      {definitions.map((entry) => (
+        <div key={entry.label}>
+          <dt className="font-semibold text-gray-900 dark:text-white">{entry.label}</dt>
+          <dd className="mt-1">{entry.definition}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}

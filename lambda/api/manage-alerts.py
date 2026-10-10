@@ -20,7 +20,7 @@ from shared.decorators import (
     RouteNotHandledError,
     api_handler,
     cors_preflight,
-    parse_json_body,
+    json_object_body,
     route_handler,
     validate,
 )
@@ -384,12 +384,9 @@ _THRESHOLD_FIELDS = {
 
 
 def _validate_settings_update(
-    body: Any,
+    body: dict[str, Any],
     event: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if not isinstance(body, dict):
-        return None, validation_error('Request body must be a JSON object', event, 'body')
-
     rejected = _key_set_error(body.keys(), required=_SETTING_FIELDS, allowed=set(), noun='setting', event=event)
     if rejected:
         return None, rejected
@@ -414,11 +411,11 @@ def _validate_settings_update(
 
 
 @require_group(ADMIN_GROUP)
-@parse_json_body
+@json_object_body
 def _put_settings(
     event: dict[str, Any],
     context: Any,
-    body: Any,
+    body: dict[str, Any],
 ) -> dict[str, Any]:
     settings, rejected = _validate_settings_update(body, event)
     if settings is None:
@@ -479,11 +476,9 @@ def _list_content_changes(
 
 
 def _validate_content_change(
-    body: Any,
+    body: dict[str, Any],
     event: dict[str, Any],
 ) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
-    if not isinstance(body, dict):
-        return None, validation_error('Request body must be a JSON object', event, 'body')
     rejected = _key_set_error(
         body.keys(), required=set(), allowed={'group_id', 'description', 'url'}, noun='field', event=event,
     )
@@ -519,11 +514,11 @@ def _validate_content_change(
 
 
 @require_group(ADMIN_GROUP)
-@parse_json_body
+@json_object_body
 def _create_content_change(
     event: dict[str, Any],
     context: Any,
-    body: Any,
+    body: dict[str, Any],
 ) -> dict[str, Any]:
     values, rejected = _validate_content_change(body, event)
     if values is None:

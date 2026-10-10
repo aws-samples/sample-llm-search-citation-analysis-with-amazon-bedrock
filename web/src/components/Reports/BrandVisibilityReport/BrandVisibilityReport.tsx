@@ -15,6 +15,7 @@ import type {
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import { describeReportScope } from '../../ui/reportScope';
+import { scopeFromSearch } from '../scopeReport/scopeReportRoute';
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 import {
   LatestRunRankingsSection, PooledRankingsSection
@@ -48,12 +49,10 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 export function BrandVisibilityReport({ keywords }: Props) {
   const params = useParams<{ keyword?: string }>();
   const [searchParams] = useSearchParams();
+  const selectedKeyword = params.keyword ? decodeURIComponent(params.keyword) : null;
+  const scope = scopeFromSearch(searchParams, selectedKeyword);
   const navigate = useNavigate();
   const { groups } = useKeywordGroups();
-
-  const selectedKeyword = params.keyword ? decodeURIComponent(params.keyword) : null;
-  const selectedGroupId = searchParams.get('group');
-  const scope: ReportScope = resolveScope(selectedKeyword, selectedGroupId);
   const [days, setDays] = useState(DEFAULT_GROUP_REPORT_DAYS);
 
   // Auto-redirect: if the user navigated to /reports/visibility/:keyword
@@ -135,18 +134,6 @@ function AllKeywordsSections({ data }: SectionsProps) {
       <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </>
   );
-}
-
-function resolveScope(keyword: string | null, groupId: string | null): ReportScope {
-  if (keyword) return {
-    kind: 'keyword',
-    keyword 
-  };
-  if (groupId) return {
-    kind: 'group',
-    groupId 
-  };
-  return { kind: 'all' };
 }
 
 function pathFor(scope: ReportScope): string {

@@ -44,7 +44,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import get_caller_claims, get_caller_identity
-from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, json_object_body, route_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import delete_existing_item, is_conditional_check_failure
@@ -301,20 +301,9 @@ def _strict_type_error(event: dict[str, Any], body: dict[str, Any]) -> dict[str,
     return None
 
 
-def _json_object_body(route: _Route) -> _Route:
-    """Answer 400 before ``@validate`` reads fields from a body that is not a JSON object."""
-    @wraps(route)
-    def wrapper(event: dict[str, Any], context: Any, *args: Any, body: Any, **kwargs: Any) -> dict[str, Any]:
-        if not isinstance(body, dict):
-            return validation_error('Request body must be a JSON object', event, 'body')
-        return route(event, context, *args, body=body, **kwargs)
-    return wrapper
-
-
 def _report_request(route: _Route) -> _Route:
     """Answer 400 unless the body is a valid report; otherwise call ``route`` with ``content=``."""
-    @parse_json_body
-    @_json_object_body
+    @json_object_body
     @validate(_REPORT_SCHEMA)
     @wraps(route)
     def wrapper(

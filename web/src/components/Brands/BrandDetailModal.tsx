@@ -1,5 +1,5 @@
 import {
-  useState, useEffect 
+  useState, useEffect, useId
 } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -11,7 +11,9 @@ import { SelfReflectionPanel } from '../SelfReflection/SelfReflectionPanel';
 import { CloseIcon } from '../ui';
 import { classificationLabel } from './brandPresentation';
 import { ModalCloseFooter } from '../ui/ModalCloseFooter';
-import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  TabBar, TabPanel, type TabDefinition
+} from '../ui/TabBar';
 import {
   CHART_BAR_PATHS, LIGHTBULB_PATHS 
 } from '../ui/iconPaths';
@@ -26,6 +28,27 @@ interface BrandDetailModalProps {
 
 type ModalTab = 'overview' | 'responses' | 'ranking-analysis';
 
+const CHAT_BUBBLE_PATHS = ['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'];
+
+/** The three tabs; the responses tab counts the providers that answered. */
+const modalTabs = (providerCount: number): ReadonlyArray<TabDefinition<ModalTab>> => [
+  {
+    id: 'overview',
+    label: 'Overview',
+    iconPaths: CHART_BAR_PATHS,
+  },
+  {
+    id: 'responses',
+    label: `AI Responses (${providerCount})`,
+    iconPaths: CHAT_BUBBLE_PATHS,
+  },
+  {
+    id: 'ranking-analysis',
+    label: 'Ranking Analysis',
+    iconPaths: LIGHTBULB_PATHS,
+  },
+];
+
 export const BrandDetailModal = ({
   brand,
   providerData,
@@ -35,6 +58,7 @@ export const BrandDetailModal = ({
 }: BrandDetailModalProps) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('overview');
   const [mounted, setMounted] = useState(false);
+  const panelId = useId();
 
   useEffect(() => {
     setMounted(true);
@@ -84,47 +108,16 @@ export const BrandDetailModal = ({
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="border-b border-gray-200 px-4 sm:px-6">
-          <nav className="-mb-px flex space-x-4 sm:space-x-8" style={{ minWidth: '280px' }}>
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${
-                activeTab === 'overview'
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <StrokeIcon className="w-4 h-4" paths={CHART_BAR_PATHS} />
-              Overview
-            </button>
-            <button
-              onClick={() => setActiveTab('responses')}
-              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${
-                activeTab === 'responses'
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <StrokeIcon className="w-4 h-4" paths={['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z']} />
-              AI Responses ({providerData.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('ranking-analysis')}
-              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${
-                activeTab === 'ranking-analysis'
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <StrokeIcon className="w-4 h-4" paths={LIGHTBULB_PATHS} />
-              Ranking Analysis
-            </button>
-          </nav>
-        </div>
+        <TabBar
+          tabs={modalTabs(providerData.length)}
+          activeId={activeTab}
+          onChange={setActiveTab}
+          label={`${brand.name} details`}
+          panelId={panelId}
+          className="px-4 sm:px-6"
+        />
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === 'overview' && (
             <BrandOverviewTab brand={brand} />
           )}
@@ -138,7 +131,7 @@ export const BrandDetailModal = ({
               queryPromptId={queryPromptId ?? ''}
             />
           )}
-        </div>
+        </TabPanel>
 
         {/* Footer */}
         <ModalCloseFooter onClose={onClose} paddingClassName="px-4 sm:px-6" />

@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import {
+  useId, useState
+} from 'react';
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
 import type {
   Keyword, KeywordResearchItem
@@ -8,21 +10,16 @@ import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
 import { ResearchAgent } from './agent/ResearchAgent';
 import type { ResearchRunViewProps } from './researchRunView';
-import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  TabBar, TabPanel, type TabDefinition
+} from '../ui/TabBar';
 import {
   BOLT_PATHS, CLOCK_PATHS, GLOBE_PATHS 
 } from '../ui/iconPaths';
 
 type ResearchTab = 'expand' | 'competitor' | 'history' | 'agent';
 
-interface ResearchTabDefinition {
-  id: ResearchTab;
-  label: string;
-  shortLabel: string;
-  iconPaths: readonly string[];
-}
-
-const RESEARCH_TABS: readonly ResearchTabDefinition[] = [
+const RESEARCH_TABS: ReadonlyArray<TabDefinition<ResearchTab>> = [
   {
     id: 'expand',
     label: 'Related Keywords',
@@ -59,6 +56,7 @@ interface KeywordResearchViewProps {
 
 export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProps = {}) => {
   const [activeTab, setActiveTab] = useState<ResearchTab>('expand');
+  const panelId = useId();
   const research = useKeywordResearch();
 
   // A retry from History jumps to the tab that shows the job's progress.
@@ -88,29 +86,9 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
         </p>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="border-b border-gray-200">
-        <nav className="flex gap-2 sm:gap-4 overflow-x-auto">
-          {RESEARCH_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 sm:px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <StrokeIcon className="w-4 h-4" paths={tab.iconPaths} />
-              <span className="hidden sm:inline">{tab.label}</span>
-              <span className="sm:hidden">{tab.shortLabel}</span>
-            </button>
-          ))}
-        </nav>
-      </div>
+      <TabBar tabs={RESEARCH_TABS} activeId={activeTab} onChange={setActiveTab} label="Keyword research" panelId={panelId} />
 
-      {/* Tab Content */}
-      <div>
+      <TabPanel id={panelId} activeId={activeTab}>
         {activeTab === 'agent' && <ResearchAgent onKeywordsAdded={onKeywordsAdded} />}
         {activeTab === 'expand' && (
           <KeywordExpansion
@@ -136,7 +114,7 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
             onKeywordsAdded={onKeywordsAdded}
           />
         )}
-      </div>
+      </TabPanel>
     </div>
   );
 };

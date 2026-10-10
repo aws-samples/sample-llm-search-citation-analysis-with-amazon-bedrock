@@ -13,7 +13,6 @@ Scope: at most one of ``keyword=``, ``group_id=``, ``keyword_ids=`` or
 """
 
 import logging
-import os
 import sys
 from typing import Any
 
@@ -35,6 +34,7 @@ from shared.scope_params import (
     scoped_dynamodb_resource,
 )
 from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import trend_view
 
@@ -48,7 +48,7 @@ _ALL_KEYWORDS_CAP = 20
 dynamodb = scoped_dynamodb_resource()
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 

@@ -9,12 +9,12 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import error_response, success_response, validation_error
-from shared.decorators import api_handler, parse_json_body, route_handler
+from shared.decorators import api_handler, json_object_body, route_handler
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
-    KEYWORD_GROUPS_TABLE_ENV,
     add_keyword_groups,
+    open_keyword_tables,
     serialize_keyword_item,
 )
 from shared.keyword_store import (
@@ -41,11 +41,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
-keywords_table = dynamodb.Table(KEYWORDS_TABLE)
-# Optional until every deployment carries the groups table.
-GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
-groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
+keywords_table, groups_table = open_keyword_tables(dynamodb)
 
 NOTES_FIELDS = ('intent', 'competition', 'source')
 MAX_KEYWORDS = 500
@@ -72,12 +68,9 @@ BRAND_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_BRAND_CONFIG', required=F
 brand_config_table = dynamodb.Table(BRAND_CONFIG_TABLE)
 
 
-@parse_json_body
+@json_object_body
 def _promote_keywords(event, context, body):
     """Promote validated research keywords into the Keywords table."""
-    if not isinstance(body, dict):
-        return validation_error('Request body must be a JSON object', event, 'body')
-
     keywords = body.get('keywords')
     error, status, priority = validate_request(
         keywords, body.get('status'), body.get('priority')

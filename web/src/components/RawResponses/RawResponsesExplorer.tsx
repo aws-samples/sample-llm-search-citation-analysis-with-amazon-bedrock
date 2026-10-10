@@ -15,6 +15,9 @@ import type {
 import { CenteredLoading } from '../ui/CenteredState';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
+  TabBar, type TabDefinition
+} from '../ui/TabBar';
+import {
   DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
 } from '../ui/iconPaths';
 
@@ -205,32 +208,26 @@ interface ExplorerHeaderProps {
   onBack: () => void;
 }
 
+const BUCKET_TABS: ReadonlyArray<TabDefinition<BucketType>> = [
+  {
+    id: 'responses',
+    label: 'Raw Responses',
+    iconPaths: DOCUMENT_TEXT_PATHS,
+  },
+  {
+    id: 'screenshots',
+    label: 'Screenshots',
+    iconPaths: PHOTO_PATHS,
+  },
+];
+
 const ExplorerHeader = ({
   activeTab, onTabChange, selectedFile, onBack 
 }: ExplorerHeaderProps) => (
   <div className="border-b border-gray-200 px-4 sm:px-6 py-4">
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div className="flex-1">
-        <div className="flex items-center gap-4">
-          <TabButton
-            active={activeTab === 'responses'}
-            onClick={() => onTabChange('responses')}
-            icon={
-              <StrokeIcon className="w-4 h-4" paths={DOCUMENT_TEXT_PATHS} />
-            }
-          >
-            Raw Responses
-          </TabButton>
-          <TabButton
-            active={activeTab === 'screenshots'}
-            onClick={() => onTabChange('screenshots')}
-            icon={
-              <StrokeIcon className="w-4 h-4" paths={PHOTO_PATHS} />
-            }
-          >
-            Screenshots
-          </TabButton>
-        </div>
+        <TabBar variant="pill" tabs={BUCKET_TABS} activeId={activeTab} onChange={onTabChange} label="Bucket" />
         <p className="text-xs sm:text-sm text-gray-500 mt-2">
           {activeTab === 'responses'
             ? 'Browse and inspect raw responses from AI providers'
@@ -248,29 +245,6 @@ const ExplorerHeader = ({
       )}
     </div>
   </div>
-);
-
-interface TabButtonProps {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}
-
-const TabButton = ({
-  active, onClick, icon, children 
-}: TabButtonProps) => (
-  <button
-    onClick={onClick}
-    className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-      active
-        ? 'bg-gray-900 text-white'
-        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'
-    }`}
-  >
-    {icon}
-    {children}
-  </button>
 );
 
 /** A file's size is unknown until it arrives, so it gets a plain centred spinner rather than a skeleton. */

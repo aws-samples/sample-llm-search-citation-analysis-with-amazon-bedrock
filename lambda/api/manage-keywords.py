@@ -24,8 +24,8 @@ from shared.decorators import api_handler, parse_json_body, route_handler, valid
 from shared.dynamodb_conditions import delete_existing_item, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
-    KEYWORD_GROUPS_TABLE_ENV,
     MAX_GROUPS_PER_KEYWORD,
+    open_keyword_tables,
     serialize_keyword_item,
 )
 from shared.keyword_store import (
@@ -45,11 +45,7 @@ from shared.utils import get_timestamp, keyword_id, load_keyword_identities, nor
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
-keywords_table = dynamodb.Table(KEYWORDS_TABLE)
-# Optional until every deployment carries the groups table.
-GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
-groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
+keywords_table, groups_table = open_keyword_tables(dynamodb)
 # The market list (BrandConfig item `markets`), read only when a request names a market.
 BRAND_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_BRAND_CONFIG', required=False, default='CitationAnalysis-BrandConfig')
 brand_config_table = dynamodb.Table(BRAND_CONFIG_TABLE)

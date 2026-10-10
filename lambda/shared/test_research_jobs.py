@@ -380,6 +380,56 @@ class TestBoundStepResult:
         assert ('round' in result, 'attempt' in result) == (False, False)
 
 
+class TestBoundedQueries:
+    """Round plans, evaluations and signal steps bound their query lists through one loop."""
+
+    _NINE_QUERIES = [{'query': f'query {index}', 'dimension': 'audience'} for index in range(9)]
+
+    def test_keeps_the_first_eight_queries_and_flags_the_overflow_in_a_round_plan(self):
+        plan = bound_round_plan({'round': 1, 'queries': self._NINE_QUERIES})
+
+        assert [query['query'] for query in plan['queries']] == [f'query {index}' for index in range(8)]
+        assert plan['plan_truncation'] == {
+            'queries_received': 9, 'queries_stored': 8, 'strings_truncated': True, 'size_limited': False,
+        }
+
+    def test_keeps_the_first_eight_queries_and_flags_the_overflow_in_a_step_result(self):
+        step = bound_step_result({'provider': 'serpapi', 'status': 'completed', 'queries': self._NINE_QUERIES})
+
+        assert [query['query'] for query in step['queries']] == [f'query {index}' for index in range(8)]
+        assert step['truncation']['strings_truncated'] is True
+
+    def test_skips_entries_that_are_not_objects_or_have_no_query_text(self):
+        queries = ['loose string', {'dimension': 'audience'}, {'query': '  Condor  Sur  routes ', 'dimension': ''}]
+
+        plan = bound_round_plan({'round': 1, 'queries': queries})
+
+        assert plan['queries'] == [{'query': 'Condor Sur routes', 'dimension': 'other', 'rationale': ''}]
+        assert plan['plan_truncation']['queries_received'] == 3
+
+    def test_carries_rationale_only_in_round_plans(self):
+        queries = [{'query': 'Altiplano Air baggage', 'dimension': 'policy', 'rationale': 'top complaint'}]
+
+        plan = bound_round_plan({'round': 1, 'queries': queries})
+        step = bound_step_result({'provider': 'serpapi', 'status': 'completed', 'queries': queries})
+
+        assert plan['queries'] == [{'query': 'Altiplano Air baggage', 'dimension': 'policy', 'rationale': 'top complaint'}]
+        assert step['queries'] == [{'query': 'Altiplano Air baggage', 'dimension': 'policy'}]
+
+    def test_cuts_query_text_to_the_byte_limit_and_flags_it(self):
+        step = bound_step_result({'provider': 'serpapi', 'status': 'completed', 'queries': [{'query': 'q' * 201}]})
+
+        assert step['queries'] == [{'query': 'q' * 200, 'dimension': 'other'}]
+        assert step['truncation']['strings_truncated'] is True
+
+    def test_treats_a_missing_or_non_list_value_as_no_queries(self):
+        plan = bound_round_plan({'round': 1, 'queries': 'not a list'})
+        step = bound_step_result({'provider': 'serpapi', 'status': 'completed'})
+
+        assert (plan['queries'], plan['plan_truncation']['queries_received']) == ([], 0)
+        assert ('queries' in step, step['truncation']['strings_truncated']) == (False, False)
+
+
 class TestPersistenceBudgets:
     def test_keeps_highest_ranked_candidates_when_step_result_exceeds_its_budget(self):
         result = bound_step_result({

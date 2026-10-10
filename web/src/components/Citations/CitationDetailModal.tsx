@@ -1,5 +1,5 @@
 import {
-  useState, useEffect, useCallback 
+  useState, useEffect, useCallback, useId
 } from 'react';
 import { formatDate } from '../../formatting/dateFormatter';
 import { safeHref } from '../../infrastructure';
@@ -14,7 +14,9 @@ import {
 import type {
   CrawledContent, CrawlStatus, SEOAnalysis
 } from '../../types';
-import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  TabBar, TabPanel, type TabDefinition
+} from '../ui/TabBar';
 import {
   CHART_BAR_PATHS, CLOCK_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
 } from '../ui/iconPaths';
@@ -26,6 +28,43 @@ interface CitationDetailModalProps {
 }
 
 type TabType = 'overview' | 'screenshot' | 'seo' | 'content' | 'history';
+
+const SHIELD_CHECK_PATHS = ['M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'];
+
+const TABS: ReadonlyArray<TabDefinition<TabType>> = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    iconPaths: CHART_BAR_PATHS,
+  },
+  {
+    id: 'screenshot',
+    label: 'Screenshot',
+    iconPaths: PHOTO_PATHS,
+  },
+  {
+    id: 'seo',
+    label: 'SEO Analysis',
+    iconPaths: SHIELD_CHECK_PATHS,
+  },
+  {
+    id: 'content',
+    label: 'Full Content',
+    iconPaths: DOCUMENT_TEXT_PATHS,
+  },
+  {
+    id: 'history',
+    label: 'History',
+    iconPaths: CLOCK_PATHS,
+  },
+];
+
+/** The screenshot and SEO tabs only exist for pages the crawl captured them for. */
+const hasTab = (citation: CrawledContent, tab: TabType): boolean => {
+  if (tab === 'screenshot') return Boolean(citation.screenshot_url);
+  if (tab === 'seo') return citation.seo_analysis !== undefined;
+  return true;
+};
 
 const StatusBadge = ({ status }: { status?: CrawlStatus }) => {
   if (!status || status === 'success') return null;
@@ -43,25 +82,6 @@ const StatusBadge = ({ status }: { status?: CrawlStatus }) => {
     </span>
   );
 };
-
-const TabButton = ({
-  active, onClick, icon, children 
-}: { 
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode; 
-}) => (
-  <button
-    onClick={onClick}
-    className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${
-      active ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-    }`}
-  >
-    {icon}
-    {children}
-  </button>
-);
 
 const MetricsGrid = ({ citation }: { citation: CrawledContent }) => {
   const metrics: ReadonlyArray<readonly [string, string | number]> = [
@@ -168,33 +188,6 @@ const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
   </div>
 );
 
-const TabNavigation = ({
-  activeTab, setActiveTab, citation 
-}: { 
-  activeTab: TabType;
-  setActiveTab: (tab: TabType) => void;
-  citation: CrawledContent; 
-}) => (
-  <div className="border-b border-gray-200 px-6">
-    <nav className="-mb-px flex space-x-8">
-      <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}
-        icon={<StrokeIcon className="w-4 h-4" paths={CHART_BAR_PATHS} />}>Overview</TabButton>
-      {citation.screenshot_url && (
-        <TabButton active={activeTab === 'screenshot'} onClick={() => setActiveTab('screenshot')}
-          icon={<StrokeIcon className="w-4 h-4" paths={PHOTO_PATHS} />}>Screenshot</TabButton>
-      )}
-      {citation.seo_analysis && (
-        <TabButton active={activeTab === 'seo'} onClick={() => setActiveTab('seo')}
-          icon={<StrokeIcon className="w-4 h-4" paths={['M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z']} />}>SEO Analysis</TabButton>
-      )}
-      <TabButton active={activeTab === 'content'} onClick={() => setActiveTab('content')}
-        icon={<StrokeIcon className="w-4 h-4" paths={DOCUMENT_TEXT_PATHS} />}>Full Content</TabButton>
-      <TabButton active={activeTab === 'history'} onClick={() => setActiveTab('history')}
-        icon={<StrokeIcon className="w-4 h-4" paths={CLOCK_PATHS} />}>History</TabButton>
-    </nav>
-  </div>
-);
-
 export const CitationDetailModal = ({
   citation, onClose 
 }: CitationDetailModalProps) => {
@@ -203,6 +196,7 @@ export const CitationDetailModal = ({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
+  const panelId = useId();
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -285,8 +279,15 @@ export const CitationDetailModal = ({
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">×</button>
           </div>
         </div>
-        <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} citation={citation} />
-        <div className="flex-1 overflow-y-auto p-6">{renderTabContent()}</div>
+        <TabBar
+          tabs={TABS.filter((tab) => hasTab(citation, tab.id))}
+          activeId={activeTab}
+          onChange={setActiveTab}
+          label="Citation details"
+          panelId={panelId}
+          className="px-6"
+        />
+        <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-6">{renderTabContent()}</TabPanel>
         <ModalCloseFooter onClose={onClose} />
       </div>
     </div>

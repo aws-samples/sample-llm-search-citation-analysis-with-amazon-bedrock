@@ -1,11 +1,15 @@
 import {
-  useCallback, useEffect, useMemo, useState
+  useCallback, useMemo, useState
 } from 'react';
 import {
   fetchMarkets, MarketsInUseError, saveMarkets
 } from '../api/markets';
-import type { Market } from '../types';
-import { useLatestRequest } from './useLatestRequest';
+import type {
+  Market, MarketsListing
+} from '../types';
+import {
+  useGuardedLoad, type GuardedLoadSource
+} from './useGuardedLoad';
 
 /** How the latest save ended: `inUse` lists the markets keywords still use (the 409). */
 export type MarketsSaveOutcome =
@@ -20,6 +24,8 @@ export type MarketsSaveOutcome =
 
 const IDLE: MarketsSaveOutcome = { status: 'idle' };
 
+const NO_MARKETS: Market[] = [];
+
 /** The message of a thrown error, else `fallback`. */
 export function failureMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message !== '' ? error.message : fallback;
@@ -33,6 +39,13 @@ function failedSave(error: unknown): MarketsSaveOutcome {
   };
 }
 
+/** `GET /markets`; `null` until the list has been read once. */
+const MARKETS_SOURCE: GuardedLoadSource<MarketsListing | null> = {
+  initial: null,
+  load: fetchMarkets,
+  errorMessage: (failure) => failureMessage(failure, 'Could not load the markets'),
+};
+
 /**
  * The configured markets (`GET /markets`, loaded on mount) and the admin's
  * save of a whole new list (`PUT /markets`). A refused save keeps the stored
@@ -40,64 +53,39 @@ function failedSave(error: unknown): MarketsSaveOutcome {
  */
 export function useMarkets() {
   const {
-    beginRequest, isMounted
-  } = useLatestRequest();
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+    data: listing, loading, error, reload: reloadListing, setData: setListing, isMounted
+  } = useGuardedLoad(MARKETS_SOURCE);
   const [saveOutcome, setSaveOutcome] = useState<MarketsSaveOutcome>(IDLE);
 
-  const reload = useCallback(() => {
-    const request = beginRequest();
-    setLoading(true);
-    setError(null);
-    fetchMarkets(request.signal)
-      .then((listing) => {
-        if (!request.isCurrent()) return;
-        setMarkets(listing.markets);
-        setUpdatedAt(listing.updated_at);
-        setLoaded(true);
-      })
-      .catch((failure: unknown) => {
-        if (request.isCurrent()) setError(failureMessage(failure, 'Could not load the markets'));
-      })
-      .finally(() => {
-        if (request.isCurrent()) setLoading(false);
-        request.finish();
-      });
-  }, [beginRequest]);
-
-  useEffect(reload, [reload]);
+  const reload = useCallback((): void => {
+    void reloadListing();
+  }, [reloadListing]);
 
   const save = useCallback(async (next: readonly Market[]): Promise<boolean> => {
     setSaveOutcome({ status: 'saving' });
     try {
-      const listing = await saveMarkets(next);
+      const stored = await saveMarkets(next);
       if (!isMounted()) return true;
-      setMarkets(listing.markets);
-      setUpdatedAt(listing.updated_at);
-      setLoaded(true);
+      setListing(stored);
       setSaveOutcome({ status: 'saved' });
       return true;
     } catch (failure) {
       if (isMounted()) setSaveOutcome(failedSave(failure));
       return false;
     }
-  }, [isMounted]);
+  }, [isMounted, setListing]);
 
   return useMemo(() => ({
-    markets,
-    updatedAt,
+    markets: listing?.markets ?? NO_MARKETS,
+    updatedAt: listing?.updated_at ?? null,
     loading,
     /** The list has been read at least once, so an empty `markets` means none are configured. */
-    loaded,
+    loaded: listing !== null,
     error,
     saveOutcome,
     reload,
     save,
-  }), [markets, updatedAt, loading, loaded, error, saveOutcome, reload, save]);
+  }), [listing, loading, error, saveOutcome, reload, save]);
 }
 
 export type MarketsController = ReturnType<typeof useMarkets>;
