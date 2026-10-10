@@ -122,9 +122,10 @@ MUTATING_ADMIN_ROUTES = [
     Route('manage-alerts.py', 'POST', '/api/alerts/alert-1/acknowledge', {'id': 'alert-1'}),
     Route('manage-alerts.py', 'POST', '/api/alerts/content-changes', body={}),
 
-    # manage-markets.py — the market list steers every run; suggestions spend Bedrock.
+    # manage-markets.py — the market list steers every run; suggestions and proposals spend Bedrock.
     Route('manage-markets.py', 'PUT', '/api/markets', body={'markets': []}),
     Route('manage-markets.py', 'POST', '/api/markets', body={'keyword': 'hotels', 'market_ids': ['cl-es']}),
+    Route('manage-markets.py', 'POST', '/api/markets', body={'propose': {'country': 'CL', 'language': 'es'}}),
 
     # Both trigger handlers — unbounded provider spend per request.
     Route('trigger-analysis.py', 'POST', '/api/trigger-analysis'),

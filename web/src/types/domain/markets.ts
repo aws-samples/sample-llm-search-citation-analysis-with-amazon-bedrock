@@ -42,3 +42,18 @@ export interface MarketKeywordSuggestion {
   market_id: string;
   keyword: string;
 }
+
+/** What the administrator decides about a new market; `POST /api/markets {propose}` fills in the rest. */
+export interface MarketProposalRequest {
+  /** ISO 3166-1 alpha-2. */
+  country: string;
+  /** BCP 47 tag (`es`, `pt-BR`). */
+  language: string;
+  city?: string;
+}
+
+/** The market Bedrock describes for a request, validated like a hand-typed one, and whether its id is already configured. */
+export interface MarketProposal {
+  market: Market;
+  market_id_taken: boolean;
+}

@@ -8,7 +8,7 @@ import {
 import { vi } from 'vitest';
 import type { MarketsController } from '../../hooks/useMarkets';
 import type {
-  Keyword, Market
+  Keyword, Market, MarketProposal, MarketProposalRequest
 } from '../../types';
 import { marketChoiceOptions } from './marketSelection';
 import {
@@ -53,6 +53,27 @@ export const BRAZIL = buildMarket({
   currency: 'BRL',
   timezone: 'America/Sao_Paulo',
 });
+
+/** What `POST /markets {propose}` answers: Santiago, with every member filled in, under a free id by default. */
+export function buildMarketProposal(overrides: Partial<MarketProposal> = {}): MarketProposal {
+  return {
+    market: SANTIAGO,
+    market_id_taken: false,
+    ...overrides,
+  };
+}
+
+/** Chile and Spanish, the city left to the model. */
+export const CHILEAN_REQUEST: MarketProposalRequest = {
+  country: 'CL',
+  language: 'es',
+};
+
+/** Chile and Spanish for Santiago. */
+export const SANTIAGO_REQUEST: MarketProposalRequest = {
+  ...CHILEAN_REQUEST,
+  city: 'Santiago',
+};
 
 export function buildMarketsControllerMock(overrides: Partial<MarketsController> = {}): MarketsController {
   return {

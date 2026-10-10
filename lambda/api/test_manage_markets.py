@@ -9,10 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.market_keywords import UnparseableSuggestionsError
+from shared.market_proposal import InvalidProposalError
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.dynamodb_stubs import fake_table
 from testing.handler_fixtures import handler_fixture
-from testing.markets_fixtures import BRAZIL, CHILE, markets_item
+from testing.markets_fixtures import BRAZIL, CHILE, markets_item, valid_market
 
 markets_module = handler_fixture(
     os.path.dirname(os.path.abspath(__file__)), 'manage-markets.py', 'manage_markets_under_test', scope='function',
@@ -21,19 +22,25 @@ markets_module = handler_fixture(
 
 STORED = markets_item(CHILE, BRAZIL)
 SUGGESTIONS = [{'market_id': 'cl-es', 'keyword': 'pasajes baratos a santiago'}]
+PROPOSED = valid_market({
+    'market_id': 'pe-es', 'country': 'PE', 'country_name': 'Peru', 'language': 'es-PE', 'language_name': 'Spanish',
+    'currency': 'PEN', 'timezone': 'America/Lima', 'city': 'Lima', 'lat': -12.0464, 'lng': -77.0428,
+})
 
 
 class Call:
     """One request to the handler, with what it read, wrote and asked the model recorded."""
 
     def __init__(self, module, method: str, body=None, *, groups: str | None = 'Admin', stored: dict | None = STORED,
-                 keywords_in_use: list[dict] | None = None, suggest: MagicMock | None = None) -> None:
+                 keywords_in_use: list[dict] | None = None, suggest: MagicMock | None = None,
+                 propose: MagicMock | None = None) -> None:
         self.brand_config = fake_table(get_item={'Item': stored} if stored else {})
         self.keywords = fake_table(scan={'Items': keywords_in_use or []})
         self.suggest = suggest or MagicMock(return_value=SUGGESTIONS)
+        self.propose = propose or MagicMock(return_value=PROPOSED)
         event = caller_event(method, '/api/markets', groups=groups, body=body, resource='/api/markets')
         with patch.multiple(module, brand_config_table=self.brand_config, keywords_table=self.keywords,
-                            suggest_local_keywords=self.suggest):
+                            suggest_local_keywords=self.suggest, propose_market=self.propose):
             self.status, self.body = invoke(module, event)
 
     @property
@@ -155,6 +162,48 @@ class TestSuggestKeywords:
 
     def test_counts_a_repeated_market_once_against_the_cap(self, markets_module):
         assert Call(markets_module, 'POST', {'keyword': 'cheap flights', 'market_ids': ['cl-es'] * 11}).status == 200
+
+
+class TestProposeMarket:
+    def test_answers_the_proposed_market_and_whether_its_id_is_taken(self, markets_module):
+        call = Call(markets_module, 'POST', {'propose': {'country': 'PE', 'language': 'es', 'city': 'Lima'}})
+
+        assert (call.status, call.body) == (200, {'market': PROPOSED.to_json(), 'market_id_taken': False})
+
+    def test_flags_a_proposal_whose_id_a_configured_market_already_uses(self, markets_module):
+        chile = valid_market({**CHILE, 'city': 'Valparaíso'})
+        call = Call(markets_module, 'POST', {'propose': {'country': 'CL', 'language': 'es'}}, propose=MagicMock(return_value=chile))
+
+        assert call.body['market_id_taken'] is True
+
+    def test_asks_the_model_with_the_normalised_request_and_the_brand_config(self, markets_module):
+        brand_config = {'config_id': 'default', 'tracked_brands': {'first_party': ['Altiplano Air'], 'competitors': []}}
+        call = Call(markets_module, 'POST', {'propose': {'country': 'pe', 'language': 'ES', 'city': ' Lima '}}, stored=brand_config)
+
+        assert call.propose.call_args.args == ({'country': 'PE', 'language': 'es', 'city': 'Lima'}, brand_config)
+
+    @pytest.mark.parametrize('failure', [InvalidProposalError('timezone is not valid'), TimeoutError('slow')], ids=['invalid', 'call-failed'])
+    def test_answers_502_when_the_model_cannot_describe_the_market(self, markets_module, failure):
+        call = Call(markets_module, 'POST', {'propose': {'country': 'PE', 'language': 'es'}}, propose=MagicMock(side_effect=failure))
+
+        assert (call.status, call.body) == (502, {'error': 'The model could not describe this market; fill the fields in by hand'})
+
+    @pytest.mark.parametrize(('propose', 'error'), [
+        pytest.param('PE', 'propose must be an object with country and language', id='not-an-object'),
+        pytest.param({'country': 'PER', 'language': 'es'}, 'propose.country must be an ISO 3166-1 alpha-2 code', id='bad-country'),
+        pytest.param({'country': 'PE'}, 'propose.language must be a BCP 47 language tag such as es or pt-BR', id='no-language'),
+    ])
+    def test_rejects_a_malformed_request_without_calling_the_model(self, markets_module, propose, error):
+        call = Call(markets_module, 'POST', {'propose': propose})
+
+        assert (call.status, call.body) == (400, {'error': error, 'field': 'propose'})
+        call.propose.assert_not_called()
+
+    def test_a_body_without_propose_still_suggests_keywords(self, markets_module):
+        call = Call(markets_module, 'POST', {'keyword': 'cheap flights', 'market_ids': ['cl-es']})
+
+        assert (call.status, 'suggestions' in call.body) == (200, True)
+        call.propose.assert_not_called()
 
 
 class TestAdminGate:

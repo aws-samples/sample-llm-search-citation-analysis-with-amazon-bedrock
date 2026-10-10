@@ -9,6 +9,31 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.38.0] - 2026-10-10
+
+### Added
+
+- **Describe this market** (Settings › Markets, `POST /api/markets` with `{"propose": {country, language, city?}}`,
+  Admin): adding a market is now two steps. Step 1 takes a country and a language from two lists, named in English
+  by the browser, plus an optional city; "Next: describe this market" (also what Enter does there, so nothing is
+  saved undescribed) makes one Bedrock call (`shared/market_proposal.py`, the `analysis` role, 2–3 s) that proposes
+  everything else a market carries: the BCP 47 tag with the regional variant, the currency, the city's IANA time
+  zone, region and coordinates, the id and display name, the local competitors of the tracked brands that the global
+  list lacks, and the brand's local names. The proposal is read back through the same `validate_market` as a
+  hand-typed market (the request's country and city always win over the model's; the language must keep the
+  requested primary subtag; bad coordinates or optional texts are dropped rather than failing it) and the answer says
+  whether the id is already configured. Step 2 shows the proposed details to check and edit, with "Describe again"
+  and "Back"; the administrator saves from there. When the model cannot answer, step 2 opens with what the choice
+  implies (codes and English names) and the rest to fill in by hand. The old `{keyword, market_ids}` body of the same
+  route keeps asking for keyword translations.
+
+### Changed
+
+- Settings › Markets: the fourteen-field form became the two steps above; editing an existing market shows the
+  details directly. Going back and changing the choice describes it afresh; going back without a change returns to
+  the same details, edits kept. The competitors field is labelled "Extra local competitors": the Brand Tracking list
+  already counts in every market.
+
 ## [2.37.3] - 2026-10-09
 
 ### Fixed
