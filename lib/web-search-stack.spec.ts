@@ -19,7 +19,14 @@ describe('CitationAnalysisWebSearchStack', () => {
   it('adds the web-search connector target authorized by the gateway role', () => {
     template.hasResourceProperties('AWS::BedrockAgentCore::GatewayTarget', {
       Name: 'web-search-tool',
-      TargetConfiguration: { Mcp: { Connector: { Source: { ConnectorId: 'web-search' } } } },
+      TargetConfiguration: {
+        Mcp: {
+          Connector: {
+            Source: { ConnectorId: 'web-search' },
+            Configurations: [{ Name: 'WebSearch', ParameterValues: {} }],
+          },
+        },
+      },
       CredentialProviderConfigurations: [{ CredentialProviderType: 'GATEWAY_IAM_ROLE' }],
     });
     expect(Object.keys(template.findResources('AWS::BedrockAgentCore::GatewayTarget'))).toHaveLength(1);

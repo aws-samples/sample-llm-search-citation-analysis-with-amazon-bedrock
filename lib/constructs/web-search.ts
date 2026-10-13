@@ -15,6 +15,9 @@ export const WEB_SEARCH_TARGET_NAME = 'web-search-tool';
 
 export const WEB_SEARCH_CONNECTOR_ID = 'web-search';
 
+/** The connector's one tool configuration; its name is the tool (`WebSearch`). */
+export const WEB_SEARCH_TOOL_CONFIGURATION = 'WebSearch';
+
 export const WEB_SEARCH_ALLOWED_REGIONS: readonly string[] = ['us-east-1', 'eu-west-1', 'ap-northeast-1'];
 
 export const WEB_SEARCH_DEFAULT_REGION = 'us-east-1';

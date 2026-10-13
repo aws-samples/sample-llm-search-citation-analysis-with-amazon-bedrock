@@ -4,7 +4,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import {
-  WEB_SEARCH_CONNECTOR_ID, WEB_SEARCH_GATEWAY_URL_PARAMETER, WEB_SEARCH_TARGET_NAME
+  WEB_SEARCH_CONNECTOR_ID, WEB_SEARCH_GATEWAY_URL_PARAMETER, WEB_SEARCH_TARGET_NAME, WEB_SEARCH_TOOL_CONFIGURATION
 } from './constructs/web-search';
 
 /**
@@ -43,7 +43,13 @@ export class CitationAnalysisWebSearchStack extends cdk.Stack {
       name: WEB_SEARCH_TARGET_NAME,
       gatewayIdentifier: this.gateway.attrGatewayIdentifier,
       targetConfiguration: {
-        mcp: { connector: { source: { connectorId: WEB_SEARCH_CONNECTOR_ID } } },
+        mcp: {
+          connector: {
+            source: { connectorId: WEB_SEARCH_CONNECTOR_ID },
+            // The service rejects a connector without its tool configuration ("Connector configurations must not be null").
+            configurations: [{ name: WEB_SEARCH_TOOL_CONFIGURATION, parameterValues: {} }],
+          },
+        },
       },
       credentialProviderConfigurations: [{ credentialProviderType: 'GATEWAY_IAM_ROLE' }],
     });
