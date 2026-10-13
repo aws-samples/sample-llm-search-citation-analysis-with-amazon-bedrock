@@ -11,7 +11,7 @@ This is the reference for every visibility KPI the system reports: what each one
 
 These are not answers and are excluded from every KPI:
 
-- rows from the optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl), because they return links and never write an answer that could name a brand;
+- rows from the optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl, Amazon Bedrock Web Search), because they return links and never write an answer that could name a brand;
 - failed engine calls (`status` other than `success`).
 
 A row is an answer when its `provider` is an AI engine; the provider decides the type. A row without `status` counts as successful.

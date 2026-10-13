@@ -14,8 +14,8 @@
 MINUTES_AGO=${1:-60}
 START_TIME=$(($(date +%s) - (MINUTES_AGO * 60)))000
 LOG_GROUP_BASE="/aws/lambda/CitationAnalysis-Search"
-PROVIDER_IDS=(openai perplexity gemini claude brave tavily exa serpapi firecrawl)
-PROVIDER_LABELS=(OpenAI Perplexity Gemini Claude Brave Tavily Exa SerpAPI Firecrawl)
+PROVIDER_IDS=(openai perplexity gemini claude brave tavily exa serpapi firecrawl agentcore)
+PROVIDER_LABELS=(OpenAI Perplexity Gemini Claude Brave Tavily Exa SerpAPI Firecrawl "Bedrock Web Search")
 
 # Log groups that exist, among the base group and the per-provider groups.
 EXISTING=$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP_BASE" \

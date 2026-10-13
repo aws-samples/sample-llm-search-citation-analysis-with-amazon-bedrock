@@ -74,6 +74,8 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
   // throughput for free; 3 needed 16. The 12 s interval keeps two slots at
   // five searches a minute, so the retries are no longer the pacing.
   { id: 'firecrawl', type: 'search', defaultConcurrency: 2, defaultMinIntervalSeconds: 12 },
+  // Amazon Bedrock Web Search through an AgentCore Gateway. Not benchmarked yet.
+  { id: 'agentcore', type: 'search', defaultConcurrency: 5 },
 ];
 
 const PROVIDER_CONCURRENCY_CONTEXT = 'providerConcurrency';
@@ -239,7 +241,7 @@ function failedProviderResult(provider: SearchProvider): Record<string, unknown>
   };
 }
 
-/** The nine `CitationAnalysis-Search-<id>` functions and the workflow states that call them. */
+/** The ten `CitationAnalysis-Search-<id>` functions and the workflow states that call them. */
 export class ProviderSearch extends Construct {
   private readonly providerFunctions: ProviderFunction[];
 

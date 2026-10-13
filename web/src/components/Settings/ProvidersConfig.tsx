@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
+import { usesIamAuth } from '../../constants/providers';
 import { describeProviderHealth } from '../../formatting/providerHealth';
 import type {
   ProviderHealthDescriptor, ProviderHealthTone
@@ -46,9 +47,11 @@ function getProviderDotClass(configured: boolean, enabled: boolean): string {
   return 'bg-gray-300';
 }
 
-function getToggleTitle(configured: boolean, enabled: boolean): string {
-  if (!configured) return 'Configure API key first';
-  return enabled ? 'Disable' : 'Enable';
+function getToggleTitle(provider: ProviderConfig): string {
+  if (!provider.configured) {
+    return usesIamAuth(provider) ? 'Gateway not deployed: deploy the web search stack to enable this provider' : 'Configure API key first';
+  }
+  return provider.enabled ? 'Disable' : 'Enable';
 }
 
 /**
@@ -112,12 +115,16 @@ const ProviderAutoDisabledNote = ({ provider }: ProviderHealthProps) => {
 /** "Configured" plus the masked key and health, or the amber "Not configured" pill. */
 const ProviderStatus = ({ provider }: ProviderHealthProps) => {
   if (!provider.configured) {
-    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">Not configured</span>;
+    const label = usesIamAuth(provider) ? 'Gateway not deployed' : 'Not configured';
+    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{label}</span>;
   }
+  const iam = usesIamAuth(provider);
   return (
     <>
-      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Configured</span>
-      {provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
+      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+        {iam ? 'IAM — no key needed' : 'Configured'}
+      </span>
+      {!iam && provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
       <ProviderHealthBadge provider={provider} />
     </>
   );
@@ -141,7 +148,7 @@ const ProviderToggle = ({
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
         on ? 'bg-emerald-500' : 'bg-gray-300'
       } ${provider.configured ? '' : 'opacity-50 cursor-not-allowed'}`}
-      title={getToggleTitle(provider.configured, provider.enabled)}
+      title={getToggleTitle(provider)}
     >
       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
         on ? 'translate-x-6' : 'translate-x-1'
@@ -291,12 +298,14 @@ export const ProvidersConfig = ({
                         Change model
                       </button>
                     )}
-                    <button onClick={() => startEditing(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                      {provider.configured ? 'Update Key' : 'Add Key'}
-                    </button>
+                    {!usesIamAuth(provider) && (
+                      <button onClick={() => startEditing(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                        {provider.configured ? 'Update Key' : 'Add Key'}
+                      </button>
+                    )}
                   </>
                 )}
-                <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Get API Key">
+                <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title={usesIamAuth(provider) ? 'Documentation' : 'Get API Key'}>
                   <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
                 </a>
               </div>
@@ -329,8 +338,8 @@ export const ProvidersConfig = ({
       <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
         <h4 className="text-sm font-medium text-gray-900 mb-2">How it works</h4>
         <ul className="text-xs text-gray-600 space-y-1">
-          <li>• Only enabled providers with configured API keys will be used during analysis</li>
-          <li>• API keys are stored securely in AWS Secrets Manager</li>
+          <li>• Only enabled providers that are configured (an API key, or IAM access for the Amazon Bedrock Web Search gateway) will be used during analysis</li>
+          <li>• API keys are stored securely in AWS Secrets Manager; the IAM provider needs no key</li>
           <li>• Disable providers temporarily without removing their API keys</li>
           <li>• The OpenAI and Gemini models can be changed as new versions appear; each is checked before it is saved</li>
           <li>• Each provider has different capabilities and pricing</li>

@@ -291,9 +291,13 @@ function allowStatementsOfPolicies(policies: unknown[]): unknown[] {
   });
 }
 
+/**
+ * The role's inline policies plus the `OverflowPolicy` managed policies CDK
+ * splits off a role whose inline policy would exceed its size limit.
+ */
 export function allowStatementsOfRole(template: Template, roleLogicalId: string): unknown[] {
   return allowStatementsOfPolicies(
-    Object.values(template.findResources('AWS::IAM::Policy'))
+    [...Object.values(template.findResources('AWS::IAM::Policy')), ...Object.values(template.findResources('AWS::IAM::ManagedPolicy'))]
       .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
   );
 }
@@ -1387,7 +1391,7 @@ export function extractWorkflowScaleSnapshot(template: Template): WorkflowScaleS
 
 /** The providers that get their own `CitationAnalysis-Search-<id>` function (2.28.0). */
 export const SEARCH_PROVIDER_IDS = [
-  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl',
+  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl', 'agentcore',
 ];
 
 export function searchFunctionName(providerId: string): string {

@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
 import { ProviderSearch, readProviderConcurrency, readProviderPacing } from './constructs/provider-search';
+import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion, webSearchPolicyStatement } from './constructs/web-search';
 import type { McpServerInputs } from './constructs/mcp-server';
 import {
   PYTHON_ASSET_EXCLUDES, lambdaSourceCode, pythonLayer
@@ -1031,6 +1032,15 @@ export class CitationAnalysisStack extends cdk.Stack {
       'Role for Search Lambda to access Secrets Manager and DynamoDB'
     );
 
+    // Amazon Bedrock Web Search (provider `agentcore`): the gateway lives in its own
+    // stack and region, found through the SSM name and region only.
+    const webSearchRegion = readWebSearchRegion(this);
+    const webSearchEnv = {
+      WEB_SEARCH_REGION: webSearchRegion,
+      WEB_SEARCH_GATEWAY_URL_PARAMETER,
+    };
+    searchLambdaRole.addToPolicy(webSearchPolicyStatement(this.account, webSearchRegion));
+
     // Grant Search Lambda read access to all API key secrets
     openaiSecret.grantRead(searchLambdaRole);
     perplexitySecret.grantRead(searchLambdaRole);
@@ -1184,6 +1194,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
+        ...webSearchEnv,
         ...bedrockTierEnv,
       },
     });
@@ -1978,6 +1989,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+        ...webSearchEnv,
         DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
         DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
         DYNAMODB_TABLE_CONTENT_CHANGES: contentChangesTable.tableName,
@@ -2074,6 +2086,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // live Converse call before it is saved. Listing and quota reads take no
     // resource-level permissions, hence `*`.
     configMgmtFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    configMgmtFunction.addToRolePolicy(webSearchPolicyStatement(this.account, webSearchRegion));
     allow(configMgmtFunction, ['bedrock:ListInferenceProfiles', 'bedrock:GetInferenceProfile'], ['*']);
     allow(configMgmtFunction, ['servicequotas:ListServiceQuotas', 'servicequotas:GetServiceQuota'], ['*']);
     // POST /api/schedules/{id}/run starts an analysis with the schedule's scope.

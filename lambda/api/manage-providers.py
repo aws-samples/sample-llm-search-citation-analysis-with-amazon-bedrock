@@ -50,6 +50,13 @@ from shared.provider_models import (
     is_valid_model_id,
 )
 from shared.utils import get_timestamp
+from shared.web_search_gateway import (
+    WebSearchGatewayError,
+    gateway_url,
+    parse_search_reply,
+    post_signed,
+    search_payload,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -64,6 +71,10 @@ SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 # Provider type constants
 PROVIDER_TYPE_LLM = 'llm'
 PROVIDER_TYPE_SEARCH = 'search'
+
+# How a provider is authenticated: a key in Secrets Manager, or the Lambda's IAM role.
+AUTH_API_KEY = 'api_key'
+AUTH_IAM = 'iam'
 
 # Provider definitions
 PROVIDERS = {
@@ -135,6 +146,17 @@ PROVIDERS = {
         'secret_name': f'{SECRETS_PREFIX}firecrawl-key',
         'docs_url': 'https://firecrawl.dev/',
         'model': 'search-scrape',
+        'type': PROVIDER_TYPE_SEARCH
+    },
+    # No secret: calls are signed with the Lambda role against the Web Search
+    # gateway (lib/web-search-stack.ts), which is the provider's only credential.
+    'agentcore': {
+        'name': 'Amazon Bedrock Web Search',
+        'description': 'Amazon-operated web index through an AgentCore Gateway (IAM, no API key)',
+        'secret_name': None,
+        'auth': AUTH_IAM,
+        'docs_url': 'https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html',
+        'model': 'web-search',
         'type': PROVIDER_TYPE_SEARCH
     }
 }
@@ -211,6 +233,18 @@ def get_secret_status(secret_name: str) -> dict:
         logger.exception("Error checking secret")
         return {'exists': False, 'has_value': False}
     return _secret_status(response)
+
+
+def uses_iam(provider_id: str) -> bool:
+    """Whether ``provider_id`` is authenticated by IAM instead of a stored key."""
+    return PROVIDERS.get(provider_id, {}).get('auth', AUTH_API_KEY) == AUTH_IAM
+
+
+def credential_status(provider_id: str) -> dict:
+    """``get_secret_status`` for a key provider; for an IAM provider, whether its gateway is deployed."""
+    if uses_iam(provider_id):
+        return {'exists': True, 'has_value': gateway_url() is not None, 'masked_key': None}
+    return get_secret_status(PROVIDERS[provider_id]['secret_name'])
 
 
 def stored_api_key(secret_name: str) -> str:
@@ -558,8 +592,24 @@ def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict
         return {'valid': False, 'error': 'Validation failed'}
 
 
+def _gateway_check(url: str) -> dict:
+    """One real one-result search through the Web Search gateway; never raises."""
+    try:
+        response = post_signed(url, search_payload('test', 1), _COMPLETION_PROBE_TIMEOUT)
+        response.raise_for_status()
+        parse_search_reply(response.json())
+    except (WebSearchGatewayError, ValueError) as error:
+        return {'valid': False, 'error': str(error)}
+    except Exception:
+        logger.exception('Error during Web Search gateway check')
+        return {'valid': False, 'error': 'Validation failed'}
+    return {'valid': True}
+
+
 def validate_api_key(provider_id: str, api_key: str) -> dict:
-    """Validate API key by making a simple test request."""
+    """Validate API key by making a simple test request (for an IAM provider, ``api_key`` is its gateway URL)."""
+    if uses_iam(provider_id):
+        return _gateway_check(api_key)
     probe = _KEY_PROBES.get(provider_id)
     if probe is None:
         return {'valid': False, 'error': 'Unknown provider'}
@@ -813,10 +863,11 @@ def handle_get_providers(event: dict, context: Any) -> dict:
     providers = []
 
     for provider_id, info in PROVIDERS.items():
-        secret_status = get_secret_status(info['secret_name'])
+        secret_status = credential_status(provider_id)
         config = get_provider_config(provider_id)
 
         providers.append({
+            'auth': info.get('auth', AUTH_API_KEY),
             'id': provider_id,
             'name': info['name'],
             'description': info['description'],
@@ -858,6 +909,8 @@ def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
 
 def _apply_api_key(provider_id: str, body: dict, event: dict) -> dict | None:
     """Validate and store ``body['api_key']``; an error response, or ``None`` on success."""
+    if uses_iam(provider_id):
+        return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
     api_key = body['api_key'].strip()
 
     # Input validation - reasonable key length
@@ -933,6 +986,11 @@ def _key_for_proof(provider_id: str, event: dict, field: str, action: str) -> st
     Every change that is proven with a real call (a model, enabling) reads the
     key the same way and refuses the same way without one.
     """
+    if uses_iam(provider_id):
+        url = gateway_url()
+        if url is None:
+            return validation_error(f'Deploy the Web Search gateway stack before {action}', event, field)
+        return url
     api_key = stored_api_key(PROVIDERS[provider_id]['secret_name'])
     if not api_key:
         return validation_error(f'Configure an API key before {action}', event, field)
@@ -1005,7 +1063,7 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
         return error
 
     # Return updated status
-    secret_status = get_secret_status(PROVIDERS[provider_id]['secret_name'])
+    secret_status = credential_status(provider_id)
     config = get_provider_config(provider_id)
 
     return success_response({
@@ -1050,6 +1108,8 @@ def handle_validate_key(event: dict, context: Any, provider_id: str, body: dict 
     needs provider status and it only ever returns masked keys.
     """
     body = body or {}
+    if uses_iam(provider_id):
+        return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
     api_key = body.get('api_key', '').strip()
     if not api_key:
         return validation_error('API key required', event, 'api_key')

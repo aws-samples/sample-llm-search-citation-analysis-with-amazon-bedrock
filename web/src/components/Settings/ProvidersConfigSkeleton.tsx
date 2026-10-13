@@ -2,9 +2,9 @@ import {
   Skeleton, SkeletonLines, SkeletonRegion
 } from '../ui/Skeleton';
 
-/** `GET /providers` lists four answer engines and five search providers. */
+/** `GET /providers` lists four answer engines and six search providers (the last, agentcore, uses IAM). */
 const PROVIDER_CARD_IDS = [
-  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl',
+  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl', 'agentcore',
 ] as const;
 
 /** One provider card: status dot, name and model, description, status pills, and the controls. */

@@ -9,6 +9,37 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.40.0] - 2026-10-11
+
+### Added
+
+- **Amazon Bedrock Web Search is the tenth provider** (`agentcore`, a search provider next to Brave, Tavily, Exa,
+  SerpAPI and Firecrawl). It queries Amazon's own web index through an AgentCore Gateway with the managed `web-search`
+  connector and records the results as citations only (no generated answer, so it never counts in the KPIs). It needs
+  no API key: the search Lambda signs each call (SigV4) with its role. One search is one stateless `tools/call`
+  (`shared/web_search_gateway.py`, `AgentCoreSearchClient`); live probes of the tool answered in about a second with
+  up to 20 results for a requested 25.
+  - **Gateway stack** (`CitationAnalysisWebSearchStack`, `lib/web-search-stack.ts`): the gateway (`AWS_IAM` inbound
+    auth), its `web-search-tool` target, a service role that may only call `bedrock-agentcore:InvokeWebSearch`, and the
+    gateway URL in the SSM parameter `/citation-analysis/web-search/gateway-url`. Web Search exists only in us-east-1,
+    eu-west-1 and ap-northeast-1, so the stack has its own region (CDK context `webSearchRegion`, default
+    `us-east-1`; anything else fails at synth) and the main stack reads the URL from SSM at run time. Nothing is
+    referenced across the two stacks, so deploy order and regions do not matter. It is a separate stack because the
+    main stack is at the 500-resource limit (the provider itself adds a function, its log group and an IAM overflow
+    policy: 499).
+  - **Settings › AI Providers**: the card shows *IAM — no key needed* once the gateway stack is deployed and *Gateway
+    not deployed* (toggle disabled) before; there is no key field. Enabling is proven with a real one-result search
+    through the gateway. `GET /api/providers` gains `auth` (`iam` | `api_key`); `PUT`/`validate` with an API key on an
+    IAM provider answer 400.
+  - **Markets.** The tool has no country or language parameter (measured: extra `country`/`language` arguments are
+    ignored), so a market changes nothing in the request. Results localize by the query's language, which a market's
+    translated keywords already carry (Spanish and Portuguese queries returned `.es`/`.cl` and `.br`/`.pt` sources
+    where the English one returned `.com`).
+  - **Terms.** AWS requires source citations and links to be kept and shown, and forbids bulk extraction or building a
+    competing index with the results.
+  - The index reports dates as text such as `05:00PM, Sunday, May 10 2026, PDT`, or `unknown` for about half of the
+    hits; `published_date` is stored as UTC ISO-8601, or `None` when unknown.
+
 ## [2.39.0] - 2026-10-10
 
 A duplication review of the 158 production clones the jscpd gate had accepted over time classified 17 as the same

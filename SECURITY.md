@@ -50,7 +50,7 @@ Before exposing a production deployment, consider adding:
 
 ### Secrets
 
-- Provider API keys live in AWS Secrets Manager under `citation-analysis/<name>-key`, where `<name>` is one of `openai`, `perplexity`, `gemini`, `claude`, `brave`, `tavily`, `exa`, `serpapi` or `firecrawl`. The stack imports these secrets and never creates them. Bedrock calls use IAM, not a key.
+- Provider API keys live in AWS Secrets Manager under `citation-analysis/<name>-key`, where `<name>` is one of `openai`, `perplexity`, `gemini`, `claude`, `brave`, `tavily`, `exa`, `serpapi` or `firecrawl`. The stack imports these secrets and never creates them. The `agentcore` provider (Amazon Bedrock Web Search) has no secret: the search Lambda uses its IAM role, and the AgentCore Gateway uses `AWS_IAM` inbound auth. Bedrock calls use IAM, not a key.
 - A secret may hold the raw key or JSON with an `api_key` field; an empty value or `placeholder` counts as not configured.
 - Lambdas read keys at invocation time (`lambda/shared/secrets.py`) and cache them for 5 minutes, so a rotated key is picked up without redeploying. Lookup failures log the exception type only, never the value.
 - Admins can create or update keys from **Settings > AI Providers**. The configuration Lambda may create, update and read secrets under `citation-analysis/*`.
