@@ -171,7 +171,8 @@ def _latest_provider_execution(provider: str | None) -> str | None:
 
 @api_handler
 @validate({
-    'provider': optional_provider(),
+    # Any provider has a last run, so the filter takes the search providers too (unlike answer-based endpoints).
+    'provider': {**optional_provider(), 'choices': PROVIDERS},
     MARKET_PARAM: scope_params.SCOPE_QUERY_PARAMS[MARKET_PARAM],
 })
 def handler(event, context, provider=None, market_id=None):

@@ -37,6 +37,8 @@ process.
     where the English one returned `.com`).
   - **Terms.** AWS requires source citations and links to be kept and shown, and forbids bulk extraction or building a
     competing index with the results.
+  - `GET /api/stats?provider=` now accepts the search providers too (it answered 400 for everything but the four
+    answer engines); the brand-mention and sentiment endpoints still take the answer engines only.
   - The index reports dates as text such as `05:00PM, Sunday, May 10 2026, PDT`, or `unknown` for about half of the
     hits; `published_date` is stored as UTC ISO-8601, or `None` when unknown.
 
