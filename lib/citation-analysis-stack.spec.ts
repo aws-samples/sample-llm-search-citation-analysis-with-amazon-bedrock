@@ -862,6 +862,7 @@ const DEFAULT_PROVIDER_CAPS: Record<string, number | undefined> = {
   exa: 5,
   serpapi: 5,
   firecrawl: 2,
+  agentcore: 5,
 };
 const LAMBDA_SERVICE_ERRORS = [
   'Lambda.ClientExecutionTimeoutException',
@@ -1052,7 +1053,7 @@ describe('Search and crawl concurrency overrides', () => {
 
 describe('Invalid -c providerConcurrency', () => {
   it.each([
-    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl)"],
+    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl, agentcore)"],
     ['sets a negative cap', { perplexity: -1 }, "'perplexity' must be a positive integer, or 0 for no cap, got -1"],
     ['sets a fractional cap', '{"openai":2.5}', "'openai' must be a positive integer, or 0 for no cap, got 2.5"],
     ['sets a cap as a string', { exa: '5' }, "'exa' must be a positive integer, or 0 for no cap, got \"5\""],
@@ -1068,7 +1069,7 @@ describe('Invalid -c providerConcurrency', () => {
 
 describe('Invalid -c providerPacing', () => {
   it.each([
-    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl)"],
+    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl, agentcore)"],
     ['sets a negative interval', { perplexity: -1 }, "'perplexity' must be a number of seconds >= 0 (0 for no pacing), got -1"],
     ['sets an interval as a string', { firecrawl: '12' }, "'firecrawl' must be a number of seconds >= 0 (0 for no pacing), got \"12\""],
     ['is not JSON', 'firecrawl=12', 'must be a JSON object, got firecrawl=12'],
@@ -2380,7 +2381,7 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
     const tierEnvironments = bedrockTierEnvironments(template);
 
-    expect(tierEnvironments).toHaveLength(17);
+    expect(tierEnvironments).toHaveLength(18);
     expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 

@@ -78,3 +78,8 @@ const PROVIDER_COLORS: Record<ProviderId, ProviderColor> = {
 export function providerColor(provider: string): ProviderColor | undefined {
   return isProviderId(provider) ? PROVIDER_COLORS[provider] : undefined;
 }
+
+/** Whether a provider row is authenticated by IAM (no API key to store); a row without `auth` uses a key. */
+export function usesIamAuth(provider: { readonly auth?: string }): boolean {
+  return provider.auth === 'iam';
+}

@@ -629,7 +629,7 @@ OPERATIONS: tuple[Tool, ...] = (
         'list_providers', _SETTINGS,
         'AI engines and search providers with their enabled and configured flags and the model each one uses.',
         ('providers', 'engines', 'models', 'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa',
-         'serpapi', 'firecrawl', 'enabled', 'configured', 'api key', 'which engines'),
+         'serpapi', 'firecrawl', 'agentcore', 'enabled', 'configured', 'api key', 'which engines'),
         _schema({}), _get_route('config-mgmt', '/api/providers'), ({},), shape=_provider_summary,
     ),
     _tool(

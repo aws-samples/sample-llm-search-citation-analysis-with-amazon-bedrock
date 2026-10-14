@@ -36,6 +36,7 @@ class Provider:
     EXA = 'exa'
     SERPAPI = 'serpapi'
     FIRECRAWL = 'firecrawl'
+    AGENTCORE = 'agentcore'
 
 
 # List of LLM providers (for iteration)
@@ -52,7 +53,8 @@ SEARCH_PROVIDERS: list[str] = [
     Provider.TAVILY,
     Provider.EXA,
     Provider.SERPAPI,
-    Provider.FIRECRAWL
+    Provider.FIRECRAWL,
+    Provider.AGENTCORE,
 ]
 
 # All providers combined (for backward compatibility)

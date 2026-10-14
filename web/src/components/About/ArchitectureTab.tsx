@@ -21,7 +21,7 @@ const AI_PROVIDERS = [
   },
 ];
 
-const SEARCH_PROVIDERS = ['Brave Search', 'Tavily', 'Exa', 'SerpAPI', 'Firecrawl'];
+const SEARCH_PROVIDERS = ['Brave Search', 'Tavily', 'Exa', 'SerpAPI', 'Firecrawl', 'Amazon Bedrock Web Search'];
 
 const CAPABILITIES = [
   {

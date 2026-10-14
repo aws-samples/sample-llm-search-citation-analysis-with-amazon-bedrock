@@ -107,9 +107,17 @@ class TestResponse:
         status, body = _get_stats(stats_module, tables, {'provider': 'bing'})
 
         assert (status, body) == (400, {
-            'error': 'Invalid provider. Must be one of: openai, perplexity, gemini, claude', 'field': 'provider',
+            'error': 'Invalid provider. Must be one of: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, '
+                     'firecrawl, agentcore',
+            'field': 'provider',
         })
         tables['search_results_table'].scan.assert_not_called()
+
+    @pytest.mark.parametrize('provider', ['openai', 'exa', 'agentcore'])
+    def test_accepts_every_answer_engine_and_search_provider(self, stats_module, provider):
+        status, _ = _get_stats(stats_module, _tables(), {'provider': provider})
+
+        assert status == 200
 
 
 class TestTableCounts:

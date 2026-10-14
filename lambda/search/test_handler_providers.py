@@ -16,6 +16,7 @@ import pytest
 
 from testing.handler_fixtures import handler_fixture
 from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.web_search_fixtures import GATEWAY_URL
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -103,3 +104,49 @@ class TestFailedProviderResult:
             response = search_handler.handler(dict(_EVENT), None)
 
         assert response['results'][0]['error_category'] == 'insufficient_credit'
+
+
+@pytest.fixture
+def agentcore_providers(search_handler):
+    """The gateway deployed, the provider enabled, the client answering; storage and health stubbed."""
+    answer = {
+        'provider': 'agentcore', 'provider_type': 'search', 'response': '', 'status': 'success',
+        'citations': ['https://latam.com/a'], 'search_results': [{'url': 'https://latam.com/a'}],
+        'raw_response': {}, 'metadata': {},
+    }
+    with (
+        patch.object(search_handler, 'get_api_key') as get_api_key,
+        patch.object(search_handler, 'gateway_url', return_value=GATEWAY_URL) as gateway_url,
+        patch.object(search_handler, 'is_provider_enabled', return_value=True),
+        patch.object(search_handler.AgentCoreSearchClient, 'search', return_value=answer) as search,
+        patch.object(search_handler, '_record_provider_outcome'),
+        patch.object(search_handler, 'wait_for_send_slot'),
+    ):
+        yield MagicMock(get_api_key=get_api_key, gateway_url=gateway_url, search=search)
+
+
+class TestAgentCoreProvider:
+    def test_runs_without_a_secret(self, search_handler, agentcore_providers):
+        results = search_handler.execute_all_providers('latam airlines', providers=['agentcore'])
+
+        assert [result['provider'] for result in results] == ['agentcore']
+        agentcore_providers.get_api_key.assert_not_called()
+
+    def test_searches_the_keyword_with_the_gateway_url_as_its_credential(self, search_handler, agentcore_providers):
+        with patch.object(search_handler.AgentCoreSearchClient, '__init__', return_value=None) as init:
+            search_handler.execute_all_providers('latam airlines', providers=['agentcore'])
+
+        init.assert_called_once_with(GATEWAY_URL)
+
+    def test_skips_the_provider_when_the_gateway_is_not_deployed(self, search_handler, agentcore_providers):
+        agentcore_providers.gateway_url.return_value = None
+
+        assert search_handler.execute_all_providers('latam airlines', providers=['agentcore']) == []
+        agentcore_providers.search.assert_not_called()
+
+    def test_does_not_look_up_the_gateway_for_another_provider(self, search_handler, agentcore_providers):
+        agentcore_providers.get_api_key.return_value = None
+
+        search_handler.execute_all_providers('latam airlines', providers=['exa'])
+
+        agentcore_providers.gateway_url.assert_not_called()

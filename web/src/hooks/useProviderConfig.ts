@@ -34,7 +34,11 @@ export interface ProviderConfig extends ProviderHealthRecord {
   configured: boolean;
   masked_key: string | null;
   last_updated: string | null;
+  /** `iam` providers need no key; absent means `api_key`. */
+  auth?: ProviderAuth;
 }
+
+export type ProviderAuth = 'iam' | 'api_key';
 
 interface UseProviderConfigReturn {
   providers: ProviderConfig[];

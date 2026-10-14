@@ -23,7 +23,14 @@ from api_clients import (
     extract_citations_from_response,
 )
 from brand_extractor import DEFAULT_EXTRACTION_CONFIG, extract_brands_from_response
-from search_clients import BraveSearchClient, ExaSearchClient, FirecrawlSearchClient, SerpAPIClient, TavilySearchClient
+from search_clients import (
+    AgentCoreSearchClient,
+    BraveSearchClient,
+    ExaSearchClient,
+    FirecrawlSearchClient,
+    SerpAPIClient,
+    TavilySearchClient,
+)
 
 # Import centralized provider constants and error handling
 from shared.ai_clients import perplexity_agent_text
@@ -42,6 +49,7 @@ from shared.step_function_response import log_error
 
 # Configure logging
 from shared.utils import get_brand_config, get_timestamp
+from shared.web_search_gateway import gateway_url
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -610,7 +618,7 @@ def _search_provider_runner(client_class: type) -> ProviderRunner:
 # runner). Replaces the nine copy-pasted
 # enabled/disabled/no-key ladders (bugs.md 3.2); execution order is
 # unchanged.
-PROVIDER_RUNNERS: list[tuple[str, str, str, ProviderRunner]] = [
+PROVIDER_RUNNERS: list[tuple[str, str | None, str, ProviderRunner]] = [
     (Provider.OPENAI, 'openai-key', 'OpenAI', _run_openai_provider),
     (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', _run_perplexity_provider),
     (Provider.GEMINI, 'gemini-key', 'Gemini', _run_gemini_provider),
@@ -620,6 +628,8 @@ PROVIDER_RUNNERS: list[tuple[str, str, str, ProviderRunner]] = [
     (Provider.EXA, 'exa-key', 'Exa', _search_provider_runner(ExaSearchClient)),
     (Provider.SERPAPI, 'serpapi-key', 'SerpAPI', _search_provider_runner(SerpAPIClient)),
     (Provider.FIRECRAWL, 'firecrawl-key', 'Firecrawl', _search_provider_runner(FirecrawlSearchClient)),
+    # No secret: IAM-signed calls to the Web Search gateway, whose URL is the credential.
+    (Provider.AGENTCORE, None, 'Bedrock Web Search', _search_provider_runner(AgentCoreSearchClient)),
 ]
 
 
@@ -675,9 +685,9 @@ def execute_all_providers(
         # and one enablement row, not all nine.
         if provider_id not in providers:
             continue
-        api_key = get_api_key(secret_name)
+        api_key = get_api_key(secret_name) if secret_name else gateway_url()
         if not api_key:
-            logger.info('%s API key not configured, skipping', label)
+            logger.info('%s credential not configured, skipping', label)
             continue
         if not is_provider_enabled(provider_id):
             logger.info('%s is disabled, skipping', label)

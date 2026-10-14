@@ -16,6 +16,7 @@ import requests
 from api_clients import clean_url, retry_with_backoff
 from shared.markets import Market, brave_params, exa_params, firecrawl_params, serpapi_params, tavily_params
 from shared.serpapi import serpapi_search
+from shared.web_search_gateway import iso_published_date, parse_search_reply, post_signed, search_payload
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -327,3 +328,37 @@ class FirecrawlSearchClient(_HttpSearchClient):
         if isinstance(data, list):
             return data
         return []
+
+
+class AgentCoreSearchClient(BaseSearchClient):
+    """Amazon Bedrock AgentCore Web Search through the IAM gateway (``shared.web_search_gateway``).
+
+    The credential is the gateway URL, not a key: calls are signed with the
+    Lambda role. The tool has no country or language parameter, so ``market``
+    changes nothing here; a market keyword reaches it in the market's language
+    (its translated text), which is what localizes the results.
+    """
+
+    provider_id = "agentcore"
+    log_label = "Bedrock Web Search"
+    snippet_key = "text"
+    #: Seconds one attempt may take (the tool answers in about a second).
+    timeout = 30
+    hit_fields = _fields(published_date=("publishedDate", None))
+    answer_fields = _fields(search_id=("id", None))
+
+    def __init__(self, gateway_url: str):
+        super().__init__(gateway_url)
+        self.gateway_url = gateway_url
+
+    def _fetch(self, query: str, market: Market | None) -> dict[str, Any]:
+        send = retry_with_backoff(provider_name=self.provider_id.upper(), timeout=self.timeout)(self._send)
+        return parse_search_reply(send(query))
+
+    def _send(self, query: str, timeout: int) -> requests.Response:
+        """POST one signed ``tools/call`` for ``query``."""
+        return post_signed(self.gateway_url, search_payload(query), timeout)
+
+    def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
+        """The hits, each with its publication date as UTC ISO-8601 (``None`` when the index reports ``unknown``)."""
+        return [{**hit, "publishedDate": iso_published_date(hit.get("publishedDate"))} for hit in super()._hits(raw_response)]

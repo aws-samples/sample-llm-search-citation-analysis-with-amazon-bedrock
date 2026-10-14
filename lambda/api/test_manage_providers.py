@@ -29,11 +29,14 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from botocore.exceptions import ClientError
 
+from shared.web_search_gateway import WebSearchGatewayError
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.module_loader import load_handler_module
 from testing.provider_response_fixtures import PERPLEXITY_MODELS_LISTING
+from testing.web_search_fixtures import GATEWAY_URL, http_response, tool_reply
 
 _ENV = {
     'CORS_ORIGIN_PARAM': '',
@@ -141,6 +144,7 @@ class TestGetProvidersSurfacesHealth:
         _, body = _get_providers()
 
         assert _provider(body, 'gemini') == {
+            'auth': 'api_key',
             'id': 'gemini',
             'name': 'Google Gemini',
             'description': 'Google Search grounding',
@@ -398,7 +402,8 @@ class TestKeyProbeTimeouts:
         assert requests_stub.call_args.kwargs['timeout'] == timeout
 
     def test_covers_every_listed_provider(self):
-        assert set(_module._KEY_PROBES) == set(_module.PROVIDERS)
+        keyed_providers = {provider_id for provider_id in _module.PROVIDERS if not _module.uses_iam(provider_id)}
+        assert set(_module._KEY_PROBES) == keyed_providers
 
     @pytest.mark.parametrize(('provider_id', 'method', 'url'), [
         ('claude', 'post', 'https://api.anthropic.com/v1/messages'),
@@ -1266,3 +1271,131 @@ class TestClaudeModelCheckFallsBackLikeRuns:
         _put_provider(provider_id, {'model': model})
 
         assert requests_stub.call_count == 1
+
+
+# --- An IAM-authenticated provider: Amazon Bedrock Web Search (`agentcore`) ----------
+# It has no secret: it is configured when the Web Search gateway stack is deployed,
+# enabled by a real one-result search through the gateway, and it refuses an API key.
+
+
+@pytest.fixture
+def deployed():
+    """The gateway stack deployed: the parameter holds its URL."""
+    with patch.object(_module, 'gateway_url', return_value=GATEWAY_URL) as lookup:
+        yield lookup
+
+
+@pytest.fixture
+def not_deployed():
+    with patch.object(_module, 'gateway_url', return_value=None) as lookup:
+        yield lookup
+
+
+@pytest.fixture
+def gateway_post():
+    with patch.object(_module, 'post_signed', return_value=http_response(tool_reply([]))) as post:
+        yield post
+
+
+def _agentcore() -> dict[str, Any]:
+    return _provider(_get_providers()[1], 'agentcore')
+
+
+def _put(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    return _put_provider('agentcore', body)
+
+
+class TestListing:
+    @pytest.mark.usefixtures('deployed')
+    def test_describes_the_provider_as_an_iam_search_provider(self):
+        provider = _agentcore()
+
+        assert (provider['auth'], provider['type'], provider['model'], provider['model_configurable']) == (
+            'iam', 'search', 'web-search', False,
+        )
+
+    @pytest.mark.usefixtures('deployed')
+    def test_is_configured_without_a_key_when_the_gateway_is_deployed(self):
+        provider = _agentcore()
+
+        assert (provider['configured'], provider['masked_key']) == (True, None)
+
+    @pytest.mark.usefixtures('not_deployed')
+    def test_is_not_configured_when_the_gateway_is_not_deployed(self):
+        assert _agentcore()['configured'] is False
+
+    @pytest.mark.usefixtures('deployed')
+    def test_never_reads_a_secret(self):
+        _agentcore()
+
+        assert [call for call in mock_secrets.get_secret_value.call_args_list if 'agentcore' in call.kwargs['SecretId']] == []
+
+
+@pytest.mark.usefixtures('deployed')
+class TestApiKey:
+    def test_refuses_an_api_key(self):
+        status, body = _put({'api_key': 'sk-not-needed'})
+
+        assert (status, body['field']) == (400, 'api_key')
+        mock_secrets.put_secret_value.assert_not_called()
+
+    def test_refuses_to_validate_an_api_key(self):
+        event = caller_event('POST', '/api/providers/agentcore/validate', body={'api_key': 'x'}, path_params={'id': 'agentcore'})
+
+        status, body = invoke(_module, event)
+
+        assert (status, body['field']) == (400, 'api_key')
+
+
+class TestEnabling:
+    @pytest.mark.usefixtures('deployed')
+    def test_proves_the_gateway_with_a_one_result_search_and_enables(self, gateway_post):
+        status, _ = _put({'enabled': True})
+
+        assert status == 200
+        assert gateway_post.call_args.args[:2] == (GATEWAY_URL, _module.search_payload('test', 1))
+
+    @pytest.mark.usefixtures('not_deployed')
+    def test_refuses_to_enable_before_the_gateway_stack_is_deployed(self, gateway_post):
+        status, body = _put({'enabled': True})
+
+        assert (status, body['field']) == (400, 'enabled')
+        assert 'Deploy the Web Search gateway stack' in body['error']
+        gateway_post.assert_not_called()
+
+    @pytest.mark.usefixtures('deployed')
+    def test_leaves_the_provider_off_when_the_gateway_refuses_the_search(self, gateway_post):
+        gateway_post.return_value = http_response({'result': {'isError': True, 'content': [{'text': 'denied'}]}})
+
+        status, body = _put({'enabled': True})
+
+        assert (status, body['error'], body['details']) == (400, 'Provider check failed', 'Web Search failed: denied')
+
+    @pytest.mark.usefixtures('deployed')
+    @pytest.mark.usefixtures('deployed')
+    @pytest.mark.parametrize('failure', [
+        pytest.param(OSError('connection reset'), id='unreachable'),
+        pytest.param(requests.exceptions.HTTPError('403 Client Error'), id='refused-caller'),
+    ])
+    def test_reports_a_gateway_that_cannot_be_used_without_raising(self, gateway_post, failure):
+        gateway_post.side_effect = failure
+
+        status, body = _put({'enabled': True})
+
+        assert (status, body['details']) == (400, 'Validation failed')
+
+    @pytest.mark.usefixtures('deployed')
+    def test_disabling_never_calls_the_gateway(self, gateway_post):
+        status, _ = _put({'enabled': False})
+
+        assert status == 200
+        gateway_post.assert_not_called()
+
+
+class TestGatewayCheck:
+    def test_accepts_a_gateway_that_answers_a_search(self, gateway_post):
+        assert _module.validate_api_key('agentcore', GATEWAY_URL) == {'valid': True}
+
+    def test_reports_a_tool_error(self, gateway_post):
+        with patch.object(_module, 'parse_search_reply', side_effect=WebSearchGatewayError('Web Search failed: x')):
+            assert _module.validate_api_key('agentcore', GATEWAY_URL) == {'valid': False, 'error': 'Web Search failed: x'}

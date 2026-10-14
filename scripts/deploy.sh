@@ -435,7 +435,7 @@ verify_deployment() {
             local functions=("Deduplication" "Crawler" "ParseKeywords" "GenerateSummary")
             # One search Lambda per provider since 2.28.0 (lib/constructs/provider-search.ts).
             local provider
-            for provider in openai perplexity gemini claude brave tavily exa serpapi firecrawl; do
+            for provider in openai perplexity gemini claude brave tavily exa serpapi firecrawl agentcore; do
                 functions+=("Search-$provider")
             done
             for func in "${functions[@]}"; do

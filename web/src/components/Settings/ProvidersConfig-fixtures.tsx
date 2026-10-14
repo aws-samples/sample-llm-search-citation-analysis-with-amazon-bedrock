@@ -26,6 +26,23 @@ export function buildProviderConfig(overrides: Partial<ProviderConfig> = {}): Pr
   };
 }
 
+/** The Amazon Bedrock Web Search gateway: authenticated by IAM, so it stores no key. */
+export function buildIamProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return buildProviderConfig({
+    id: 'agentcore',
+    name: 'Amazon Bedrock Web Search',
+    description: 'Amazon-operated web index through an AgentCore Gateway (IAM, no API key)',
+    model: 'web-search',
+    model_configurable: false,
+    docs_url: 'https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html',
+    auth: 'iam',
+    masked_key: null,
+    last_updated: null,
+    last_success_at: undefined,
+    ...overrides,
+  });
+}
+
 /**
  * Claude as production found it on 2026-08-19: out of credit, still nominally
  * enabled, and failing every request since 10:00Z.

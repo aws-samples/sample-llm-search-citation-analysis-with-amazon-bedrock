@@ -2,6 +2,8 @@
 import * as cdk from 'aws-cdk-lib';
 import { CitationAnalysisStack } from '../lib/citation-analysis-stack';
 import { CitationAnalysisMcpStack } from '../lib/mcp-stack';
+import { readWebSearchRegion } from '../lib/constructs/web-search';
+import { CitationAnalysisWebSearchStack } from '../lib/web-search-stack';
 
 const app = new cdk.App();
 const env = {
@@ -23,7 +25,15 @@ const mcpStack = new CitationAnalysisMcpStack(app, 'CitationAnalysisMcpStack', {
 });
 mcpStack.node.addDependency(stack);
 
-for (const taggedStack of [stack, mcpStack]) {
+// Amazon Bedrock Web Search only exists in three regions, so its gateway has its
+// own stack in a fixed region. The main stack reaches it through the SSM
+// parameter name and region constants only: no dependency, no cross-stack reference.
+const webSearchStack = new CitationAnalysisWebSearchStack(app, 'CitationAnalysisWebSearchStack', {
+  env: { account: env.account, region: readWebSearchRegion(app) },
+  description: 'Citation Analysis System - Amazon Bedrock Web Search gateway',
+});
+
+for (const taggedStack of [stack, mcpStack, webSearchStack]) {
   cdk.Tags.of(taggedStack).add('Application', 'CitationAnalysis');
 }
 
