@@ -3,14 +3,13 @@ import {
 } from 'react';
 import { getErrorMessage } from '../infrastructure';
 import {
-  deleteKeywordResearch,
-  fetchKeywordResearchHistory,
   retryKeywordResearch,
   startCompetitorAnalysis,
   startKeywordExpansion,
 } from '../api/keywordResearch';
 import type { ResearchType } from '../api/keywordResearch';
 import { pollResearchJob } from './researchPolling';
+import { useResearchHistoryPages } from './useResearchHistoryPages';
 import type {
   CompetitorAnalysis, CompetitorAnalysisResult, KeywordExpansionResult, KeywordResearchItem
 } from '../types';
@@ -119,12 +118,11 @@ const TIMEOUT_MESSAGES: Record<TrackedResearchType, string> = {
 
 export const useKeywordResearch = () => {
   const [loading, setLoading] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expansionResult, setExpansionResult] = useState<KeywordExpansionResult | null>(null);
   const [competitorResult, setCompetitorResult] = useState<CompetitorAnalysisResult | null>(null);
   const [activeJob, setActiveJob] = useState<KeywordResearchItem | null>(null);
-  const [history, setHistory] = useState<KeywordResearchItem[]>([]);
+  const historyPages = useResearchHistoryPages();
 
   // Cancellation for the long-running poll loops (AUDIT 2.20): each
   // start/retry claims a new generation; a later call or unmount invalidates
@@ -259,38 +257,15 @@ export const useKeywordResearch = () => {
     void trackJob(stored.id, stored.type, isCancelled);
   }, [beginRun, claimGeneration, trackJob]);
 
-  const fetchHistory = useCallback(async (type?: ResearchType) => {
-    setHistoryLoading(true);
-    try {
-      setHistory(await fetchKeywordResearchHistory(type));
-    } catch (err) {
-      console.error('[research] Error fetching history:', err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  const deleteResearch = useCallback(async (id: string) => {
-    try {
-      await deleteKeywordResearch(id);
-      setHistory((prev) => prev.filter((item) => item.id !== id));
-    } catch (err) {
-      console.error('[research] Error deleting research:', err);
-    }
-  }, []);
-
   return {
+    ...historyPages,
     loading,
-    historyLoading,
     error,
     expansionResult,
     competitorResult,
     activeJob,
-    history,
     expandKeywords,
     analyzeCompetitor,
     retryResearch,
-    fetchHistory,
-    deleteResearch,
   };
 };

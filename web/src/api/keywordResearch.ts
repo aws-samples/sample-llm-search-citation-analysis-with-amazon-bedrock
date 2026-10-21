@@ -11,6 +11,7 @@
 import {
   apiDelete, apiGet, apiPost, apiPut
 } from './client';
+import { withNextToken } from './cursorPages';
 import type {
   AgentDimensionOption, KeywordResearchItem, ResearchTemplate
 } from '../types';
@@ -114,11 +115,32 @@ export async function fetchKeywordResearch(id: string): Promise<KeywordResearchI
   return decodeJob(await apiGet<unknown>(`/keyword-research/${encodeURIComponent(id)}`));
 }
 
-export async function fetchKeywordResearchHistory(type?: ResearchType): Promise<KeywordResearchItem[]> {
-  const params: Record<string, string> = { limit: '50' };
+/** One newest-first page of research jobs and the token of the next (`null` on the last). */
+export interface KeywordResearchHistoryPage {
+  items: KeywordResearchItem[];
+  nextToken: string | null;
+}
+
+/** Jobs per history page; the API also cuts a page at its response budget. */
+const HISTORY_PAGE_LIMIT = '50';
+
+export async function fetchKeywordResearchHistoryPage(
+  type?: ResearchType,
+  nextToken: string | null = null
+): Promise<KeywordResearchHistoryPage> {
+  const params: Record<string, string> = { limit: HISTORY_PAGE_LIMIT };
   if (type) params.type = type;
-  const payload = await apiGet<unknown>('/keyword-research/history', { params });
-  return listItems(payload, 'history').filter(isKeywordResearchItem);
+  const payload = await apiGet<unknown>('/keyword-research/history', { params: withNextToken(params, nextToken) });
+  const items = listItems(payload, 'history').filter(isKeywordResearchItem);
+  return {
+    items,
+    nextToken: isRecord(payload) && typeof payload.next_token === 'string' ? payload.next_token : null,
+  };
+}
+
+/** The newest page of research jobs (the agent's run list). */
+export async function fetchKeywordResearchHistory(type?: ResearchType): Promise<KeywordResearchItem[]> {
+  return (await fetchKeywordResearchHistoryPage(type)).items;
 }
 
 export async function deleteKeywordResearch(id: string): Promise<void> {
