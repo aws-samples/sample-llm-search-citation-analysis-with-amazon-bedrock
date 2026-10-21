@@ -1,6 +1,7 @@
 import {
   apiDelete, apiGet, apiPost, apiPut
 } from './client';
+import { withNextToken } from './cursorPages';
 import {
   decodeBatchStartResponse,
   decodeBatchStatusResponse,
@@ -56,10 +57,11 @@ export async function fetchContentIdeas(signal?: AbortSignal): Promise<ContentId
 
 export async function fetchContentHistory(
   limit = 20,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  nextToken: string | null = null
 ): Promise<DecodedContentHistory> {
   return decodeContentHistoryResponse(await apiGet<unknown>('/content-studio/history', {
-    params: { limit: String(limit) },
+    params: withNextToken({ limit: String(limit) }, nextToken),
     signal,
   }));
 }

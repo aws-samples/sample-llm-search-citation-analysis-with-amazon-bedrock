@@ -49,7 +49,7 @@ def history_for(limit: int, **pages: list[dict[str, object]]) -> tuple[list[dict
     table.query.side_effect = status_query_pages(**pages)
 
     with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-        history = _mod.get_content_history(limit)
+        history = _mod.get_content_history(limit).items
     return history, table
 
 
@@ -155,7 +155,6 @@ class TestIndexedHistory:
             "generated",
             "2026-09-20T10:00:00Z",
             idea_type="visibility_gap",
-            idea_data={"id": "old-idea", "keyword": "Legacy keyword"},
         )
 
         history, _ = history_for(20, generated=[legacy])
@@ -164,7 +163,21 @@ class TestIndexedHistory:
         assert "scope" not in history[0]
         assert "batch_id" not in history[0]
 
-    def test_history_route_keeps_existing_response_shape(self) -> None:
+    def test_omits_idea_and_raw_model_text_from_history_rows(self) -> None:
+        row = history_row(
+            "heavy",
+            "generated",
+            "2026-09-20T10:00:00Z",
+            idea_data={"id": "idea", "keyword": "Hotel"},
+            raw_content="raw model text",
+            generated_content={"title": "Ready"},
+        )
+
+        history, _ = history_for(20, generated=[row])
+
+        assert history == [history_row("heavy", "generated", "2026-09-20T10:00:00Z", generated_content={"title": "Ready"})]
+
+    def test_history_route_returns_page_with_next_token_and_unviewed_count(self) -> None:
         legacy = history_row("legacy", "generated", "2026-09-20T10:00:00Z")
         table = fake_table()
         table.query.side_effect = [
@@ -179,8 +192,19 @@ class TestIndexedHistory:
         assert body == {
             "history": [legacy],
             "total_count": 1,
+            "next_token": None,
             "unviewed_count": 1,
+            "unviewed_count_capped": False,
         }
+
+    def test_history_route_rejects_malformed_next_token(self) -> None:
+        event = api_gateway_event(
+            "GET", "/content-studio/history", query={"limit": "20", "next_token": "bm90LWEtY3Vyc29y"}
+        )
+
+        status, body = call_api(event, content_studio_resource(content_table=fake_table()))
+
+        assert (status, body) == (400, {"error": "Invalid next_token", "field": "next_token"})
 
 
 class TestGenerationStatus:
@@ -221,10 +245,33 @@ class TestUnviewedCount:
         with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
             count = _mod.get_unviewed_count()
 
-        assert count == 5
+        assert count == (5, False)
         assert table.query.call_count == 2
         assert table.query.call_args_list[1].kwargs["ExclusiveStartKey"] == {"id": "page-1"}
         table.scan.assert_not_called()
+
+    def test_reports_capped_count_when_unviewed_rows_exceed_the_cap(self) -> None:
+        table = fake_table()
+        table.query.side_effect = [
+            {"Count": 60, "LastEvaluatedKey": {"id": "page-1"}},
+            {"Count": 60, "LastEvaluatedKey": {"id": "page-2"}},
+        ]
+
+        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
+            count = _mod.get_unviewed_count()
+
+        assert count == (99, True)
+        assert table.query.call_count == 2
+
+    def test_stops_after_page_cap_and_reports_count_as_lower_bound(self) -> None:
+        table = fake_table()
+        table.query.return_value = {"Count": 1, "LastEvaluatedKey": {"id": "more"}}
+
+        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
+            count = _mod.get_unviewed_count()
+
+        assert count == (5, True)
+        assert table.query.call_count == 5
 
     def test_filters_generated_rows_by_explicit_unviewed_value(self) -> None:
         table = fake_table(query={"Count": 0})

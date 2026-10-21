@@ -14,6 +14,8 @@ export interface S3BrowseResponse {
   files: S3Item[];
   total_folders: number;
   total_files: number;
+  /** Continues a folder of more than one S3 page (1,000 entries); `null` on the last page. */
+  next_token?: string | null;
 }
 
 export interface RawResponseDocument {
@@ -39,9 +41,13 @@ export interface RawResponseDocument {
 
 export interface RawResponseContent {
   key: string;
-  content: RawResponseDocument | string;
+  /** `null` when the object is too large to send inline (`too_large`). */
+  content: RawResponseDocument | string | null;
   content_type: string;
   size: number;
   last_modified: string;
   is_json: boolean;
+  /** Over the API's inline limit (1 MB): download the file instead of previewing it. */
+  too_large?: boolean;
+  max_inline_bytes?: number;
 }

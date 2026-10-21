@@ -26,6 +26,7 @@ from shared.api_response import (
     validation_error,
 )
 from shared.auth import ADMIN_GROUP, is_self_reference, require_group
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_cursor, encode_cursor
 from shared.decorators import (
     RouteNotHandledError,
     api_handler,
@@ -33,6 +34,7 @@ from shared.decorators import (
     paginate,
     parse_json_body,
     route_handler,
+    validate,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,11 +113,8 @@ def _cognito_errors(failure: str) -> Callable[[_Route], _Route]:
     return decorate
 
 
-# Cap on how many Cognito pages we'll fetch in a single request. Each page
-# is up to 60 users, so the default caps at ~3000 users per list call. When
-# the frontend needs more, the migration path is to surface Cognito's own
-# PaginationToken (see audit item 17 follow-up).
-_MAX_COGNITO_PAGES = 50
+# Cognito's ListUsers answers at most 60 users per call.
+_COGNITO_PAGE_LIMIT = 60
 
 # Max concurrent admin_list_groups_for_user calls. Cognito has no batch API
 # so we fan out; 10 threads keeps us well under the 120 RPS soft limit.
@@ -136,63 +135,66 @@ def _fetch_user_groups(username: str) -> list[str]:
     return _group_names(response)
 
 
-@_cognito_errors('Failed to list users')
-def handle_list_users(event: dict, context: Any, limit: int, offset: int, **kwargs) -> dict:
-    """GET /users - List all Cognito users with pagination.
+def _read_users(limit: int, pagination_token: str | None) -> tuple[list[dict], str | None]:
+    """Up to ``limit`` users from Cognito's ``pagination_token`` on, and the token after them.
 
-    Fetches Cognito pages up to `_MAX_COGNITO_PAGES` (hard cap; the previous
-    unbounded loop would hang the Lambda on a pagination-token bug). The
-    per-user group lookup is N+1 — Cognito has no batch API — so we fan out
-    with a ThreadPoolExecutor. See audit items 16 and 17.
+    Each ListUsers call asks for exactly the users still missing (at most
+    60), so a page never reads past what it returns and Cognito's token
+    always marks the next unread user.
     """
     users: list[dict] = []
-    pagination_token = None
-    pages_fetched = 0
-
-    while pages_fetched < _MAX_COGNITO_PAGES:
+    while len(users) < limit:
         params: dict[str, Any] = {
             'UserPoolId': USER_POOL_ID,
-            'Limit': 60,  # Max allowed by Cognito
+            'Limit': min(_COGNITO_PAGE_LIMIT, limit - len(users)),
         }
         if pagination_token:
             params['PaginationToken'] = pagination_token
-
         response = cognito_client.list_users(**params)
-        users.extend([format_user(u) for u in response.get('Users', [])])
+        users.extend(format_user(u) for u in response.get('Users', []))
         pagination_token = response.get('PaginationToken')
-        pages_fetched += 1
-
         if not pagination_token:
             break
+    return users, pagination_token
 
-    truncated = pagination_token is not None
-    if truncated:
-        logger.warning(
-            "Cognito list_users hit the %d-page cap; returning %d users.",
-            _MAX_COGNITO_PAGES, len(users),
-        )
 
-    # Parallel group lookup. Cognito has no batch API so we fan out —
-    # the previous serial loop was 50ms x N seconds linear.
-    if users:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GROUPS_FANOUT) as pool:
-            results = pool.map(
-                _fetch_user_groups, [u['username'] for u in users]
-            )
-            for user, groups in zip(users, results, strict=False):
-                user['groups'] = groups
+def _with_groups(users: list[dict]) -> None:
+    """Fill each user's ``groups``, ``_GROUPS_FANOUT`` lookups at a time (Cognito has no batch API)."""
+    if not users:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(_GROUPS_FANOUT, len(users))) as pool:
+        for user, groups in zip(users, pool.map(_fetch_user_groups, [u['username'] for u in users]), strict=True):
+            user['groups'] = groups
 
-    # Apply offset/limit pagination against the fetched page set.
-    total = len(users)
-    paginated = users[offset:offset + limit]
+
+@validate(CURSOR_QUERY_PARAM)
+@_cognito_errors('Failed to list users')
+def handle_list_users(event: dict, context: Any, limit: int, next_token: str | None = None, **kwargs) -> dict:
+    """GET /users - one page of Cognito users (``limit``, ``next_token``).
+
+    ``next_token`` wraps Cognito's own PaginationToken, so a request reads only
+    the users it returns (at most 100, two ListUsers calls) and looks up the
+    groups of those users only. Clients follow ``next_token`` for the roster.
+    """
+    pagination_token: str | None = None
+    if next_token is not None:
+        decoded = decode_cursor(next_token, ('cognito',))
+        if decoded is None or not isinstance(decoded['cognito'], str) or not decoded['cognito']:
+            return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+        pagination_token = decoded['cognito']
+
+    try:
+        users, following = _read_users(limit, pagination_token)
+    except cognito_client.exceptions.InvalidParameterException:
+        # An expired or foreign PaginationToken.
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+    _with_groups(users)
 
     return success_response({
-        'users': paginated,
-        'total': total,
+        'users': users,
+        'count': len(users),
         'limit': limit,
-        'offset': offset,
-        'has_more': offset + limit < total,
-        'truncated': truncated,
+        'next_token': encode_cursor({'cognito': following}) if following else None,
     }, event)
 
 

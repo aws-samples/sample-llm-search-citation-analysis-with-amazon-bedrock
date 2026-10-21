@@ -10,6 +10,7 @@ import type {
 } from '../../types';
 import { buildTabContentKeyword } from '../Layout/TabContent-fixtures';
 import { ContentStudioView } from './ContentStudioView';
+import { buildContentStudioHistory } from './ContentStudioHistory-fixtures';
 import {
   buildActionableIdea,
   buildActiveBatch,
@@ -66,7 +67,14 @@ vi.mock('./GroupBriefForm', async () => {
   };
 });
 
-vi.mock('./ContentHistory', () => ({ ContentHistory: () => <div data-testid="content-history">History</div> }));
+vi.mock('./ContentHistory', () => ({
+  ContentHistory: ({ onLoadMore }: { readonly onLoadMore?: () => void }) => (
+    <div data-testid="content-history">
+      History
+      {onLoadMore && <button type="button" onClick={onLoadMore}>Load older content</button>}
+    </div>
+  ),
+}));
 
 import { useContentStudio } from '../../hooks/useContentStudio';
 
@@ -301,5 +309,36 @@ describe('ContentStudioView', () => {
     renderContentStudioView({ unviewedCount: 5 });
 
     expect(screen.getByText('5 new')).toBeInTheDocument();
+  });
+
+  it('shows the unviewed count with a plus when the API capped it', () => {
+    renderContentStudioView({
+      unviewedCount: 99,
+      unviewedCountCapped: true 
+    });
+
+    expect(screen.getByText('99+ new')).toBeInTheDocument();
+  });
+
+  it('loads older content when the history has more pages and the load button is pressed', async () => {
+    const loadMoreHistory = vi.fn().mockResolvedValue(undefined);
+    renderContentStudioView({
+      history: [buildContentStudioHistory()],
+      historyHasMore: true,
+      loadMoreHistory 
+    });
+    await userEvent.click(screen.getByText('Generated Content'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Load older content' }));
+
+    expect(loadMoreHistory).toHaveBeenCalledWith();
+  });
+
+  it('offers no load button when the whole history is loaded', async () => {
+    renderContentStudioView({ history: [buildContentStudioHistory()] });
+
+    await userEvent.click(screen.getByText('Generated Content'));
+
+    expect(screen.queryByRole('button', { name: 'Load older content' })).not.toBeInTheDocument();
   });
 });

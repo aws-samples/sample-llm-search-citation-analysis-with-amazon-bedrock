@@ -37,7 +37,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
 # Add shared module to path
@@ -48,9 +47,18 @@ from shared.api_response import api_response, not_found_response, success_respon
 from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
-from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    optional_limit,
+    parse_json_body,
+    route_handler,
+    validate,
+)
 from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
 from shared.env_vars import resolve_table_env
+from shared.merged_pages import MergeSpec, PartitionReader, decode_positions, merged_page, query_reader
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
     AGENT_DEFAULT_TARGET_COUNT,
@@ -764,40 +772,57 @@ def _get_research(event: dict[str, Any], context: Any, job: dict[str, Any]) -> d
     return success_response(public_view(job), event)
 
 
-def _query_history(job_type: str | None, limit: int) -> list[dict[str, Any]]:
-    """Newest jobs per type from the GSI; every type when no filter is given."""
-    types = [job_type] if job_type else list(JOB_TYPES)
-    items: list[dict[str, Any]] = []
-    for each in types:
-        response = research_table.query(
-            IndexName=HISTORY_INDEX,
-            KeyConditionExpression=Key('type').eq(each),
-            ScanIndexForward=False,
-            Limit=limit,
-        )
-        items.extend(response.get('Items', []))
-    items.sort(key=lambda item: item.get('created_at', ''), reverse=True)
-    return items[:limit]
+def _history_spec(job_type: str | None) -> MergeSpec:
+    """Merge newest first over one ``TypeCreatedIndex`` partition per job type (just one when filtered)."""
+    return MergeSpec(
+        partitions=(job_type,) if job_type else tuple(JOB_TYPES),
+        key_names=('id', 'type', 'created_at'),
+        sort_key=lambda item: (str(item.get('created_at', '')),),
+    )
+
+
+def _history_view(item: dict[str, Any]) -> dict[str, Any]:
+    """Agent rows drop the system-prompt snapshot (up to 6 KB each); the detail route still returns it."""
+    _fail_if_research_timed_out(item)
+    view = public_view(item)
+    view.pop('system_prompt', None)
+    return view
 
 
 @validate({
     'type': {'type': str, 'choices': list(JOB_TYPES)},
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20}
+    'limit': optional_limit(default=20, max_val=100),
+    **CURSOR_QUERY_PARAM,
 })
-def _get_history(event: dict[str, Any], context: Any, type: str | None = None, limit: int = 20) -> dict[str, Any]:
-    """GET /api/keyword-research/history — recent jobs, newest first.
+def _get_history(
+    event: dict[str, Any],
+    context: Any,
+    type: str | None = None,
+    limit: int = 20,
+    next_token: str | None = None,
+) -> dict[str, Any]:
+    """GET /api/keyword-research/history — one newest-first page of jobs.
 
-    Agent rows drop the system-prompt snapshot here (up to 6 KB each); the
-    detail route still returns it.
+    Each page is cut to the response page budget (a job carries its merged
+    results, rounds and config); ``next_token`` continues it and is tied to
+    the ``type`` filter it was issued for.
     """
-    items = _query_history(type, limit)
-    for item in items:
-        _fail_if_research_timed_out(item)
+    spec = _history_spec(type)
+    positions = decode_positions(next_token, spec)
+    if positions is None:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+    read = query_reader(research_table, index_name=HISTORY_INDEX, partition_attribute='type')
+    # Views are what the budget measures, so the reader shapes each item as it is read.
+    page = merged_page(_shaped(read), spec, positions, limit)
+    return success_response({'items': page.items, 'count': len(page.items), 'next_token': page.next_token}, event)
 
-    views = [public_view(item) for item in items]
-    for view in views:
-        view.pop('system_prompt', None)
-    return success_response({'items': views, 'count': len(views)}, event)
+
+def _shaped(read: PartitionReader) -> PartitionReader:
+    """``read`` whose items come back as history views (which keep ``id``, ``type`` and ``created_at``)."""
+    def shaped(partition: str, start_key: dict[str, Any] | None, limit: int) -> tuple[list[dict[str, Any]], bool]:
+        items, has_more = read(partition, start_key, limit)
+        return [_history_view(item) for item in items], has_more
+    return shaped
 
 
 def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:

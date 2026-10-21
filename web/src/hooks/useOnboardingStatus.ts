@@ -33,7 +33,8 @@ export interface OnboardingStatusApi {
 const defaultOnboardingStatusApi: OnboardingStatusApi = {
   fetchProviders: () => authenticatedFetch(`${API_BASE_URL}/providers`),
   fetchBrandConfig: () => authenticatedFetch(`${API_BASE_URL}/brand-config`),
-  fetchSchedules: () => authenticatedFetch(`${API_BASE_URL}/schedules`),
+  // One schedule answers "does any exist"; the list is paginated (next_token).
+  fetchSchedules: () => authenticatedFetch(`${API_BASE_URL}/schedules?limit=1`),
   fetchPersonas: () => authenticatedFetch(`${API_BASE_URL}/query-prompts`),
 };
 

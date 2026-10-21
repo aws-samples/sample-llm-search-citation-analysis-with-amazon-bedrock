@@ -7,6 +7,7 @@ import {
   deleteResearchTemplate,
   fetchKeywordResearch,
   fetchKeywordResearchHistory,
+  fetchKeywordResearchHistoryPage,
   fetchResearchTemplates,
   InvalidKeywordResearchResponseError,
   isKeywordResearchItem,
@@ -132,6 +133,26 @@ describe('keyword research client', () => {
 
     expect(lastRequest().url).toBe('https://api.test.com/keyword-research/history?limit=50&type=expansion');
     expect(items.map((item) => item.id)).toStrictEqual(['job-1']);
+  });
+
+  it('reads the history page after next_token and returns the next page token', async () => {
+    respondWith(200, {
+      items: [PENDING_JOB],
+      next_token: 'page-3' 
+    });
+
+    const page = await fetchKeywordResearchHistoryPage('agent', 'page-2');
+
+    expect(lastRequest().url).toBe('https://api.test.com/keyword-research/history?limit=50&type=agent&next_token=page-2');
+    expect(page.nextToken).toBe('page-3');
+  });
+
+  it('reports no next page when the history response carries no next_token', async () => {
+    respondWith(200, { items: [PENDING_JOB] });
+
+    const page = await fetchKeywordResearchHistoryPage();
+
+    expect(page.nextToken).toBeNull();
   });
 
   it('throws InvalidKeywordResearchResponseError when history has no items list', async () => {

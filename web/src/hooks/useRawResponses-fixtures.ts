@@ -68,6 +68,30 @@ export const mockBrowseResponse: S3BrowseResponse = {
   total_files: 2,
 };
 
+/** The first page of a folder too large for one S3 listing. */
+export const firstBrowsePage: S3BrowseResponse = {
+  prefix: 'raw-responses/2024-01-01/',
+  folders: [],
+  files: [{
+    name: 'b.json',
+    path: 'raw-responses/2024-01-01/b.json',
+    type: 'file' 
+  }],
+  total_folders: 0,
+  total_files: 1,
+  next_token: 'page-2',
+};
+
+export const lastBrowsePage: S3BrowseResponse = {
+  ...firstBrowsePage,
+  files: [{
+    name: 'c.json',
+    path: 'raw-responses/2024-01-01/c.json',
+    type: 'file' 
+  }],
+  next_token: null,
+};
+
 export const mockFileContent: RawResponseContent = {
   key: 'responses/file1.json',
   content: '{"keyword": "test", "response": "data"}',
@@ -77,21 +101,31 @@ export const mockFileContent: RawResponseContent = {
   is_json: true,
 };
 
-export function createMockFetch(options: {
+interface MockFetchOptions {
   browseResponse?: S3BrowseResponse;
+  /** Answered to a browse request that carries a `next_token`. */
+  nextBrowseResponse?: S3BrowseResponse;
   fileResponse?: RawResponseContent;
   downloadUrl?: string;
   shouldFail?: boolean;
   shouldFailFile?: boolean;
   shouldFailDownload?: boolean;
-} = {}) {
+}
+
+function browseAnswer(url: string, options: MockFetchOptions): S3BrowseResponse {
+  return url.includes('next_token=') && options.nextBrowseResponse
+    ? options.nextBrowseResponse
+    : options.browseResponse ?? mockBrowseResponse;
+}
+
+export function createMockFetch(options: MockFetchOptions = {}) {
   return vi.fn().mockImplementation((url: string) => {
     if (options.shouldFail) {
       return Promise.resolve(createMockJsonResponse({}, 500));
     }
 
     if (url.includes('/browse')) {
-      return Promise.resolve(createMockJsonResponse(options.browseResponse ?? mockBrowseResponse));
+      return Promise.resolve(createMockJsonResponse(browseAnswer(url, options)));
     }
 
     if (url.includes('/file')) {

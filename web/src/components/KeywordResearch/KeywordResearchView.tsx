@@ -110,6 +110,8 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
             loading={research.historyLoading}
             onDelete={research.deleteResearch}
             onRefresh={research.fetchHistory}
+            onLoadMore={research.historyHasMore ? () => void research.loadMoreHistory() : undefined}
+            loadingMore={research.historyLoadingMore}
             onRetry={handleHistoryRetry}
             onKeywordsAdded={onKeywordsAdded}
           />

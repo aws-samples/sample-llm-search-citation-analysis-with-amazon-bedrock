@@ -30,6 +30,9 @@ interface ResearchHistoryProps extends Pick<ResearchRunViewProps, 'onRetry' | 'o
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
+  /** Set while older jobs remain past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
@@ -68,6 +71,8 @@ export const ResearchHistory = ({
   onRefresh,
   onRetry,
   onKeywordsAdded,
+  onLoadMore,
+  loadingMore = false,
 }: ResearchHistoryProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -105,6 +110,17 @@ export const ResearchHistory = ({
             />
           ))}
         </div>
+      )}
+
+      {onLoadMore && history.length > 0 && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+        >
+          {loadingMore ? 'Loading…' : 'Load older research'}
+        </button>
       )}
     </div>
   );

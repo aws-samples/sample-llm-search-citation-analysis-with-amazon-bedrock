@@ -25,7 +25,7 @@ interface RawResponsesExplorerProps {initialPath?: string;}
 
 export const RawResponsesExplorer = ({ initialPath }: RawResponsesExplorerProps) => {
   const {
-    loading, error, browseData, fileContent, browse, getFile, getDownloadUrl, clearFile 
+    loading, loadingMore, error, browseData, fileContent, browse, loadMore, getFile, getDownloadUrl, clearFile
   } =
     useRawResponses();
   const [activeTab, setActiveTab] = useState<BucketType>('responses');
@@ -124,6 +124,8 @@ export const RawResponsesExplorer = ({ initialPath }: RawResponsesExplorerProps)
           imageUrl={imageUrl}
           selectedFile={selectedFile}
           browseData={browseData}
+          loadingMore={loadingMore}
+          onLoadMore={() => void loadMore()}
           onDownload={handleDownload}
           onFolderClick={handleFolderClick}
           onFileClick={handleFileClick}
@@ -140,13 +142,15 @@ interface ExplorerBodyProps {
   imageUrl: string | null;
   selectedFile: S3Item | null;
   browseData: S3BrowseResponse | null;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onDownload: () => Promise<void>;
   onFolderClick: (folder: S3Item) => void;
   onFileClick: (file: S3Item) => Promise<void>;
 }
 
 const ExplorerBody = ({
-  loading, error, fileContent, imageUrl, selectedFile, browseData, onDownload, onFolderClick, onFileClick
+  loading, error, fileContent, imageUrl, selectedFile, browseData, loadingMore, onLoadMore, onDownload, onFolderClick, onFileClick
 }: ExplorerBodyProps) => (
   <>
     {error && (
@@ -170,6 +174,8 @@ const ExplorerBody = ({
         browseData={browseData}
         onFolderClick={onFolderClick}
         onFileClick={onFileClick}
+        loadingMore={loadingMore}
+        onLoadMore={typeof browseData.next_token === 'string' ? onLoadMore : undefined}
       />
     )}
   </>

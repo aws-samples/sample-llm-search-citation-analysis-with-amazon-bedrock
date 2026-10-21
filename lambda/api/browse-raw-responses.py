@@ -5,7 +5,7 @@ Provides S3 bucket browsing capabilities for raw API responses and screenshots.
 Supports listing folders/files and fetching file content.
 
 Endpoints:
-    GET /api/raw-responses/browse?prefix=path/to/folder&bucket=responses|screenshots
+    GET /api/raw-responses/browse?prefix=path/to/folder&bucket=responses|screenshots[&next_token=...]
     GET /api/raw-responses/file?key=path/to/file.json&bucket=responses|screenshots
     GET /api/raw-responses/download?key=path/to/file.json&bucket=responses|screenshots
 """
@@ -24,9 +24,17 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_cursor, encode_cursor
 from shared.decorators import api_handler, route_handler, validate
 
 s3_client = boto3.client('s3')
+
+# Entries (folders + files) per browse page: S3's own ListObjectsV2 maximum.
+BROWSE_PAGE_KEYS = 1000
+# Above this object size, /file answers with a presigned download link instead
+# of the content: JSON-escaping (and the envelope's second escaping) can more
+# than triple accented text on the way out.
+MAX_INLINE_FILE_BYTES = 1_000_000
 
 # Fail-fast: Required environment variables.
 #
@@ -123,78 +131,91 @@ def scope_key_to_root(key: str, root_prefix: str) -> tuple[str | None, str | Non
     return scoped, None
 
 
-def _list_objects(bucket: str, prefix: str) -> Mapping[str, Any]:
-    """One ``ListObjectsV2`` page under ``prefix`` with ``/`` as the delimiter.
+def _list_objects(bucket: str, prefix: str, continuation_token: str | None = None) -> Mapping[str, Any]:
+    """One ``ListObjectsV2`` page (up to ``BROWSE_PAGE_KEYS`` entries) under ``prefix`` with ``/`` as the delimiter.
 
     The listing is handed on as an untyped mapping: boto3-stubs marks every
     field of a listed object optional, while S3 always returns ``Key``,
     ``Size`` and ``LastModified`` for objects and ``Prefix`` for common
     prefixes, so the caller reads them without per-field narrowing.
     """
-    return s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter='/')
+    params: dict[str, Any] = {'Bucket': bucket, 'Prefix': prefix, 'Delimiter': '/', 'MaxKeys': BROWSE_PAGE_KEYS}
+    if continuation_token:
+        params['ContinuationToken'] = continuation_token
+    return s3_client.list_objects_v2(**params)
 
 
-def list_prefixes(bucket: str, prefix: str = '', root_prefix: str = 'raw-responses/') -> dict[str, Any]:
-    """
-    List folders and files at a given S3 prefix.
-    Returns both common prefixes (folders) and objects (files).
-    """
-    # Ensure prefix ends with / if not empty and not already ending with /
+def resolve_prefix(prefix: str, root_prefix: str) -> str:
+    """The listed prefix: under ``root_prefix``, ending in ``/`` (the root itself when empty)."""
     if prefix and not prefix.endswith('/'):
         prefix = prefix + '/'
-
-    # For root level, we want to list under the root prefix
     if not prefix:
-        prefix = root_prefix
-    elif not prefix.startswith(root_prefix):
-        prefix = root_prefix + prefix
+        return root_prefix
+    return prefix if prefix.startswith(root_prefix) else root_prefix + prefix
 
-    response = _list_objects(bucket, prefix)
 
-    folders = []
-    files = []
+def _folder_entry(common_prefix: Mapping[str, Any]) -> dict[str, Any]:
+    folder_path = common_prefix['Prefix']
+    return {'name': folder_path.rstrip('/').split('/')[-1], 'path': folder_path, 'type': 'folder'}
 
-    # Extract folder names from CommonPrefixes
-    for cp in response.get('CommonPrefixes', []):
-        folder_path = cp['Prefix']
-        # Get just the folder name (last part before trailing /)
-        folder_name = folder_path.rstrip('/').split('/')[-1]
-        folders.append({
-            'name': folder_name,
-            'path': folder_path,
-            'type': 'folder'
-        })
 
-    # Extract file info from Contents
-    for obj in response.get('Contents', []):
-        key = obj['Key']
-        # Skip the prefix itself
-        if key == prefix:
-            continue
-        # Get just the file name
-        file_name = key.split('/')[-1]
-        if file_name:  # Skip empty names
-            # Determine if this is an image
-            is_image = file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))
-            files.append({
-                'name': file_name,
-                'path': key,
-                'type': 'image' if is_image else 'file',
-                'size': obj['Size'],
-                'last_modified': obj['LastModified'].isoformat()
-            })
+def _file_entry(obj: Mapping[str, Any], prefix: str) -> dict[str, Any] | None:
+    key = obj['Key']
+    file_name = key.split('/')[-1]
+    if key == prefix or not file_name:
+        return None
+    is_image = file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))
+    return {
+        'name': file_name,
+        'path': key,
+        'type': 'image' if is_image else 'file',
+        'size': obj['Size'],
+        'last_modified': obj['LastModified'].isoformat(),
+    }
 
-    # Sort folders and files by name (newest first for date folders)
+
+def list_prefixes(
+    bucket: str,
+    prefix: str = '',
+    root_prefix: str = 'raw-responses/',
+    continuation_token: str | None = None,
+) -> dict[str, Any]:
+    """
+    One page of the folders and files at a given S3 prefix.
+
+    S3 lists keys in ascending order, ``BROWSE_PAGE_KEYS`` entries per page;
+    each page is sorted newest first by name and ``next_token`` carries S3's
+    continuation token (``None`` on the last page).
+    """
+    prefix = resolve_prefix(prefix, root_prefix)
+    response = _list_objects(bucket, prefix, continuation_token)
+
+    folders = [_folder_entry(cp) for cp in response.get('CommonPrefixes', [])]
+    files = [entry for obj in response.get('Contents', []) if (entry := _file_entry(obj, prefix)) is not None]
+
+    # Sort folders and files by name (newest first for date folders and timestamps)
     folders.sort(key=lambda x: x['name'], reverse=True)
-    files.sort(key=lambda x: x['name'], reverse=True)  # Newest first for timestamps
+    files.sort(key=lambda x: x['name'], reverse=True)
 
+    following = response.get('NextContinuationToken') if response.get('IsTruncated') else None
     return {
         'prefix': prefix,
         'folders': folders,
         'files': files,
         'total_folders': len(folders),
-        'total_files': len(files)
+        'total_files': len(files),
+        'next_token': encode_cursor({'prefix': prefix, 's3': following}) if following else None,
     }
+
+
+def decode_browse_token(token: str | None, prefix: str) -> tuple[bool, str | None]:
+    """``(valid, s3_continuation_token)`` for a browse ``next_token`` issued for ``prefix``."""
+    if token is None:
+        return True, None
+    decoded = decode_cursor(token, ('prefix', 's3'))
+    if decoded is None or decoded['prefix'] != prefix or not isinstance(decoded['s3'], str) or not decoded['s3']:
+        return False, None
+    return True, decoded['s3']
 
 
 class ObjectNotFoundError(Exception):
@@ -204,11 +225,30 @@ class ObjectNotFoundError(Exception):
 def get_file_content(bucket: str, key: str) -> dict[str, Any]:
     """
     Get the content of a specific S3 file.
+
+    Objects over ``MAX_INLINE_FILE_BYTES`` are not read: the answer carries
+    ``too_large: true`` and a presigned ``download_url`` instead of the content
+    (raw provider JSON can pass 1 MB, and JSON-escaped Spanish triples it).
     """
     try:
         response = s3_client.get_object(Bucket=bucket, Key=key)
     except s3_client.exceptions.NoSuchKey as err:
         raise ObjectNotFoundError(f"File not found: {key}") from err
+
+    size = response['ContentLength']
+    if size > MAX_INLINE_FILE_BYTES:
+        response['Body'].close()
+        return {
+            'key': key,
+            'content': None,
+            'content_type': response.get('ContentType', 'application/octet-stream'),
+            'size': size,
+            'last_modified': response['LastModified'].isoformat(),
+            'is_json': False,
+            'too_large': True,
+            'max_inline_bytes': MAX_INLINE_FILE_BYTES,
+            'download_url': generate_download_url(bucket, key),
+        }
 
     content = response['Body'].read().decode('utf-8')
 
@@ -219,18 +259,20 @@ def get_file_content(bucket: str, key: str) -> dict[str, Any]:
             'key': key,
             'content': parsed,
             'content_type': 'application/json',
-            'size': response['ContentLength'],
+            'size': size,
             'last_modified': response['LastModified'].isoformat(),
-            'is_json': True
+            'is_json': True,
+            'too_large': False,
         }
     except json.JSONDecodeError:
         return {
             'key': key,
             'content': content,
             'content_type': response.get('ContentType', 'text/plain'),
-            'size': response['ContentLength'],
+            'size': size,
             'last_modified': response['LastModified'].isoformat(),
-            'is_json': False
+            'is_json': False,
+            'too_large': False,
         }
 
 
@@ -256,10 +298,11 @@ def generate_download_url(bucket: str, key: str, expiration: int = 900) -> str:
 
 @validate({
     'prefix': {'type': str, 'max_length': 1024, 'default': ''},
-    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
+    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'},
+    **CURSOR_QUERY_PARAM,
 })
-def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str) -> dict[str, Any]:
-    """List folder contents at the given prefix."""
+def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str, next_token: str | None = None) -> dict[str, Any]:
+    """List one page of folder contents at the given prefix (``next_token`` continues it)."""
     # URL decode the prefix
     prefix = unquote(prefix) if prefix else ''
 
@@ -273,7 +316,11 @@ def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str) -> di
     if not actual_bucket:
         return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
-    result = list_prefixes(actual_bucket, prefix, root_prefix)
+    valid, continuation_token = decode_browse_token(next_token, resolve_prefix(prefix, root_prefix))
+    if not valid:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+
+    result = list_prefixes(actual_bucket, prefix, root_prefix, continuation_token)
     result['bucket_type'] = bucket
     return success_response(result, event)
 

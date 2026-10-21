@@ -49,12 +49,16 @@ def _store_groups(*groups):
 
 
 def _store_members(*keywords):
+    """Keywords as the StatusIndex holds them: a query of the `active` partition returns the active ones only."""
+    active = [keyword for keyword in keywords if keyword.get('status') == 'active']
+    mock_keywords_table.query.return_value = {'Items': [{'group_ids': keyword['group_ids']} for keyword in active]}
     mock_keywords_table.scan.return_value = {'Items': list(keywords)}
 
 
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     reset_with_no_keywords(mock_keywords_table, mock_groups_table)
+    mock_keywords_table.query.return_value = {'Items': []}
     mock_groups_table.scan.return_value = {'Items': []}
     mock_groups_table.get_item.return_value = {}
 
@@ -120,6 +124,16 @@ class TestListGroups:
 
     def test_returns_an_empty_list_when_no_groups_exist(self):
         assert _request('GET') == (200, {'groups': [], 'count': 0})
+
+    def test_reads_counts_from_active_status_index_partition_instead_of_scanning_keywords(self):
+        _store_groups(_stored_group('g1', 'Coruna'))
+
+        _request('GET')
+
+        request = mock_keywords_table.query.call_args.kwargs
+        assert (request['IndexName'], request['ProjectionExpression']) == ('StatusIndex', 'group_ids')
+        assert request['KeyConditionExpression'].get_expression()['values'][1] == 'active'
+        mock_keywords_table.scan.assert_not_called()
 
 
 class TestCreateGroup:

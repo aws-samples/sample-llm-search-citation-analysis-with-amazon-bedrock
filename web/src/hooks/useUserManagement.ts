@@ -13,6 +13,7 @@ import {
   type InviteUserRequest,
   type UpdateUserRequest,
 } from '../api/users';
+import { collectCursorPages } from '../api/cursorPages';
 
 /** What a user action came to; `message` is the server's answer or the error to show. */
 export interface UserActionOutcome {
@@ -21,9 +22,6 @@ export interface UserActionOutcome {
   /** A partial success worth telling the admin about (e.g. a group that could not be assigned). */
   warning?: string;
 }
-
-/** Safety cap on pages followed; the server itself stops at about 3000 users. */
-const MAX_PAGES = 30;
 
 /** The ID-token claims the server compares a target account against to refuse self-changes. */
 const IDENTITY_CLAIMS = ['email', 'cognito:username', 'sub'] as const;
@@ -62,19 +60,18 @@ interface UserListing {
   total: number;
 }
 
-/** Every page of `GET /users` from `offset`, followed until the server says there is no more. */
-async function listUsersFrom(offset: number, pagesLeft: number): Promise<UserListing> {
-  const page = await listUsers(USERS_PAGE_LIMIT, offset);
-  if (!page.has_more || page.users.length === 0 || pagesLeft <= 1) {
+/** Every page of `GET /users`, following `next_token` until the server reports the last page. */
+async function listAllUsers(): Promise<UserListing> {
+  const users = await collectCursorPages(async (nextToken) => {
+    const page = await listUsers(USERS_PAGE_LIMIT, nextToken);
     return {
-      users: page.users,
-      total: page.total,
+      items: page.users,
+      nextToken: page.next_token,
     };
-  }
-  const rest = await listUsersFrom(offset + page.users.length, pagesLeft - 1);
+  });
   return {
-    users: [...page.users, ...rest.users],
-    total: rest.total,
+    users,
+    total: users.length,
   };
 }
 
@@ -128,7 +125,7 @@ export function useUserManagement(): UseUserManagementReturn {
     setRefreshing(true);
     setError(null);
     try {
-      const listing = await listUsersFrom(0, MAX_PAGES);
+      const listing = await listAllUsers();
       setUsers(listing.users);
       setTotal(listing.total);
     } catch (err) {

@@ -113,8 +113,22 @@ describe('Content Studio history decoder', () => {
       buildHistoryDecoderPayload(oneHistoryItem, { unviewed_count: count }),
       'unviewed count',
     ]),
+    [
+      'next_token is a number',
+      buildHistoryDecoderPayload(oneHistoryItem, { next_token: 7 }),
+      'history next_token',
+    ],
   ])('rejects the history response when %s', (_condition, payload, subject) => {
     expect(() => decodeContentHistoryResponse(payload)).toThrow(invalidContentStudioResponse(subject));
+  });
+
+  it('decodes the next page token and the capped unviewed count of a history page', () => {
+    const decoded = decodeContentHistoryResponse(buildHistoryDecoderPayload(oneHistoryItem, {
+      next_token: 'page-2',
+      unviewed_count_capped: true,
+    }));
+
+    expect([decoded.nextToken, decoded.unviewedCountCapped]).toStrictEqual(['page-2', true]);
   });
 
   it.each(invalidHistoryItemCases)('rejects a history item when %s', (_condition, historyItem) => {

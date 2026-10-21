@@ -27,13 +27,54 @@ const payload: SchedulePayload = {
 
 describe('executions API', () => {
   describe('fetchSchedules', () => {
-    it('requests /schedules with the abort signal', async () => {
+    it('requests the first /schedules page with the abort signal', async () => {
       const controller = new AbortController();
       mockApiGet.mockResolvedValue({ schedules: [] });
 
       await fetchSchedules(controller.signal);
 
-      expect(mockApiGet).toHaveBeenCalledWith('/schedules', { signal: controller.signal });
+      expect(mockApiGet).toHaveBeenCalledWith('/schedules', {
+        signal: controller.signal,
+        params: { limit: '100' } 
+      });
+    });
+
+    it('requests the next page with the next_token the previous page returned', async () => {
+      mockApiGet
+        .mockResolvedValueOnce({
+          schedules: [],
+          next_token: 'page-2' 
+        })
+        .mockResolvedValueOnce({
+          schedules: [],
+          next_token: null 
+        });
+
+      await fetchSchedules();
+
+      expect(mockApiGet).toHaveBeenLastCalledWith('/schedules', {
+        signal: undefined,
+        params: {
+          limit: '100',
+          next_token: 'page-2' 
+        } 
+      });
+    });
+
+    it('returns the schedules of every page in page order', async () => {
+      mockApiGet
+        .mockResolvedValueOnce({
+          schedules: [{ id: 'sch-new' }],
+          next_token: 'page-2' 
+        })
+        .mockResolvedValueOnce({
+          schedules: [{ id: 'sch-old' }],
+          next_token: null 
+        });
+
+      const result = await fetchSchedules();
+
+      expect(result).toStrictEqual([{ id: 'sch-new' }, { id: 'sch-old' }]);
     });
 
     it('returns schedules array from response', async () => {

@@ -15,10 +15,13 @@ interface FolderFileListProps {
   };
   onFolderClick: (folder: S3Item) => void;
   onFileClick: (file: S3Item) => void;
+  /** Set when the folder has entries past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export const FolderFileList = ({
-  browseData, onFolderClick, onFileClick 
+  browseData, onFolderClick, onFileClick, onLoadMore, loadingMore = false
 }: FolderFileListProps) => {
   const isEmpty = browseData.folders.length === 0 && browseData.files.length === 0;
 
@@ -38,10 +41,22 @@ export const FolderFileList = ({
         ))}
       </div>
 
+      {onLoadMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="mt-3 w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+        >
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </button>
+      )}
+
       {(browseData.total_folders > 0 || browseData.total_files > 0) && (
         <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-400">
           {browseData.total_folders} folder{browseData.total_folders === 1 ? '' : 's'},{' '}
           {browseData.total_files} file{browseData.total_files === 1 ? '' : 's'}
+          {onLoadMore ? ' loaded' : ''}
         </div>
       )}
     </div>
