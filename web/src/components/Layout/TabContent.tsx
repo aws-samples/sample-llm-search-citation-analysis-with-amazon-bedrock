@@ -41,6 +41,8 @@ interface TabContentProps {
   readonly stats: Stats | null;
   readonly citations: Citations | null;
   readonly searches: Search[];
+  /** Token of the page after `searches` (`null` when it is the last one). */
+  readonly searchesNextToken: string | null;
   readonly keywords: Keyword[];
   readonly setKeywords: React.Dispatch<React.SetStateAction<Keyword[]>>;
   readonly schedules: Schedule[];
@@ -91,14 +93,23 @@ function DashboardMarketNote({ marketId }: { readonly marketId: MarketChoice }) 
 }
 
 function DashboardStats({ stats }: { readonly stats: Stats | null }) {
+  const approximate = stats?.counts_approximate === true;
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
-      <StatCard title="Total Searches" value={stats?.total_searches ?? 0} icon={<SearchIcon className="w-6 h-6" />} tone="blue" />
-      <StatCard title="Total Citations" value={stats?.total_citations ?? 0} icon={<LinkIcon className="w-6 h-6" />} tone="violet" />
-      <StatCard title="Pages Crawled" value={stats?.total_crawled ?? 0} icon={<GlobeIcon className="w-6 h-6" />} tone="emerald" />
-      <StatCard title="Unique Keywords" value={stats?.unique_keywords ?? 0} icon={<KeyIcon className="w-6 h-6" />} tone="amber" />
+      <StatCard title="Total Searches" value={stats?.total_searches ?? 0} icon={<SearchIcon className="w-6 h-6" />} tone="blue" approximate={approximate} />
+      <StatCard title="Total Citations" value={stats?.total_citations ?? 0} icon={<LinkIcon className="w-6 h-6" />} tone="violet" approximate={approximate} />
+      <StatCard title="Pages Crawled" value={stats?.total_crawled ?? 0} icon={<GlobeIcon className="w-6 h-6" />} tone="emerald" approximate={approximate} />
+      <StatCard title="Unique Keywords" value={stats?.unique_keywords ?? 0} icon={<KeyIcon className="w-6 h-6" />} tone="amber" approximate={approximate} />
     </div>
   );
+}
+
+/** The scope's distinct cited URLs: `total_urls` of a `GET /citations` page, else the URLs listed. */
+function citedUrlCount(citations: Citations | null): number {
+  if (citations === null) return 0;
+  return 'total_urls' in citations && typeof citations.total_urls === 'number'
+    ? citations.total_urls
+    : citations.top_urls.length;
 }
 
 function DashboardCharts({ citations }: { readonly citations: Citations | null }) {
@@ -145,7 +156,7 @@ function QuickActions({
           onClick={() => setActiveTab('citations')}
           className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
         >
-          <span className="hidden sm:inline">View Citations ({citations?.top_urls?.length ?? 0})</span>
+          <span className="hidden sm:inline">View Citations ({citedUrlCount(citations).toLocaleString()})</span>
           <span className="sm:hidden">Citations</span>
         </button>
         <button
@@ -188,6 +199,7 @@ export function TabContent(props: TabContentProps) {
     stats,
     citations,
     searches,
+    searchesNextToken,
     keywords,
     setKeywords,
     schedules,
@@ -218,7 +230,7 @@ export function TabContent(props: TabContentProps) {
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
-    searches: <SearchesView searches={searches} onNavigateToRawResponses={onNavigateToRawResponses} />,
+    searches: <SearchesView searches={searches} nextToken={searchesNextToken} onNavigateToRawResponses={onNavigateToRawResponses} />,
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
   };

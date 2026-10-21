@@ -3,6 +3,8 @@ export interface Stats {
   total_citations: number;
   total_crawled: number;
   unique_keywords: number;
+  /** A total is an estimate (a large table's item count, refreshed by DynamoDB about every six hours). */
+  counts_approximate?: boolean;
 }
 
 export interface ProviderStat {

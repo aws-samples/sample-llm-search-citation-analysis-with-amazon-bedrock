@@ -6,7 +6,10 @@ import {
 } from '@testing-library/react';
 import type { Keyword } from '../../types';
 import { TabContent } from './TabContent';
-import { buildTabContentProps } from './TabContent-fixtures';
+import {
+  APPROXIMATE_STATS, buildTabContentProps, FIRST_CITATIONS_PAGE, RECENT_SEARCH
+} from './TabContent-fixtures';
+import { APPROXIMATE_COUNT_NOTE } from '../Dashboard/StatCard';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
 import {
   buildMarketSelectionMock, renderWithMarketSelection
@@ -78,5 +81,65 @@ describe('TabContent dashboard composition', () => {
 
     expect(chartMarker.compareDocumentPosition(alertsMarker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(alertsMarker.compareDocumentPosition(quickActions)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('counts every cited URL of the scope on the citations quick action, not just the first page', () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'dashboard',
+      citations: FIRST_CITATIONS_PAGE,
+    })} />);
+
+    expect(screen.getByText('View Citations (4,210)')).toBeInTheDocument();
+  });
+
+  it('counts the listed URLs on the citations quick action when the payload has no scope total', () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'dashboard',
+      citations: COMBINED_PANELS.citations,
+    })} />);
+
+    expect(screen.getByText('View Citations (0)')).toBeInTheDocument();
+  });
+});
+
+describe('TabContent dashboard totals', () => {
+  it('marks every stat card approximate when the stats say the counts are estimates', () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'dashboard',
+      stats: APPROXIMATE_STATS,
+    })} />);
+
+    expect(screen.getAllByTitle(APPROXIMATE_COUNT_NOTE)).toHaveLength(4);
+  });
+
+  it('marks no stat card approximate when the stats are exact counts', () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'dashboard',
+      ...COMBINED_PANELS,
+    })} />);
+
+    expect(screen.queryAllByTitle(APPROXIMATE_COUNT_NOTE)).toStrictEqual([]);
+  });
+});
+
+describe('TabContent recent searches', () => {
+  it('offers the older searches when the dashboard load has a next page', async () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'searches',
+      searches: [RECENT_SEARCH],
+      searchesNextToken: 'older-searches',
+    })} />);
+
+    expect(await screen.findByRole('button', { name: 'Load older searches' })).toBeInTheDocument();
+  });
+
+  it('offers no older searches when the dashboard load holds the last page', async () => {
+    render(<TabContent {...buildTabContentProps({
+      activeTab: 'searches',
+      searches: [RECENT_SEARCH],
+    })} />);
+    await screen.findByText(RECENT_SEARCH.keyword);
+
+    expect(screen.queryByRole('button', { name: 'Load older searches' })).not.toBeInTheDocument();
   });
 });

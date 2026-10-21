@@ -4,6 +4,7 @@ import {
 import { validateApiConfig } from '../api/client';
 import { fetchAllKeywords } from '../api/keywordPages';
 import { DASHBOARD_CITATIONS_LIMIT } from '../api/citationPages';
+import { isStats } from '../types/domain/statsDecoders';
 import {
   API_BASE_URL,
   authenticatedFetch,
@@ -34,10 +35,6 @@ export const DASHBOARD_PANEL_PATHS = [
 interface SearchesResponse {
   searches: Search[];
   next_token?: string | null;
-}
-
-function isStats(value: unknown): value is Stats {
-  return typeof value === 'object' && value !== null && 'total_searches' in value;
 }
 
 function isCitations(value: unknown): value is Citations {

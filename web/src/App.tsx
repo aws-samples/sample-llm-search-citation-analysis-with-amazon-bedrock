@@ -271,6 +271,7 @@ function MainApp() {
     stats,
     citations,
     searches,
+    searchesNextToken,
     keywords,
     setKeywords,
     loading,
@@ -372,6 +373,7 @@ function MainApp() {
                       stats={stats}
                       citations={citations}
                       searches={searches}
+                      searchesNextToken={searchesNextToken}
                       keywords={keywords}
                       setKeywords={setKeywords}
                       schedules={schedules}

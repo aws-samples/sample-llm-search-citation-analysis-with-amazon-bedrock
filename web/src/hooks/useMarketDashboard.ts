@@ -2,25 +2,18 @@ import type { MarketChoice } from '../components/Markets/marketSelection';
 import type {
   Citations, Stats
 } from '../types';
-import {
-  apiRequestErrors, isAnalysisPayload
-} from './useAnalysisEndpoint';
+import { isStats } from '../types/domain/statsDecoders';
+import { apiRequestErrors } from './useAnalysisEndpoint';
 import { marketCitationsEndpoint } from './useMarketCitations';
 import {
   marketReadRequest, useMarketRead
 } from './useMarketRead';
 
-const STAT_TOTALS = ['total_searches', 'total_citations', 'total_crawled', 'unique_keywords'] as const;
-
-function isStatsResponse(data: unknown): data is Stats {
-  return isAnalysisPayload(data) && STAT_TOTALS.every((total) => typeof data[total] === 'number');
-}
-
 /** `GET /stats?market_id=`: the dashboard totals over one market's keywords. */
 const marketStatsEndpoint = {
   errorContext: 'stats',
   logMessage: '[stats] Error fetching market stats:',
-  isValidResponse: isStatsResponse,
+  isValidResponse: isStats,
   ...apiRequestErrors('Failed to fetch stats'),
   buildRequest: marketReadRequest('/stats'),
 };
