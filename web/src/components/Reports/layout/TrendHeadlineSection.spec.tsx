@@ -85,3 +85,17 @@ describe('TrendHeadlineSection keywords by trend', () => {
     expect(screen.getByRole('button', { name: `About ${TREND_DEFINITION.label}` })).toHaveAccessibleDescription(TREND_DEFINITION.definition);
   });
 });
+
+describe('TrendHeadlineSection window cut', () => {
+  it('says after which run the trend covers the scope when its window read was cut short', () => {
+    renderHeadline({ truncated_before: '2026-10-05T06:50:33Z' });
+
+    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs after ${new Date('2026-10-05T06:50:33Z').toLocaleString()}`);
+  });
+
+  it('adds no cut note when the window was read whole', () => {
+    renderHeadline({ truncated_before: null });
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+});

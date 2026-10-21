@@ -5,7 +5,9 @@ import {
 import {
   describe, it, expect 
 } from 'vitest';
-import { StatCard } from './StatCard';
+import {
+  APPROXIMATE_COUNT_NOTE, StatCard
+} from './StatCard';
 import { SearchIcon } from '../ui';
 
 function renderStatCard(overrides: Partial<ComponentProps<typeof StatCard>> = {}) {
@@ -60,5 +62,28 @@ describe('StatCard', () => {
 
     const badge = container.querySelector('.bg-gray-50');
     expect(badge).toBeInTheDocument();
+  });
+
+  it('prefixes an approximate value with ≈', () => {
+    renderStatCard({
+      value: 1234,
+      approximate: true,
+    });
+
+    expect(screen.getByTitle(APPROXIMATE_COUNT_NOTE)).toHaveTextContent(`≈ ${APPROXIMATE_COUNT_NOTE} 1,234`);
+  });
+
+  it('hides the ≈ sign from screen readers and reads the explanation instead', () => {
+    renderStatCard({ approximate: true });
+
+    expect(screen.getByText('≈')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText(APPROXIMATE_COUNT_NOTE)).toHaveClass('sr-only');
+  });
+
+  it('shows an exact value without ≈ or explanation', () => {
+    renderStatCard({ value: 1234 });
+
+    expect(screen.getByText('1,234')).not.toHaveAttribute('title');
+    expect(screen.queryByText('≈')).not.toBeInTheDocument();
   });
 });

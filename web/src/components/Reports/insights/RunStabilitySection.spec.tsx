@@ -1,7 +1,9 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { render } from '@testing-library/react';
+import {
+  render, screen
+} from '@testing-library/react';
 import { buildStabilityRow } from '../../../types/domain/insights-fixtures';
 import {
   columnTooltip, describeInsightsSectionPlaceholders, expectEmptySection, insightLines, insightsWithFacts, loadedInsights, sectionColumnHeadings,
@@ -74,6 +76,18 @@ describe('RunStabilitySection', () => {
     renderStability(insightsWithFacts({ stability }));
 
     expectEmptySection(RUN_STABILITY_TITLE, STABILITY_EMPTY);
+  });
+
+  it('says after which run the stability covers the group when its history read was cut short', () => {
+    renderStability(loadedInsights({ history_truncated_before: '2026-10-05T06:50:33Z' }));
+
+    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs after ${new Date('2026-10-05T06:50:33Z').toLocaleString()}`);
+  });
+
+  it('adds no cut note when the group history was read whole', () => {
+    renderStability(loadedInsights({ history_truncated_before: null }));
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
   describeInsightsSectionPlaceholders(RunStabilitySection);

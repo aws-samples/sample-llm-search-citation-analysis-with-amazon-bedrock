@@ -5,6 +5,7 @@ import {
   apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
 } from './useAnalysisEndpoint';
 import { useMarketScopedFetch } from './useMarketScopedFetch';
+import { isTruncationMark } from '../types/domain/truncationDecoders';
 
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
   return isAnalysisPayload(data)
@@ -14,7 +15,8 @@ function isReportsOverviewResponse(data: unknown): data is ReportsOverviewRespon
     && 'latest_brands' in data
     && 'top_improving' in data
     && 'top_declining' in data
-    && 'top_recommendations' in data;
+    && 'top_recommendations' in data
+    && isTruncationMark(data.truncated_before);
 }
 
 const reportsOverviewEndpoint = {

@@ -275,6 +275,8 @@ export interface HistoricalTrendsResponse {
     stable_count: number;
   };
   brand_trends: BrandTrends;
+  /** The run the bounded window read stopped at (the trend covers the runs after it); `null`/absent when read whole. */
+  truncated_before?: string | null;
 }
 
 interface PersonaBrandRanking {

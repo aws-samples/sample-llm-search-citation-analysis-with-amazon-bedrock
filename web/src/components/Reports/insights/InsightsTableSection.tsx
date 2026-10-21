@@ -24,6 +24,8 @@ interface Props<Row> {
   readonly emptyMessage: string | ((response: ReportInsightsResponse) => string);
   /** A sentence under the table or the empty message: what was left out, or how to measure more. */
   readonly note?: (response: ReportInsightsResponse) => ReactNode;
+  /** Shown above the insights: why the facts cover less than the period. */
+  readonly notice?: (response: ReportInsightsResponse) => ReactNode;
 }
 
 /** The loading and error placeholders of an insights section titled `title`, or its loaded response. */
@@ -52,7 +54,7 @@ function InsightLines({ insights }: { readonly insights: readonly Insight[] }) {
  * them, or why the table is empty.
  */
 export function InsightsTableSection<Row>({
-  title, subtitle, block, slice, rows, columns, rowKey, emptyMessage, note
+  title, subtitle, block, slice, rows, columns, rowKey, emptyMessage, note, notice
 }: Props<Row>) {
   const gate = gateInsights(title, slice);
   if (!gate.ready) return gate.placeholder;
@@ -62,6 +64,7 @@ export function InsightsTableSection<Row>({
   const footnote = note?.(response);
   return (
     <ReportSection title={title} subtitle={subtitle}>
+      {notice?.(response)}
       <InsightLines insights={response.insights.filter((insight) => insight.block === block)} />
       {tabled.length === 0
         ? <SectionPlaceholder variant="empty" message={typeof emptyMessage === 'string' ? emptyMessage : emptyMessage(response)} />

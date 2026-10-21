@@ -52,6 +52,7 @@ export interface ReportsOverviewResponse {
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];
   top_recommendations: Recommendation[];
+  truncated_before?: HistoricalTrendsResponse['truncated_before'];
 }
 
 export interface CompetitorOutrankedKeyword {
