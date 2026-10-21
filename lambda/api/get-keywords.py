@@ -6,8 +6,6 @@ continuation token, so clients can read every keyword however large the table
 grows without a single response approaching the Lambda payload cap.
 """
 
-import base64
-import json
 import sys
 from typing import Any
 
@@ -17,6 +15,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.cursors import CURSOR_ERROR_MESSAGE, decode_cursor, encode_cursor
 from shared.decorators import api_handler, optional_limit, validate
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import serialize_keyword_item
@@ -34,15 +33,11 @@ VALID_PRIORITIES = ['high', 'normal', 'low']
 # A token encodes {"id": "<keyword id>"}; ids are at most 64 characters, so
 # even a fully JSON-escaped id stays far below this bound.
 MAX_NEXT_TOKEN_LENGTH = 1024
-_MALFORMED_CURSOR_MESSAGE = 'Invalid next_token'
 
 
 def encode_next_token(last_evaluated_key: dict[str, Any] | None) -> str | None:
     """Opaque, URL-safe continuation token for a scan's ``LastEvaluatedKey``."""
-    if not last_evaluated_key:
-        return None
-    raw = json.dumps(last_evaluated_key, separators=(',', ':'), sort_keys=True, default=str)
-    return base64.urlsafe_b64encode(raw.encode('utf-8')).decode('ascii').rstrip('=')
+    return encode_cursor(last_evaluated_key)
 
 
 def decode_next_token(token: str) -> dict[str, str] | None:
@@ -51,14 +46,8 @@ def decode_next_token(token: str) -> dict[str, str] | None:
     The Keywords table's only key attribute is ``id``, so a valid token decodes
     to exactly ``{"id": <non-empty string>}``.
     """
-    padded = token + '=' * (-len(token) % 4)
-    try:
-        raw = base64.b64decode(padded.encode('ascii'), altchars=b'-_', validate=True)
-        decoded = json.loads(raw.decode('utf-8'))
-    # binascii.Error, UnicodeError and JSONDecodeError are all ValueErrors.
-    except ValueError:
-        return None
-    if not isinstance(decoded, dict) or set(decoded) != {'id'}:
+    decoded = decode_cursor(token, ('id',))
+    if decoded is None:
         return None
     key_value = decoded['id']
     if not isinstance(key_value, str) or not key_value:
@@ -150,7 +139,7 @@ def handler(
     if next_token is not None:
         exclusive_start_key = decode_next_token(next_token)
         if exclusive_start_key is None:
-            return validation_error(_MALFORMED_CURSOR_MESSAGE, event, 'next_token')
+            return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
         scan_params['ExclusiveStartKey'] = exclusive_start_key
 
     response = keywords_table.scan(**scan_params)
