@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.bounded_counts import Count
 from shared.config import PROVIDERS
 from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_table
@@ -65,13 +66,19 @@ def _search_table(count: int, answers: Mapping[str, Any] | None = None) -> Magic
     return table
 
 
+def described(table: MagicMock, size_bytes: int = 4_096, item_count: int = 0) -> MagicMock:
+    """``table`` whose ``DescribeTable`` reports ``size_bytes`` and ``item_count`` (small by default: counted exactly)."""
+    table.meta.client.describe_table.return_value = {'Table': {'TableSizeBytes': size_bytes, 'ItemCount': item_count}}
+    return table
+
+
 def _tables(search: MagicMock | None = None, citations: int = 0, crawled: int = 0, keywords: int = 0) -> dict[str, MagicMock]:
-    """Every table the handler opened at import, keyed by module attribute: ``search`` plus count-only stubs."""
+    """Every table the handler opened at import, keyed by module attribute: ``search`` plus count-only stubs, all small."""
     return {
-        'search_results_table': _search_table(0) if search is None else search,
-        'citations_table': fake_table(scan={'Count': citations}),
-        'crawled_table': fake_table(scan={'Count': crawled}),
-        'keywords_table': fake_table(scan={'Count': keywords}),
+        'search_results_table': described(_search_table(0) if search is None else search),
+        'citations_table': described(fake_table(scan={'Count': citations})),
+        'crawled_table': described(fake_table(scan={'Count': crawled})),
+        'keywords_table': described(fake_table(scan={'Count': keywords})),
     }
 
 
@@ -92,6 +99,7 @@ class TestResponse:
             'total_citations': 7,
             'total_crawled': 3,
             'unique_keywords': 5,
+            'counts_approximate': False,
             'last_execution': _LATEST,
             'timestamp': _STAMP,
         })
@@ -130,7 +138,7 @@ class TestTableCounts:
             table.scan.assert_called_once_with(Select='COUNT')
 
     def test_sums_the_counts_of_every_scan_page(self, stats_module):
-        table = fake_table()
+        table = described(fake_table())
         table.scan.side_effect = [{'Count': 2, 'LastEvaluatedKey': {'id': 'k-2'}}, {'Count': 3}]
 
         _, body = _get_stats(stats_module, _tables() | {'keywords_table': table})
@@ -139,7 +147,7 @@ class TestTableCounts:
         assert table.scan.call_args_list[1].kwargs == {'Select': 'COUNT', 'ExclusiveStartKey': {'id': 'k-2'}}
 
     def test_reports_zero_when_the_scan_fails_with_nothing_cached(self, stats_module):
-        table = fake_table()
+        table = described(fake_table())
         table.scan.side_effect = throttled('Scan')
 
         status, body = _get_stats(stats_module, _tables() | {'citations_table': table})
@@ -150,33 +158,33 @@ class TestTableCounts:
 def _count_past_an_expired_cache(module: Any, table: MagicMock, *, cached_count: int) -> int:
     """``_get_table_item_count`` of ``table`` while its cached ``cached_count`` is past the five-minute TTL."""
     expired = time.time() - module._count_cache_ttl - 1
-    with patch.object(module, '_count_cache', {'search_results': {'count': cached_count, 'timestamp': expired}}):
+    with patch.object(module, '_count_cache', {'search_results': {'count': Count(cached_count), 'timestamp': expired}}):
         return module._get_table_item_count(table, 'search_results')
 
 
 class TestCountCache:
     def test_reuses_a_count_read_less_than_five_minutes_ago(self, stats_module):
-        table = fake_table(scan={'Count': 12})
+        table = described(fake_table(scan={'Count': 12}))
 
         with patch.object(stats_module, '_count_cache', {}):
             counts = [stats_module._get_table_item_count(table, 'search_results') for _ in range(2)]
 
-        assert counts == [12, 12]
+        assert counts == [Count(12), Count(12)]
         table.scan.assert_called_once_with(Select='COUNT')
 
     def test_rereads_a_count_cached_more_than_five_minutes_ago(self, stats_module):
-        table = fake_table(scan={'Count': 12})
+        table = described(fake_table(scan={'Count': 12}))
 
         count = _count_past_an_expired_cache(stats_module, table, cached_count=1)
 
-        assert count == 12
+        assert count == Count(12)
         table.scan.assert_called_once_with(Select='COUNT')
 
     def test_falls_back_to_the_expired_count_when_the_scan_fails(self, stats_module):
-        table = fake_table()
+        table = described(fake_table())
         table.scan.side_effect = throttled('Scan')
 
-        assert _count_past_an_expired_cache(stats_module, table, cached_count=9) == 9
+        assert _count_past_an_expired_cache(stats_module, table, cached_count=9) == Count(9)
 
 
 class TestLastExecution:
@@ -258,7 +266,7 @@ def _partition_counts(
         stamp = (latest_runs or {}).get(keyword)
         return {'Items': [{'timestamp': stamp}]} if stamp else _NO_ROWS
 
-    table = fake_table()
+    table = described(fake_table())
     table.query.side_effect = query
     return table
 
@@ -278,7 +286,7 @@ def _market_tables(keyword_rows: list[dict[str, Any]] | None = None) -> dict[str
         'search_results_table': _partition_counts(_SEARCHES, {'gemini': _newest(_LATEST)}, _LATEST_RUNS),
         'citations_table': _partition_counts(_CITATIONS),
         'crawled_table': _partition_counts(_CRAWLED),
-        'keywords_table': fake_table(scan={'Items': _KEYWORD_ROWS if keyword_rows is None else keyword_rows}),
+        'keywords_table': described(fake_table(scan={'Items': _KEYWORD_ROWS if keyword_rows is None else keyword_rows})),
     }
 
 
@@ -308,6 +316,7 @@ class TestMarketTotals:
             'total_citations': 4,
             'total_crawled': 2,
             'unique_keywords': 2,
+            'counts_approximate': False,
             'last_execution': _CHILE_RUN,
             'timestamp': _STAMP,
             'market_id': _CHILE_ID,
