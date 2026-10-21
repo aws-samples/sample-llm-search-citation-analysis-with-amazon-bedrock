@@ -8,6 +8,9 @@
 import {
   apiDelete, apiGet, apiPost, apiPut
 } from './client';
+import {
+  collectCursorPages, withNextToken, type CursorPage
+} from './cursorPages';
 import type {
   AnalysisScope, Schedule, ScheduleFrequency
 } from '../types';
@@ -15,7 +18,10 @@ import type {
 // Re-exported for existing consumers of this module's schedule API.
 export type { Schedule };
 
-interface SchedulesResponse {schedules: Schedule[];}
+interface SchedulesResponse {
+  schedules?: Schedule[];
+  next_token?: string | null;
+}
 
 /** What the API accepts on create and update (every field optional on update). */
 export interface SchedulePayload {
@@ -31,12 +37,25 @@ export interface SchedulePayload {
 
 export interface ScheduleRunResponse {message: string;}
 
+/** Schedules per page; pages are also cut by the API's response budget. */
+const SCHEDULES_PAGE_LIMIT = '100';
+
+async function fetchSchedulePage(nextToken: string | null, signal?: AbortSignal): Promise<CursorPage<Schedule>> {
+  const response = await apiGet<SchedulesResponse>('/schedules', {
+    signal,
+    params: withNextToken({ limit: SCHEDULES_PAGE_LIMIT }, nextToken),
+  });
+  return {
+    items: response.schedules ?? [],
+    nextToken: typeof response.next_token === 'string' ? response.next_token : null,
+  };
+}
+
 /**
- * Fetches all schedules.
+ * Fetches all schedules, newest first, following the list's `next_token`.
  */
 export async function fetchSchedules(signal?: AbortSignal): Promise<Schedule[]> {
-  const response = await apiGet<SchedulesResponse>('/schedules', { signal });
-  return response.schedules ?? [];
+  return collectCursorPages((nextToken) => fetchSchedulePage(nextToken, signal));
 }
 
 export async function createSchedule(payload: SchedulePayload): Promise<Schedule> {
