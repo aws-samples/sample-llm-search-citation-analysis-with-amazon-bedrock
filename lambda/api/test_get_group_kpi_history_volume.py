@@ -23,8 +23,7 @@ from shared.response_budget import LAMBDA_RESPONSE_LIMIT_BYTES, json_bytes
 from testing.module_loader import load_handler_module
 from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import assert_within_page_budget
-from testing.search_results_fixtures import active_keywords_table, report_dynamodb
-from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
+from testing.window_rows_fixtures import run_timestamp, volume_group
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -33,21 +32,22 @@ with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_
 
 KEYWORD_COUNT = 40
 RUN_COUNT = 120
-KEYWORDS = [volume_keyword(index) for index in range(KEYWORD_COUNT)]
-ACTIVE = [{'id': f'k{index}', 'keyword': keyword, 'status': 'active', 'group_ids': {'coruna'}} for index, keyword in enumerate(KEYWORDS)]
-ROWS = group_window_rows(KEYWORD_COUNT, RUN_COUNT)
-SINCE = '2026-01-01T00:00:00.000000Z'
+GROUP = volume_group(KEYWORD_COUNT, RUN_COUNT)
+OWNED = ['hotel-coruna-mar.es']
 
 
-def _call(params: dict[str, str]) -> dict[str, Any]:
-    resource = report_dynamodb(paged_search_results_table(ROWS), active_keywords_table(ACTIVE))
+def _call(params: dict[str, str], rows_read: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The response to a group-kpis request; the SearchResults rows it read are added to ``rows_read``."""
+    resource, read = GROUP.resource()
     event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': {'group_id': 'coruna', **params}, 'headers': {}}
     with (
         patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna-mar.es']}),
-        patch.object(_mod, 'history_since', return_value=SINCE),
+        patch.object(_mod, 'get_brand_config', return_value={'first_party_domains': OWNED}),
+        patch.object(_mod, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
     ):
-        return _mod.handler(event, None)
+        response = _mod.handler(event, None)
+    (rows_read if rows_read is not None else []).extend(read)
+    return response
 
 
 def _body(response: dict[str, Any]) -> dict[str, Any]:
@@ -68,7 +68,7 @@ def _follow(params: dict[str, str], key: str) -> list[list[dict[str, Any]]]:
 
 @pytest.fixture(scope='module')
 def full_history() -> dict[str, Any]:
-    return build_group_kpi_history(KEYWORDS, ROWS, ['hotel-coruna-mar.es'])
+    return build_group_kpi_history(GROUP.keywords, GROUP.rows, OWNED)
 
 
 @pytest.fixture(scope='module')
@@ -104,12 +104,19 @@ def test_summary_group_kpis_equal_the_full_history_computation(summary_response,
     assert [run['kpis'] for run in _body(summary_response)['runs']] == [run['kpis'] for run in full_history['runs']]
 
 
+def test_summary_reports_the_run_the_read_stopped_at_when_the_window_holds_more_rows_than_the_cap():
+    with patch('shared.scoped_reports.rows_per_keyword', return_value=80):
+        body = _body(_call({}))
+
+    assert (body['truncated_before'], len(body['runs'])) == (run_timestamp(RUN_COUNT - 11), 10)
+
+
 def test_stays_within_page_budget_when_keyword_runs_are_paged_for_120_daily_runs():
     assert_within_page_budget(_call({'view': 'keywords', 'limit': '25'}))
 
 
 def test_keyword_pages_return_every_keyword_exactly_once_in_order(keyword_pages):
-    assert [entry['keyword'] for page in keyword_pages for entry in page] == KEYWORDS
+    assert [entry['keyword'] for page in keyword_pages for entry in page] == GROUP.keywords
 
 
 def test_keyword_pages_hold_the_runs_of_the_full_history(keyword_pages, full_history):
@@ -145,27 +152,9 @@ def test_one_runs_drivers_read_from_its_previous_group_run_equal_the_full_histor
 
 
 def test_one_runs_drivers_read_only_the_two_runs():
-    table = paged_search_results_table(ROWS)
-    answer_page = table.query.side_effect
     rows_read: list[dict[str, Any]] = []
 
-    def counting_query(**kwargs: Any) -> dict[str, Any]:
-        response = answer_page(**kwargs)
-        rows_read.extend(response['Items'])
-        return response
-
-    table.query.side_effect = counting_query
-    resource = report_dynamodb(table, active_keywords_table(ACTIVE))
-    event = {
-        'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'headers': {},
-        'queryStringParameters': {'group_id': 'coruna', 'view': 'drivers', 'from_run': run_timestamp(59), 'to_run': run_timestamp(60)},
-    }
-    with (
-        patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_brand_config', return_value={}),
-        patch.object(_mod, 'history_since', return_value=SINCE),
-    ):
-        _mod.handler(event, None)
+    _call({'view': 'drivers', 'from_run': run_timestamp(59), 'to_run': run_timestamp(60)}, rows_read)
 
     assert len(rows_read) == KEYWORD_COUNT * 2 * 8
 

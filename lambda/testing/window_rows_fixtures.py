@@ -13,12 +13,13 @@ to run so every compared run has drivers.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
 from testing.response_size import long_text
-from testing.search_results_fixtures import key_parts, search_result_row
+from testing.search_results_fixtures import active_keywords_table, key_parts, report_dynamodb, search_result_row
 
 #: The eight answer engines of a large tenant.
 VOLUME_PROVIDERS = ('openai', 'perplexity', 'gemini', 'claude', 'openai', 'perplexity', 'gemini', 'claude')
@@ -117,3 +118,41 @@ def paged_search_results_table(rows_by_keyword: Mapping[str, Sequence[Mapping[st
     table = MagicMock(name='paged-search-results')
     table.query.side_effect = query
     return table
+
+
+def record_rows_read(table: MagicMock) -> list[dict[str, Any]]:
+    """The list every row ``table.query`` answers from now on is appended to: what a handler read."""
+    answer_page = table.query.side_effect
+    rows_read: list[dict[str, Any]] = []
+
+    def recording_query(**kwargs: Any) -> dict[str, Any]:
+        response = answer_page(**kwargs)
+        rows_read.extend(response['Items'])
+        return response
+
+    table.query.side_effect = recording_query
+    return rows_read
+
+
+@dataclass(frozen=True)
+class VolumeGroup:
+    """A keyword group ``coruna`` of ``keywords`` with a large window of ``rows``."""
+
+    keywords: list[str]
+    active: list[dict[str, Any]]
+    rows: dict[str, list[dict[str, Any]]]
+
+    def resource(self) -> tuple[MagicMock, list[dict[str, Any]]]:
+        """A report DynamoDB resource over the group, and the list of the SearchResults rows read through it."""
+        table = paged_search_results_table(self.rows)
+        return report_dynamodb(table, active_keywords_table(self.active)), record_rows_read(table)
+
+
+def volume_group(keyword_count: int, run_count: int, answers_per_run: int = 8) -> VolumeGroup:
+    """``keyword_count`` active keywords of the group ``coruna``, each answered ``answers_per_run`` times in ``run_count`` daily runs."""
+    keywords = [volume_keyword(index) for index in range(keyword_count)]
+    return VolumeGroup(
+        keywords=keywords,
+        active=[{'id': f'k{index}', 'keyword': keyword, 'status': 'active', 'group_ids': {'coruna'}} for index, keyword in enumerate(keywords)],
+        rows=group_window_rows(keyword_count, run_count, answers_per_run),
+    )
