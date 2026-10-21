@@ -11,7 +11,12 @@ from shared.group_kpi_history import (
     GROUP_RUN_MIN_COVERAGE,
     answers_by_run,
     build_group_kpi_history,
+    group_kpi_history_from_answers,
+    keyword_run_histories,
+    keyword_summary,
+    run_drivers,
     run_models,
+    summary_run,
 )
 from shared.kpi_engine import KPI_IDS, TRENDED_KPIS, answers_from_rows
 
@@ -367,3 +372,56 @@ class TestKeywordDrillDown:
         history = _history({'b': [_hotel_first(RUN_1)], 'a': [_hotel_first(RUN_1)]}, keywords=['b', 'a'])
 
         assert [entry['keyword'] for entry in history['keywords']] == ['b', 'a']
+
+
+def _two_group_runs_answers() -> dict[str, list[Any]]:
+    """The answers of ``_two_group_runs``, as a windowed read hands them over."""
+    return {
+        'k1': answers_from_rows([{**row, 'keyword': 'k1'} for row in (_hotel_first(RUN_1), _rival_only(RUN_2))]),
+        'k2': answers_from_rows([{**row, 'keyword': 'k2'} for row in (_rival_only(RUN_1), _hotel_at(RUN_2, 3))]),
+        'k3': answers_from_rows([{**row, 'keyword': 'k3'} for row in (_hotel_first(RUN_1), _hotel_first(RUN_2))]),
+    }
+
+
+class TestHistoryFromAnswers:
+    def test_equals_the_history_built_from_the_rows(self):
+        assert group_kpi_history_from_answers(['k1', 'k2', 'k3'], _two_group_runs_answers()) == _two_group_runs()
+
+    def test_keyword_run_histories_equal_the_keywords_of_the_history(self):
+        assert keyword_run_histories(['k1', 'k2', 'k3'], _two_group_runs_answers()) == _two_group_runs()['keywords']
+
+    def test_keyword_run_histories_answer_no_runs_for_a_keyword_without_answers(self):
+        assert keyword_run_histories(['k9'], {}) == [{'keyword': 'k9', 'runs': []}]
+
+
+class TestSummaryShapes:
+    def test_summary_run_replaces_the_drivers_by_their_count(self):
+        change = summary_run(_run(_two_group_runs(), RUN_2))['change']
+
+        assert ('drivers' in change, change['drivers_count']) == (False, 2)
+
+    def test_summary_run_keeps_the_rest_of_the_change(self):
+        full = _run(_two_group_runs(), RUN_2)['change']
+        change = summary_run(_run(_two_group_runs(), RUN_2))['change']
+
+        assert {key: change[key] for key in full if key != 'drivers'} == {key: value for key, value in full.items() if key != 'drivers'}
+
+    def test_summary_run_keeps_a_run_without_change(self):
+        run = _run(_two_group_runs(), RUN_1)
+
+        assert summary_run(run) == run
+
+    def test_keyword_summary_holds_the_run_count_and_the_latest_run(self):
+        entry = _keyword(_two_group_runs(), 'k2')
+
+        assert keyword_summary(entry) == {'keyword': 'k2', 'runs_count': 2, 'latest': entry['runs'][1]}
+
+    def test_keyword_summary_has_no_latest_run_without_runs(self):
+        assert keyword_summary({'keyword': 'k9', 'runs': []}) == {'keyword': 'k9', 'runs_count': 0, 'latest': None}
+
+    def test_run_drivers_list_the_drivers_of_every_compared_run(self):
+        history = _two_group_runs()
+
+        assert run_drivers(history['runs']) == [
+            {'timestamp': RUN_2, 'previous_timestamp': RUN_1, 'drivers': _run(history, RUN_2)['change']['drivers']},
+        ]

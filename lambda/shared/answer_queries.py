@@ -10,6 +10,7 @@ walks a keyword's whole history.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -33,6 +34,60 @@ def query_keyword_rows_since(table: Any, keyword: str, since: str) -> list[dict[
         ProjectionExpression=ANSWER_PROJECTION,
         ExpressionAttributeNames=ANSWER_ATTRIBUTE_NAMES,
     )
+
+
+@dataclass(frozen=True)
+class CappedRows:
+    """A keyword's projected rows of a window, oldest first, read newest first up to a row cap."""
+
+    rows: list[dict[str, Any]]
+    cut: str | None
+    """``None`` when the window was read whole; else the run timestamp at and before which no row was kept."""
+
+
+def _window_condition(keyword: str, since: str, until: str | None) -> Any:
+    """The key condition of ``keyword``'s rows from ``since`` on, through the run ``until`` when given."""
+    sort_key = Key('timestamp_provider')
+    # Every sort key of the run `until` starts with `until#`, and '$' sorts right after '#'.
+    window = sort_key.gte(since) if until is None else sort_key.between(since, f'{until}$')
+    return Key('keyword').eq(keyword) & window
+
+
+def query_keyword_rows_capped(
+    table: Any,
+    keyword: str,
+    since: str,
+    max_rows: int,
+    *,
+    until: str | None = None,
+) -> CappedRows:
+    """``keyword``'s projected rows from ``since`` on (through the run ``until``), at most ``max_rows`` of the newest.
+
+    The window is read newest first, so a cap drops the oldest runs and never
+    the latest. The oldest run read may be incomplete when the cap stops the
+    read inside it, so all of its rows are dropped and its timestamp becomes
+    ``cut``: the rows kept are every row of the runs after ``cut``.
+    """
+    params: dict[str, Any] = {
+        'KeyConditionExpression': _window_condition(keyword, since, until),
+        'ProjectionExpression': ANSWER_PROJECTION,
+        'ExpressionAttributeNames': ANSWER_ATTRIBUTE_NAMES,
+        'ScanIndexForward': False,
+    }
+    rows: list[dict[str, Any]] = []
+    # One row past the cap tells "exactly max_rows" apart from "more than max_rows".
+    while len(rows) <= max_rows:
+        response = table.query(**params, Limit=max_rows + 1 - len(rows))
+        rows.extend(response.get('Items') or [])
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            break
+        params['ExclusiveStartKey'] = last_key
+    rows.reverse()
+    if len(rows) <= max_rows:
+        return CappedRows(rows, None)
+    cut = str(rows[0].get('timestamp') or '')
+    return CappedRows([row for row in rows if str(row.get('timestamp') or '') > cut], cut)
 
 
 def query_keyword_run_rows(
@@ -106,9 +161,11 @@ def query_latest_run_rows(
 
 
 __all__ = [
+    'CappedRows',
     'history_since',
     'latest_run_timestamp',
     'previous_run_timestamp',
+    'query_keyword_rows_capped',
     'query_keyword_rows_since',
     'query_keyword_run_rows',
     'query_last_two_runs_rows',
