@@ -11,6 +11,10 @@ followed by the same JSON, or ``isError`` with the handler's ``error``,
 block because several hosts (Kiro among them) show the model only the text
 block; the MCP spec asks servers that return ``structuredContent`` to do so.
 
+A router answer over 5 MB arrives as a spill pointer (``shared.response_spill``);
+``invoke_route`` reads the body from its presigned S3 URL (capped at
+``MAX_SPILL_BYTES``) before shaping, and any failure there is the generic 502.
+
 Every call emits exactly one structured audit line
 ``{caller_sub, tool, operation, outcome, ms}`` (plus ``reason`` when the call
 was refused); tokens and bodies are never logged. Calls of write and spend
@@ -25,12 +29,16 @@ import math
 import os
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
+import requests
 import state
 from auth import Caller, authorize_tool
 from botocore.exceptions import BotoCoreError, ClientError
 from catalogue import InvalidArguments, JsonObject, NotFound, Route, Tool, validate_arguments
+
+from shared.response_spill import spilled_location
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -39,6 +47,9 @@ logger.setLevel(logging.INFO)
 MAX_RESULT_CHARS = 50_000
 #: Room left for the ``truncated`` marker and JSON punctuation when only a text preview fits.
 _PREVIEW_MARGIN = 100
+_CURSOR_KEY = 'next_token'
+#: What a cut page of a paginated answer tells the model (its ``next_token`` skips the items cut).
+CUT_PAGE_NOTE = 'Items of this page were cut to fit; ask again with a smaller limit before following next_token.'
 _ERROR_FIELDS = ('error', 'details', 'field')
 
 _lambda_client: Any = None
@@ -85,7 +96,11 @@ def _decode_body(raw: Any) -> Any:
 
 
 def invoke_route(route: Route, caller: Caller) -> tuple[int, Any]:
-    """``(statusCode, decoded body)`` the router Lambda answered ``route`` with."""
+    """``(statusCode, decoded body)`` the router Lambda answered ``route`` with.
+
+    A spill pointer (``shared.response_spill``: the router moved a body over
+    5 MB to S3) is followed, so the caller sees the original body.
+    """
     response = lambda_client().invoke(
         FunctionName=function_name(route.router),
         Payload=json.dumps(api_event(route, caller)).encode('utf-8'),
@@ -93,8 +108,98 @@ def invoke_route(route: Route, caller: Caller) -> tuple[int, Any]:
     payload = json.loads(response['Payload'].read())
     if response.get('FunctionError') or not isinstance(payload, dict):
         logger.error('Router %s failed: %s', route.router, response.get('FunctionError') or 'malformed response')
-        return 502, {'error': 'The API handler failed'}
-    return int(payload.get('statusCode') or 500), _decode_body(payload.get('body'))
+        return _handler_failed()
+    status, body = int(payload.get('statusCode') or 500), _decode_body(payload.get('body'))
+    location = spilled_location(body)
+    if location is None:
+        return status, body
+    spilled, reason = _follow_spill(location)
+    if reason is not None:
+        logger.error('Router %s spilled response could not be read: %s', route.router, reason)
+        return _handler_failed()
+    return status, spilled
+
+
+def _handler_failed() -> tuple[int, Any]:
+    return 502, {'error': 'The API handler failed'}
+
+
+def _follow_spill(url: str) -> tuple[Any, str | None]:
+    """``(body, None)`` read from a spill pointer's URL, or ``(None, reason)``.
+
+    The reason of a ``requests`` failure is its class name only: its message
+    holds the presigned URL, whose signature must not reach the logs.
+    """
+    try:
+        return fetch_spilled_body(url), None
+    except SpillDownloadError as refused:
+        return None, str(refused)
+    except requests.RequestException as failure:
+        return None, type(failure).__name__
+    except ValueError as malformed:
+        return None, f'malformed body ({type(malformed).__name__})'
+
+
+# --- Spilled responses ------------------------------------------------------------
+
+#: Largest spilled body the server reads (a spill is over 5 MB, and a router's whole answer stays under 6 MiB).
+MAX_SPILL_BYTES = 32 * 1024 * 1024
+#: Seconds to connect to and read from S3.
+SPILL_TIMEOUT_SECONDS = 20
+#: Presigned S3 URLs are on this domain; any other host is refused.
+SPILL_HOST_SUFFIX = '.amazonaws.com'
+_SPILL_CHUNK_BYTES = 64 * 1024
+
+
+class SpillDownloadError(Exception):
+    """A spilled body the server will not read: a foreign host, an error status or too many bytes."""
+
+
+def _spill_host(url: str) -> str:
+    """The URL's host when it is an https URL on ``SPILL_HOST_SUFFIX``; raises ``SpillDownloadError`` otherwise."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ''
+    if parsed.scheme != 'https' or not host.endswith(SPILL_HOST_SUFFIX):
+        raise SpillDownloadError(f'refused host {host or "(none)"}')
+    return host
+
+
+def spill_session() -> requests.Session:
+    """A session that sends nothing but the URL: no ``.netrc`` credentials, no proxy or other environment settings."""
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
+def _read_capped(response: requests.Response) -> bytes:
+    """The response body, refused above ``MAX_SPILL_BYTES`` by its Content-Length and by the bytes read."""
+    declared = response.headers.get('Content-Length')
+    if declared is not None and int(declared) > MAX_SPILL_BYTES:
+        raise SpillDownloadError(f'declared {declared} bytes')
+    chunks: list[bytes] = []
+    received = 0
+    for chunk in response.iter_content(chunk_size=_SPILL_CHUNK_BYTES):
+        received += len(chunk)
+        if received > MAX_SPILL_BYTES:
+            raise SpillDownloadError(f'more than {MAX_SPILL_BYTES} bytes')
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
+def fetch_spilled_body(url: str) -> Any:
+    """The decoded JSON body a spill pointer's presigned ``url`` holds.
+
+    The URL carries its own (presigned) authorization, so the request sends no
+    headers of the caller and follows no redirect. The URL is never logged.
+    """
+    host = _spill_host(url)
+    with spill_session() as session, session.get(
+        url, timeout=SPILL_TIMEOUT_SECONDS, stream=True, allow_redirects=False,
+    ) as response:
+        if response.status_code != 200:
+            raise SpillDownloadError(f'{host} answered {response.status_code}')
+        raw = _read_capped(response)
+    return json.loads(raw)
 
 
 # --- Result shaping -------------------------------------------------------------
@@ -123,18 +228,25 @@ def _without_tail(items: list[Any], overflow: int) -> list[Any]:
 
 
 def truncate_result(data: JsonObject) -> JsonObject:
-    """``data`` cut to its first page when it exceeds ``MAX_RESULT_CHARS``: the longest lists lose their tail."""
+    """``data`` cut to its first page when it exceeds ``MAX_RESULT_CHARS``: the longest lists lose their tail.
+
+    A paginated answer keeps its ``next_token``, but the cursor continues after
+    the whole page the API returned, so a cut page says to ask again with a
+    smaller ``limit`` rather than skip the items it lost.
+    """
     if _size(data) <= MAX_RESULT_CHARS:
         return data
-    trimmed = dict(data)
+    markers: JsonObject = {'truncated': True}
+    if data.get(_CURSOR_KEY) is not None:
+        markers = {_CURSOR_KEY: data[_CURSOR_KEY], 'truncated_note': CUT_PAGE_NOTE, **markers}
+    trimmed = {**data, **markers}
     lists = [key for key, value in trimmed.items() if isinstance(value, list) and value]
     for key in sorted(lists, key=lambda name: _size(trimmed[name]), reverse=True):
         while trimmed[key] and _size(trimmed) > MAX_RESULT_CHARS:
             trimmed[key] = _without_tail(trimmed[key], _size(trimmed) - MAX_RESULT_CHARS)
     if _size(trimmed) > MAX_RESULT_CHARS:
-        preview: JsonObject = {'preview': json.dumps(trimmed, default=str)[:MAX_RESULT_CHARS - _PREVIEW_MARGIN]}
-        trimmed = preview
-    trimmed['truncated'] = True
+        room = MAX_RESULT_CHARS - _PREVIEW_MARGIN - _size(markers)
+        trimmed = {'preview': json.dumps(trimmed, default=str)[:room], **markers}
     return trimmed
 
 

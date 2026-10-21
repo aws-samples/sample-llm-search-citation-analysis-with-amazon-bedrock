@@ -14,7 +14,7 @@ import state
 from auth import verify_claims
 from botocore.exceptions import ClientError
 from catalogue import InvalidArguments, find_operation
-from invoke import MAX_RESULT_CHARS, run_operation, truncate_result
+from invoke import CUT_PAGE_NOTE, MAX_RESULT_CHARS, run_operation, truncate_result
 
 from testing.mcp_result_fixtures import READ_SCOPE, WRITE_SCOPE, text_block
 
@@ -193,6 +193,25 @@ class TestTruncateResult:
 
         assert (set(trimmed), trimmed['truncated']) == ({'preview', 'truncated'}, True)
         assert len(json.dumps(trimmed)) <= MAX_RESULT_CHARS
+
+    def test_a_cut_page_keeps_next_token_and_tells_the_model_to_ask_for_a_smaller_limit(self):
+        data = {'searches': [{'v': 'a' * 200} for _ in range(400)], 'next_token': 'tok_2'}
+
+        trimmed = truncate_result(data)
+
+        assert (trimmed['next_token'], trimmed['truncated_note']) == ('tok_2', CUT_PAGE_NOTE)
+        assert len(json.dumps(trimmed)) <= MAX_RESULT_CHARS
+
+    def test_a_text_preview_keeps_next_token(self):
+        trimmed = truncate_result({'blob': 'z' * (MAX_RESULT_CHARS + 10), 'next_token': 'tok_2'})
+
+        assert (set(trimmed), trimmed['next_token']) == ({'preview', 'next_token', 'truncated_note', 'truncated'}, 'tok_2')
+        assert len(json.dumps(trimmed)) <= MAX_RESULT_CHARS
+
+    def test_a_cut_last_page_carries_no_note(self):
+        trimmed = truncate_result({'searches': [{'v': 'a' * 200} for _ in range(400)], 'next_token': None})
+
+        assert ('truncated_note' in trimmed, trimmed['next_token']) == (False, None)
 
 
 class TestAudit:
