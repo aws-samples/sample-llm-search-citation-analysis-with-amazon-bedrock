@@ -37,9 +37,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from shared.answer_queries import history_since, query_keyword_rows_since, query_keyword_run_rows, query_latest_run_rows
+from shared.answer_queries import history_since, query_keyword_run_rows, query_latest_run_rows
 from shared.dynamo_decimal import convert_floats_to_decimal
-from shared.group_kpi_history import build_group_kpi_history
+from shared.group_kpi_history import keyword_run_histories
 from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
 from shared.insights_narrative import (
@@ -66,6 +66,7 @@ from shared.markets import (
 from shared.models import ModelRole, get_model_id, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
+from shared.scoped_reports import load_window_answers
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
@@ -179,14 +180,17 @@ def _run_answers(keywords: list[str], run_timestamp: str | None) -> list[Answer]
     return answers_from_rows(row for keyword in keywords for row in rows[keyword])
 
 
-def _rows_since(since: str) -> Callable[[Any, str], list[dict[str, Any]]]:
-    return lambda table, keyword: query_keyword_rows_since(table, keyword, since)
+def _history(keywords: list[str], owned_domains: list[str]) -> tuple[list[dict[str, Any]], str | None]:
+    """The keywords' stability history over ``HISTORY_DAYS``, read and built as ``GET /api/reports/insights`` does.
 
-
-def _history(keywords: list[str], owned_domains: list[str]) -> list[dict[str, Any]]:
-    """The keywords' stability history over ``HISTORY_DAYS``, as the insights endpoint builds it by default."""
-    history = build_group_kpi_history(keywords, _read_all(keywords, _rows_since(history_since(HISTORY_DAYS))), owned_domains)
-    return history['keywords']
+    The read is bounded like the endpoint's (``load_window_answers``), so both
+    stop at the same run when the window holds more rows than one report
+    reads; that run is the second value (``None`` for a window read whole).
+    """
+    window = load_window_answers(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(HISTORY_DAYS))
+    if window.truncated_before is not None:
+        logger.warning('Group history read cut short: runs at and before %s left out', window.truncated_before)
+    return keyword_run_histories(keywords, window.answers, owned_domains), window.truncated_before
 
 
 # ---------------------------------------------------------------------------
@@ -287,11 +291,11 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
     answers = _run_answers(keywords, run_timestamp)
     if not answers:
         return run.outcome(status='skipped', reason='no_answers')
-    computed = compute_insights(
-        answers, owned_domains, _history(keywords, owned_domains), competitor_domains_from(brand_config),
-    )
+    history, history_truncated_before = _history(keywords, owned_domains)
+    truncation = {} if history_truncated_before is None else {'history_truncated_before': history_truncated_before}
+    computed = compute_insights(answers, owned_domains, history, competitor_domains_from(brand_config))
     if not computed['insights']:
-        return run.outcome(status='skipped', reason='no_insights')
+        return run.outcome(status='skipped', reason='no_insights', **truncation)
     kpis = brand_kpis(answers, owned_domains)
     language = _language(run)
     narrative, dropped = validate_narrative(
@@ -310,7 +314,7 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
         generated_at=get_timestamp(),
     )))
     logger.info('Narrative stored for a group run: %d item(s) kept, %d dropped', sum(map(len, narrative.values())), dropped)
-    return run.outcome(status='generated', dropped=dropped)
+    return run.outcome(status='generated', dropped=dropped, **truncation)
 
 
 def _guarded(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
@@ -350,6 +354,8 @@ def _summary(outcomes: list[dict[str, Any]], run_timestamp: str | None) -> dict[
         'skipped': count('skipped'),
         'failed': count('failed'),
         'dropped': sum(outcome.get('dropped', 0) for outcome in outcomes),
+        # Groups whose history read stopped at the window cap, as /api/reports/insights reports it.
+        'history_truncated': sum('history_truncated_before' in outcome for outcome in outcomes),
     }
 
 
