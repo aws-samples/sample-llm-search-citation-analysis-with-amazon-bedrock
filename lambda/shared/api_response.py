@@ -17,6 +17,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from shared.dynamo_decimal import DecimalEncoder
+from shared.response_spill import SPILL_HEADER, guard_response
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -144,6 +145,8 @@ def cors_json_headers(event: dict | None) -> dict[str, str]:
         )
     return {
         'Content-Type': 'application/json',
+        # Lets the dashboard read the spill marker on a cross-origin response.
+        'Access-Control-Expose-Headers': SPILL_HEADER,
         **get_cors_headers(request_origin),
     }
 
@@ -212,11 +215,13 @@ def api_response(
     if headers:
         response_headers.update(headers)
 
-    return {
+    # Every response is measured; one too large for Lambda's 6 MiB cap is
+    # moved to S3 behind a pointer instead of failing as a bare 502.
+    return guard_response({
         'statusCode': status_code,
         'headers': response_headers,
         'body': json.dumps(body, cls=DecimalEncoder, default=str),
-    }
+    }, event)
 
 
 def success_response(

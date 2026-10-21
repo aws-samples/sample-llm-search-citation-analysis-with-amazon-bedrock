@@ -15,6 +15,7 @@ def credentialed_json_headers(origin: str) -> dict[str, str]:
     """``cors_json_headers`` for a request whose origin is allowed and echoed back."""
     return {
         'Content-Type': 'application/json',
+        'Access-Control-Expose-Headers': 'X-Spilled-Response',
         'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Api-Key',
         'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
