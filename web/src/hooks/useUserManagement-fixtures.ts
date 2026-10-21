@@ -38,7 +38,7 @@ export const mockUsers: CognitoUser[] = [
 
 interface MockApiOptions {
   users?: CognitoUser[];
-  /** Splits the listing into pages of this size, each answered with `has_more` until the last. */
+  /** Splits the listing into pages of this size, each answered with a `next_token` until the last. */
   pageSize?: number;
   shouldFailList?: boolean;
   shouldFailInvite?: boolean;
@@ -60,14 +60,15 @@ function failing(fail: boolean | undefined, message: string, answer: () => unkno
 function listingMock(options: MockApiOptions) {
   const users = options.users ?? mockUsers;
   const pageSize = options.pageSize ?? 100;
-  return vi.fn().mockImplementation((_limit: number, offset: number) => {
+  return vi.fn().mockImplementation((_limit: number, nextToken: string | null) => {
     if (options.shouldFailList) return Promise.reject(new ApiRequestError('Failed to list users', 500));
+    const offset = nextToken === null ? 0 : Number(nextToken);
+    const page = users.slice(offset, offset + pageSize);
     return Promise.resolve({
-      users: users.slice(offset, offset + pageSize),
-      total: users.length,
+      users: page,
+      count: page.length,
       limit: pageSize,
-      offset,
-      has_more: offset + pageSize < users.length,
+      next_token: offset + pageSize < users.length ? String(offset + pageSize) : null,
     });
   });
 }
