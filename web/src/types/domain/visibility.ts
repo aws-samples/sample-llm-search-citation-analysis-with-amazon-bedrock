@@ -167,6 +167,8 @@ export interface CitationGapsResponse {
     coverage_rate: number;
   };
   keywords_analyzed?: number;
+  /** Scoped rollups: whether keywords of the scope were left out (at most 100 are read). */
+  keywords_truncated?: boolean;
   keyword_summaries?: Array<{
     keyword: string;
     gap_count: number;

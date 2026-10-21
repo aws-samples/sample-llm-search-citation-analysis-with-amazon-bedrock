@@ -31,6 +31,7 @@ from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
 from shared.kpi_engine import is_owned_domain, normalize_domain, percent
 from shared.scope_params import (
+    SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     all_active_scope,
@@ -254,6 +255,17 @@ def _gaps_and_covered_sources(
     return gaps, covered_sources
 
 
+def latest_run_gaps(latest_items: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every gap of one keyword's latest-run rows (``provider``, ``citations``, ``brands``), ranked, not enriched.
+
+    The classification ``analyze_citation_gaps`` applies, for callers that
+    already hold the rows (``/reports/competitor``).
+    """
+    first_party_list, competitors_list = tracked_brand_names(config)
+    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
+    return _gaps_and_covered_sources(source_brand_map, config)[0]
+
+
 def _first_party_brand_error(config: dict[str, Any]) -> dict[str, str] | None:
     """Return the public error contract when first-party brands are missing."""
     tracked_brands = config.get('tracked_brands', {})
@@ -327,7 +339,13 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
 
 
 def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportScope | None) -> dict[str, Any]:
-    """Analyze citation gaps across the active keywords of a scope."""
+    """Analyze citation gaps across the active keywords of a scope.
+
+    Every scope reads a bounded number of keyword partitions: ``limit`` of
+    every active keyword (the default and ``scope=all``), or a group's or id
+    list's keywords up to ``SCOPE_KEYWORDS_CAP`` (``limit`` never cuts a group
+    below that). ``keywords_truncated`` says whether keywords were left out.
+    """
     configuration_error = _first_party_brand_error(config)
     if configuration_error is not None:
         return configuration_error
@@ -336,7 +354,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportS
     resolved = scope if scope is not None else all_active_scope(keywords_table)
     keywords = sorted(resolved.keywords, key=str.casefold)
     if scope is not None and scope.kind != 'all':
-        limit = max(limit, len(keywords))
+        limit = min(max(limit, len(keywords)), SCOPE_KEYWORDS_CAP)
 
     selected_keywords = keywords[:limit]
     all_gaps: list[dict[str, Any]] = []
@@ -373,6 +391,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportS
 
     return {
         'scope': resolved.describe(),
+        'keywords_truncated': len(selected_keywords) < len(keywords),
         'keywords_analyzed': len(keyword_summaries),
         'keyword_summaries': sorted(keyword_summaries, key=lambda summary: -summary['high_priority_gaps']),
         'top_gaps': top_gaps,
