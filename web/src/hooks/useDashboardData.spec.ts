@@ -72,6 +72,18 @@ describe('useDashboardData', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('returns the token of the next searches page from the first page', async () => {
+    const { result } = await renderLoadedDashboard({ searchesNextToken: 'older-searches' });
+
+    expect(result.current.searchesNextToken).toBe('older-searches');
+  });
+
+  it('returns a null searches token when the first page is the last one', async () => {
+    const { result } = await renderLoadedDashboard();
+
+    expect(result.current.searchesNextToken).toBeNull();
+  });
+
   it('returns the dashboard network message when an API request fails', async () => {
     const { result } = await renderLoadedDashboard({ shouldFail: true });
 

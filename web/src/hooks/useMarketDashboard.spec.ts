@@ -25,7 +25,7 @@ describe('useMarketDashboard', () => {
     renderMarketDashboard('cl-es');
 
     await waitFor(() => expect(mockAuthenticatedFetch.mock.calls.map(([url]) => String(url)).sort((left, right) => left.localeCompare(right))).toStrictEqual([
-      'https://api.test.com/citations?market_id=cl-es',
+      'https://api.test.com/citations?market_id=cl-es&limit=25',
       'https://api.test.com/stats?market_id=cl-es',
     ]));
   });

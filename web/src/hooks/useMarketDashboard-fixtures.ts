@@ -5,7 +5,7 @@ import {
   buildMarketSelectionMock, marketSelectionWrapper
 } from '../components/Markets/markets-fixtures';
 import type {
-  Citations, Stats
+  CitationsPage, Stats
 } from '../types';
 import type { DashboardPanels } from './useMarketDashboard';
 import { useMarketDashboard } from './useMarketDashboard';
@@ -39,8 +39,13 @@ export const CHILEAN_STATS: Stats = {
   unique_keywords: 2,
 };
 
-/** `GET /citations?market_id=cl-es`. */
-export const CHILEAN_PANEL_CITATIONS: Citations = {
+/** `GET /citations?market_id=cl-es&limit=25`. */
+export const CHILEAN_PANEL_CITATIONS: CitationsPage = {
+  total_urls: 1,
+  total_citation_count: 2,
+  matched_urls: 1,
+  next_token: null,
+  truncated: false,
   provider_stats: [{
     provider: 'openai',
     citation_count: 21,

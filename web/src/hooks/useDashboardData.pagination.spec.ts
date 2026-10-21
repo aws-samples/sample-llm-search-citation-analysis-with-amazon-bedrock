@@ -141,8 +141,8 @@ describe('useDashboardData keyword pagination', () => {
 
     expect(mockAuthenticatedFetch.mock.calls.map(([url]) => url)).toStrictEqual([
       `${MOCK_API_BASE_URL}/stats`,
-      `${MOCK_API_BASE_URL}/citations`,
-      `${MOCK_API_BASE_URL}/searches`,
+      `${MOCK_API_BASE_URL}/citations?limit=25`,
+      `${MOCK_API_BASE_URL}/searches?limit=100`,
       MOCK_KEYWORDS_URL,
     ]);
   });

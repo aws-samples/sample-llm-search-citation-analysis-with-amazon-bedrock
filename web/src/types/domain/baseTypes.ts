@@ -20,6 +20,7 @@ export interface TopUrl {
   citation_count: number;
   by_provider?: { [provider: string]: number };
   keyword_count?: number;
+  /** Only on pages asked for with `include_keywords=true` (the Excel export). */
   keywords?: string[];
   /** Stored by deduplication (derived from the URL for older rows); absent from older API builds. */
   content_type?: 'video' | 'page';
@@ -28,7 +29,21 @@ export interface TopUrl {
 export interface Citations {
   provider_stats: ProviderStat[];
   brand_stats: BrandStat[];
+  /** One page of the scope's URLs, in the requested order (`GET /citations` pages server-side). */
   top_urls: TopUrl[];
+}
+
+/** One page of `GET /citations`: the URL page plus totals over the whole scope, whatever the filters. */
+export interface CitationsPage extends Citations {
+  /** Distinct URLs of the scope. */
+  total_urls: number;
+  /** Sum of `citation_count` over every URL of the scope. */
+  total_citation_count: number;
+  /** URLs passing the filters: the length of the list the pages walk through. */
+  matched_urls: number;
+  next_token: string | null;
+  /** The server hit a read cap: the totals cover part of the scope. */
+  truncated: boolean;
 }
 
 export interface Search {
@@ -36,6 +51,7 @@ export interface Search {
   provider: string;
   timestamp: string;
   citations?: string[];
+  /** Only on rows asked for with `include_response=true`. */
   response?: string;
   query_prompt_id?: string;
   query_prompt_name?: string;
