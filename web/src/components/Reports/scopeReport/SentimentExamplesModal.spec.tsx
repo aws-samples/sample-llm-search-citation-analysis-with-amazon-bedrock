@@ -12,7 +12,7 @@ import {
 } from '../../../types/domain/sentimentExamples-fixtures';
 import { SentimentExamplesModal } from './SentimentExamplesModal';
 import {
-  HOTEL_SOL_SCOPE, renderExamplesModal, requestedUrl, requestSignal
+  answerExamplePages, FIRST_EXAMPLE_PAGE, HOTEL_SOL_SCOPE, LAST_EXAMPLE_PAGE, listedBrands, renderExamplesModal, requestedUrl, requestSignal
 } from './sentimentExamples-fixtures';
 import { answerEveryFetch } from '../../../test/fetchStubs';
 
@@ -190,5 +190,67 @@ describe('SentimentExamplesModal', () => {
     unmount();
 
     expect(requestSignal()?.aborted).toBe(true);
+  });
+});
+
+describe('SentimentExamplesModal pages', () => {
+  it('offers more answers when the page has a next token', async () => {
+    answerExamplePages(FIRST_EXAMPLE_PAGE);
+    renderExamplesModal();
+
+    expect(await screen.findByRole('button', { name: 'Load more answers' })).toBeEnabled();
+  });
+
+  it('offers no more answers on the last page', async () => {
+    answerExamplePages(LAST_EXAMPLE_PAGE);
+    renderExamplesModal();
+    await screen.findByRole('list', { name: 'Answers' });
+
+    expect(screen.queryByRole('button', { name: 'Load more answers' })).not.toBeInTheDocument();
+  });
+
+  it('asks for the page the token points at', async () => {
+    answerExamplePages(FIRST_EXAMPLE_PAGE, LAST_EXAMPLE_PAGE);
+    renderExamplesModal();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more answers' }));
+    await screen.findByText('3 answers');
+
+    expect(mockAuthenticatedFetch.mock.calls[1]?.[0])
+      .toBe('https://api.test.com/visibility/sentiment-examples?group_id=hotel-sol&sentiment=negative&provider=openai&next_token=page-2');
+  });
+
+  it('appends the next page under the answers already shown', async () => {
+    answerExamplePages(FIRST_EXAMPLE_PAGE, LAST_EXAMPLE_PAGE);
+    renderExamplesModal();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more answers' }));
+    await screen.findByText('3 answers');
+
+    expect(listedBrands()).toStrictEqual(['Hotel Sol', 'Sol Spa', 'Sol Beach Club']);
+  });
+
+  it('keeps the answers shown and disables the button while the next page loads', async () => {
+    answerExamplePages(FIRST_EXAMPLE_PAGE);
+    renderExamplesModal();
+    const button = await screen.findByRole('button', { name: 'Load more answers' });
+    deferAuthenticatedFetch();
+
+    fireEvent.click(button);
+
+    expect(screen.getByRole('button', { name: 'Loading more answers…' })).toBeDisabled();
+    expect(listedBrands()).toStrictEqual(['Hotel Sol', 'Sol Spa']);
+  });
+
+  it('keeps the answers shown and says so when the next page cannot be loaded', async () => {
+    answerExamplePages(FIRST_EXAMPLE_PAGE);
+    renderExamplesModal();
+    const button = await screen.findByRole('button', { name: 'Load more answers' });
+    answerEveryFetch({}, 500);
+
+    fireEvent.click(button);
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Unable to load the answers');
+    expect(listedBrands()).toStrictEqual(['Hotel Sol', 'Sol Spa']);
   });
 });

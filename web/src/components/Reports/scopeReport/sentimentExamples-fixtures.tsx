@@ -1,16 +1,19 @@
 import { vi } from 'vitest';
 import {
-  fireEvent, render, screen
+  fireEvent, render, screen, within
 } from '@testing-library/react';
 import type {
   ReportScope, VisibilityResponse
 } from '../../../types';
 import type { SentimentSplit } from '../../../types/domain/groupKpiHistory';
 import type {
-  SentimentExample, SentimentLabel
+  SentimentExample, SentimentExamplesResponse, SentimentLabel
 } from '../../../types/domain/sentimentExamples';
-import { buildSentimentExample } from '../../../types/domain/sentimentExamples-fixtures';
+import {
+  buildSentimentExample, buildSentimentExamplesResponse
+} from '../../../types/domain/sentimentExamples-fixtures';
 import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
+import { createMockJsonResponse } from '../../../test/fetchResponses';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
   buildEngineKpis, buildVisibility
@@ -108,4 +111,32 @@ export function renderExamplesModal({
       <SentimentExamplesModal scope={HOTEL_SOL_SCOPE} scopeLabel="Hotel Sol" sentiment={sentiment} provider={provider} onClose={onClose} />,
     ),
   };
+}
+
+/** The first page of three matching answers: two shown, the third behind `next_token` `'page-2'`. */
+export const FIRST_EXAMPLE_PAGE: SentimentExamplesResponse = buildSentimentExamplesResponse({
+  total: 3,
+  examples: [buildSentimentExample({ brand: 'Hotel Sol' }), buildSentimentExample({ brand: 'Sol Spa' })],
+  next_token: 'page-2',
+});
+
+/** The last page after `FIRST_EXAMPLE_PAGE`. */
+export const LAST_EXAMPLE_PAGE: SentimentExamplesResponse = buildSentimentExamplesResponse({
+  total: 3,
+  examples: [buildSentimentExample({ brand: 'Sol Beach Club' })],
+  next_token: null,
+});
+
+/** Answers the requests in order: the first with `pages[0]`, the next with `pages[1]`, … */
+export function answerExamplePages(...pages: readonly SentimentExamplesResponse[]): void {
+  pages.forEach((page) => {
+    mockAuthenticatedFetch.mockImplementationOnce(() => Promise.resolve(createMockJsonResponse(page)));
+  });
+}
+
+/** The brand line of every answer card listed, in order. */
+export function listedBrands(): Array<string | null | undefined> {
+  return within(screen.getByRole('list', { name: 'Answers' }))
+    .getAllByRole('listitem')
+    .map((item) => item.firstElementChild?.firstElementChild?.textContent);
 }
