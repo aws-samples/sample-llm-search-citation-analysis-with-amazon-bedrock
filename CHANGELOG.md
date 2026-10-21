@@ -100,6 +100,17 @@ handed over through S3 instead of failing.
   is fed a large, realistic data set in accented Spanish and must stay within its 1 MB page budget, measured on the
   proxy envelope.
 
+### Security
+
+- **Vite 8.3.5** (root and `web/`, was 8.2.1/8.2.2): fixes the six open Dependabot alerts (GHSA-587h-7wmj-h5pm,
+  GHSA-r825-w8mm-5pxw, GHSA-698v-4r3x-3vcv in its `launch-editor`) and three dev-server advisories (GHSA-9jrq-w75r-8gcw,
+  GHSA-rq7h-c2jc-7f22, GHSA-vfpm-58rq-9qcg). Rolldown and PostCSS moved with it.
+- **pytest 9.0.3+** in `lambda/requirements-dev.txt` (PYSEC-2026-1845; dev toolchain only).
+- Still open: `braces` ≤ 3.0.3 (GHSA-vfj7-8cjw-p6xm, stack exhaustion on deeply nested glob patterns) reaches the
+  dashboard only through Tailwind CSS 3.4's build-time file watcher and content globs, which are our own config, and
+  no patched 3.x exists. The fix is the Tailwind 4 migration (`npm audit fix --force`), a separate change to the
+  styling of every component.
+
 ### Removed
 
 - `shared.bounded_reads.newest_items`, `shared.search_results.query_keyword_items`,
