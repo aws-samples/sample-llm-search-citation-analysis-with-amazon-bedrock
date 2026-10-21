@@ -20,6 +20,13 @@ async function renderLoaded() {
   return rendered.result;
 }
 
+/** The hook after the first page and then the next one are loaded. */
+async function renderSecondPageLoaded() {
+  const result = await renderLoaded();
+  await act(() => result.current.loadMoreHistory());
+  return result;
+}
+
 describe('useResearchHistoryPages', () => {
   beforeEach(() => {
     mockApi.fetchKeywordResearchHistoryPage.mockReset();
@@ -35,25 +42,19 @@ describe('useResearchHistoryPages', () => {
   });
 
   it('requests the next page of the same type filter with the token', async () => {
-    const result = await renderLoaded();
-
-    await act(() => result.current.loadMoreHistory());
+    await renderSecondPageLoaded();
 
     expect(mockApi.fetchKeywordResearchHistoryPage).toHaveBeenLastCalledWith('expansion', 'page-2');
   });
 
   it('appends the next page without repeating jobs already listed', async () => {
-    const result = await renderLoaded();
-
-    await act(() => result.current.loadMoreHistory());
+    const result = await renderSecondPageLoaded();
 
     expect(result.current.history.map((job) => job.id)).toStrictEqual(['job-3', 'job-2', 'job-1']);
   });
 
   it('reports no older jobs after the last page is loaded', async () => {
-    const result = await renderLoaded();
-
-    await act(() => result.current.loadMoreHistory());
+    const result = await renderSecondPageLoaded();
 
     expect(result.current.historyHasMore).toBe(false);
   });

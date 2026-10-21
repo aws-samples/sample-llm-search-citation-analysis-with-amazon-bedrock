@@ -11,11 +11,11 @@ import type { ContentStudioHistory } from '../types';
 /** Items per history page; the API also cuts a page at its response budget. */
 export const CONTENT_HISTORY_PAGE_SIZE = 20;
 
-/** `current` plus the items of `page` it does not hold yet, in page order. */
-export function appendHistoryPage(
-  current: readonly ContentStudioHistory[],
-  page: readonly ContentStudioHistory[]
-): ContentStudioHistory[] {
+/** `current` plus the items of `page` it does not hold yet (by `id`), in page order. */
+export function appendHistoryPage<TItem extends { readonly id: string }>(
+  current: readonly TItem[],
+  page: readonly TItem[]
+): TItem[] {
   const seen = new Set(current.map((item) => item.id));
   return [...current, ...page.filter((item) => !seen.has(item.id))];
 }

@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from shared.cursors import encode_offset_cursor
-from testing.module_loader import load_handler_module
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.search_results_fixtures import (
     PartitionReadFailure,
     active_keywords_table,
@@ -21,11 +18,9 @@ from testing.search_results_fixtures import (
     search_results_table,
     sort_condition,
 )
+from testing.window_rows_fixtures import load_window_report, report_event, windowed_report
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
-with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_ENV):
-    _mod = load_handler_module(_HERE, 'get-group-kpi-history.py', 'get_group_kpi_history_under_test')
+_mod = load_window_report('get-group-kpi-history.py', 'get_group_kpi_history_under_test')
 
 ACTIVE_KEYWORDS = [
     {'id': 'k1', 'keyword': 'hotel sol spa', 'status': 'active', 'group_ids': {'sol'}},
@@ -60,13 +55,8 @@ def _call(
     active: list[dict[str, Any]] = ACTIVE_KEYWORDS,
 ) -> tuple[int, dict[str, Any]]:
     resource, _ = _resource(search_rows or {}, active)
-    event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': params, 'headers': {}}
-    with (
-        patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_brand_config', return_value=brand_config if brand_config is not None else {}),
-        patch.object(_mod, 'history_since', return_value='2026-06-22T06:00:00.000000Z'),
-    ):
-        response = _mod.handler(event, None)
+    with windowed_report(_mod, resource, brand_config=brand_config or {}, since='2026-06-22T06:00:00.000000Z'):
+        response = _mod.handler(report_event('/api/reports/group-kpis', params), None)
     return response['statusCode'], json.loads(response['body'])
 
 
@@ -152,14 +142,9 @@ class TestSummaryRead:
     def test_reads_each_keyword_from_the_window_start_newest_first(self):
         row = search_result_row('hotel sol spa', 'openai', [], timestamp=RUN)
         resource, search_table = _resource({'hotel sol spa': [row]})
-        event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': {'group_id': 'sol'}, 'headers': {}}
 
-        with (
-            patch.object(_mod, 'dynamodb', resource),
-            patch.object(_mod, 'get_brand_config', return_value={}),
-            patch.object(_mod, 'history_since', return_value='2026-09-01T00:00:00.000000Z'),
-        ):
-            _mod.handler(event, None)
+        with windowed_report(_mod, resource, brand_config={}, since='2026-09-01T00:00:00.000000Z'):
+            _mod.handler(report_event('/api/reports/group-kpis', {'group_id': 'sol'}), None)
 
         windows = [
             (sort_condition(call.kwargs), call.kwargs['ScanIndexForward'])
@@ -205,15 +190,15 @@ class TestSummaryView:
 
 
 class TestKeywordsView:
-    def test_answers_one_keywords_runs_for_detail_keyword(self):
-        _, body = _call({'group_id': 'sol', 'view': 'keywords', 'detail_keyword': 'hotel sol spa'}, TWO_RUNS)
+    @pytest.fixture
+    def detail_body(self) -> dict[str, Any]:
+        return _call({'group_id': 'sol', 'view': 'keywords', 'detail_keyword': 'hotel sol spa'}, TWO_RUNS)[1]
 
-        assert [(entry['keyword'], [run['timestamp'] for run in entry['runs']]) for entry in body['keywords']] == [('hotel sol spa', [RUN, RUN_2])]
+    def test_answers_one_keywords_runs_for_detail_keyword(self, detail_body):
+        assert [(entry['keyword'], [run['timestamp'] for run in entry['runs']]) for entry in detail_body['keywords']] == [('hotel sol spa', [RUN, RUN_2])]
 
-    def test_has_no_next_page_for_detail_keyword(self):
-        _, body = _call({'group_id': 'sol', 'view': 'keywords', 'detail_keyword': 'hotel sol spa'}, TWO_RUNS)
-
-        assert body['next_token'] is None
+    def test_has_no_next_page_for_detail_keyword(self, detail_body):
+        assert detail_body['next_token'] is None
 
     def test_refuses_a_detail_keyword_outside_the_scope(self):
         status, body = _call({'group_id': 'sol', 'view': 'keywords', 'detail_keyword': 'hotel mar views'}, TWO_RUNS)

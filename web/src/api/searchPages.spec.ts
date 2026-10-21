@@ -6,7 +6,7 @@ import {
   fetchAllSearches, fetchKeywordSearches, isSearchesPage, SearchPageError
 } from './searchPages';
 import {
-  answerSearchPages, buildSearch, NEWER_RUN, OLDER_RUN
+  answerSearchPages, NEWER_RUN, OLDER_RUN, TWO_SEARCH_PAGES
 } from './searchPages-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -33,10 +33,7 @@ describe('isSearchesPage', () => {
 
 describe('fetchAllSearches', () => {
   it('returns every run of every page in page order', async () => {
-    answerSearchPages({
-      '': [[NEWER_RUN], 'older'],
-      older: [[OLDER_RUN], null],
-    });
+    answerSearchPages(TWO_SEARCH_PAGES);
 
     expect(await fetchAllSearches()).toStrictEqual([NEWER_RUN, OLDER_RUN]);
   });
@@ -71,16 +68,16 @@ describe('fetchKeywordSearches', () => {
   });
 
   it('follows the pages until the API reports the last one', async () => {
-    answerSearchPages({
-      '': [[NEWER_RUN], 'older'],
-      older: [[OLDER_RUN], null],
-    });
+    answerSearchPages(TWO_SEARCH_PAGES);
 
     expect(await fetchKeywordSearches('vuelos a cusco')).toStrictEqual([NEWER_RUN, OLDER_RUN]);
   });
 
   it('stops once it holds the newest max rows', async () => {
-    const third = buildSearch({ timestamp: '2026-09-16T10:00:00Z' });
+    const third = {
+      ...OLDER_RUN,
+      timestamp: '2026-09-16T10:00:00Z',
+    };
     answerSearchPages({
       '': [[NEWER_RUN, OLDER_RUN], 'older'],
       older: [[third], null],

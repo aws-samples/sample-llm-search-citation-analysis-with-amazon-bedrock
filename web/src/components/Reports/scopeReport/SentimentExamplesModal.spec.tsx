@@ -28,6 +28,11 @@ const NO_ANSWERS = buildSentimentExamplesResponse({
   examples: [],
 });
 
+/** Resolves once the answers list is on screen. */
+async function waitForAnswersList() {
+  return screen.findByRole('list', { name: 'Answers' });
+}
+
 describe('SentimentExamplesModal', () => {
   it('names the sentiment and the engine in its title', () => {
     answerEveryFetch(buildSentimentExamplesResponse());
@@ -102,7 +107,7 @@ describe('SentimentExamplesModal', () => {
     answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
-    await screen.findByRole('list', { name: 'Answers' });
+    await waitForAnswersList();
 
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -142,7 +147,7 @@ describe('SentimentExamplesModal', () => {
     answerEveryFetch(TWO_OF_THIRTY_SEVEN);
     renderExamplesModal();
 
-    const list = await screen.findByRole('list', { name: 'Answers' });
+    const list = await waitForAnswersList();
 
     expect(within(list).getAllByRole('listitem').map((item) => item.firstElementChild?.firstElementChild?.textContent)).toStrictEqual(['Hotel Sol', 'Sol Spa']);
   });
@@ -193,47 +198,49 @@ describe('SentimentExamplesModal', () => {
   });
 });
 
+/** The modal over a first page that continues; resolves to its "Load more answers" button. */
+async function setupFirstPageShown() {
+  answerExamplePages(FIRST_EXAMPLE_PAGE);
+  renderExamplesModal();
+  return screen.findByRole('button', { name: 'Load more answers' });
+}
+
+/** The modal after "Load more answers" appended the last page. */
+async function setupSecondPageLoaded() {
+  answerExamplePages(FIRST_EXAMPLE_PAGE, LAST_EXAMPLE_PAGE);
+  renderExamplesModal();
+  fireEvent.click(await screen.findByRole('button', { name: 'Load more answers' }));
+  await screen.findByText('3 answers');
+}
+
 describe('SentimentExamplesModal pages', () => {
   it('offers more answers when the page has a next token', async () => {
-    answerExamplePages(FIRST_EXAMPLE_PAGE);
-    renderExamplesModal();
-
-    expect(await screen.findByRole('button', { name: 'Load more answers' })).toBeEnabled();
+    expect(await setupFirstPageShown()).toBeEnabled();
   });
 
   it('offers no more answers on the last page', async () => {
     answerExamplePages(LAST_EXAMPLE_PAGE);
     renderExamplesModal();
-    await screen.findByRole('list', { name: 'Answers' });
+    await waitForAnswersList();
 
     expect(screen.queryByRole('button', { name: 'Load more answers' })).not.toBeInTheDocument();
   });
 
   it('asks for the page the token points at', async () => {
-    answerExamplePages(FIRST_EXAMPLE_PAGE, LAST_EXAMPLE_PAGE);
-    renderExamplesModal();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Load more answers' }));
-    await screen.findByText('3 answers');
+    await setupSecondPageLoaded();
 
     expect(mockAuthenticatedFetch.mock.calls[1]?.[0])
       .toBe('https://api.test.com/visibility/sentiment-examples?group_id=hotel-sol&sentiment=negative&provider=openai&next_token=page-2');
   });
 
   it('appends the next page under the answers already shown', async () => {
-    answerExamplePages(FIRST_EXAMPLE_PAGE, LAST_EXAMPLE_PAGE);
-    renderExamplesModal();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Load more answers' }));
-    await screen.findByText('3 answers');
+    await setupSecondPageLoaded();
 
     expect(listedBrands()).toStrictEqual(['Hotel Sol', 'Sol Spa', 'Sol Beach Club']);
   });
 
   it('keeps the answers shown and disables the button while the next page loads', async () => {
-    answerExamplePages(FIRST_EXAMPLE_PAGE);
-    renderExamplesModal();
-    const button = await screen.findByRole('button', { name: 'Load more answers' });
+    const button = await setupFirstPageShown();
     deferAuthenticatedFetch();
 
     fireEvent.click(button);
@@ -243,9 +250,7 @@ describe('SentimentExamplesModal pages', () => {
   });
 
   it('keeps the answers shown and says so when the next page cannot be loaded', async () => {
-    answerExamplePages(FIRST_EXAMPLE_PAGE);
-    renderExamplesModal();
-    const button = await screen.findByRole('button', { name: 'Load more answers' });
+    const button = await setupFirstPageShown();
     answerEveryFetch({}, 500);
 
     fireEvent.click(button);

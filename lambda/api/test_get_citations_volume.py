@@ -12,26 +12,19 @@ and that the per-keyword reads run in parallel under a shared page cap.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.citations_fixtures import citations_handler
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
+from testing.paging import follow_next_token
 from testing.partition_tables import PagedTable
 from testing.response_size import assert_within_page_budget, response_bytes
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-citations_module = handler_fixture(
-    _API_DIR,
-    'get-citations.py',
-    'get_citations_volume_under_test',
-    env={'DYNAMODB_TABLE_CITATIONS': 'test-citations', 'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'},
-)
+citations_module = citations_handler('get_citations_volume_under_test')
 
 _KEYWORD_COUNT = 100
 _URLS_PER_KEYWORD = 600
@@ -91,14 +84,12 @@ def test_stays_within_page_budget_when_the_dashboard_asks_for_its_first_page(cit
 
 
 def test_following_next_token_returns_every_url_once_in_order(citations_module, citations_table):
-    _, (_, first) = _get(citations_module, citations_table, {'limit': '1000', 'sort': 'domain', 'order': 'asc'})
-    urls = [entry['url'] for entry in first['top_urls']]
-    token = first['next_token']
-    while token is not None:
-        response, (_, body) = _get(citations_module, citations_table, {'limit': '1000', 'sort': 'domain', 'order': 'asc', 'next_token': token})
-        assert_within_page_budget(response)
-        urls += [entry['url'] for entry in body['top_urls']]
-        token = body['next_token']
+    urls = follow_next_token(
+        lambda query: _get(citations_module, citations_table, query)[0],
+        {'limit': '1000', 'sort': 'domain', 'order': 'asc'},
+        lambda body: [entry['url'] for entry in body['top_urls']],
+        within_page_budget=True,
+    )
 
     domains = [url.split('/')[2] for url in urls]
     assert (len(urls), len(set(urls)), domains == sorted(domains)) == (_DISTINCT_URLS, _DISTINCT_URLS, True)

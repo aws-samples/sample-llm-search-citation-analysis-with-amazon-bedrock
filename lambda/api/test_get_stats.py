@@ -25,24 +25,14 @@ import pytest
 from shared.bounded_counts import Count
 from shared.config import PROVIDERS
 from testing.client_errors import throttled
-from testing.dynamodb_stubs import fake_table
+from testing.dynamodb_stubs import described, fake_table
+from testing.env import STATS_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.markets_fixtures import BRAZIL, CHILE
 from testing.search_results_fixtures import key_parts
 
-stats_module = handler_fixture(
-    os.path.dirname(__file__),
-    'get-stats.py',
-    'get_stats_under_test',
-    env={
-        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-        'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-        'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-        'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-        'CORS_ORIGIN_PARAM': '',
-    },
-)
+stats_module = handler_fixture(os.path.dirname(__file__), 'get-stats.py', 'get_stats_under_test', env=STATS_ENV)
 
 _OLDER = '2026-05-01T08:00:00Z'
 _LATEST = '2026-05-02T08:00:00Z'
@@ -63,12 +53,6 @@ def _search_table(count: int, answers: Mapping[str, Any] | None = None) -> Magic
     """
     table = fake_table(scan={'Count': count})
     table.query.side_effect = [(answers or {}).get(provider, _NO_ROWS) for provider in PROVIDERS]
-    return table
-
-
-def described(table: MagicMock, size_bytes: int = 4_096, item_count: int = 0) -> MagicMock:
-    """``table`` whose ``DescribeTable`` reports ``size_bytes`` and ``item_count`` (small by default: counted exactly)."""
-    table.meta.client.describe_table.return_value = {'Table': {'TableSizeBytes': size_bytes, 'ItemCount': item_count}}
     return table
 
 

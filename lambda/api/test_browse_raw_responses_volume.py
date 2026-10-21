@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 
 from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.response_size import assert_within_page_budget, long_text
 
 _ENV = {'RAW_RESPONSES_BUCKET': 'test-raw', 'SCREENSHOTS_BUCKET': 'test-shots', 'CORS_ORIGIN_PARAM': ''}
@@ -102,14 +103,13 @@ def test_continues_with_next_token_when_folder_exceeds_one_s3_page(big_folder: M
 @given(st.integers(min_value=0, max_value=2_600), st.integers(min_value=0, max_value=5))
 def test_following_next_token_returns_every_entry_once(file_count: int, folder_count: int) -> None:
     client = _s3_folder(file_count, folder_count)
-    paths: list[str] = []
-    query = {'prefix': '2026-09-18/'}
-    for _page in range(10):
-        _status, body = parse_response(_browse(client, query))
-        paths.extend(entry['path'] for entry in body['folders'] + body['files'])
-        if body['next_token'] is None:
-            break
-        query = {'prefix': '2026-09-18/', 'next_token': body['next_token']}
+
+    paths = follow_next_token(
+        lambda query: _browse(client, query),
+        {'prefix': '2026-09-18/'},
+        lambda body: [entry['path'] for entry in body['folders'] + body['files']],
+        max_pages=10,
+    )
 
     assert (len(paths), len(set(paths))) == (file_count + folder_count, file_count + folder_count)
 
@@ -117,15 +117,13 @@ def test_following_next_token_returns_every_entry_once(file_count: int, folder_c
 def test_rejects_next_token_issued_for_another_folder(big_folder: MagicMock) -> None:
     _status, first = parse_response(_browse(big_folder, {'prefix': '2026-09-18/'}))
 
-    status, body = parse_response(_browse(big_folder, {'prefix': '2026-09-17/', 'next_token': first['next_token']}))
+    response = _browse(big_folder, {'prefix': '2026-09-17/', 'next_token': first['next_token']})
 
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(response) == INVALID_NEXT_TOKEN
 
 
 def test_rejects_malformed_next_token_with_400(big_folder: MagicMock) -> None:
-    status, body = parse_response(_browse(big_folder, {'next_token': 'e30'}))
-
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(_browse(big_folder, {'next_token': 'e30'})) == INVALID_NEXT_TOKEN
 
 
 def test_stays_within_page_budget_when_raw_file_is_several_megabytes() -> None:

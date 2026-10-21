@@ -343,20 +343,18 @@ def _history_reads(search: MagicMock) -> list[dict]:
 
 
 class TestHistoryWindow:
-    def test_counts_no_history_cut_when_the_window_is_read_whole(self, worker_module) -> None:
+    def _generated_and_cut(self, worker_module) -> tuple[int, int]:
+        """``(generated, history_truncated)`` of one worker run over ``_THREE_RUNS``."""
         with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), rows=_THREE_RUNS):
             result = worker_module.handler(_workflow_event('group-1'), None)
+        return result['generated'], result['history_truncated']
 
-        assert (result['generated'], result['history_truncated']) == (1, 0)
+    def test_counts_no_history_cut_when_the_window_is_read_whole(self, worker_module) -> None:
+        assert self._generated_and_cut(worker_module) == (1, 0)
 
     def test_counts_the_history_cut_when_the_window_holds_more_rows_than_one_report_reads(self, worker_module) -> None:
-        with (
-            _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), rows=_THREE_RUNS),
-            patch.object(scoped_reports, 'rows_per_keyword', return_value=2),
-        ):
-            result = worker_module.handler(_workflow_event('group-1'), None)
-
-        assert (result['generated'], result['history_truncated']) == (1, 1)
+        with patch.object(scoped_reports, 'rows_per_keyword', return_value=2):
+            assert self._generated_and_cut(worker_module) == (1, 1)
 
     def test_reads_each_keyword_history_with_the_report_row_cap(self, worker_module) -> None:
         search = MagicMock()

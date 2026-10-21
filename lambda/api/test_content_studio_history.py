@@ -234,6 +234,12 @@ class TestGenerationStatus:
         }
 
 
+def _unviewed_count(table: MagicMock) -> tuple[int, bool]:
+    """``get_unviewed_count()`` read from ``table`` as the content table."""
+    with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
+        return _mod.get_unviewed_count()
+
+
 class TestUnviewedCount:
     def test_counts_every_paginated_generated_index_page(self) -> None:
         table = fake_table()
@@ -242,10 +248,7 @@ class TestUnviewedCount:
             {"Count": 3},
         ]
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            count = _mod.get_unviewed_count()
-
-        assert count == (5, False)
+        assert _unviewed_count(table) == (5, False)
         assert table.query.call_count == 2
         assert table.query.call_args_list[1].kwargs["ExclusiveStartKey"] == {"id": "page-1"}
         table.scan.assert_not_called()
@@ -257,27 +260,20 @@ class TestUnviewedCount:
             {"Count": 60, "LastEvaluatedKey": {"id": "page-2"}},
         ]
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            count = _mod.get_unviewed_count()
-
-        assert count == (99, True)
+        assert _unviewed_count(table) == (99, True)
         assert table.query.call_count == 2
 
     def test_stops_after_page_cap_and_reports_count_as_lower_bound(self) -> None:
         table = fake_table()
         table.query.return_value = {"Count": 1, "LastEvaluatedKey": {"id": "more"}}
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            count = _mod.get_unviewed_count()
-
-        assert count == (5, True)
+        assert _unviewed_count(table) == (5, True)
         assert table.query.call_count == 5
 
     def test_filters_generated_rows_by_explicit_unviewed_value(self) -> None:
         table = fake_table(query={"Count": 0})
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            _mod.get_unviewed_count()
+        _unviewed_count(table)
 
         request = table.query.call_args.kwargs
         assert request["IndexName"] == "StatusCreatedIndex"

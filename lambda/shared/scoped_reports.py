@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from shared.answer_queries import query_keyword_rows_capped
+from shared.group_kpi_history import keyword_run_histories
 from shared.kpi_engine import Answer, answers_from_rows
 from shared.scope_params import (
     MARKET_PARAM,
@@ -151,6 +152,19 @@ def load_window_answers(
         },
         truncated_before=cut,
     )
+
+
+def load_window_histories(
+    table: Any, keywords: list[str], since: str, owned_domains: list[str],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Each keyword's runs from ``since`` on with their KPIs (``keyword_run_histories``), and ``truncated_before``.
+
+    Read by ``load_window_answers``, so ``/reports/insights`` and the
+    report-insights Lambda stop at the same run when the window holds more
+    rows than one report reads.
+    """
+    window = load_window_answers(table, keywords, since)
+    return keyword_run_histories(keywords, window.answers, owned_domains), window.truncated_before
 
 
 def capped_scope(scope: ReportScope, cap: int = SCOPE_KEYWORDS_CAP) -> tuple[list[str], dict[str, Any]]:

@@ -5,11 +5,12 @@ import {
 } from '../types/domain/groupKpiHistory';
 import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 import {
-  decodeReportScope, encodeReportScope, reportScopeParams
+  decodeReportScope, encodeReportScope
 } from '../components/ui/reportScope';
 import {
   apiRequestErrors, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
+import { groupKpiRequest } from './useGroupKpiHistory';
 
 const keywordRunsEndpoint = {
   errorContext: 'visibility',
@@ -17,14 +18,10 @@ const keywordRunsEndpoint = {
   logMessage: '[groupKpiHistory] Error fetching a keyword\'s runs:',
   isValidResponse: isGroupKeywordRunsPage,
   ...apiRequestErrors('Failed to fetch the keyword\'s runs'),
-  buildRequest: (scope: ReportScope, marketId: string | null, days: number, keyword: string) => ({
-    path: '/reports/group-kpis',
-    params: new URLSearchParams({
-      ...reportScopeParams(scope, marketId),
-      days: days.toString(),
-      view: 'keywords',
-      detail_keyword: keyword,
-    }),
+  buildRequest: (scope: ReportScope, marketId: string | null, days: number, keyword: string) => groupKpiRequest(scope, marketId, {
+    days: days.toString(),
+    view: 'keywords',
+    detail_keyword: keyword,
   }),
 };
 
@@ -34,14 +31,10 @@ const runDriversEndpoint = {
   logMessage: '[groupKpiHistory] Error fetching a run\'s drivers:',
   isValidResponse: isGroupRunDriversPage,
   ...apiRequestErrors('Failed to fetch what drove the change'),
-  buildRequest: (scope: ReportScope, marketId: string | null, previousRun: string, run: string) => ({
-    path: '/reports/group-kpis',
-    params: new URLSearchParams({
-      ...reportScopeParams(scope, marketId),
-      view: 'drivers',
-      from_run: previousRun,
-      to_run: run,
-    }),
+  buildRequest: (scope: ReportScope, marketId: string | null, previousRun: string, run: string) => groupKpiRequest(scope, marketId, {
+    view: 'drivers',
+    from_run: previousRun,
+    to_run: run,
   }),
 };
 

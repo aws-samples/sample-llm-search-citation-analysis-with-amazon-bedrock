@@ -11,6 +11,13 @@ import {
 
 vi.mock('./client', () => import('./clientMock-fixtures'));
 
+/** Every appearance of the hotel group at the latest run, in every market. */
+const UNFILTERED_GROUP_READ = {
+  scope: HOTEL_GROUP,
+  marketId: null,
+  filters: {},
+};
+
 describe('fetchBrandAppearances', () => {
   it('reads the first page of the scope at the requested run', async () => {
     mockApiGet.mockResolvedValue({
@@ -72,11 +79,7 @@ describe('fetchBrandAppearances', () => {
   it('refuses an answer that is not an appearances page', async () => {
     mockApiGet.mockResolvedValue({ aggregated: {} });
 
-    const read = fetchBrandAppearances({
-      scope: HOTEL_GROUP,
-      marketId: null,
-      filters: {} 
-    });
+    const read = fetchBrandAppearances(UNFILTERED_GROUP_READ);
 
     await expect(read).rejects.toThrow(InvalidBrandMentionsResponseError);
   });
@@ -84,11 +87,7 @@ describe('fetchBrandAppearances', () => {
   it('refuses a page sequence that repeats a token', async () => {
     mockApiGet.mockResolvedValue(APPEARANCE_PAGE_1);
 
-    const read = fetchBrandAppearances({
-      scope: HOTEL_GROUP,
-      marketId: null,
-      filters: {} 
-    });
+    const read = fetchBrandAppearances(UNFILTERED_GROUP_READ);
 
     await expect(read).rejects.toThrow('Brand mentions API repeated a continuation token');
   });

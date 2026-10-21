@@ -7,6 +7,7 @@ import { ConfirmModal } from '../ui/Modal';
 import { CollectionIcon } from '../ui';
 import { ContentDetailModal } from './ContentDetailModal';
 import { HistoryListItem } from './HistoryListItem';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 
 interface ContentHistoryProps {
   history: ContentStudioHistory[];
@@ -87,16 +88,7 @@ export const ContentHistory = ({
         ))}
       </div>
 
-      {onLoadMore && (
-        <button
-          type="button"
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="mt-3 w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
-        >
-          {loadingMore ? 'Loading…' : 'Load older content'}
-        </button>
-      )}
+      <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load older content" layoutClassName="mt-3 " />
 
       {selectedItem && (
         <ContentDetailModal

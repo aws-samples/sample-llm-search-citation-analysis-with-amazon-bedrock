@@ -15,6 +15,9 @@ import {
 } from './reportQueries-fixtures';
 import { TREND_DEFINITION } from '../../../constants/kpiDefinitions';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
+import {
+  CUT_RUN, cutNoteText, getCutNoteElement
+} from './HistoryCutNote-fixtures';
 
 function renderHeadline(overrides: Partial<HistoricalTrendsResponse> = {}): void {
   const view = buildTrendView(overrides);
@@ -88,9 +91,9 @@ describe('TrendHeadlineSection keywords by trend', () => {
 
 describe('TrendHeadlineSection window cut', () => {
   it('says after which run the trend covers the scope when its window read was cut short', () => {
-    renderHeadline({ truncated_before: '2026-10-05T06:50:33Z' });
+    renderHeadline({ truncated_before: CUT_RUN });
 
-    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs after ${new Date('2026-10-05T06:50:33Z').toLocaleString()}`);
+    expect(getCutNoteElement()).toHaveTextContent(cutNoteText(CUT_RUN));
   });
 
   it('adds no cut note when the window was read whole', () => {

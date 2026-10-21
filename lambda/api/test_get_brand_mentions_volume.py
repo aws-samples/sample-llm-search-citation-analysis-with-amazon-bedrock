@@ -22,6 +22,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords, volume_rows
+from testing.paging import follow_next_token
 from testing.report_scope_fixtures import load_scoped_handler, scoped_report
 from testing.response_size import assert_within_page_budget
 
@@ -45,14 +46,7 @@ def _report(module: Any, rows: dict[str, list[dict[str, Any]]], keyword_count: i
 
 
 def _all_pages(report: Any, params: dict[str, str]) -> list[list[dict[str, Any]]]:
-    pages: list[list[dict[str, Any]]] = []
-    token: str | None = None
-    while True:
-        body = report.body({**params, **({'next_token': token} if token else {})})
-        pages.append(body['appearances'])
-        token = body['next_token']
-        if token is None:
-            return pages
+    return follow_next_token(report.call, params, lambda body: [body['appearances']])
 
 
 def test_stays_within_page_budget_when_a_large_group_is_summarized(brand_mentions, group_rows):

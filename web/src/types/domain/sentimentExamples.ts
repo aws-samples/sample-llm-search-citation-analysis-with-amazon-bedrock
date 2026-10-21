@@ -5,7 +5,9 @@
  */
 import type { ReportScopeInfo } from './baseTypes';
 import type { SentimentSplit } from './groupKpiHistory';
-import { isRecord } from './keywordDecoders';
+import {
+  isNullableString, isRecord
+} from './keywordDecoders';
 
 /** A sentiment label the extraction assigns to a brand. */
 export type SentimentLabel = keyof SentimentSplit;
@@ -50,10 +52,6 @@ export interface SentimentExamplesResponse {
 
 function isSentimentLabel(value: unknown): value is SentimentLabel {
   return SENTIMENT_LABELS.has(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string';
 }
 
 function hasExampleText(value: Record<string, unknown>): boolean {

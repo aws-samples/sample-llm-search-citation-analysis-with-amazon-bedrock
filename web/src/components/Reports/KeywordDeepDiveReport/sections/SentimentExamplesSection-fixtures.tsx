@@ -5,25 +5,21 @@ import type {
   AggregatedBrand, BrandAppearance, BrandMentionsResponse
 } from '../../../../types';
 import {
-  buildAggregatedBrand, mockBrandMentionsResponse
+  buildAggregatedBrand, buildBrandAppearance, mockBrandMentionsResponse
 } from '../../../../hooks/useBrandMentions-fixtures';
 import { SentimentExamplesSection } from './SentimentExamplesSection';
 
 /** A negative OpenAI appearance with a quote, a reason and a ranking context, unless overridden. */
 export function buildAppearance(overrides: Partial<BrandAppearance> = {}): BrandAppearance {
-  return {
-    keyword: 'hotel coruna spa',
-    provider: 'openai',
-    model: 'gpt-5-mini',
+  return buildBrandAppearance({
     rank: 3,
-    mention_count: 1,
     first_position: 120,
     sentiment: 'negative',
     sentiment_quote: 'Guests often mention that the rooms feel dated.',
     sentiment_reason: 'The answer warns about dated rooms.',
     ranking_context: 'a cheaper but dated option',
     ...overrides,
-  };
+  });
 }
 
 function firstPartyBrand(name: string, appearances: BrandAppearance[]): AggregatedBrand {

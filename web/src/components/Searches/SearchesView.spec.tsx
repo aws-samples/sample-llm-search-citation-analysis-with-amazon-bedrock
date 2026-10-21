@@ -6,13 +6,14 @@ import {
 } from '@testing-library/react';
 import { SearchesView } from './SearchesView';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
-import { exportToExcel } from '../../exporters/excelGenerator';
+import { lastExportedColumn } from '../../test/excelExportMock';
 import {
-  answerSearchPages, NEWER_RUN, OLDER_RUN
+  answerSearchPages, NEWER_RUN, OLDER_RUN, TWO_SEARCH_PAGES
 } from '../../api/searchPages-fixtures';
+import { queryLoadOlderSearchesElement } from './SearchesView-fixtures';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
-vi.mock('../../exporters/excelGenerator', () => ({ exportToExcel: vi.fn() }));
+vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
 
 const mockSearches = [
   {
@@ -24,6 +25,13 @@ const mockSearches = [
     brand_mentions: [],
   },
 ];
+
+/** The view over the first page, with the older page answered and "Load older searches" clicked. */
+function setupOlderPageLoad() {
+  answerSearchPages({ older: [[OLDER_RUN], null] });
+  render(<SearchesView searches={[NEWER_RUN]} nextToken="older" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Load older searches' }));
+}
 
 describe('SearchesView', () => {
   it('renders the keyword table columns when there are no searches', () => {
@@ -92,23 +100,17 @@ describe('SearchesView', () => {
   it('offers no older searches when the first page is the last one', () => {
     render(<SearchesView searches={[NEWER_RUN]} />);
 
-    expect(screen.queryByRole('button', { name: 'Load older searches' })).not.toBeInTheDocument();
+    expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument();
   });
 
   it('loads the older page the token points at and keeps the first page', async () => {
-    answerSearchPages({ older: [[OLDER_RUN], null] });
-    render(<SearchesView searches={[NEWER_RUN]} nextToken="older" />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load older searches' }));
+    setupOlderPageLoad();
 
     expect(await screen.findByRole('option', { name: 'gemini' })).toBeInTheDocument();
   });
 
   it('asks for the page after the first one when loading older searches', async () => {
-    answerSearchPages({ older: [[OLDER_RUN], null] });
-    render(<SearchesView searches={[NEWER_RUN]} nextToken="older" />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load older searches' }));
+    setupOlderPageLoad();
 
     await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/searches?limit=100&next_token=older', expect.anything(),
@@ -116,24 +118,18 @@ describe('SearchesView', () => {
   });
 
   it('hides the button once the last page is loaded', async () => {
-    answerSearchPages({ older: [[OLDER_RUN], null] });
-    render(<SearchesView searches={[NEWER_RUN]} nextToken="older" />);
+    setupOlderPageLoad();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load older searches' }));
-
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Load older searches' })).not.toBeInTheDocument());
+    await waitFor(() => expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument());
   });
 
   it('exports the runs of every page', async () => {
-    answerSearchPages({
-      '': [[NEWER_RUN], 'older'],
-      older: [[OLDER_RUN], null],
-    });
+    answerSearchPages(TWO_SEARCH_PAGES);
     render(<SearchesView searches={[NEWER_RUN]} />);
 
     fireEvent.click(screen.getByRole('button', { name: /export/i }));
 
-    await waitFor(() => expect(vi.mocked(exportToExcel).mock.lastCall?.[0].data.map((row) => row.Provider)).toStrictEqual([
+    await waitFor(() => expect(lastExportedColumn('Provider')).toStrictEqual([
       'openai', 'gemini',
     ]));
   });

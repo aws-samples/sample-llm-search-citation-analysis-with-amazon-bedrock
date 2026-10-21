@@ -20,6 +20,7 @@ import {
 } from '../../formatting/researchStatus';
 import { ResearchListSkeleton } from './ResearchListSkeleton';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
@@ -112,16 +113,7 @@ export const ResearchHistory = ({
         </div>
       )}
 
-      {onLoadMore && history.length > 0 && (
-        <button
-          type="button"
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
-        >
-          {loadingMore ? 'Loading…' : 'Load older research'}
-        </button>
-      )}
+      <LoadMoreButton onLoadMore={history.length > 0 ? onLoadMore : undefined} loading={loadingMore} label="Load older research" />
     </div>
   );
 };

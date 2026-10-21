@@ -12,8 +12,12 @@ from shared.kpi_engine import answers_from_rows, brand_table
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
-from testing.latest_run_fixtures import oldest_page_first_table
-from testing.search_results_fixtures import report_dynamodb, search_result_row, search_results_table
+from testing.search_results_fixtures import (
+    oldest_page_first_table,
+    report_dynamodb,
+    search_result_row,
+    search_results_table,
+)
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {

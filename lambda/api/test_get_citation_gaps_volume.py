@@ -19,14 +19,12 @@ from shared.scope_params import SCOPE_KEYWORDS_CAP, ReportScope
 from testing.citation_gaps_fixtures import load_citation_gaps
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event
+from testing.report_scope_fixtures import AIRLINE_BRAND_CONFIG
 from testing.response_size import assert_within_page_budget, long_text
 
 _mod = load_citation_gaps('get_citation_gaps_volume_under_test')
 
-CONFIG: dict[str, Any] = {
-    'tracked_brands': {'first_party': ['Altiplano Air'], 'competitors': ['Cóndor Vuelos']},
-    'first_party_domains': ['altiplano.example'],
-}
+CONFIG = AIRLINE_BRAND_CONFIG
 
 _KEYWORDS = tuple(f'vuelos económicos destino {index:03d}' for index in range(500))
 

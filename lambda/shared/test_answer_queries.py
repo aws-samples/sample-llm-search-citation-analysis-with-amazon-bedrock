@@ -242,6 +242,10 @@ class TestCappedWindowRows:
     ROWS = group_window_rows(1, 3, answers_per_run=4)[volume_keyword(0)]
     KEYWORD = volume_keyword(0)
 
+    @pytest.fixture
+    def table(self) -> MagicMock:
+        return paged_search_results_table({self.KEYWORD: self.ROWS})
+
     def test_reads_the_whole_window_oldest_first_under_the_cap(self):
         capped = query_keyword_rows_capped(paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5), self.KEYWORD, WINDOW_START, 12)
 
@@ -252,29 +256,23 @@ class TestCappedWindowRows:
 
         assert (sorted({row['timestamp'] for row in capped.rows}), capped.cut) == ([run_timestamp(2)], run_timestamp(1))
 
-    def test_drops_a_whole_run_when_the_cap_ends_on_its_last_row(self):
-        capped = query_keyword_rows_capped(paged_search_results_table({self.KEYWORD: self.ROWS}), self.KEYWORD, WINDOW_START, 8)
+    def test_drops_a_whole_run_when_the_cap_ends_on_its_last_row(self, table):
+        capped = query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 8)
 
         assert (sorted({row['timestamp'] for row in capped.rows}), capped.cut) == ([run_timestamp(1), run_timestamp(2)], run_timestamp(0))
 
-    def test_reads_the_window_newest_first_from_its_start(self):
-        table = paged_search_results_table({self.KEYWORD: self.ROWS})
-
+    def test_reads_the_window_newest_first_from_its_start(self, table):
         query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100)
 
         kwargs = table.query.call_args.kwargs
         assert (sort_condition(kwargs), kwargs['ScanIndexForward'], kwargs['ProjectionExpression']) == (('>=', WINDOW_START), False, ANSWER_PROJECTION)
 
-    def test_reads_through_the_last_row_of_the_run_until(self):
-        table = paged_search_results_table({self.KEYWORD: self.ROWS})
-
+    def test_reads_through_the_last_row_of_the_run_until(self, table):
         capped = query_keyword_rows_capped(table, self.KEYWORD, run_timestamp(0), 100, until=run_timestamp(1))
 
         assert sorted({row['timestamp'] for row in capped.rows}) == [run_timestamp(0), run_timestamp(1)]
 
-    def test_asks_for_one_row_past_the_cap_at_most(self):
-        table = paged_search_results_table({self.KEYWORD: self.ROWS})
-
+    def test_asks_for_one_row_past_the_cap_at_most(self, table):
         query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 6)
 
         assert [call.kwargs['Limit'] for call in table.query.call_args_list] == [7]

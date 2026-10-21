@@ -10,6 +10,7 @@ import {
   APPROXIMATE_STATS, buildTabContentProps, FIRST_CITATIONS_PAGE, RECENT_SEARCH
 } from './TabContent-fixtures';
 import { APPROXIMATE_COUNT_NOTE } from '../Dashboard/StatCard';
+import { queryLoadOlderSearchesElement } from '../Searches/SearchesView-fixtures';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
 import {
   buildMarketSelectionMock, renderWithMarketSelection
@@ -122,24 +123,27 @@ describe('TabContent dashboard totals', () => {
   });
 });
 
+/** The Recent Searches tab over `RECENT_SEARCH`. */
+function renderSearchesTab(overrides: Parameters<typeof buildTabContentProps>[0] = {}) {
+  return render(<TabContent {...buildTabContentProps({
+    activeTab: 'searches',
+    searches: [RECENT_SEARCH],
+    ...overrides,
+  })} />);
+}
+
 describe('TabContent recent searches', () => {
   it('offers the older searches when the dashboard load has a next page', async () => {
-    render(<TabContent {...buildTabContentProps({
-      activeTab: 'searches',
-      searches: [RECENT_SEARCH],
-      searchesNextToken: 'older-searches',
-    })} />);
+    renderSearchesTab({ searchesNextToken: 'older-searches' });
+    await screen.findByText(RECENT_SEARCH.keyword);
 
-    expect(await screen.findByRole('button', { name: 'Load older searches' })).toBeInTheDocument();
+    expect(queryLoadOlderSearchesElement()).toBeInTheDocument();
   });
 
   it('offers no older searches when the dashboard load holds the last page', async () => {
-    render(<TabContent {...buildTabContentProps({
-      activeTab: 'searches',
-      searches: [RECENT_SEARCH],
-    })} />);
+    renderSearchesTab();
     await screen.findByText(RECENT_SEARCH.keyword);
 
-    expect(screen.queryByRole('button', { name: 'Load older searches' })).not.toBeInTheDocument();
+    expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument();
   });
 });

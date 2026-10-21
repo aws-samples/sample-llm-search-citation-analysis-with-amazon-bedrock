@@ -10,6 +10,17 @@ import { useMarketScopedFetch } from './useMarketScopedFetch';
 /** The error a non-OK status becomes; its message is what a 4xx refusal shows the reader. */
 export const buildHttpError = (status: number) => new ApiRequestError('Failed to fetch the group KPI history', status);
 
+/** A `GET /reports/group-kpis` request: the scope in the market plus the view's own parameters. */
+export function groupKpiRequest(scope: ReportScope, marketId: string | null, viewParams: Readonly<Record<string, string>>) {
+  return {
+    path: '/reports/group-kpis',
+    params: new URLSearchParams({
+      ...reportScopeParams(scope, marketId),
+      ...viewParams,
+    }),
+  };
+}
+
 const groupKpiHistoryEndpoint = {
   errorContext: 'visibility',
   // Stryker disable next-line StringLiteral: console context only
@@ -17,13 +28,7 @@ const groupKpiHistoryEndpoint = {
   isValidResponse: (data: unknown): data is GroupKpiHistoryResponse => isGroupKpiHistoryResponse(data),
   createHttpError: buildHttpError,
   createResponseError: (message: string) => new ApiRequestError(message),
-  buildRequest: (marketId: string | null, scope: ReportScope, days: number) => ({
-    path: '/reports/group-kpis',
-    params: new URLSearchParams({
-      ...reportScopeParams(scope, marketId),
-      days: days.toString(),
-    }),
-  }),
+  buildRequest: (marketId: string | null, scope: ReportScope, days: number) => groupKpiRequest(scope, marketId, { days: days.toString() }),
 };
 
 /**

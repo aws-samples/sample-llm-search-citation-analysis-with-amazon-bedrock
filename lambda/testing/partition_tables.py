@@ -26,10 +26,14 @@ def _partition_value(condition: ConditionBase) -> tuple[str, Any]:
 
 @dataclass
 class PagedTable:
-    """Rows plus the key schema of the table (``indexes[None]``) and of each GSI."""
+    """Rows plus the key schema of the table (``indexes[None]``) and of each GSI.
+
+    A key schema is ``(partition, sort)``; a table keyed by its partition
+    alone (queried only through a GSI) is ``(partition,)``.
+    """
 
     rows: list[dict[str, Any]]
-    indexes: Mapping[str | None, tuple[str, str]]
+    indexes: Mapping[str | None, tuple[str, ...]]
     max_page_rows: int | None = None
     """DynamoDB's 1 MB page cut, as a row count: a page stops here even below ``Limit``."""
     failures: dict[Any, Exception] = field(default_factory=dict)

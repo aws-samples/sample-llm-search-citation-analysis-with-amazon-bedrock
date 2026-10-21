@@ -5,14 +5,9 @@
 import type {
   BrandAppearanceRow, BrandAppearancesPage, BrandMentionsResponse
 } from '../types';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string';
-}
+import {
+  isNullableString, isRecord
+} from '../types/domain/keywordDecoders';
 
 /** The summary answer: an `aggregated` block with its brand list, and the runs the scope can be read at. */
 export function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {

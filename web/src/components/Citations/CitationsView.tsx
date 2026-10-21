@@ -24,6 +24,7 @@ import type {
   ContentTypeFilter, SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
 import { exportToExcel } from '../../exporters/excelGenerator';
+import { datedExcelFileName } from '../../exporters/excelFileName';
 import { fetchAllCitationUrls } from '../../api/citationPages';
 import {
   useMarketCitations, type MarketCitations
@@ -176,7 +177,7 @@ export const CitationsView = ({
         data: citationExportRows(everyUrl),
         columns: CITATION_EXPORT_COLUMNS,
         sheetName: 'Citations',
-        fileName: `citations-${new Date().toISOString().split('T')[0]}.xlsx`,
+        fileName: datedExcelFileName('citations', new Date()),
       });
     } catch (err) {
       console.error('Error exporting citations:', err);

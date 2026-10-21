@@ -172,6 +172,23 @@ def brand_mentions_env(brand_mentions):
         yield report
 
 
+_SPA = 'hotel coruna spa'
+
+
+def _spa_body(module, rows: list[dict], **params: str) -> dict:
+    """The brand mentions of the keyword ``_SPA`` when its partition holds ``rows``."""
+    with scoped_report(module, {'tracked_brands': {}}, search_rows={_SPA: rows}) as report:
+        return report.body({'keyword': _SPA, **params})
+
+
+def _latest_and_older_run(query_prompt_id: str = 'default') -> list[dict]:
+    """A latest Gemini answer naming 'Latest Brand' and an OLD_TS OpenAI answer (persona ``query_prompt_id``) naming 'Old Brand'."""
+    return [
+        _result(_SPA, 'gemini', [_brand('Latest Brand', 'first_party')]),
+        _result(_SPA, 'openai', [_brand('Old Brand', 'competitor')], timestamp=OLD_TS, query_prompt_id=query_prompt_id),
+    ]
+
+
 class TestBrandMentionsScope:
     @pytest.fixture
     def latest_coruna_hotel_brand(self, brand_mentions_env):
@@ -195,12 +212,7 @@ class TestBrandMentionsScope:
         assert body['aggregated']['brands'][0]['total_mentions'] == 5
 
     def test_single_keyword_selects_the_newest_run_by_sort_key(self, brand_mentions):
-        rows = {'hotel coruna spa': [
-            _result('hotel coruna spa', 'gemini', [_brand('Latest Brand', 'first_party')]),
-            _result('hotel coruna spa', 'openai', [_brand('Old Brand', 'competitor')], timestamp=OLD_TS),
-        ]}
-        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows=rows) as report:
-            body = report.body({'keyword': 'hotel coruna spa'})
+        body = _spa_body(brand_mentions, _latest_and_older_run())
 
         assert (body['available_runs'], [entry['provider'] for entry in body['by_provider']]) == (
             [RUN_TS, OLD_TS], ['gemini'],
@@ -226,18 +238,7 @@ class TestBrandMentionsScope:
         brand_mentions,
         filter_params,
     ):
-        rows = {'hotel coruna spa': [
-            _result('hotel coruna spa', 'gemini', [_brand('Latest Brand', 'first_party')]),
-            _result(
-                'hotel coruna spa',
-                'openai',
-                [_brand('Old Brand', 'competitor')],
-                timestamp=OLD_TS,
-                query_prompt_id='historical-persona',
-            ),
-        ]}
-        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows=rows) as report:
-            body = report.body({'keyword': 'hotel coruna spa', **filter_params})
+        body = _spa_body(brand_mentions, _latest_and_older_run(query_prompt_id='historical-persona'), **filter_params)
 
         assert {
             'timestamp': body['timestamp'],
@@ -259,14 +260,11 @@ class TestBrandMentionsScope:
     def test_single_keyword_keeps_the_latest_run_rows_matching_the_filter(
         self, brand_mentions, filter_params, expected_providers,
     ):
-        unlabelled = _result('hotel coruna spa', 'gemini', [_brand('Hotel Coruna', 'first_party')])
+        unlabelled = _result(_SPA, 'gemini', [_brand('Hotel Coruna', 'first_party')])
         del unlabelled['query_prompt_id']
-        rows = {'hotel coruna spa': [
-            _result('hotel coruna spa', 'openai', [_brand('Rival Inn', 'competitor')], query_prompt_id='family'),
-            unlabelled,
-        ]}
-        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows=rows) as report:
-            body = report.body({'keyword': 'hotel coruna spa', **filter_params})
+        rival = _result(_SPA, 'openai', [_brand('Rival Inn', 'competitor')], query_prompt_id='family')
+
+        body = _spa_body(brand_mentions, [rival, unlabelled], **filter_params)
 
         assert [entry['provider'] for entry in body['by_provider']] == expected_providers
 

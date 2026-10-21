@@ -1,6 +1,7 @@
 /**
  * Excel export utility with dynamic import to reduce bundle size.
  */
+import { datedExcelFileName } from './excelFileName';
 
 interface ExcelColumn {wch: number;}
 
@@ -28,7 +29,7 @@ export function scopedExcelFileName(
   const normalizedSlug = scopeLabel.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '');
   const truncatedSlug = maxSlugLength === undefined ? normalizedSlug : normalizedSlug.slice(0, maxSlugLength);
   const slug = truncatedSlug || 'keywords';
-  return `${filePrefix}-${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+  return datedExcelFileName(`${filePrefix}-${slug}`, date);
 }
 
 /**

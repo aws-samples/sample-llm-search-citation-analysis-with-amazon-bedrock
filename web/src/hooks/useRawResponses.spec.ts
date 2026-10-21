@@ -56,10 +56,15 @@ describe('useRawResponses', () => {
       nextBrowseResponse: lastBrowsePage 
     });
 
-    it('requests the next page of the folder on screen with its next_token', async () => {
-      const { result } = await renderRawResponsesAfter((hook) => hook.browse('2024-01-01/'), pagedFetch());
+    /** The hook after browsing a two-page folder and loading its second page. */
+    const renderSecondPageLoaded = async () => {
+      const rendered = await renderRawResponsesAfter((hook) => hook.browse('2024-01-01/'), pagedFetch());
+      await act(() => rendered.result.current.loadMore());
+      return rendered;
+    };
 
-      await act(() => result.current.loadMore());
+    it('requests the next page of the folder on screen with its next_token', async () => {
+      await renderSecondPageLoaded();
 
       expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
         'https://api.test.com/raw-responses/browse?prefix=2024-01-01%2F&bucket=responses&next_token=page-2'
@@ -67,9 +72,7 @@ describe('useRawResponses', () => {
     });
 
     it('appends the next page newest first and keeps its next_token', async () => {
-      const { result } = await renderRawResponsesAfter((hook) => hook.browse('2024-01-01/'), pagedFetch());
-
-      await act(() => result.current.loadMore());
+      const { result } = await renderSecondPageLoaded();
 
       expect(result.current.browseData).toStrictEqual({
         ...lastBrowsePage,

@@ -39,7 +39,6 @@ from typing import Any
 
 from shared.answer_queries import history_since, query_keyword_run_rows, query_latest_run_rows
 from shared.dynamo_decimal import convert_floats_to_decimal
-from shared.group_kpi_history import keyword_run_histories
 from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
 from shared.insights_narrative import (
@@ -66,7 +65,7 @@ from shared.markets import (
 from shared.models import ModelRole, get_model_id, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
-from shared.scoped_reports import load_window_answers
+from shared.scoped_reports import load_window_histories
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
@@ -183,14 +182,14 @@ def _run_answers(keywords: list[str], run_timestamp: str | None) -> list[Answer]
 def _history(keywords: list[str], owned_domains: list[str]) -> tuple[list[dict[str, Any]], str | None]:
     """The keywords' stability history over ``HISTORY_DAYS``, read and built as ``GET /api/reports/insights`` does.
 
-    The read is bounded like the endpoint's (``load_window_answers``), so both
-    stop at the same run when the window holds more rows than one report
-    reads; that run is the second value (``None`` for a window read whole).
+    The second value is the run the read stopped at (``None`` for a window read whole).
     """
-    window = load_window_answers(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(HISTORY_DAYS))
-    if window.truncated_before is not None:
-        logger.warning('Group history read cut short: runs at and before %s left out', window.truncated_before)
-    return keyword_run_histories(keywords, window.answers, owned_domains), window.truncated_before
+    histories, truncated_before = load_window_histories(
+        dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(HISTORY_DAYS), owned_domains,
+    )
+    if truncated_before is not None:
+        logger.warning('Group history read cut short: runs at and before %s left out', truncated_before)
+    return histories, truncated_before
 
 
 # ---------------------------------------------------------------------------

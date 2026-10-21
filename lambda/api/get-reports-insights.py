@@ -31,14 +31,13 @@ from typing import Any
 from shared.answer_queries import history_since, query_latest_run_rows
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, validate
-from shared.group_kpi_history import keyword_run_histories
 from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
 from shared.insights_narrative import group_scope_key, load_narrative
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.markets import market_scoped_key
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
-from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope, load_window_answers, required_report_scope
+from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope, load_window_histories, required_report_scope
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
@@ -84,14 +83,11 @@ def load_latest_answers(keywords: list[str]) -> dict[str, list[Answer]]:
 
 
 def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> tuple[list[dict[str, Any]], str | None]:
-    """Each keyword's runs of the last ``days`` days with their KPIs, as ``GET /api/reports/group-kpis`` builds them.
+    """Each keyword's runs of the last ``days`` days with their KPIs, read as ``GET /api/reports/group-kpis`` reads them.
 
-    Read as that route reads it (``load_window_answers``), so both stop at the
-    same run when the window holds more rows than one report reads; that run
-    is the second value (``None`` for a window read whole).
+    The second value is the run the read stopped at (``None`` for a window read whole).
     """
-    window = load_window_answers(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days))
-    return keyword_run_histories(keywords, window.answers, owned_domains), window.truncated_before
+    return load_window_histories(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days), owned_domains)
 
 
 def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, Any] | None:

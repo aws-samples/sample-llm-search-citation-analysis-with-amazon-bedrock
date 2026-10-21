@@ -19,13 +19,15 @@ from hypothesis import strategies as st
 
 from testing.content_studio_fixtures import content_studio_resource, load_content_studio_module
 from testing.events import api_gateway_event, parse_response
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token, minute_stamp
+from testing.partition_tables import PagedTable
 from testing.response_size import assert_within_page_budget, long_text
 
 _mod = load_content_studio_module("content_studio_volume_under_test")
 
 
 def _row(index: int, status: str, *, body: int, raw: int, brief: int) -> dict[str, Any]:
-    stamp = f"2026-09-{1 + index // 1440:02d}T{index // 60 % 24:02d}:{index % 60:02d}:00Z"
+    stamp = minute_stamp(index)
     return {
         "id": f"content-{status}-{index:04d}",
         "keyword": f"hotel en coruña {index}",
@@ -43,34 +45,17 @@ def _row(index: int, status: str, *, body: int, raw: int, brief: int) -> dict[st
 
 
 def _status_table(rows: list[dict[str, Any]]) -> MagicMock:
-    """A content table whose StatusCreatedIndex queries honour Limit and ExclusiveStartKey."""
-    by_status: dict[str, list[dict[str, Any]]] = {}
-    for row in sorted(rows, key=lambda item: item["created_at"], reverse=True):
-        by_status.setdefault(row["status"], []).append(row)
-
-    def query(**params: Any) -> dict[str, Any]:
-        if params.get("Select") == "COUNT":
-            return {"Count": 0}
-        status = params["KeyConditionExpression"].get_expression()["values"][1]
-        items = by_status.get(status, [])
-        start = 0
-        if "ExclusiveStartKey" in params:
-            start = [item["id"] for item in items].index(params["ExclusiveStartKey"]["id"]) + 1
-        page = items[start:start + params["Limit"]]
-        response: dict[str, Any] = {"Items": [dict(item) for item in page]}
-        if start + len(page) < len(items):
-            last = page[-1]
-            response["LastEvaluatedKey"] = {"id": last["id"], "status": status, "created_at": last["created_at"]}
-        return response
-
-    table = MagicMock()
-    table.query.side_effect = query
-    return table
+    """The content table, paging its StatusCreatedIndex partitions like DynamoDB."""
+    return MagicMock(wraps=PagedTable(rows, {None: ("id",), "StatusCreatedIndex": ("status", "created_at")}))
 
 
 def _get(table: MagicMock, query: dict[str, str]) -> dict[str, Any]:
     event = api_gateway_event("GET", "/content-studio/history", query=query)
-    with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
+    with (
+        patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)),
+        # The unviewed badge is a separate COUNT query, not part of the history page under test.
+        patch.object(_mod, "get_unviewed_count", return_value=(0, False)),
+    ):
         return _mod._api_handler(event, None)
 
 
@@ -109,20 +94,13 @@ def test_leaves_out_idea_and_raw_text_when_rows_are_listed(heavy_rows: list[dict
 def test_following_next_token_returns_every_row_once_newest_first(statuses: list[str], limit: int) -> None:
     rows = [_row(index, status, body=10, raw=10, brief=10) for index, status in enumerate(statuses)]
     table = _status_table(rows)
-    collected: list[str] = []
-    query: dict[str, str] = {"limit": str(limit)}
-    for _page in range(200):
-        _status, body = parse_response(_get(table, query))
-        collected.extend(item["id"] for item in body["history"])
-        if body["next_token"] is None:
-            break
-        query = {"limit": str(limit), "next_token": body["next_token"]}
 
-    expected = [row["id"] for row in sorted(rows, key=lambda row: row["created_at"], reverse=True)]
-    assert collected == expected
+    collected = follow_next_token(
+        lambda query: _get(table, query), {"limit": str(limit)}, lambda body: [item["id"] for item in body["history"]],
+    )
+
+    assert collected == [row["id"] for row in sorted(rows, key=lambda row: row["created_at"], reverse=True)]
 
 
 def test_rejects_malformed_next_token_with_400() -> None:
-    status, body = parse_response(_get(_status_table([]), {"next_token": "e30"}))
-
-    assert (status, body) == (400, {"error": "Invalid next_token", "field": "next_token"})
+    assert parse_response(_get(_status_table([]), {"next_token": "e30"})) == INVALID_NEXT_TOKEN

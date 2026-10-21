@@ -21,7 +21,7 @@ import pytest
 from shared.visibility_views import BRANDS_LIMIT
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.report_scope_fixtures import AIRLINE_BRAND_CONFIG, REPORT_TABLES_ENV
 from testing.response_size import assert_within_page_budget
 from testing.search_results_fixtures import active_keywords_table, report_dynamodb, search_results_table
 from testing.sentiment_examples_fixtures import stored_answer, stored_brand
@@ -33,10 +33,6 @@ visibility_handler = handler_fixture(_API_DIR, 'get-visibility-metrics.py', 'get
 _ENGINES = ('openai', 'perplexity', 'gemini', 'claude')
 _KEYWORDS = [f'hoteles con encanto en la región {index:03d}' for index in range(100)]
 _LOCAL_BRANDS = 50
-_CONFIG = {
-    'tracked_brands': {'first_party': ['Altiplano Air'], 'competitors': ['Cóndor Vuelos']},
-    'first_party_domains': ['altiplano.example'],
-}
 
 
 def _local_brands(keyword_index: int) -> list[dict[str, Any]]:
@@ -68,7 +64,7 @@ def body_and_response(visibility_handler) -> tuple[Any, dict[str, Any]]:
     keywords = active_keywords_table([{'id': f'k{index}', 'keyword': keyword, 'status': 'active'} for index, keyword in enumerate(_KEYWORDS)])
     with (
         patch.object(visibility_handler, 'dynamodb', report_dynamodb(search_results_table(_rows()), keywords)),
-        patch.object(visibility_handler, 'get_brand_config', return_value=_CONFIG),
+        patch.object(visibility_handler, 'get_brand_config', return_value=AIRLINE_BRAND_CONFIG),
     ):
         response = visibility_handler.handler(api_gateway_event('GET', '/api/visibility', query={'scope': 'all'}), None)
     return parse_response(response)[1], response

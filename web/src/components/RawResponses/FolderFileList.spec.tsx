@@ -2,10 +2,11 @@ import {
   describe, it, expect, vi
 } from 'vitest';
 import {
-  render, screen, fireEvent
+  render, screen
 } from '@testing-library/react';
 import { FolderFileList } from './FolderFileList';
 import { buildFile } from './FileViewer-fixtures';
+import { itPagesWithLoadMoreButton } from '../ui/LoadMoreButton-fixtures';
 
 const listing = {
   folders: [],
@@ -15,28 +16,9 @@ const listing = {
 };
 
 describe('FolderFileList', () => {
-  it('shows no load-more button when the folder is fully loaded', () => {
-    render(<FolderFileList browseData={listing} onFolderClick={vi.fn()} onFileClick={vi.fn()} />);
-
-    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
-  });
-
-  it('asks for the next page when load more is pressed', () => {
-    const onLoadMore = vi.fn();
-    render(<FolderFileList browseData={listing} onFolderClick={vi.fn()} onFileClick={vi.fn()} onLoadMore={onLoadMore} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
-
-    expect(onLoadMore).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables the load-more button while the next page loads', () => {
-    render(
-      <FolderFileList browseData={listing} onFolderClick={vi.fn()} onFileClick={vi.fn()} onLoadMore={vi.fn()} loadingMore />
-    );
-
-    expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled();
-  });
+  itPagesWithLoadMoreButton('Load more', (props) => render(
+    <FolderFileList browseData={listing} onFolderClick={vi.fn()} onFileClick={vi.fn()} {...props} />
+  ));
 
   it('says the counts are of the loaded entries while more remain', () => {
     render(<FolderFileList browseData={listing} onFolderClick={vi.fn()} onFileClick={vi.fn()} onLoadMore={vi.fn()} />);

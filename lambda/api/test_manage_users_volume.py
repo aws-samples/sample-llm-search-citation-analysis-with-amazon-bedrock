@@ -24,6 +24,7 @@ from testing.manage_users_fixtures import (
     listed_user,
     mock_cognito,
 )
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.response_size import assert_within_page_budget
 
 
@@ -73,14 +74,8 @@ def test_looks_up_groups_only_for_the_returned_page() -> None:
 @given(st.integers(min_value=0, max_value=400), st.integers(min_value=1, max_value=100))
 def test_following_next_token_returns_every_user_once_in_order(size: int, limit: int) -> None:
     _pool(size)
-    collected: list[str] = []
-    query = {'limit': str(limit)}
-    for _page in range(500):
-        _status, body = parse_response(_list(query))
-        collected.extend(user['username'] for user in body['users'])
-        if body['next_token'] is None:
-            break
-        query = {'limit': str(limit), 'next_token': body['next_token']}
+
+    collected = follow_next_token(_list, {'limit': str(limit)}, lambda body: [user['username'] for user in body['users']])
 
     assert collected == [f'usuario.{n:05d}@hotel-coruña.example' for n in range(size)]
 
@@ -88,14 +83,10 @@ def test_following_next_token_returns_every_user_once_in_order(size: int, limit:
 def test_rejects_malformed_next_token_with_400() -> None:
     _pool(3)
 
-    status, body = parse_response(_list({'next_token': 'e30'}))
-
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(_list({'next_token': 'e30'})) == INVALID_NEXT_TOKEN
 
 
 def test_rejects_expired_cognito_token_with_400() -> None:
     mock_cognito.list_users.side_effect = CognitoInvalidParameter('expired')
 
-    status, body = parse_response(_list({'next_token': 'eyJjb2duaXRvIjoiYWJjIn0'}))
-
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(_list({'next_token': 'eyJjb2duaXRvIjoiYWJjIn0'})) == INVALID_NEXT_TOKEN

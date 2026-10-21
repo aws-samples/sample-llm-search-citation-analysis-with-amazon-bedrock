@@ -4,6 +4,7 @@ import {
 import type {
   BrandAppearanceRow, BrandMentionsResponse, Keyword, ReportScope
 } from '../../types';
+import { ONE_BRAND_ONE_COMPETITOR } from '../../hooks/useBrandMentions-fixtures';
 
 export const LATEST_BRAND_RUN = '2026-09-18T10:00:00Z';
 export const HISTORICAL_BRAND_RUN = '2026-09-10T10:00:00Z';
@@ -115,14 +116,7 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
         }],
       },
     ],
-    total_unique_brands: 2,
-    matching_brands: 2,
-    brands_truncated: false,
-    summary: {
-      first_party_count: 1,
-      competitor_count: 1,
-      other_count: 0,
-    },
+    ...ONE_BRAND_ONE_COMPETITOR,
   },
 };
 

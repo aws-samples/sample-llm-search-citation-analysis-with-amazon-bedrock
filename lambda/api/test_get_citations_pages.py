@@ -6,40 +6,27 @@ stubbed out. Totals cover the whole scope on every page, whatever the filters.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from shared.cursors import encode_offset_cursor
+from testing.citations_fixtures import VIDEO_URL, citation_row, citations_handler
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-_VIDEO = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
-
-citations_module = handler_fixture(
-    _API_DIR,
-    'get-citations.py',
-    'get_citations_pages_under_test',
-    env={'DYNAMODB_TABLE_CITATIONS': 'test-citations', 'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'},
-)
-
-
-def _row(url: str, keyword: str, count: int) -> dict[str, Any]:
-    return {'keyword': keyword, 'normalized_url': url, 'citation_count': count, 'citing_providers': ['openai']}
+citations_module = citations_handler('get_citations_pages_under_test')
 
 
 # a.example: 5 citations, 1 keyword; zeta.example: 3 citations, 2 keywords;
 # m.example: 3 citations, 1 keyword; the video: 1 citation, 1 keyword.
 _ROWS = [
-    _row('https://a.example/guide', 'hotels', 5),
-    _row('https://zeta.example/list', 'hotels', 2),
-    _row('https://zeta.example/list', 'spa', 1),
-    _row('https://m.example/page', 'spa', 3),
-    _row(_VIDEO, 'spa', 1),
+    citation_row('https://a.example/guide', 'hotels', 5),
+    citation_row('https://zeta.example/list', 'hotels', 2),
+    citation_row('https://zeta.example/list', 'spa', 1),
+    citation_row('https://m.example/page', 'spa', 3),
+    citation_row(VIDEO_URL, 'spa', 1),
 ]
 
 
@@ -59,12 +46,12 @@ def _urls(module, query: dict[str, str] | None = None) -> list[str]:
 class TestOrder:
     def test_lists_most_cited_first_then_most_keywords_by_default(self, citations_module):
         assert _urls(citations_module) == [
-            'https://a.example/guide', 'https://zeta.example/list', 'https://m.example/page', _VIDEO,
+            'https://a.example/guide', 'https://zeta.example/list', 'https://m.example/page', VIDEO_URL,
         ]
 
     def test_lists_least_cited_first_keeping_the_base_order_of_ties(self, citations_module):
         assert _urls(citations_module, {'order': 'asc'}) == [
-            _VIDEO, 'https://zeta.example/list', 'https://m.example/page', 'https://a.example/guide',
+            VIDEO_URL, 'https://zeta.example/list', 'https://m.example/page', 'https://a.example/guide',
         ]
 
     def test_lists_most_keywords_first_when_sorting_by_keywords(self, citations_module):
@@ -72,7 +59,7 @@ class TestOrder:
 
     def test_lists_domains_alphabetically_when_sorting_by_domain_ascending(self, citations_module):
         assert _urls(citations_module, {'sort': 'domain', 'order': 'asc'}) == [
-            'https://a.example/guide', 'https://m.example/page', _VIDEO, 'https://zeta.example/list',
+            'https://a.example/guide', 'https://m.example/page', VIDEO_URL, 'https://zeta.example/list',
         ]
 
 
@@ -86,7 +73,7 @@ class TestFilters:
         ]
 
     def test_keeps_only_videos_when_filtering_by_content_type(self, citations_module):
-        assert _urls(citations_module, {'content_type': 'video'}) == [_VIDEO]
+        assert _urls(citations_module, {'content_type': 'video'}) == [VIDEO_URL]
 
     def test_counts_the_matching_urls_while_totals_cover_the_whole_scope(self, citations_module):
         _, body = _get(citations_module, {'content_type': 'video'})
@@ -102,11 +89,11 @@ class TestPages:
 
     def test_returns_the_page_the_token_points_at(self, citations_module):
         assert _urls(citations_module, {'limit': '2', 'next_token': encode_offset_cursor(2, 4) or ''}) == [
-            'https://m.example/page', _VIDEO,
+            'https://m.example/page', VIDEO_URL,
         ]
 
     def test_returns_the_page_at_an_offset(self, citations_module):
-        assert _urls(citations_module, {'limit': '1', 'offset': '3'}) == [_VIDEO]
+        assert _urls(citations_module, {'limit': '1', 'offset': '3'}) == [VIDEO_URL]
 
     def test_ends_with_a_null_token_on_the_last_page(self, citations_module):
         _, body = _get(citations_module, {'limit': '2', 'offset': '2'})

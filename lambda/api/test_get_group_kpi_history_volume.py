@@ -11,24 +11,19 @@ drivers are pages of at most the page budget.
 
 from __future__ import annotations
 
-import json
-import os
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from shared.group_kpi_history import build_group_kpi_history
 from shared.response_budget import LAMBDA_RESPONSE_LIMIT_BYTES, json_bytes
-from testing.module_loader import load_handler_module
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.events import parse_response
+from testing.paging import follow_next_token
 from testing.response_size import assert_within_page_budget
-from testing.window_rows_fixtures import run_timestamp, volume_group
+from testing.window_rows_fixtures import load_window_report, report_event, run_timestamp, volume_group, windowed_report
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
-with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_ENV):
-    _mod = load_handler_module(_HERE, 'get-group-kpi-history.py', 'get_group_kpi_history_volume_under_test')
+_mod = load_window_report('get-group-kpi-history.py', 'get_group_kpi_history_volume_under_test')
 
 KEYWORD_COUNT = 40
 RUN_COUNT = 120
@@ -39,31 +34,19 @@ OWNED = ['hotel-coruna-mar.es']
 def _call(params: dict[str, str], rows_read: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The response to a group-kpis request; the SearchResults rows it read are added to ``rows_read``."""
     resource, read = GROUP.resource()
-    event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': {'group_id': 'coruna', **params}, 'headers': {}}
-    with (
-        patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_brand_config', return_value={'first_party_domains': OWNED}),
-        patch.object(_mod, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
-    ):
-        response = _mod.handler(event, None)
+    with windowed_report(_mod, resource, brand_config={'first_party_domains': OWNED}):
+        response = _mod.handler(report_event('/api/reports/group-kpis', {'group_id': 'coruna', **params}), None)
     (rows_read if rows_read is not None else []).extend(read)
     return response
 
 
 def _body(response: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(response['body'])
+    return parse_response(response)[1]
 
 
 def _follow(params: dict[str, str], key: str) -> list[list[dict[str, Any]]]:
     """Every page of ``key`` from the first page to the last ``next_token``."""
-    pages: list[list[dict[str, Any]]] = []
-    token: str | None = None
-    while True:
-        body = _body(_call({**params, **({'next_token': token} if token else {})}))
-        pages.append(body[key])
-        token = body['next_token']
-        if token is None:
-            return pages
+    return follow_next_token(_call, params, lambda body: [body[key]])
 
 
 @pytest.fixture(scope='module')

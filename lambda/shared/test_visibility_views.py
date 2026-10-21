@@ -78,15 +78,15 @@ class TestVisibilityView:
 
         assert [(brand['name'], brand['mentions'], brand['keywords']) for brand in brands] == [(RIVAL, 3, 2), (HOTEL, 1, 1)]
 
-    def test_narrows_the_leaderboard_to_matching_brand_names_only(self):
-        view = visibility_view(['spa', 'beach'], self.ANSWERS, brand='sol')
+    @pytest.fixture
+    def sol_view(self) -> dict[str, Any]:
+        return visibility_view(['spa', 'beach'], self.ANSWERS, brand='sol')
 
-        assert ([brand['name'] for brand in view['brands']], view['kpis']['answers']) == ([HOTEL], 3)
+    def test_narrows_the_leaderboard_to_matching_brand_names_only(self, sol_view):
+        assert ([brand['name'] for brand in sol_view['brands']], sol_view['kpis']['answers']) == ([HOTEL], 3)
 
-    def test_gives_each_brand_its_place_in_the_whole_leaderboard(self):
-        view = visibility_view(['spa', 'beach'], self.ANSWERS, brand='sol')
-
-        assert ([brand['position'] for brand in view['brands']], view['brands_total']) == ([2], 1)
+    def test_gives_each_brand_its_place_in_the_whole_leaderboard(self, sol_view):
+        assert ([brand['position'] for brand in sol_view['brands']], sol_view['brands_total']) == ([2], 1)
 
     def test_counts_every_brand_of_the_leaderboard(self):
         assert visibility_view(['spa', 'beach'], self.ANSWERS)['brands_total'] == 2

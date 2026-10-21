@@ -15,6 +15,9 @@ import {
   buildDetail, buildHistory, buildKeywordChange, buildKeywordRun, buildRun, buildRunSeries, KEYWORD_HISTORIES, KEYWORD_KPIS, RUN_1, RUN_2
 } from './groupKpiHistory-fixtures';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import {
+  cutNoteText, getCutNoteElement
+} from '../layout/HistoryCutNote-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
@@ -223,7 +226,7 @@ describe('GroupKpiReport download and coverage notes', () => {
   it('says after which run the report starts when the period held more data than one report reads', () => {
     renderGroupKpiReport({ history: buildHistory({ truncated_before: RUN_2 }) });
 
-    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs after ${new Date(RUN_2).toLocaleString()}`);
+    expect(getCutNoteElement()).toHaveTextContent(cutNoteText(RUN_2));
   });
 
   it('says from which run the report starts when older runs were left out of the summary', () => {

@@ -12,12 +12,20 @@ to run so every compared run has drivers.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import json
+import os
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from testing.module_loader import API_DIR, load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import long_text
 from testing.search_results_fixtures import active_keywords_table, key_parts, report_dynamodb, search_result_row
 
@@ -156,3 +164,55 @@ def volume_group(keyword_count: int, run_count: int, answers_per_run: int = 8) -
         active=[{'id': f'k{index}', 'keyword': keyword, 'status': 'active', 'group_ids': {'coruna'}} for index, keyword in enumerate(keywords)],
         rows=group_window_rows(keyword_count, run_count, answers_per_run),
     )
+
+
+def load_window_report(filename: str, module_name: str) -> ModuleType:
+    """A windowed report handler of ``lambda/api`` loaded with ``REPORT_TABLES_ENV`` and ``boto3.resource`` stubbed."""
+    with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_ENV):
+        return load_handler_module(API_DIR, filename, module_name)
+
+
+def report_event(path: str, query: Mapping[str, str] | None) -> dict[str, Any]:
+    """The REST proxy event of ``GET path`` with ``query`` as its query string."""
+    return {'httpMethod': 'GET', 'path': path, 'queryStringParameters': query, 'headers': {}}
+
+
+@contextmanager
+def windowed_report(
+    module: ModuleType, resource: MagicMock, *, brand_config: Mapping[str, Any], since: str = '2026-01-01T00:00:00.000000Z',
+) -> Generator[None, None, None]:
+    """``module`` reading ``resource`` with ``brand_config`` and its history window starting at ``since``."""
+    with (
+        patch.object(module, 'dynamodb', resource),
+        patch.object(module, 'get_brand_config', return_value=brand_config),
+        patch.object(module, 'history_since', return_value=since),
+    ):
+        yield
+
+
+WindowRead = tuple[dict[str, Any], list[dict[str, Any]]]
+
+
+def whole_read_fixture(call: Callable[[], WindowRead]):
+    """A module fixture holding one ``call`` as is: the response and the rows it read (assign it to ``whole_read``)."""
+
+    @pytest.fixture(scope='module')
+    def whole_read() -> WindowRead:
+        return call()
+
+    return whole_read
+
+
+def capped_read_fixture(call: Callable[[], WindowRead], capped_rows_per_keyword: int):
+    """A module fixture holding one ``call`` with the window read scaled down to ``capped_rows_per_keyword`` rows per keyword.
+
+    It holds the decoded body and the rows read; assign it to ``capped_read``.
+    """
+
+    @pytest.fixture(scope='module')
+    def capped_read() -> WindowRead:
+        with patch('shared.scoped_reports.rows_per_keyword', return_value=capped_rows_per_keyword):
+            response, rows_read = call()
+        return json.loads(response['body']), rows_read
+
+    return capped_read

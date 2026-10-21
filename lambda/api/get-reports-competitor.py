@@ -22,7 +22,7 @@ many competitors are rolled up.
 Reads and size, by design
 
 Each analysed keyword costs one projected SearchResults query of its latest
-run (``LATEST_RUN_ITEM_LIMIT`` rows, no answer text), ``SCOPE_MAX_WORKERS`` at
+run (``shared.search_results.query_latest_run``: no answer text), ``SCOPE_MAX_WORKERS`` at
 a time; no crawl lookups. The rows give both the brand ranks and the gaps,
 and every competitor's rollup is built from the same rows. A rollup holds at
 most ``keyword_limit`` outranked keywords and ``OUTREACH_TARGETS_LIMIT``
@@ -57,8 +57,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from boto3.dynamodb.conditions import Key
-
 # Shared layer path
 sys.path.insert(0, '/opt/python')
 
@@ -72,7 +70,7 @@ from shared.scope_params import (
     map_scope_keywords,
     scoped_dynamodb_resource,
 )
-from shared.search_results import latest_run, search_results_table_name
+from shared.search_results import query_latest_run, search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -83,12 +81,6 @@ dynamodb = scoped_dynamodb_resource()
 
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
-
-#: Rows read per keyword to isolate its latest run (one per provider x persona), as in /citation-gaps.
-LATEST_RUN_ITEM_LIMIT = 50
-
-#: What a keyword's latest run is read with: never the answer text.
-_RUN_PROJECTION = '#ts, provider, citations, brands'
 
 #: The exclusive sources each rollup lists, best lift first.
 OUTREACH_TARGETS_LIMIT = 10
@@ -142,14 +134,7 @@ def _list_tracked_keywords(limit: int) -> tuple[list[str], int]:
 
 def _latest_run_rows(keyword: str) -> list[dict[str, Any]]:
     """The rows of ``keyword``'s latest run: brands, citations and provider only."""
-    response = dynamodb.Table(SEARCH_RESULTS_TABLE).query(
-        KeyConditionExpression=Key('keyword').eq(keyword),
-        ScanIndexForward=False,
-        Limit=LATEST_RUN_ITEM_LIMIT,
-        ProjectionExpression=_RUN_PROJECTION,
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
-    return latest_run(response.get('Items', []))[1]
+    return query_latest_run(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)[1]
 
 
 def _rank_of(brand: dict[str, Any]) -> int:

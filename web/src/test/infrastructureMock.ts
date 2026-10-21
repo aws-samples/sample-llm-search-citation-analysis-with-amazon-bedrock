@@ -47,6 +47,11 @@ export function deferAuthenticatedFetch(): DeferredResponse {
   return deferred;
 }
 
+/** Leaves every `authenticatedFetch` call pending forever, for specs of the state before any response. */
+export function stallAuthenticatedFetch(): void {
+  mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+}
+
 /**
  * Queues two responses the spec settles by hand, for the next two
  * `authenticatedFetch` calls in order.

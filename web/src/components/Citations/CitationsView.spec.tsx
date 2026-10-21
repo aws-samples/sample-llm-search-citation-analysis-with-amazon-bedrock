@@ -5,8 +5,10 @@ import {
   fireEvent, render, screen, waitFor
 } from '@testing-library/react';
 import { CitationsView } from './CitationsView';
-import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
-import { exportToExcel } from '../../exporters/excelGenerator';
+import {
+  mockAuthenticatedFetch, stallAuthenticatedFetch
+} from '../../test/infrastructureMock';
+import { lastExportedColumn } from '../../test/excelExportMock';
 import {
   answerTwoCitationPages, buildCitationsPage, FIRST_OF_TWO, SECOND_OF_TWO
 } from '../../hooks/useMarketCitations-fixtures';
@@ -15,7 +17,15 @@ import {
 } from './CitationsView-fixtures';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
-vi.mock('../../exporters/excelGenerator', () => ({ exportToExcel: vi.fn() }));
+vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
+
+/** The article page on screen, two citation pages answered, and Export clicked. */
+async function setupTwoPageExport() {
+  renderCitationsView(ARTICLE_PAGE);
+  await screen.findByText('example.com');
+  answerTwoCitationPages();
+  fireEvent.click(screen.getByRole('button', { name: /export/i }));
+}
 
 describe('CitationsView', () => {
   it('shows the empty state when the API has no citations', async () => {
@@ -49,7 +59,7 @@ describe('CitationsView', () => {
   });
 
   it('shows the placeholder rows until the first page arrives', () => {
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+    stallAuthenticatedFetch();
 
     render(<CitationsView placeholder={[{
       url: 'https://placeholder.example/x',
@@ -79,13 +89,9 @@ describe('CitationsView', () => {
   });
 
   it('exports every page of the list with its keyword texts', async () => {
-    renderCitationsView(ARTICLE_PAGE);
-    await screen.findByText('example.com');
-    answerTwoCitationPages();
+    await setupTwoPageExport();
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }));
-
-    await waitFor(() => expect(vi.mocked(exportToExcel).mock.lastCall?.[0].data.map((row) => row.URL)).toStrictEqual([
+    await waitFor(() => expect(lastExportedColumn('URL')).toStrictEqual([
       FIRST_OF_TWO.url, SECOND_OF_TWO.url,
     ]));
   });
@@ -97,11 +103,7 @@ describe('CitationsView', () => {
   });
 
   it('asks for the keyword texts when exporting', async () => {
-    renderCitationsView(ARTICLE_PAGE);
-    await screen.findByText('example.com');
-    answerTwoCitationPages();
-
-    fireEvent.click(screen.getByRole('button', { name: /export/i }));
+    await setupTwoPageExport();
 
     await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/citations?limit=1000&include_keywords=true', expect.anything(),

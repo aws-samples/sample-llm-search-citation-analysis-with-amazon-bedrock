@@ -29,6 +29,12 @@ def fake_table(**responses: object) -> MagicMock:
     return table
 
 
+def described(table: MagicMock, size_bytes: int = 4_096, item_count: int = 0) -> MagicMock:
+    """``table`` whose ``DescribeTable`` reports ``size_bytes`` and ``item_count`` (small by default: counted exactly)."""
+    table.meta.client.describe_table.return_value = {'Table': {'TableSizeBytes': size_bytes, 'ItemCount': item_count}}
+    return table
+
+
 def reset_tables(*tables: MagicMock) -> None:
     """Forget every recorded call and configured response on the given table stubs.
 

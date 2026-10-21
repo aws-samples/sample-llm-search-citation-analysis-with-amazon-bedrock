@@ -11,27 +11,21 @@ import os
 from typing import Any
 from unittest.mock import patch
 
+from testing.env import SELF_REFLECTION_ENV
 from testing.handler_fixtures import handler_fixture
-from testing.latest_run_fixtures import oldest_page_first_table
-from testing.search_results_fixtures import report_dynamodb, search_result_row, search_results_table
+from testing.search_results_fixtures import (
+    oldest_page_first_table,
+    report_dynamodb,
+    search_result_row,
+    search_results_table,
+)
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _KEYWORD = 'hotel con spa en a coruña'
 _RUN = '2026-09-20T06:00:00.000000Z'
 _OLD_RUN = '2026-08-01T06:00:00.000000Z'
 
-reflection = handler_fixture(
-    _API_DIR,
-    'self-reflection.py',
-    'self_reflection_latest_run_under_test',
-    env={
-        'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
-        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-        'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
-        'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
-        'CORS_ORIGIN_PARAM': '',
-    },
-)
+reflection = handler_fixture(_API_DIR, 'self-reflection.py', 'self_reflection_latest_run_under_test', env=SELF_REFLECTION_ENV)
 
 
 def _row(provider: str, timestamp: str, response: str, persona: str = 'default') -> dict[str, Any]:

@@ -1,6 +1,7 @@
 import type { S3Item } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { formatSize } from './fileSizeFormatter';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   ARCHIVE_PATHS, CHEVRON_RIGHT_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
@@ -41,16 +42,7 @@ export const FolderFileList = ({
         ))}
       </div>
 
-      {onLoadMore && (
-        <button
-          type="button"
-          onClick={onLoadMore}
-          disabled={loadingMore}
-          className="mt-3 w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
-        >
-          {loadingMore ? 'Loading…' : 'Load more'}
-        </button>
-      )}
+      <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load more" layoutClassName="mt-3 " />
 
       {(browseData.total_folders > 0 || browseData.total_files > 0) && (
         <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-400">

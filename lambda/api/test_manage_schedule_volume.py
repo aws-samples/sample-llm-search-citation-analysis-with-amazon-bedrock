@@ -25,21 +25,16 @@ from hypothesis import strategies as st
 
 from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.env import SCHEDULE_ENV
 from testing.events import parse_response
 from testing.module_loader import load_handler_module
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.response_size import assert_within_page_budget
-
-_ENV = {
-    'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
-    'SCHEDULE_ROLE_ARN': 'arn:aws:iam::123456789012:role/test-scheduler-role',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-    'CORS_ORIGIN_PARAM': '',
-}
 
 with (
     patch('boto3.client', return_value=MagicMock()),
     patch('boto3.resource', return_value=fake_dynamodb_resource()),
-    patch.dict(os.environ, _ENV),
+    patch.dict(os.environ, SCHEDULE_ENV),
 ):
     _mod = load_handler_module(os.path.dirname(__file__), 'manage-schedule.py', 'manage_schedule_volume')
 
@@ -129,19 +124,13 @@ def test_reads_page_details_in_parallel(keyword_scoped: list[dict[str, Any]]) ->
 @given(st.integers(min_value=0, max_value=130), st.integers(min_value=1, max_value=100))
 def test_following_next_token_returns_every_schedule_once_newest_first(count: int, limit: int) -> None:
     client = _scheduler([_detail(index, 1) for index in range(count)])
-    collected: list[str] = []
-    query = {'limit': str(limit)}
-    for _page in range(200):
-        _status, body = parse_response(_list(client, query))
-        collected.extend(item['id'] for item in body['schedules'])
-        if body['next_token'] is None:
-            break
-        query = {'limit': str(limit), 'next_token': body['next_token']}
+
+    collected = follow_next_token(
+        lambda query: _list(client, query), {'limit': str(limit)}, lambda body: [item['id'] for item in body['schedules']],
+    )
 
     assert collected == [f'sch-{index:08x}' for index in reversed(range(count))]
 
 
 def test_rejects_malformed_next_token_with_400() -> None:
-    status, body = parse_response(_list(_scheduler([]), {'next_token': 'e30'}))
-
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(_list(_scheduler([]), {'next_token': 'e30'})) == INVALID_NEXT_TOKEN

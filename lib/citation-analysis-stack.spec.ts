@@ -808,13 +808,18 @@ describe('Keyword-scale analysis workflow', () => {
 });
 
 describe('Keywords bucket run-scratch lifecycle', () => {
-  it('expires runs/ objects and abandoned uploads under runs/ only', () => {
+  it('expires runs/ objects and abandoned uploads under runs/, and spilled API responses after a day', () => {
     expect(synthesized.workflowScale.keywordsBucketRules).toStrictEqual([{
       Id: 'ExpireRunScratch',
       Status: 'Enabled',
       Prefix: 'runs/',
       ExpirationInDays: 30,
       AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+    }, {
+      Id: 'ExpireSpilledApiResponses',
+      Status: 'Enabled',
+      Prefix: 'api-responses/',
+      ExpirationInDays: 1,
     }]);
   });
 });
@@ -2267,6 +2272,8 @@ describe('Content Studio scopes batches and saved templates', () => {
   it('gives worker and API the same Content Studio environment contract', () => {
     const expectedWorkerEnvironment = { ...snapshot.environment };
     delete expectedWorkerEnvironment.CORS_ORIGIN_PARAM;
+    // The worker answers no HTTP request, so it never spills a response.
+    delete expectedWorkerEnvironment.API_RESPONSE_BUCKET;
 
     expect(snapshot.workerEnvironment).toStrictEqual(expectedWorkerEnvironment);
     expect(snapshot.environment.CONTENT_STUDIO_WORKER_FUNCTION_NAME).toBe(

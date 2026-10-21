@@ -55,17 +55,17 @@ class TestListRuns:
 
 
 class TestReadRunRows:
-    def test_reads_the_latest_run_when_no_timestamp_is_given(self):
-        table = search_results_table({'hotel spa': [_row('openai', [], RUN_1), _row('gemini', [], RUN_2)]})
+    @pytest.fixture
+    def two_runs(self) -> Any:
+        return search_results_table({'hotel spa': [_row('openai', [], RUN_1), _row('gemini', [], RUN_2)]})
 
-        timestamp, rows = read_run_rows(table, 'hotel spa', None)
+    def test_reads_the_latest_run_when_no_timestamp_is_given(self, two_runs):
+        timestamp, rows = read_run_rows(two_runs, 'hotel spa', None)
 
         assert (timestamp, [row['provider'] for row in rows]) == (RUN_2, ['gemini'])
 
-    def test_reads_only_the_requested_run(self):
-        table = search_results_table({'hotel spa': [_row('openai', [], RUN_1), _row('gemini', [], RUN_2)]})
-
-        assert [row['provider'] for row in read_run_rows(table, 'hotel spa', RUN_1)[1]] == ['openai']
+    def test_reads_only_the_requested_run(self, two_runs):
+        assert [row['provider'] for row in read_run_rows(two_runs, 'hotel spa', RUN_1)[1]] == ['openai']
 
     def test_answers_nothing_for_a_keyword_never_analysed(self):
         assert read_run_rows(search_results_table({}), 'hotel spa', None) == (None, [])
@@ -140,15 +140,14 @@ class TestAppearanceRows:
             ('High', 'openai'), ('High', 'gemini'), ('Low', 'openai'),
         ]
 
-    def test_narrows_to_one_brand_case_insensitively(self):
+    @pytest.mark.parametrize(('classification', 'brand', 'expected'), [
+        pytest.param(None, ' rival ', ['Rival'], id='one-brand-case-insensitively'),
+        pytest.param('first_party', None, ['Mine'], id='one-classification'),
+    ])
+    def test_narrows_the_appearances_to_the_filter(self, classification, brand, expected):
         rows = [_row('openai', [_brand('Rival'), _brand('Mine', 'first_party')])]
 
-        assert [row['brand'] for row in appearance_rows(rows, None, ' rival ')] == ['Rival']
-
-    def test_narrows_to_one_classification(self):
-        rows = [_row('openai', [_brand('Rival'), _brand('Mine', 'first_party')])]
-
-        assert [row['brand'] for row in appearance_rows(rows, 'first_party', None)] == ['Mine']
+        assert [row['brand'] for row in appearance_rows(rows, classification, brand)] == expected
 
     def test_names_the_persona_of_each_appearance(self):
         row = search_result_row('hotel spa', 'openai', [_brand('Rival')], timestamp=RUN_3, query_prompt_id='familia')

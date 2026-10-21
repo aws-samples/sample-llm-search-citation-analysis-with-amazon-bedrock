@@ -12,6 +12,9 @@ import {
 import {
   RUN_STABILITY_TITLE, RunStabilitySection, STABILITY_EMPTY
 } from './RunStabilitySection';
+import {
+  CUT_RUN, cutNoteText, getCutNoteElement
+} from '../layout/HistoryCutNote-fixtures';
 
 function renderStability(slice = loadedInsights()) {
   return render(<RunStabilitySection {...slice} />);
@@ -79,9 +82,9 @@ describe('RunStabilitySection', () => {
   });
 
   it('says after which run the stability covers the group when its history read was cut short', () => {
-    renderStability(loadedInsights({ history_truncated_before: '2026-10-05T06:50:33Z' }));
+    renderStability(loadedInsights({ history_truncated_before: CUT_RUN }));
 
-    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs after ${new Date('2026-10-05T06:50:33Z').toLocaleString()}`);
+    expect(getCutNoteElement()).toHaveTextContent(cutNoteText(CUT_RUN));
   });
 
   it('adds no cut note when the group history was read whole', () => {

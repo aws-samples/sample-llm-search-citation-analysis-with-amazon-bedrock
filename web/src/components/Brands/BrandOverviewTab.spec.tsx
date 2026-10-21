@@ -17,6 +17,17 @@ const ALL_ROWS = ['openai', 'gemini', 'claude'].map((provider) => buildAppearanc
   provider,
 }));
 
+/** The previewed brand on screen with "Show all 7 appearances" clicked. */
+async function setupShowAll() {
+  renderOverview(previewedBrand());
+  await userEvent.click(screen.getByRole('button', { name: 'Show all 7 appearances' }));
+}
+
+/** The "show all" button, or `null` when the tab offers none. */
+function queryShowAllElement() {
+  return screen.queryByRole('button', { name: /Show all/ });
+}
+
 describe('BrandOverviewTab', () => {
   beforeEach(() => {
     vi.mocked(fetchBrandAppearances).mockResolvedValue(ALL_ROWS);
@@ -36,9 +47,7 @@ describe('BrandOverviewTab', () => {
   });
 
   it('reads every appearance of the brand when asked to show all', async () => {
-    renderOverview(previewedBrand());
-
-    await userEvent.click(screen.getByRole('button', { name: 'Show all 7 appearances' }));
+    await setupShowAll();
 
     expect(fetchBrandAppearances).toHaveBeenCalledWith({
       ...GROUP_APPEARANCES_REQUEST,
@@ -47,19 +56,15 @@ describe('BrandOverviewTab', () => {
   });
 
   it('lists the loaded appearances in place of the preview', async () => {
-    renderOverview(previewedBrand());
-
-    await userEvent.click(screen.getByRole('button', { name: 'Show all 7 appearances' }));
+    await setupShowAll();
 
     expect(await screen.findByText('CLAUDE')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    expect(queryShowAllElement()).not.toBeInTheDocument();
   });
 
   it('shows the error when the appearances cannot be read', async () => {
     vi.mocked(fetchBrandAppearances).mockRejectedValue(new ApiRequestError('Server error', 500));
-    renderOverview(previewedBrand());
-
-    await userEvent.click(screen.getByRole('button', { name: 'Show all 7 appearances' }));
+    await setupShowAll();
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load brand mentions');
   });
@@ -67,12 +72,12 @@ describe('BrandOverviewTab', () => {
   it('offers no "show all" when the preview already holds every appearance', () => {
     renderOverview(previewedBrand(2));
 
-    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    expect(queryShowAllElement()).not.toBeInTheDocument();
   });
 
   it('offers no "show all" without a request to read them with', () => {
     renderOverview(previewedBrand(), null);
 
-    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    expect(queryShowAllElement()).not.toBeInTheDocument();
   });
 });

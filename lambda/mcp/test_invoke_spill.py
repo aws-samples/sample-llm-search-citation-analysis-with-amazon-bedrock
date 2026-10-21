@@ -13,11 +13,10 @@ import io
 import json
 import logging
 
-import invoke
 import pytest
 import requests
 from catalogue import Route, find_operation
-from invoke import MAX_RESULT_CHARS, SPILL_TIMEOUT_SECONDS, invoke_route, run_operation, spill_session
+from invoke import MAX_RESULT_CHARS, MAX_SPILL_BYTES, SPILL_TIMEOUT_SECONDS, invoke_route, run_operation, spill_session
 
 from testing.mcp_spill_fixtures import SPILL_URL, FakeSpillSession, spill_pointer
 
@@ -29,12 +28,17 @@ SPILLED_BODY = {
 }
 
 
+def _list_citations(caller) -> dict:
+    """The ``get_citations`` list tool's result when its router answers a spill pointer."""
+    return run_operation('get_citations', find_operation('get_citations'), {'view': 'list'}, caller)
+
+
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> FakeSpillSession:
     """The S3 behind the presigned URL; serves ``SPILLED_BODY`` unless a test says otherwise."""
     session = FakeSpillSession()
     session.serve(200, SPILLED_BODY)
-    monkeypatch.setattr(invoke, 'spill_session', lambda: session)
+    monkeypatch.setattr('invoke.spill_session', lambda: session)
     return session
 
 
@@ -47,9 +51,7 @@ class TestPointerFollowed:
     def test_a_tool_result_carries_the_spilled_body_and_its_next_token(self, api, caller, store):
         api.answer(200, spill_pointer())
 
-        result = run_operation('get_citations', find_operation('get_citations'), {'view': 'list'}, caller)
-
-        assert result['structuredContent'] == SPILLED_BODY
+        assert _list_citations(caller)['structuredContent'] == SPILLED_BODY
 
     def test_reads_the_url_with_a_timeout_streamed_and_without_redirects_or_headers(self, api, caller, store):
         api.answer(200, spill_pointer())
@@ -63,7 +65,7 @@ class TestPointerFollowed:
         store.serve(200, {'citations': rows, 'next_token': 'eyJvZmZzZXQiOiAyMDAwfQ'})
         api.answer(200, spill_pointer())
 
-        data = run_operation('get_citations', find_operation('get_citations'), {'view': 'list'}, caller)['structuredContent']
+        data = _list_citations(caller)['structuredContent']
 
         assert (data['truncated'], data['next_token']) == (True, 'eyJvZmZzZXQiOiAyMDAwfQ')
         assert len(json.dumps(data)) <= MAX_RESULT_CHARS
@@ -98,18 +100,17 @@ class TestDownloadRefused:
 
         assert (invoke_route(ROUTE, caller), store.requests) == (HANDLER_FAILED, [])
 
-    def test_a_declared_content_length_over_32_mb_is_refused_before_reading(self, api, caller, store):
-        store.serve(200, SPILLED_BODY, headers={'Content-Length': str(32 * 1024 * 1024 + 1)})
+    @pytest.mark.parametrize(('max_spill_bytes', 'body', 'headers', 'chunks_read'), [
+        pytest.param(MAX_SPILL_BYTES, json.dumps(SPILLED_BODY).encode(), {'Content-Length': str(32 * 1024 * 1024 + 1)}, 0,
+                     id='declared-content-length-over-32-mb-before-reading'),
+        pytest.param(2048, b'x' * 4096, {}, 3, id='streaming-past-the-cap-without-a-length'),
+    ])
+    def test_a_body_over_the_spill_cap_is_refused(self, api, caller, store, monkeypatch, max_spill_bytes, body, headers, chunks_read):
+        monkeypatch.setattr('invoke.MAX_SPILL_BYTES', max_spill_bytes)
+        store.serve(200, body, headers=headers)
         api.answer(200, spill_pointer())
 
-        assert (invoke_route(ROUTE, caller), store.last_response.chunks_read) == (HANDLER_FAILED, 0)
-
-    def test_a_body_streaming_past_the_cap_without_a_length_is_refused(self, api, caller, store, monkeypatch):
-        monkeypatch.setattr(invoke, 'MAX_SPILL_BYTES', 2048)
-        store.serve(200, b'x' * 4096, headers={})
-        api.answer(200, spill_pointer())
-
-        assert (invoke_route(ROUTE, caller), store.last_response.chunks_read) == (HANDLER_FAILED, 3)
+        assert (invoke_route(ROUTE, caller), store.last_response.chunks_read) == (HANDLER_FAILED, chunks_read)
 
     def test_an_expired_url_answering_403_is_the_generic_502(self, api, caller, store):
         store.serve(403, b'<Error><Code>AccessDenied</Code></Error>')
@@ -135,7 +136,7 @@ class TestDownloadRefused:
         store.failure = requests.Timeout('read timed out')
         api.answer(200, spill_pointer())
 
-        result = run_operation('get_citations', find_operation('get_citations'), {'view': 'list'}, caller)
+        result = _list_citations(caller)
 
         assert (result['isError'], result['structuredContent']) == (True, {'status': 502, 'error': 'The API handler failed'})
 

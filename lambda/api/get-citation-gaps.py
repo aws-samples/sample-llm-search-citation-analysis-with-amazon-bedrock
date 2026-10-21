@@ -18,7 +18,6 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
 # Add shared module to path
@@ -38,7 +37,7 @@ from shared.scope_params import (
     keywords_table_name,
     scope_from_request,
 )
-from shared.search_results import latest_run, search_results_table_name
+from shared.search_results import query_latest_run, search_results_table_name
 from shared.utils import extract_domain, get_brand_config
 from shared.youtube import content_type_for
 
@@ -52,12 +51,6 @@ dynamodb = boto3.resource(
 )
 
 KEYWORDS_TABLE = keywords_table_name()
-
-# Upper bound on items fetched per keyword when isolating the latest
-# analysis run. One run writes one SearchResults item per provider x
-# persona (9 providers x a handful of personas today), so 50 comfortably
-# covers a full run while keeping the read small.
-LATEST_RUN_ITEM_LIMIT = 50
 
 # Concurrency for SearchResults classification in the all-keywords path.
 # Crawl enrichment starts only after this pool has closed.
@@ -283,21 +276,9 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
     if configuration_error is not None:
         return configuration_error
 
-    search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-
-    response = search_table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword),
-        ScanIndexForward=False,
-        Limit=LATEST_RUN_ITEM_LIMIT,
-        ProjectionExpression='#ts, provider, citations, brands',
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
-    items: list[dict[str, Any]] = response.get('Items', [])
-
-    if not items:
+    latest_timestamp, latest_items = query_latest_run(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
+    if not latest_items:
         return {'error': f'No data found for keyword: {keyword}'}
-
-    latest_timestamp, latest_items = latest_run(items)
 
     gaps, covered_sources, cited_urls = classify_latest_run(latest_items, config)
 

@@ -12,7 +12,6 @@ Call-shape tests use ``MagicMock`` tables; behaviour tests use
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -24,22 +23,14 @@ from shared.partition_pages import projection_params
 from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
 from testing.partition_tables import PagedTable
+from testing.searches_fixtures import SEARCH_RESULTS_INDEXES, searches_handler
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-searches_module = handler_fixture(
-    _API_DIR,
-    'get-searches.py',
-    'get_searches_under_test',
-    env={'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results', 'CORS_ORIGIN_PARAM': ''},
-)
+searches_module = searches_handler('get_searches_under_test')
 
 _KEYWORD = 'best running shoes'
 _OLDER = '2026-05-01T08:00:00Z'
 _LATEST = '2026-05-02T08:00:00Z'
-_INDEXES = {None: ('keyword', 'timestamp_provider'), 'ProviderIndex': ('provider', 'timestamp')}
 
 
 def _row(provider: str, timestamp: str, keyword: str = _KEYWORD, **fields: Any) -> dict[str, Any]:
@@ -59,7 +50,7 @@ def _get_searches(module: Any, table: Any, query: dict[str, str] | None = None) 
 
 
 def _paged(*rows: dict[str, Any], **options: Any) -> PagedTable:
-    return PagedTable(list(rows), _INDEXES, **options)
+    return PagedTable(list(rows), SEARCH_RESULTS_INDEXES, **options)
 
 
 @pytest.fixture
@@ -67,21 +58,21 @@ def empty_table() -> MagicMock:
     return fake_table(query={'Items': []})
 
 
+def _keyword_query(limit: int, **options: Any) -> dict[str, Any]:
+    """The newest-first ``query`` of the ``_KEYWORD`` partition, ``limit`` rows, plus ``options``."""
+    return {'KeyConditionExpression': Key('keyword').eq(_KEYWORD), 'ScanIndexForward': False, 'Limit': limit, **options}
+
+
 class TestKeywordReads:
     def test_queries_the_keyword_partition_newest_first_projected_up_to_the_limit(self, searches_module, empty_table):
         _get_searches(searches_module, empty_table, {'keyword': _KEYWORD, 'limit': '2'})
 
-        empty_table.query.assert_called_once_with(
-            KeyConditionExpression=Key('keyword').eq(_KEYWORD), ScanIndexForward=False, Limit=2,
-            **projection_params(searches_module.LIST_ATTRIBUTES),
-        )
+        empty_table.query.assert_called_once_with(**_keyword_query(2, **projection_params(searches_module.LIST_ATTRIBUTES)))
 
     def test_reads_whole_rows_when_the_response_text_is_asked_for(self, searches_module, empty_table):
         _get_searches(searches_module, empty_table, {'keyword': _KEYWORD, 'include_response': 'true'})
 
-        empty_table.query.assert_called_once_with(
-            KeyConditionExpression=Key('keyword').eq(_KEYWORD), ScanIndexForward=False, Limit=50,
-        )
+        empty_table.query.assert_called_once_with(**_keyword_query(50))
 
     def test_returns_the_keyword_rows_newest_first_with_their_count(self, searches_module):
         older, newer = _row('openai', _OLDER), _row('gemini', _LATEST)

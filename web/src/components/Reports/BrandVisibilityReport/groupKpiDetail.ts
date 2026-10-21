@@ -42,16 +42,25 @@ export interface GroupKpiDetail {
   readonly drivers: readonly GroupRunDrivers[];
 }
 
+/** One page of `GET /reports/group-kpis` for the target, undecoded: the scope in the market plus the view's parameters. */
+async function fetchGroupKpiPage(
+  target: GroupKpiDetailTarget, viewParams: Readonly<Record<string, string>>, nextToken: string | null,
+): Promise<unknown> {
+  return apiGet<unknown>('/reports/group-kpis', {
+    params: withNextToken({
+      ...reportScopeParams(target.scope, target.marketId),
+      ...viewParams,
+    }, nextToken),
+  });
+}
+
 async function fetchKeywordRunsPage(
   target: GroupKpiDetailTarget, days: number, nextToken: string | null,
 ): Promise<CursorPage<KeywordRunHistory>> {
-  const payload = await apiGet<unknown>('/reports/group-kpis', {
-    params: withNextToken({
-      ...reportScopeParams(target.scope, target.marketId),
-      days: days.toString(),
-      view: 'keywords',
-    }, nextToken),
-  });
+  const payload = await fetchGroupKpiPage(target, {
+    days: days.toString(),
+    view: 'keywords',
+  }, nextToken);
   if (!isGroupKeywordRunsPage(payload)) throw new GroupKpiDetailError('Group KPI API returned an invalid keyword page');
   return {
     items: payload.keywords,
@@ -62,14 +71,11 @@ async function fetchKeywordRunsPage(
 async function fetchDriversPage(
   target: GroupKpiDetailTarget, fromRun: string, toRun: string, nextToken: string | null,
 ): Promise<CursorPage<GroupRunDrivers>> {
-  const payload = await apiGet<unknown>('/reports/group-kpis', {
-    params: withNextToken({
-      ...reportScopeParams(target.scope, target.marketId),
-      view: 'drivers',
-      from_run: fromRun,
-      to_run: toRun,
-    }, nextToken),
-  });
+  const payload = await fetchGroupKpiPage(target, {
+    view: 'drivers',
+    from_run: fromRun,
+    to_run: toRun,
+  }, nextToken);
   if (!isGroupRunDriversPage(payload)) throw new GroupKpiDetailError('Group KPI API returned an invalid drivers page');
   return {
     items: payload.changes,

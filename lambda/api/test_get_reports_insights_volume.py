@@ -11,52 +11,41 @@ cut window is reported in ``history_truncated_before``.
 from __future__ import annotations
 
 import json
-import os
-from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from shared.group_kpi_history import build_group_kpi_history
 from shared.insights_engine import stability_facts
-from testing.module_loader import load_handler_module
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import assert_within_page_budget
-from testing.window_rows_fixtures import run_timestamp, volume_group
+from testing.window_rows_fixtures import (
+    WindowRead,
+    capped_read_fixture,
+    load_window_report,
+    report_event,
+    run_timestamp,
+    volume_group,
+    whole_read_fixture,
+    windowed_report,
+)
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
-with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_ENV):
-    _mod = load_handler_module(_HERE, 'get-reports-insights.py', 'get_reports_insights_volume_under_test')
+_mod = load_window_report('get-reports-insights.py', 'get_reports_insights_volume_under_test')
 
 RUN_COUNT = 90
 GROUP = volume_group(40, RUN_COUNT)
 OWNED = ['hotel-coruna-mar.es']
 
 
-def _call() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _call() -> WindowRead:
     """The insights of the group, and the SearchResults rows read for them."""
     resource, rows_read = GROUP.resource()
-    event = {'httpMethod': 'GET', 'path': '/api/reports/insights', 'queryStringParameters': {'group_id': 'coruna'}, 'headers': {}}
     with (
-        patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_brand_config', return_value={'first_party_domains': OWNED}),
-        patch.object(_mod, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
+        windowed_report(_mod, resource, brand_config={'first_party_domains': OWNED}),
         patch.object(_mod, 'load_narrative', return_value=None),
     ):
-        return _mod.handler(event, None), rows_read
+        return _mod.handler(report_event('/api/reports/insights', {'group_id': 'coruna'}), None), rows_read
 
 
-@pytest.fixture(scope='module')
-def whole_read() -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    return _call()
-
-
-@pytest.fixture(scope='module')
-def capped_read() -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    with patch('shared.scoped_reports.rows_per_keyword', return_value=80):
-        response, rows_read = _call()
-    return json.loads(response['body']), rows_read
+whole_read = whole_read_fixture(_call)
+capped_read = capped_read_fixture(_call, 80)
 
 
 def test_stays_within_page_budget_when_a_forty_keyword_group_has_90_daily_runs(whole_read):

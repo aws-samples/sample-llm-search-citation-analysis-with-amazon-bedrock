@@ -9,6 +9,7 @@ import {
 import { paginate } from '../ui/pagination';
 import { summarizeSearches } from '../../formatting/searchSummary';
 import { exportToExcel } from '../../exporters/excelGenerator';
+import { datedExcelFileName } from '../../exporters/excelFileName';
 import {
   SEARCH_EXCEL_COLUMNS, searchExcelRows
 } from '../../exporters/searchResultExporter';
@@ -82,7 +83,7 @@ export const SearchesView = ({
         data: excelData,
         columns: SEARCH_EXCEL_COLUMNS,
         sheetName: 'Searches',
-        fileName: `searches-${new Date().toISOString().split('T')[0]}.xlsx`,
+        fileName: datedExcelFileName('searches', new Date()),
       });
     } catch (err) {
       console.error('[searches] Error exporting searches:', err);

@@ -20,9 +20,19 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from boto3.dynamodb.conditions import Key
+
 # One projected Scan page is enough to enumerate a small Keywords table; the cap
 # keeps a large table from turning the call into a full-table read.
 DEFAULT_KEYWORD_SCAN_LIMIT = 500
+
+# Rows read per keyword to isolate its latest run. One run writes one row per
+# provider x persona (9 providers x a handful of personas today), so 50
+# comfortably covers a full run while keeping the read small.
+LATEST_RUN_ITEM_LIMIT = 50
+
+# What ``query_latest_run`` reads of each row: never the answer text.
+LATEST_RUN_PROJECTION = '#ts, provider, citations, brands'
 
 
 def search_results_table_name() -> str:
@@ -50,3 +60,19 @@ def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """
     latest = max((item.get('timestamp', '') for item in items), default='')
     return latest, [item for item in items if item.get('timestamp') == latest]
+
+
+def query_latest_run(table: Any, keyword: str) -> tuple[str, list[dict[str, Any]]]:
+    """``latest_run`` of ``keyword``'s newest ``LATEST_RUN_ITEM_LIMIT`` rows, read as one projected page.
+
+    The projection (``LATEST_RUN_PROJECTION``) never includes the answer text.
+    A keyword without rows gives ``('', [])``.
+    """
+    response = table.query(
+        KeyConditionExpression=Key('keyword').eq(keyword),
+        ScanIndexForward=False,
+        Limit=LATEST_RUN_ITEM_LIMIT,
+        ProjectionExpression=LATEST_RUN_PROJECTION,
+        ExpressionAttributeNames={'#ts': 'timestamp'},
+    )
+    return latest_run(response.get('Items', []))

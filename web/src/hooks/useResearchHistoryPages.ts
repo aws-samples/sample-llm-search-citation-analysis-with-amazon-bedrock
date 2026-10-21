@@ -5,12 +5,7 @@ import {
   deleteKeywordResearch, fetchKeywordResearchHistoryPage, type ResearchType
 } from '../api/keywordResearch';
 import type { KeywordResearchItem } from '../types';
-
-/** `current` plus the jobs of `page` it does not hold yet, in page order. */
-function appendJobs(current: readonly KeywordResearchItem[], page: readonly KeywordResearchItem[]): KeywordResearchItem[] {
-  const seen = new Set(current.map((item) => item.id));
-  return [...current, ...page.filter((item) => !seen.has(item.id))];
-}
+import { appendHistoryPage } from './useContentHistoryPaging';
 
 export interface ResearchHistoryPages {
   history: KeywordResearchItem[];
@@ -61,7 +56,7 @@ export function useResearchHistoryPages(): ResearchHistoryPages {
     try {
       const page = await fetchKeywordResearchHistoryPage(listing.type, nextToken);
       if (listingRef.current !== listing) return;
-      setHistory((current) => appendJobs(current, page.items));
+      setHistory((current) => appendHistoryPage(current, page.items));
       setNextToken(page.nextToken);
     } catch (err) {
       console.error('[research] Error loading more history:', err);

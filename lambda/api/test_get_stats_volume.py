@@ -22,24 +22,14 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from shared.bounded_counts import Deadline
-from testing.dynamodb_stubs import fake_table
+from testing.dynamodb_stubs import described, fake_table
+from testing.env import STATS_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.response_size import assert_within_page_budget
 from testing.search_results_fixtures import key_parts
 
-stats_module = handler_fixture(
-    os.path.dirname(__file__),
-    'get-stats.py',
-    'get_stats_volume_under_test',
-    env={
-        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-        'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-        'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-        'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-        'CORS_ORIGIN_PARAM': '',
-    },
-)
+stats_module = handler_fixture(os.path.dirname(__file__), 'get-stats.py', 'get_stats_volume_under_test', env=STATS_ENV)
 
 _GIB = 1024 ** 3
 _KEYWORDS = [f'vuelos baratos destino {index:04d}' for index in range(1_000)]
@@ -48,9 +38,7 @@ _ROWS_PER_PAGE = 40
 
 def _large_table(size_bytes: int, item_count: int) -> MagicMock:
     """A table ``DescribeTable`` reports as ``size_bytes`` holding ``item_count`` items, whose scans never end."""
-    table = fake_table(scan={'Count': 400, 'LastEvaluatedKey': {'id': 'more'}}, query={'Items': []})
-    table.meta.client.describe_table.return_value = {'Table': {'TableSizeBytes': size_bytes, 'ItemCount': item_count}}
-    return table
+    return described(fake_table(scan={'Count': 400, 'LastEvaluatedKey': {'id': 'more'}}, query={'Items': []}), size_bytes, item_count)
 
 
 def _endless_partitions() -> MagicMock:

@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 from shared.sentiment_examples import ANSWER_TEXT_CAP
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import assert_within_page_budget, long_text
 from testing.search_results_fixtures import active_keywords_table, report_dynamodb, search_results_table
@@ -78,35 +79,26 @@ class TestPageBudget:
         assert (body['total'], len(body['examples']) < 50, body['next_token'] is not None) == (400, True, True)
 
 
-def _follow(module: Any, query: dict[str, str]) -> list[tuple[str, str]]:
-    """Every example of every page, following ``next_token`` to the end."""
-    collected: list[tuple[str, str]] = []
-    token: str | None = None
-    for _ in range(500):
-        _, body = parse_response(_call(module, {**query, **({'next_token': token} if token else {})}))
-        collected.extend((example['keyword'], example['provider']) for example in body['examples'])
-        token = body['next_token']
-        if token is None:
-            return collected
-    raise AssertionError('next_token never ran out')
-
-
 class TestPagination:
     @settings(max_examples=5, deadline=None)
     @given(limit=st.integers(min_value=1, max_value=50))
     def test_following_next_token_returns_every_example_once_in_order(self, sentiment_handler, limit):
         with _endpoint(sentiment_handler, 'Respuesta breve.'):
             _, first = parse_response(_call(sentiment_handler, {**_QUERY, 'limit': '50'}))
-            pages = _follow(sentiment_handler, {**_QUERY, 'limit': str(limit)})
+            pages = follow_next_token(
+                lambda query: _call(sentiment_handler, query),
+                {**_QUERY, 'limit': str(limit)},
+                lambda body: [(example['keyword'], example['provider']) for example in body['examples']],
+            )
 
         expected = sorted(((keyword, engine) for keyword in _KEYWORDS for engine in _ENGINES), key=lambda pair: (pair[0], pair[1]))
         assert (pages, first['total']) == (expected, 400)
 
     def test_rejects_a_malformed_next_token_with_400(self, sentiment_handler):
         with _endpoint(sentiment_handler, 'Respuesta breve.'):
-            status, body = parse_response(_call(sentiment_handler, {**_QUERY, 'next_token': 'not-a-token'}))
+            response = _call(sentiment_handler, {**_QUERY, 'next_token': 'not-a-token'})
 
-        assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+        assert parse_response(response) == INVALID_NEXT_TOKEN
 
     def test_answers_a_null_next_token_on_the_last_page(self, sentiment_handler):
         with _endpoint(sentiment_handler, 'Respuesta breve.'):

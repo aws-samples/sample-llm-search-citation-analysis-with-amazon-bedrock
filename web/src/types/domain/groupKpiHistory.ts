@@ -7,7 +7,9 @@
  */
 import type { ReportScopeInfo } from './baseTypes';
 import type { KpiId } from '../../constants/kpiDefinitions';
-import { isRecord } from './keywordDecoders';
+import {
+  isNullableString, isRecord
+} from './keywordDecoders';
 
 /** The KPIs a trend is called for: every rate and score, not the counts (`TRENDED_KPIS`). */
 export type TrendedKpiId = Exclude<KpiId, 'answers' | 'mentions' | 'citations'>;
@@ -160,10 +162,6 @@ function isGroupRunDrivers(value: unknown): value is GroupRunDrivers {
     && Array.isArray(value.drivers);
 }
 
-function isNextToken(value: unknown): value is string | null {
-  return value === null || typeof value === 'string';
-}
-
 export function isGroupKpiHistoryResponse(value: unknown): value is GroupKpiHistoryResponse {
   return isRecord(value)
     && isRecord(value.scope)
@@ -177,12 +175,12 @@ export function isGroupKeywordRunsPage(value: unknown): value is GroupKeywordRun
   return isRecord(value)
     && Array.isArray(value.keywords)
     && value.keywords.every(isKeywordRunHistory)
-    && isNextToken(value.next_token);
+    && isNullableString(value.next_token);
 }
 
 export function isGroupRunDriversPage(value: unknown): value is GroupRunDriversPage {
   return isRecord(value)
     && Array.isArray(value.changes)
     && value.changes.every(isGroupRunDrivers)
-    && isNextToken(value.next_token);
+    && isNullableString(value.next_token);
 }

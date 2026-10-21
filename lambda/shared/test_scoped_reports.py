@@ -13,6 +13,8 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from shared.scope_params import SCOPE_KEYWORDS_CAP, ReportScope
 from shared.scoped_reports import (
     MIN_ROWS_PER_KEYWORD,
@@ -166,20 +168,20 @@ def _run_timestamps(window: WindowAnswers, keyword: str) -> list[str]:
 
 
 class TestLoadWindowAnswers:
+    @pytest.fixture
+    def capped_window(self) -> Any:
+        """Both keywords' window read with a cap of six rows: inside the long keyword's history."""
+        return load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=6)
     def test_reads_every_answer_of_the_window_under_the_cap(self) -> None:
         window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=100)
 
         assert ([len(window.answers[_LONG]), len(window.answers[_SHORT])], window.truncated_before) == ([12, 3], None)
 
-    def test_reports_the_run_the_cap_stopped_at(self) -> None:
-        window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=6)
+    def test_reports_the_run_the_cap_stopped_at(self, capped_window) -> None:
+        assert capped_window.truncated_before == run_timestamp(1)
 
-        assert window.truncated_before == run_timestamp(1)
-
-    def test_cuts_every_keyword_at_the_same_run_when_one_keyword_is_capped(self) -> None:
-        window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=6)
-
-        assert (_run_timestamps(window, _LONG), _run_timestamps(window, _SHORT)) == ([run_timestamp(2)], [run_timestamp(2)])
+    def test_cuts_every_keyword_at_the_same_run_when_one_keyword_is_capped(self, capped_window) -> None:
+        assert (_run_timestamps(capped_window, _LONG), _run_timestamps(capped_window, _SHORT)) == ([run_timestamp(2)], [run_timestamp(2)])
 
     def test_reads_through_the_run_until(self) -> None:
         window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_SHORT], _WINDOW_START, until=run_timestamp(1))

@@ -21,6 +21,7 @@ import pytest
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.partition_tables import PagedTable
 from testing.response_size import assert_within_page_budget, long_text, response_bytes
 
@@ -52,26 +53,20 @@ def _crawl(index: int) -> dict[str, Any]:
 _ROWS = [_crawl(index) for index in range(200)]
 
 
-def _get(module: Any, query: dict[str, str]) -> tuple[dict[str, Any], tuple[int, Any]]:
+def _get(module: Any, query: dict[str, str]) -> dict[str, Any]:
+    """The proxy response to ``GET /api/crawled-content`` over the 200-crawl data set."""
     table = PagedTable([dict(row) for row in _ROWS], _INDEXES)
     event = api_gateway_event('GET', '/api/crawled-content', query={**query, 'include_screenshot_url': 'false'})
     with patch.object(module, 'dynamodb', fake_dynamodb_resource(MagicMock(wraps=table))):
-        response = module.handler(event, None)
-    return response, parse_response(response)
+        return module.handler(event, None)
 
 
-def _follow(module: Any, query: dict[str, str]) -> list[str]:
-    stamps: list[str] = []
-    token: str | None = None
-    for _ in range(len(_ROWS) + 1):
-        response, (status, body) = _get(module, {**query, **({'next_token': token} if token else {})})
-        assert status == 200
-        assert_within_page_budget(response)
-        stamps += [row['crawled_at'] for row in body['items']]
-        token = body['next_token']
-        if token is None:
-            return stamps
-    raise AssertionError('next_token never ran out')
+def _crawl_stamps(module: Any, query: dict[str, str]) -> list[str]:
+    """``crawled_at`` of every row of every page, each page checked against the budget."""
+    return follow_next_token(
+        lambda page_query: _get(module, page_query), query, lambda body: [row['crawled_at'] for row in body['items']],
+        max_pages=len(_ROWS) + 1, within_page_budget=True,
+    )
 
 
 def test_old_shape_of_the_data_set_was_past_the_lambda_cap():
@@ -79,19 +74,19 @@ def test_old_shape_of_the_data_set_was_past_the_lambda_cap():
 
 
 def test_stays_within_page_budget_when_a_keyword_has_hundreds_of_long_crawls(crawled_content_module):
-    response, _ = _get(crawled_content_module, {'keyword': _KEYWORD, 'limit': '500'})
+    response = _get(crawled_content_module, {'keyword': _KEYWORD, 'limit': '500'})
 
     assert_within_page_budget(response)
 
 
 def test_stays_within_page_budget_when_a_url_history_is_asked_for(crawled_content_module):
-    response, _ = _get(crawled_content_module, {'url': _URL, 'include_history': 'true', 'limit': '500'})
+    response = _get(crawled_content_module, {'url': _URL, 'include_history': 'true', 'limit': '500'})
 
     assert_within_page_budget(response)
 
 
 def test_returns_the_whole_history_on_one_page_without_the_page_text(crawled_content_module):
-    _, (_, body) = _get(crawled_content_module, {'url': _URL, 'include_history': 'true', 'include_content': 'false'})
+    _, body = parse_response(_get(crawled_content_module, {'url': _URL, 'include_history': 'true', 'include_content': 'false'}))
 
     assert (body['count'], body['next_token']) == (50, None)
 
@@ -106,15 +101,15 @@ def test_following_next_token_returns_every_crawl_once_newest_first(crawled_cont
         (row['crawled_at'] for row in _ROWS if 'url' not in query or row['normalized_url'] == _URL), reverse=True,
     )
 
-    assert _follow(crawled_content_module, query) == expected
+    assert _crawl_stamps(crawled_content_module, query) == expected
 
 
 def test_following_next_token_over_the_unfiltered_scan_returns_every_crawl_once(crawled_content_module):
-    assert sorted(_follow(crawled_content_module, {'limit': '500'})) == sorted(row['crawled_at'] for row in _ROWS)
+    assert sorted(_crawl_stamps(crawled_content_module, {'limit': '500'})) == sorted(row['crawled_at'] for row in _ROWS)
 
 
 @pytest.mark.parametrize('query', [{'keyword': _KEYWORD}, {'url': _URL, 'include_history': 'true'}], ids=['keyword', 'url'])
 def test_rejects_a_malformed_next_token_with_400(crawled_content_module, query):
-    _, (status, body) = _get(crawled_content_module, {**query, 'next_token': 'bm90LWEtdG9rZW4'})
+    response = _get(crawled_content_module, {**query, 'next_token': 'bm90LWEtdG9rZW4'})
 
-    assert (status, body) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+    assert parse_response(response) == INVALID_NEXT_TOKEN

@@ -194,6 +194,24 @@ const FeedbackSection = ({
   </div>
 );
 
+/**
+ * The API cuts long engine answers (12,000 characters); say so, with the
+ * stored length, once the reader has expanded the answer.
+ */
+const ShortenedAnswerNote = ({
+  provider, shownLength
+}: {
+  provider: ProviderBrandData;
+  shownLength: number 
+}) => (
+  provider.response_truncated === true && provider.response_length !== undefined ? (
+    <p className="mt-2 text-xs text-gray-500">
+      Answer shortened to its first {shownLength.toLocaleString()} of {provider.response_length.toLocaleString()} characters.
+      The full text is under Raw Responses.
+    </p>
+  ) : null
+);
+
 export const ProviderResponseCard = ({
   provider, brand 
 }: ProviderResponseCardProps) => {
@@ -219,6 +237,7 @@ export const ProviderResponseCard = ({
         <div className="prose prose-sm max-w-none">
           {formatResponse(displayText)}
         </div>
+        {isExpanded && <ShortenedAnswerNote provider={provider} shownLength={fullText.length} />}
         {fullText.length > 300 && (
           <button
             onClick={() => setIsExpanded(!isExpanded)}

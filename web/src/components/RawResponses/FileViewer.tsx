@@ -81,12 +81,7 @@ export const FileViewer = ({
   if (content.too_large === true) {
     return (
       <div className="space-y-4">
-        <ViewerHeader
-          name={file.name}
-          details={<>{formatSize(content.size)} • {formatDate(content.last_modified)}</>}
-        >
-          <DownloadButton onClick={onDownload} />
-        </ViewerHeader>
+        <FileHeader file={file} content={content} onDownload={onDownload} />
         <TooLargeNotice size={content.size} limit={content.max_inline_bytes} />
       </div>
     );
@@ -127,7 +122,8 @@ export const FileViewer = ({
 interface FileHeaderProps {
   file: S3Item;
   content: RawResponseContent;
-  onCopy: () => void;
+  /** Copies the content; no Copy button without it (a file too large to preview). */
+  onCopy?: () => void;
   onDownload: () => void;
 }
 
@@ -150,13 +146,15 @@ const FileHeader = ({
     name={file.name}
     details={<>{formatSize(content.size)} • {formatDate(content.last_modified)}</>}
   >
-    <button
-      onClick={onCopy}
-      className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
-    >
-      <ClipboardIcon className="w-4 h-4" />
-      <span className="sr-only sm:not-sr-only">Copy</span>
-    </button>
+    {onCopy && (
+      <button
+        onClick={onCopy}
+        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
+      >
+        <ClipboardIcon className="w-4 h-4" />
+        <span className="sr-only sm:not-sr-only">Copy</span>
+      </button>
+    )}
     <DownloadButton onClick={onDownload} />
   </ViewerHeader>
 );

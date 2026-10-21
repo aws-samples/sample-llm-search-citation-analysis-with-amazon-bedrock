@@ -2,7 +2,9 @@ import { vi } from 'vitest';
 import { act } from '@testing-library/react';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { renderLoadedHook } from '../test/loadedHook';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  mockAuthenticatedFetch, stallAuthenticatedFetch
+} from '../test/infrastructureMock';
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 import {
@@ -138,7 +140,7 @@ export async function renderReconciledDashboard(overrides: MockFetchOverrides = 
 export function startPendingKeywordReconciliation(
   result: { current: ReturnType<typeof useDashboardData> }
 ): AbortSignal | undefined {
-  mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+  stallAuthenticatedFetch();
   act(() => {
     void result.current.reconcileKeywords();
   });

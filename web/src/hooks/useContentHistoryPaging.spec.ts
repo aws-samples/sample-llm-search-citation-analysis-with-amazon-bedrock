@@ -28,6 +28,14 @@ const oldest = buildContentStudioHistory({
   created_at: '2026-09-01T00:00:00Z' 
 });
 
+/** The newest page, continuing to `page-2`. */
+const FIRST_PAGE = {
+  history: [newest],
+  nextToken: 'page-2',
+  unviewedCount: 0,
+  unviewedCountCapped: false,
+};
+
 function renderPaging() {
   return renderHook(() => {
     const [history, setHistory] = useState<ContentStudioHistory[]>([]);
@@ -36,6 +44,14 @@ function renderPaging() {
       ...useContentHistoryPaging(setHistory, vi.fn()),
     };
   });
+}
+
+/** The hook after `FIRST_PAGE` and then the older page are loaded. */
+async function renderOlderPageLoaded() {
+  const rendered = renderPaging();
+  act(() => rendered.result.current.applyFirstPage(FIRST_PAGE));
+  await act(() => rendered.result.current.loadMoreHistory());
+  return rendered;
 }
 
 describe('appendHistoryPage', () => {
@@ -70,45 +86,21 @@ describe('useContentHistoryPaging', () => {
   });
 
   it('requests the page after the first page token', async () => {
-    const { result } = renderPaging();
-    act(() => result.current.applyFirstPage({
-      history: [newest],
-      nextToken: 'page-2',
-      unviewedCount: 0,
-      unviewedCountCapped: false 
-    }));
-
-    await act(() => result.current.loadMoreHistory());
+    await renderOlderPageLoaded();
 
     expect(mockApi.fetchContentHistory).toHaveBeenCalledWith(20, undefined, 'page-2');
   });
 
   it('appends the older page and reports no further pages', async () => {
-    const { result } = renderPaging();
-    act(() => result.current.applyFirstPage({
-      history: [newest],
-      nextToken: 'page-2',
-      unviewedCount: 0,
-      unviewedCountCapped: false 
-    }));
-
-    await act(() => result.current.loadMoreHistory());
+    const { result } = await renderOlderPageLoaded();
 
     expect([result.current.history.map((item) => item.id), result.current.historyHasMore]).toStrictEqual([['new', 'old'], false]);
   });
 
   it('keeps the older pages when the first page is refreshed after loading more', async () => {
-    const { result } = renderPaging();
-    const firstPage = {
-      history: [newest],
-      nextToken: 'page-2',
-      unviewedCount: 0,
-      unviewedCountCapped: false 
-    };
-    act(() => result.current.applyFirstPage(firstPage));
-    await act(() => result.current.loadMoreHistory());
+    const { result } = await renderOlderPageLoaded();
 
-    act(() => result.current.applyFirstPage(firstPage));
+    act(() => result.current.applyFirstPage(FIRST_PAGE));
 
     expect(result.current.history.map((item) => item.id)).toStrictEqual(['new', 'old']);
   });

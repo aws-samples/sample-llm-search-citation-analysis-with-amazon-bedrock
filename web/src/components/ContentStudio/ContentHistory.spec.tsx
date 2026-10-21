@@ -1,51 +1,21 @@
 import {
-  describe, it, expect, vi
+  describe, expect, it, vi
 } from 'vitest';
 import {
   render, screen
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { ContentHistory } from './ContentHistory';
 import { buildContentStudioHistory } from './ContentStudioHistory-fixtures';
+import { itPagesWithLoadMoreButton } from '../ui/LoadMoreButton-fixtures';
 
 describe('ContentHistory', () => {
-  it('asks for older content when the load button is pressed', async () => {
-    const onLoadMore = vi.fn();
-    render(
-      <ContentHistory
-        history={[buildContentStudioHistory()]}
-        loading={false}
-        onDelete={vi.fn()}
-        onMarkViewed={vi.fn()}
-        onLoadMore={onLoadMore}
-      />
-    );
+  itPagesWithLoadMoreButton('Load older content', (props) => render(
+    <ContentHistory history={[buildContentStudioHistory()]} loading={false} onDelete={vi.fn()} onMarkViewed={vi.fn()} {...props} />
+  ));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Load older content' }));
+  it('shows the empty state instead of a load button when there is no history yet', () => {
+    render(<ContentHistory history={[]} loading={false} onDelete={vi.fn()} onMarkViewed={vi.fn()} onLoadMore={vi.fn()} />);
 
-    expect(onLoadMore).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables the load button while older content loads', () => {
-    render(
-      <ContentHistory
-        history={[buildContentStudioHistory()]}
-        loading={false}
-        onDelete={vi.fn()}
-        onMarkViewed={vi.fn()}
-        onLoadMore={vi.fn()}
-        loadingMore
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled();
-  });
-
-  it('shows no load button when the whole history is loaded', () => {
-    render(
-      <ContentHistory history={[buildContentStudioHistory()]} loading={false} onDelete={vi.fn()} onMarkViewed={vi.fn()} />
-    );
-
-    expect(screen.queryByRole('button', { name: 'Load older content' })).not.toBeInTheDocument();
+    expect(screen.getByText('No generated content yet.')).toBeInTheDocument();
   });
 });

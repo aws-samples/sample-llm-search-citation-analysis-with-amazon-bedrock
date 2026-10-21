@@ -38,8 +38,10 @@ import uuid
 from typing import Any
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
+from shared.log_safety import log_text
 from shared.response_budget import LARGE_RESPONSE_BYTES, SPILL_THRESHOLD_BYTES, envelope_bytes
 
 logger = logging.getLogger(__name__)
@@ -58,15 +60,26 @@ TOO_LARGE_MESSAGE = 'The response is too large to return. Narrow the request (a 
 
 @functools.cache
 def _s3() -> Any:
-    """The S3 client, created on the first spill (most containers never spill)."""
-    return boto3.client('s3')
+    """The S3 client, created on the first spill (most containers never spill).
+
+    Presigned URLs name the regional virtual-hosted endpoint
+    (``<bucket>.s3.<region>.amazonaws.com``): the global one can answer a
+    browser's ``fetch`` with a redirect that carries no CORS headers.
+    """
+    region = boto3.session.Session().region_name
+    return boto3.client(
+        's3',
+        region_name=region,
+        endpoint_url=f'https://s3.{region}.amazonaws.com',
+        config=Config(signature_version='s3v4', s3={'addressing_style': 'virtual'}),
+    )
 
 
 def _route(event: dict[str, Any] | None) -> str:
-    """``METHOD /resource`` of the request, for the log line."""
+    """``METHOD /resource`` of the request, made safe for a log line."""
     if not event:
         return 'unknown'
-    return f"{event.get('httpMethod', '')} {event.get('resource') or event.get('path') or ''}".strip()
+    return log_text(f"{event.get('httpMethod', '')} {event.get('resource') or event.get('path') or ''}".strip())
 
 
 def _too_large(response: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +122,7 @@ def guard_response(response: dict[str, Any], event: dict[str, Any] | None = None
         logger.warning('large_api_response route=%s bytes=%d', route, size)
         return response
 
-    bucket = os.environ.get(BUCKET_ENV)
+    bucket = os.environ.get('API_RESPONSE_BUCKET')
     if not bucket:
         logger.error('spilled_api_response failed route=%s bytes=%d: %s is not set', route, size, BUCKET_ENV)
         return _too_large(response)

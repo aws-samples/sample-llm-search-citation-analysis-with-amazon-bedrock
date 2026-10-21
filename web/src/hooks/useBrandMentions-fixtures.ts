@@ -1,5 +1,5 @@
 import type {
-  AggregatedBrand, BrandMentionsResponse
+  AggregatedBrand, BrandAppearance, BrandMentionsResponse
 } from '../types';
 import {
   createEndpointMockFetch, type EndpointMockFetchOptions 
@@ -24,6 +24,32 @@ export function buildAggregatedBrand(overrides: Partial<AggregatedBrand> = {}): 
     ...overrides,
   };
 }
+
+/** One positive OpenAI appearance at rank 1 for the Coruña spa question, unless overridden. */
+export function buildBrandAppearance(overrides: Partial<BrandAppearance> = {}): BrandAppearance {
+  return {
+    keyword: 'hotel coruna spa',
+    provider: 'openai',
+    model: 'gpt-5-mini',
+    rank: 1,
+    mention_count: 1,
+    first_position: 10,
+    sentiment: 'positive',
+    ...overrides,
+  };
+}
+
+/** The brand counts of a summary listing one first-party brand and one competitor, all of them. */
+export const ONE_BRAND_ONE_COMPETITOR = {
+  total_unique_brands: 2,
+  matching_brands: 2,
+  brands_truncated: false,
+  summary: {
+    first_party_count: 1,
+    competitor_count: 1,
+    other_count: 0,
+  },
+} satisfies Partial<BrandMentionsResponse['aggregated']>;
 
 export const mockBrandMentionsResponse: BrandMentionsResponse = {
   keyword: 'test',
@@ -52,14 +78,7 @@ export const mockBrandMentionsResponse: BrandMentionsResponse = {
         provider_ranks: { openai: 2 },
       }),
     ],
-    total_unique_brands: 2,
-    matching_brands: 2,
-    brands_truncated: false,
-    summary: {
-      first_party_count: 1,
-      competitor_count: 1,
-      other_count: 0,
-    },
+    ...ONE_BRAND_ONE_COMPETITOR,
   },
   by_provider: [],
 };

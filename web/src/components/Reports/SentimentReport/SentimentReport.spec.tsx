@@ -15,6 +15,7 @@ import {
   buildLatestBrands, buildPeriodChange, buildTrendPoint
 } from '../layout/reportPayload-fixtures';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
+import { cutNoteText } from '../layout/HistoryCutNote-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
@@ -116,7 +117,7 @@ describe('Sentiment over time', () => {
     renderSentiment(reportWithTrends({ truncated_before: '2026-08-20T06:50:33Z' }));
 
     expect(within(sectionTitled('Net sentiment over time')).getByRole('note'))
-      .toHaveTextContent(`the report covers the runs after ${new Date('2026-08-20T06:50:33Z').toLocaleString()}`);
+      .toHaveTextContent(cutNoteText('2026-08-20T06:50:33Z'));
   });
 
   it('adds no cut note to the trend when its window was read whole', () => {

@@ -3,7 +3,7 @@
  * `authenticatedFetch` (see ./infrastructureMock).
  */
 import { vi } from 'vitest';
-import { mockAuthenticatedFetch } from './infrastructureMock';
+import { stallAuthenticatedFetch } from './infrastructureMock';
 
 /**
  * Leaves every request pending, renders the hook with `render`, unmounts it,
@@ -11,7 +11,7 @@ import { mockAuthenticatedFetch } from './infrastructureMock';
  */
 export function spyOnAbortAfterPendingUnmount(render: () => { unmount: () => void }) {
   const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
-  mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+  stallAuthenticatedFetch();
   render().unmount();
   return abortSpy;
 }

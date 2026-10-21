@@ -38,6 +38,16 @@ def _decoded(response: dict[str, Any]) -> Any:
     return json.loads(response['body'])
 
 
+#: ``(status, code)`` of an oversized answer that could not be spilled.
+RESPONSE_TOO_LARGE = (500, 'response_too_large')
+
+
+def _oversized_outcome() -> tuple[int, str]:
+    """``(status, code)`` of answering ``_oversized_body()``."""
+    response = api_response(200, _oversized_body(), EVENT)
+    return response['statusCode'], _decoded(response).get('code')
+
+
 def test_returns_small_responses_unchanged(s3_client: MagicMock) -> None:
     response = {'statusCode': 200, 'headers': {}, 'body': '{"ok": true}'}
 
@@ -96,17 +106,15 @@ def test_presigns_a_short_lived_get_of_the_spilled_object(s3_client: MagicMock) 
 
 def test_answers_a_clear_500_when_the_bucket_is_not_configured(s3_client: MagicMock) -> None:
     with patch.dict(os.environ, {}, clear=True):
-        response = api_response(200, _oversized_body(), EVENT)
+        outcome = _oversized_outcome()
 
-    assert (response['statusCode'], _decoded(response)['code']) == (500, 'response_too_large')
+    assert outcome == RESPONSE_TOO_LARGE
 
 
 def test_answers_a_clear_500_when_s3_rejects_the_write(s3_client: MagicMock) -> None:
     s3_client.put_object.side_effect = ClientError({'Error': {'Code': 'AccessDenied'}}, 'PutObject')
 
-    response = api_response(200, _oversized_body(), EVENT)
-
-    assert (response['statusCode'], _decoded(response)['code']) == (500, 'response_too_large')
+    assert _oversized_outcome() == RESPONSE_TOO_LARGE
 
 
 def test_logs_each_spill_as_an_error_with_route_and_size(s3_client: MagicMock, caplog: pytest.LogCaptureFixture) -> None:
@@ -118,13 +126,38 @@ def test_logs_each_spill_as_an_error_with_route_and_size(s3_client: MagicMock, c
     )
 
 
+def _warned_routes(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The ``large_api_response route=…`` part of every warning logged, without its size."""
+    return [record.getMessage().split(' bytes=')[0] for record in caplog.records if record.levelname == 'WARNING']
+
+
 def test_warns_about_large_responses_below_the_threshold(s3_client: MagicMock, caplog: pytest.LogCaptureFixture) -> None:
     api_response(200, {'text': long_text(1_000_000)}, EVENT)
 
-    assert [record.getMessage().split(' bytes=')[0] for record in caplog.records if record.levelname == 'WARNING'] == [
-        'large_api_response route=GET /api/citations',
-    ]
+    assert _warned_routes(caplog) == ['large_api_response route=GET /api/citations']
     s3_client.put_object.assert_not_called()
+
+
+def test_logs_a_route_with_a_line_break_on_one_line(s3_client: MagicMock, caplog: pytest.LogCaptureFixture) -> None:
+    forged = {**EVENT, 'resource': None, 'path': '/api/x\nERROR forged record'}
+
+    api_response(200, {'text': long_text(1_000_000)}, forged)
+
+    assert _warned_routes(caplog) == ['large_api_response route=GET /api/x\\nERROR forged record']
+
+
+def test_presigns_on_the_regional_virtual_hosted_endpoint() -> None:
+    fake_credentials = {
+        'AWS_DEFAULT_REGION': 'eu-west-1', 'AWS_ACCESS_KEY_ID': 'AKIAEXAMPLE', 'AWS_SECRET_ACCESS_KEY': 'example-secret',
+    }
+    response_spill._s3.cache_clear()
+    with patch.dict(os.environ, fake_credentials):
+        url = response_spill._s3().generate_presigned_url(
+            'get_object', Params={'Bucket': 'citation-analysis-keywords-123', 'Key': 'api-responses/x.json'}, ExpiresIn=300,
+        )
+    response_spill._s3.cache_clear()
+
+    assert url.startswith('https://citation-analysis-keywords-123.s3.eu-west-1.amazonaws.com/api-responses/x.json?')
 
 
 def test_finds_the_url_of_a_spill_pointer() -> None:
