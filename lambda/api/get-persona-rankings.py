@@ -16,11 +16,12 @@ import boto3
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
 from shared.kpi_engine import answers_from_rows, brand_table
-from shared.search_results import latest_run, query_keyword_items, search_results_table_name
+from shared.search_results import search_results_table_name
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -161,18 +162,17 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
 
     If query_prompt_id is provided, returns only that persona's data.
     """
-    items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
+    # The latest run, read newest-first by sort key: a partition holding more
+    # than one 1 MB page of history no longer answers from its oldest page.
+    latest_items = query_latest_run_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
 
-    if not items:
+    if not latest_items:
         return {
             'keyword': keyword,
             'personas': [],
             'cross_persona_summary': {'brands': []},
             'message': 'No search results found for this keyword.',
         }
-
-    # Use the latest timestamp only
-    _, latest_items = latest_run(items)
 
     # Group items by query_prompt_id
     grouped: dict[str, list[dict[str, Any]]] = {}

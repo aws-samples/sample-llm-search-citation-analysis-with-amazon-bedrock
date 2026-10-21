@@ -14,7 +14,7 @@ import type {
   GroupKpiHistoryResponse, GroupRun, GroupRunDrivers, KeywordRunHistory, KpiDeltas, MentionChange
 } from '../../../types/domain/groupKpiHistory';
 import type { GroupKpiDetail } from './groupKpiDetail';
-import type { BrandMentionsResponse } from '../../../types';
+import type { BrandAppearanceRow } from '../../../types';
 import {
   GROUP_REPORT_DEFINITIONS, KPI_SPECS, type KpiSpec, type KpiUnit
 } from '../../../constants/kpiDefinitions';
@@ -144,7 +144,7 @@ export function groupKpiReportSheets(
   scopeLabel: string,
   run: GroupRun,
   detail: GroupKpiDetail,
-  mentions: BrandMentionsResponse | null,
+  mentions: readonly BrandAppearanceRow[] | null,
   generatedAt: Date,
 ): ExcelSheet[] {
   const sheets = [
@@ -171,7 +171,7 @@ export async function exportGroupKpiReport(
   scopeLabel: string,
   run: GroupRun,
   detail: GroupKpiDetail,
-  mentions: BrandMentionsResponse | null,
+  mentions: readonly BrandAppearanceRow[] | null,
   date = new Date(),
 ): Promise<void> {
   await exportWorkbook(groupKpiReportSheets(history, scopeLabel, run, detail, mentions, date), groupKpiReportFileName(scopeLabel, date));

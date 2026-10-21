@@ -4,7 +4,7 @@ import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { BrandMentionsTable } from './BrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
-import { exportBrandMentions } from './brandMentionsExport';
+import { exportBrandMentionsFor } from './brandMentionsExport';
 import {
   countTrackedBrands, describeIndustry
 } from './brandConfigSummary';
@@ -18,6 +18,8 @@ import type {
   Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { useSelectedMarketId } from '../Markets/marketSelectionContext';
+import type { BrandAppearancesRequest } from '../../api/brandMentions';
 
 interface BrandsViewProps {keywords: Keyword[];}
 
@@ -130,9 +132,10 @@ const getFilterCounts = (data: BrandMentionsResponse | null) => ({
 });
 
 const BrandReportControls = ({
-  data, scopeLabel, selectedTimestamp, onTimestampChange
+  data, exportRequest, scopeLabel, selectedTimestamp, onTimestampChange
 }: {
   data: BrandMentionsResponse;
+  exportRequest: BrandAppearancesRequest;
   scopeLabel: string;
   selectedTimestamp: string | null;
   onTimestampChange: (timestamp: string | null) => void;
@@ -140,7 +143,7 @@ const BrandReportControls = ({
   const {
     exporting, handleExport 
   } = useExportAction(
-    () => exportBrandMentions(data, scopeLabel),
+    () => exportBrandMentionsFor(exportRequest, scopeLabel),
     '[brands] Excel export failed:',
   );
 
@@ -199,14 +202,20 @@ const AnalysisRunContext = ({
   );
 };
 
+const BrandsCapNote = ({ aggregated }: { aggregated: BrandMentionsResponse['aggregated'] }) => (aggregated.brands_truncated ? (
+  <p className="text-xs text-gray-500 px-1">
+    Showing the top {aggregated.brands.length} of {aggregated.matching_brands} brands by aggregate score; the Excel export has every mention.
+  </p>
+) : null);
+
 const BrandContent = ({
-  data, loading, error, scope, scopeLabel, classificationFilter, selectedTimestamp,
+  data, loading, error, appearancesRequest, scopeLabel, classificationFilter, selectedTimestamp,
   onFilterChange, onTimestampChange, onBrandClick, config
 }: {
   data: BrandMentionsResponse | null;
   loading: boolean;
   error: string | null;
-  scope: ReportScope | null;
+  appearancesRequest: BrandAppearancesRequest | null;
   scopeLabel: string;
   classificationFilter: string | null;
   selectedTimestamp: string | null;
@@ -219,7 +228,7 @@ const BrandContent = ({
   // keeps the previous results on screen, dimmed, so nothing collapses.
   if (loading && !data) return <BrandMentionsSkeleton />;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm text-red-700">{error}</p></div>;
-  if (scope === null) return <EmptyState />;
+  if (appearancesRequest === null) return <EmptyState />;
   if (!data) return null;
 
   const counts = getFilterCounts(data);
@@ -228,6 +237,7 @@ const BrandContent = ({
     <div aria-busy={loading} className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`}>
       <BrandReportControls
         data={data}
+        exportRequest={appearancesRequest}
         scopeLabel={scopeLabel}
         selectedTimestamp={selectedTimestamp}
         onTimestampChange={onTimestampChange}
@@ -238,6 +248,7 @@ const BrandContent = ({
         onFilterChange={onFilterChange}
         counts={counts}
       />
+      <BrandsCapNote aggregated={data.aggregated} />
       <BrandMentionsTable brands={data.aggregated.brands} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
     </div>
   );
@@ -281,11 +292,13 @@ const renderModals = (props: {
   findCompetitors: ReturnType<typeof useBrandConfig>['findCompetitors'];
   selectedPersonaId: string | null;
   scopeLabel: string;
+  appearancesRequest: BrandAppearancesRequest | null;
 }) => (
   <>
     {props.selectedBrand && props.data && (
       <BrandDetailModal
         brand={props.selectedBrand}
+        appearancesRequest={props.appearancesRequest}
         providerData={props.data.by_provider}
         keyword={props.data.keyword ?? props.scopeLabel}
         queryPromptId={props.selectedPersonaId}
@@ -316,6 +329,16 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
     activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
   const scopeLabel = scope === null ? '' : describeReportScope(scope, groups);
+  const marketId = useSelectedMarketId();
+  const appearancesRequest: BrandAppearancesRequest | null = scope === null ? null : {
+    scope,
+    marketId,
+    filters: {
+      classification: classificationFilter,
+      query_prompt_id: selectedPersonaId,
+      timestamp: selectedTimestamp,
+    },
+  };
 
   const {
     data, loading, error
@@ -356,7 +379,7 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         data={data}
         loading={loading}
         error={error}
-        scope={scope}
+        appearancesRequest={appearancesRequest}
         scopeLabel={scopeLabel}
         classificationFilter={classificationFilter}
         selectedTimestamp={selectedTimestamp}
@@ -378,7 +401,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         expandAllBrands,
         findCompetitors,
         selectedPersonaId,
-        scopeLabel
+        scopeLabel,
+        appearancesRequest
       })}
     </div>
   );

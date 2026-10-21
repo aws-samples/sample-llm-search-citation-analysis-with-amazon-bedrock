@@ -28,8 +28,14 @@ export interface ProviderBrandData {
   provider: string;
   timestamp: string;
   brands: BrandMention[];
+  /** The persona the answer was asked under (`default` without one). */
+  query_prompt_id?: string;
   response_preview: string;
+  /** The answer text, cut at 12,000 characters (`response_truncated`). */
   full_response?: string;
+  response_truncated?: boolean;
+  /** Characters of the stored answer, before any cut. */
+  response_length?: number;
   seo_feedback?: string;
   geo_feedback?: string;
   citations?: string[];
@@ -42,6 +48,8 @@ export interface BrandAppearance {
   keyword: string;
   provider: string;
   model: string;
+  /** The persona of the answer (`default` without one). */
+  query_prompt_id?: string;
   rank: number;
   mention_count: number;
   first_position: number;
@@ -52,8 +60,12 @@ export interface BrandAppearance {
   ranking_context?: string;
 }
 
+/** Appearances per sentiment label; labels nobody used are absent. */
+export type SentimentCounts = Partial<Record<'positive' | 'neutral' | 'negative' | 'mixed', number>>;
+
 /**
- * Aggregated brand data across all AI providers.
+ * One brand of a `/brand-mentions` summary: aggregates over every appearance
+ * and a bounded preview of them (`view=appearances` pages hold the rest).
  */
 export interface AggregatedBrand {
   name: string;
@@ -64,11 +76,34 @@ export interface AggregatedBrand {
   overall_rank: number;
   aggregate_score: number;
   classification: BrandClassification;
+  /** Distinct providers that named the brand, sorted. */
   providers: string[];
+  /** Each provider's best rank of the brand. */
+  provider_ranks: Record<string, number>;
+  /** The best-ranked appearances: all of them for one keyword (up to 30), 5 for a wider scope. */
   appearances: BrandAppearance[];
-  /** Distinct keywords mentioning the brand (2.4.0; meaningful for group answers). */
+  /** Every appearance, however many `appearances` previews. */
+  appearance_count: number;
+  sentiment_counts: SentimentCounts;
+  /** Distinct keywords mentioning the brand (meaningful for group answers). */
   keyword_count?: number;
-  keywords?: string[];
+}
+
+/** One row of a `view=appearances` page: an appearance tagged with its brand. */
+export interface BrandAppearanceRow extends BrandAppearance {
+  brand: string;
+  classification: BrandClassification;
+  overall_rank: number;
+}
+
+/** One `view=appearances` page of `/brand-mentions`. */
+export interface BrandAppearancesPage {
+  keyword: string | null;
+  timestamp: string | null;
+  brand: string | null;
+  appearances: BrandAppearanceRow[];
+  total_appearances: number;
+  next_token: string | null;
 }
 
 /**
@@ -112,10 +147,13 @@ export interface BrandMentionsResponse {
   /** Per-provider responses; empty for a group / all answer. */
   by_provider: ProviderBrandData[];
   aggregated: {
+    /** The best 100 brands of the requested classification, best aggregate score first. */
     brands: AggregatedBrand[];
+    /** Every brand of the rows, whatever the classification filter. */
     total_unique_brands: number;
-    first_party_brands: AggregatedBrand[];
-    competitor_brands: AggregatedBrand[];
+    /** Brands of the requested classification, before the cap of `brands`. */
+    matching_brands: number;
+    brands_truncated: boolean;
     summary: {
       first_party_count: number;
       competitor_count: number;

@@ -1,28 +1,48 @@
 """
 Get Brand Mentions API
 
-Retrieves brand mentions from search results for a specific keyword.
-Supports multiple industries and brand classification (first_party, competitor, other).
+Brand mentions of one analysis run for a keyword or a report scope, as a
+bounded summary (``view=summary``, the default) or as pages of every
+appearance (``view=appearances``). Brands are classified first_party,
+competitor or other by the extraction step.
+
+Both views read only the selected run of each keyword partition (the sort key
+starts with the run timestamp), never the keyword's whole history; the size
+rules live in ``shared.brand_mention_views``.
 """
 
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response, success_response
-from shared.decorators import api_handler, optional_provider, validate
-from shared.dynamo_decimal import to_int
-from shared.dynamodb_batch import collect_all_items
-from shared.scope_params import SCOPE_QUERY_PARAMS, ReportScope, keywords_table_name, query_keyword_rows
+from shared.answer_queries import latest_run_timestamp
+from shared.api_response import not_found_response, success_response, validation_error
+from shared.brand_mention_views import (
+    KEYWORD_APPEARANCE_LIMIT,
+    KEYWORD_ATTRIBUTE_NAMES,
+    KEYWORD_PROJECTION,
+    RUN_LISTING_DEEP_KEYWORDS,
+    RUN_LISTING_LIMIT,
+    appearance_rows,
+    brand_summary,
+    filter_rows,
+    list_runs,
+    provider_entry,
+    read_run_rows,
+)
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
+from shared.decorators import api_handler, optional_limit, optional_provider, validate
+from shared.response_budget import take_within_budget
+from shared.scope_params import SCOPE_QUERY_PARAMS, ReportScope, keywords_table_name
 from shared.scoped_reports import required_report_scope
-from shared.search_results import latest_run, search_results_table_name
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -34,298 +54,191 @@ dynamodb = boto3.resource('dynamodb')
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
-# Group aggregates fan out one projected Query per keyword (no LLM response
-# text), in parallel.
+# Scope reads fan out one keyword per worker.
 _SCOPE_MAX_WORKERS = 10
-_AVAILABLE_RUN_LIMIT = 50
-_SCOPE_PROJECTION = 'keyword, #ts, provider, brands, query_prompt_id, metadata'
+
+VIEWS = ('summary', 'appearances')
 
 
-def _result_model(result: dict[str, Any], provider: str) -> str:
-    """Return the stored model identifier, falling back to its provider."""
-    metadata = result.get('metadata')
-    if isinstance(metadata, dict):
-        model = metadata.get('model')
-        if isinstance(model, str) and model:
-            return model
-    return provider
+@dataclass(frozen=True)
+class _RowFilters:
+    """The run and row filters one request applies to every keyword it reads."""
+
+    timestamp: str | None
+    query_prompt_id: str | None
+    provider: str | None
 
 
-def aggregate_brand_mentions(results: list[dict[str, Any]]) -> dict[str, Any]:
+def _keyword_run(keyword: str, filters: _RowFilters, run_depth: int) -> tuple[list[dict[str, Any]], list[str]]:
+    """One keyword's rows of the selected run (projected, no answer text) and its newest ``run_depth`` runs."""
+    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+    runs: list[str] = []
+    if run_depth:
+        latest = latest_run_timestamp(table, keyword)
+        if latest is None:
+            return [], []
+        runs = list_runs(table, keyword, latest, run_depth)
+        selected = filters.timestamp or latest
+    else:
+        selected = filters.timestamp
+    _, rows = read_run_rows(table, keyword, selected)
+    return filter_rows(rows, filters.query_prompt_id, filters.provider), runs
+
+
+def _load_scope(scope: ReportScope, filters: _RowFilters, *, with_runs: bool) -> list[tuple[list[dict[str, Any]], list[str]]]:
+    """``_keyword_run`` for every keyword of ``scope``, in scope order.
+
+    With ``with_runs`` the first ``RUN_LISTING_DEEP_KEYWORDS`` keywords list
+    up to ``RUN_LISTING_LIMIT`` runs each and the others their latest run.
     """
-    Aggregate brand mentions across all providers.
+    keywords = list(scope.keywords)
+    if not keywords:
+        return []
 
-    Returns:
-        Dict with aggregated brand data including cross-provider rankings
-    """
-    brand_scores = {}  # brand_name -> {providers: [], total_mentions: int, best_rank: int}
+    def read(position_keyword: tuple[int, str]) -> tuple[list[dict[str, Any]], list[str]]:
+        position, keyword = position_keyword
+        depth = 0
+        if with_runs:
+            depth = RUN_LISTING_LIMIT if position < RUN_LISTING_DEEP_KEYWORDS else 1
+        return _keyword_run(keyword, filters, depth)
 
-    for result in results:
-        provider = result.get('provider') or 'unknown'
-        brands = result.get('brands', [])
-
-        for brand in brands:
-            name = brand.get('name')
-            if not name:
-                continue
-
-            normalized_name = name.lower()
-
-            if normalized_name not in brand_scores:
-                # Use the LLM-assigned classification directly
-                # The LLM has already classified brands based on ownership knowledge
-                classification = brand.get('classification', 'other')
-
-                brand_scores[normalized_name] = {
-                    'name': name,  # Keep original casing from first mention
-                    'parent_company': brand.get('parent_company'),
-                    'providers': [],
-                    'keywords': set(),
-                    'total_mentions': 0,
-                    'best_rank': to_int(brand.get('rank'), 999),
-                    'classification': classification,
-                    'appearances': []
-                }
-
-            brand_scores[normalized_name]['providers'].append(provider)
-            if result.get('keyword'):
-                brand_scores[normalized_name]['keywords'].add(result['keyword'])
-            brand_scores[normalized_name]['total_mentions'] += to_int(brand.get('mention_count'), 1)
-            brand_scores[normalized_name]['best_rank'] = min(
-                brand_scores[normalized_name]['best_rank'],
-                to_int(brand.get('rank'), 999)
-            )
-            brand_scores[normalized_name]['appearances'].append({
-                'keyword': result.get('keyword') or '',
-                'provider': provider,
-                'model': _result_model(result, provider),
-                'rank': brand.get('rank'),
-                'mention_count': brand.get('mention_count'),
-                'first_position': brand.get('first_position'),
-                'sentiment': brand.get('sentiment'),
-                'sentiment_reason': brand.get('sentiment_reason'),
-                'sentiment_quote': brand.get('sentiment_quote'),
-                'ranking_context': brand.get('ranking_context')
-            })
-
-    # Convert to list and calculate aggregate score
-    aggregated = []
-    for brand_data in brand_scores.values():
-        # Score: number of providers * 10 + inverse of best rank + total mentions
-        provider_count = len(set(brand_data['providers']))
-        score = (provider_count * 10) + (10 - brand_data['best_rank']) + brand_data['total_mentions']
-
-        brand_data['provider_count'] = provider_count
-        brand_data['aggregate_score'] = score
-        # Distinct keywords mentioning the brand (meaningful for group scopes).
-        brand_data['keyword_count'] = len(brand_data['keywords'])
-        brand_data['keywords'] = sorted(brand_data['keywords'])
-        aggregated.append(brand_data)
-
-    # Sort by aggregate score
-    aggregated.sort(key=lambda x: x['aggregate_score'], reverse=True)
-
-    # Add overall rank
-    for idx, brand in enumerate(aggregated, 1):
-        brand['overall_rank'] = idx
-
-    # Separate by classification
-    first_party_brands = [b for b in aggregated if b.get('classification') == 'first_party']
-    competitor_brands = [b for b in aggregated if b.get('classification') == 'competitor']
-    other_brands = [b for b in aggregated if b.get('classification') == 'other']
-
-    return {
-        'brands': aggregated,
-        'total_unique_brands': len(aggregated),
-        'first_party_brands': first_party_brands,
-        'competitor_brands': competitor_brands,
-        'summary': {
-            'first_party_count': len(first_party_brands),
-            'competitor_count': len(competitor_brands),
-            'other_count': len(other_brands)
-        }
-    }
+    with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
+        return list(pool.map(read, enumerate(keywords)))
 
 
-def _aggregate_classified(items: list[dict[str, Any]], classification: str | None) -> dict[str, Any]:
-    """``aggregate_brand_mentions`` with ``brands`` narrowed to ``classification`` when one is given."""
-    aggregated = aggregate_brand_mentions(items)
-    if classification:
-        aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
-    return aggregated
+def _newest(runs: set[str]) -> list[str]:
+    return sorted(runs, reverse=True)[:RUN_LISTING_LIMIT]
 
 
-def _filter_rows(items: list[dict[str, Any]], query_prompt_id: str | None, provider: str | None) -> list[dict[str, Any]]:
-    """The rows of one persona (rows without one are ``default``) and one provider, when given."""
-    if query_prompt_id:
-        items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
-    if provider:
-        items = [item for item in items if item.get('provider') == provider]
-    return items
-
-
-def _available_runs(items: list[dict[str, Any]]) -> list[str]:
-    """Newest distinct analysis timestamps represented by loaded rows."""
-    timestamps = {
-        timestamp
-        for item in items
-        if isinstance((timestamp := item.get('timestamp')), str) and timestamp
-    }
-    return sorted(timestamps, reverse=True)[:_AVAILABLE_RUN_LIMIT]
-
-
-def _scope_run_items(
-    keyword: str,
-    timestamp: str | None,
-    query_prompt_id: str | None,
-    provider: str | None,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Load projected rows and select one run for a keyword in a report scope."""
-    items = query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _SCOPE_PROJECTION)
-    available_runs = _available_runs(items)
-    selected_timestamp = timestamp or (available_runs[0] if available_runs else None)
-    selected_items = [item for item in items if item.get('timestamp') == selected_timestamp]
-    return _filter_rows(selected_items, query_prompt_id, provider), available_runs
+def _rows_timestamp(rows: list[dict[str, Any]], timestamp: str | None) -> str | None:
+    return timestamp or max((row.get('timestamp', '') for row in rows), default=None)
 
 
 def get_scope_brand_mentions(
     scope: ReportScope,
     brand_config: dict[str, Any],
-    query_prompt_id: str | None,
-    provider: str | None,
+    filters: _RowFilters,
     classification: str | None,
-    timestamp: str | None,
 ) -> dict[str, Any]:
-    """Brand mentions aggregated over the selected run for every keyword.
+    """The summary of every keyword's selected run in a multi-keyword scope.
 
-    With no explicit timestamp, each keyword keeps its latest-run behavior.
-    With one, only rows from that shared run are included, so keywords absent
-    from the run count as having no data. Full LLM responses (`by_provider`)
-    are not part of a group answer.
+    With no explicit timestamp each keyword contributes its latest run; with
+    one, only rows of that shared run count, so keywords absent from it have
+    no data. Engine answers (``by_provider``) are not part of a scope answer.
     """
-    keywords = list(scope.keywords)
-    loaded: list[tuple[list[dict[str, Any]], list[str]]] = []
-    if keywords:
-        with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
-            loaded = list(pool.map(
-                lambda keyword: _scope_run_items(keyword, timestamp, query_prompt_id, provider),
-                keywords,
-            ))
-
-    per_keyword = [rows for rows, _runs in loaded]
-    items = [item for rows in per_keyword for item in rows]
-    available_runs = sorted(
-        {run for _rows, runs in loaded for run in runs},
-        reverse=True,
-    )[:_AVAILABLE_RUN_LIMIT]
-    aggregated = _aggregate_classified(items, classification)
-
+    loaded = _load_scope(scope, filters, with_runs=True)
+    rows = [row for keyword_rows, _runs in loaded for row in keyword_rows]
     return {
         'scope': scope.describe(),
         'keyword': None,
-        'timestamp': timestamp or max((item.get('timestamp', '') for item in items), default=None),
-        'available_runs': available_runs,
-        'keywords_analyzed': len(keywords),
-        'keywords_with_data': sum(1 for rows in per_keyword if rows),
+        'timestamp': _rows_timestamp(rows, filters.timestamp),
+        'available_runs': _newest({run for _rows, runs in loaded for run in runs}),
+        'keywords_analyzed': len(scope.keywords),
+        'keywords_with_data': sum(1 for keyword_rows, _runs in loaded if keyword_rows),
         'config': brand_config,
         'by_provider': [],
-        'aggregated': aggregated,
+        'aggregated': brand_summary(rows, classification),
     }
 
 
-def _query_full_keyword_rows(table: Any, keyword: str) -> list[dict[str, Any]]:
-    """Load every full response row in one keyword partition."""
-    return collect_all_items(
-        table.query,
-        KeyConditionExpression=Key('keyword').eq(keyword),
+def get_keyword_brand_mentions(
+    keyword: str,
+    brand_config: dict[str, Any],
+    filters: _RowFilters,
+    classification: str | None,
+) -> dict[str, Any] | None:
+    """The summary of one keyword's selected run with each engine's answer; ``None`` when there is no such run."""
+    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+    latest = latest_run_timestamp(table, keyword)
+    if latest is None:
+        return None
+    selected, rows = read_run_rows(
+        table, keyword, filters.timestamp or latest,
+        projection=KEYWORD_PROJECTION, attribute_names=KEYWORD_ATTRIBUTE_NAMES,
     )
+    if not rows:
+        return None
+    rows = filter_rows(rows, filters.query_prompt_id, filters.provider)
+    return {
+        'keyword': keyword,
+        'timestamp': selected,
+        'available_runs': list_runs(table, keyword, latest),
+        'config': brand_config,
+        'by_provider': [provider_entry(row) for row in rows],
+        'aggregated': brand_summary(rows, classification, KEYWORD_APPEARANCE_LIMIT),
+    }
+
+
+def get_appearance_page(
+    scope: ReportScope,
+    filters: _RowFilters,
+    classification: str | None,
+    brand: str | None,
+    page: tuple[int, int],
+) -> dict[str, Any]:
+    """One page of every appearance in the scope's selected runs (``page`` = offset, limit)."""
+    offset, limit = page
+    rows = [row for keyword_rows, _runs in _load_scope(scope, filters, with_runs=False) for row in keyword_rows]
+    appearances = appearance_rows(rows, classification, brand)
+    taken, _more = take_within_budget(appearances[offset:], max_items=limit)
+    return {
+        **({} if scope.is_single_keyword else {'scope': scope.describe()}),
+        'keyword': scope.keywords[0] if scope.is_single_keyword else None,
+        'timestamp': _rows_timestamp(rows, filters.timestamp),
+        'brand': brand,
+        'appearances': taken,
+        'total_appearances': len(appearances),
+        'next_token': encode_offset_cursor(offset + len(taken), len(appearances)),
+    }
 
 
 @api_handler
 @validate({
     **SCOPE_QUERY_PARAMS,
+    **CURSOR_QUERY_PARAM,
     'timestamp': {'type': str, 'max_length': 50},
     'provider': optional_provider(),
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
     'query_prompt_id': {'type': str, 'max_length': 100},
+    'view': {'type': str, 'choices': list(VIEWS), 'default': 'summary'},
+    'brand': {'type': str, 'max_length': 200},
+    'limit': optional_limit(default=500, max_val=2000),
 })
 @required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
-def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, timestamp: str | None = None, provider: str | None = None,
-            classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, timestamp: str | None = None,
+            provider: str | None = None, classification: str | None = None, query_prompt_id: str | None = None,
+            view: str = 'summary', brand: str | None = None, limit: int = 500,
+            next_token: str | None = None) -> dict[str, Any]:
     """
-    API handler to get brand mentions for a keyword or a keyword group.
+    GET /api/brand-mentions for a keyword or a report scope.
 
     Query params (exactly one scope):
-        - keyword: The search keyword — per-provider responses + aggregate
-        - group_id / keyword_ids: a keyword group / id set — aggregate across keywords
-        - timestamp: Specific analysis run (optional, defaults to latest)
-        - provider: Filter by specific provider (optional)
-        - classification: Filter by classification (first_party, competitor, other) (optional)
-        - query_prompt_id: Filter by persona (optional)
+        - keyword: one keyword (the summary adds each engine's answer)
+        - group_id / keyword_ids / scope=all: aggregate across keywords
+        - timestamp: one analysis run (default: each keyword's latest)
+        - provider, classification, query_prompt_id: row and brand filters
+        - view: ``summary`` (default) or ``appearances``
+        - brand, limit, next_token: the ``appearances`` page (one brand when
+          ``brand`` is given; ``limit`` rows at most, 500 by default)
 
-    Returns:
-        Brand mention aggregates, available run timestamps, and per-provider
-        response details for single-keyword requests.
+    ``summary``: ``{keyword, timestamp, available_runs, config, by_provider,
+    aggregated: {brands, total_unique_brands, matching_brands,
+    brands_truncated, summary}}`` (+ ``scope``, ``keywords_analyzed``,
+    ``keywords_with_data`` for a scope). ``appearances``: ``{keyword,
+    timestamp, brand, appearances, total_appearances, next_token}``.
     """
-    # Get brand tracking configuration
+    filters = _RowFilters(timestamp, query_prompt_id, provider)
+    if view == 'appearances':
+        offset = decode_offset_cursor(next_token)
+        if offset is None:
+            return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+        return success_response(get_appearance_page(report_scope, filters, classification, brand, (offset, limit)), event)
+
     brand_config = get_brand_config()
-
     if not report_scope.is_single_keyword:
-        result = get_scope_brand_mentions(
-            report_scope,
-            brand_config,
-            query_prompt_id,
-            provider,
-            classification,
-            timestamp,
-        )
-        return success_response(result, event)
+        return success_response(get_scope_brand_mentions(report_scope, brand_config, filters, classification), event)
 
-    keyword = report_scope.keywords[0]
-    # Every stored run is read (paginated) so `available_runs` lists them all,
-    # even when a timestamp narrows the answer to one of them.
-    items = _query_full_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
-
-    if not items:
+    result = get_keyword_brand_mentions(report_scope.keywords[0], brand_config, filters, classification)
+    if result is None:
         return not_found_response('Results for keyword', event)
-
-    available_runs = _available_runs(items)
-    result_timestamp = timestamp
-
-    if timestamp:
-        items = [item for item in items if item.get('timestamp') == timestamp]
-        if not items:
-            return not_found_response('Results for keyword', event)
-    else:
-        result_timestamp, items = latest_run(items)
-
-    items = _filter_rows(items, query_prompt_id, provider)
-
-    # Format response by provider
-    by_provider = []
-    for item in items:
-        full_response = item.get('response', '')
-        by_provider.append({
-            'provider': item.get('provider'),
-            'timestamp': item.get('timestamp'),
-            'brands': item.get('brands', []),
-            'response_preview': full_response[:200] + '...' if len(full_response) > 200 else full_response,
-            'full_response': full_response,
-            'seo_feedback': item.get('seo_feedback', ''),
-            'geo_feedback': item.get('geo_feedback', ''),
-            'citations': item.get('citations', [])
-        })
-
-    # Aggregate across providers
-    aggregated = _aggregate_classified(items, classification)
-
-    result = {
-        'keyword': keyword,
-        'timestamp': result_timestamp,
-        'available_runs': available_runs,
-        'config': brand_config,
-        'by_provider': by_provider,
-        'aggregated': aggregated
-    }
-
     return success_response(result, event)

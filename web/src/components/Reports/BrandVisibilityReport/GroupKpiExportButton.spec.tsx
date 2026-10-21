@@ -14,14 +14,14 @@ import {
 import {
   clickGroupKpiExport as clickExport, HOTEL_SOL_SCOPE
 } from './GroupKpiReport-fixtures';
-import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
+import { fetchBrandAppearances } from '../../../api/brandMentions';
 import { exportGroupKpiReport } from './groupKpiExport';
 import {
   fetchGroupKpiDetail, GroupKpiDetailError
 } from './groupKpiDetail';
 import { ApiRequestError } from '../../../infrastructure';
 
-vi.mock('../../../api/brandMentions', () => ({ fetchBrandMentionsAtRun: vi.fn() }));
+vi.mock('../../../api/brandMentions', () => ({ fetchBrandAppearances: vi.fn() }));
 vi.mock('./groupKpiExport', () => ({ exportGroupKpiReport: vi.fn() }));
 vi.mock('./groupKpiDetail', async (importOriginal) => ({
   ...await importOriginal<typeof import('./groupKpiDetail')>(),
@@ -34,7 +34,7 @@ const DETAIL = buildDetail();
 
 describe('GroupKpiExportButton', () => {
   beforeEach(() => {
-    vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
+    vi.mocked(fetchBrandAppearances).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
     vi.mocked(fetchGroupKpiDetail).mockResolvedValue(DETAIL);
   });
 
@@ -59,7 +59,11 @@ describe('GroupKpiExportButton', () => {
   it('fetches the brand mentions of the selected run', async () => {
     await clickExport();
 
-    expect(fetchBrandMentionsAtRun).toHaveBeenCalledWith(HOTEL_SOL_SCOPE, RUN.timestamp, null);
+    expect(fetchBrandAppearances).toHaveBeenCalledWith({
+      scope: HOTEL_SOL_SCOPE,
+      marketId: null,
+      filters: { timestamp: RUN.timestamp },
+    });
   });
 
   it('exports the history, the run and its brand mentions', async () => {
@@ -69,7 +73,7 @@ describe('GroupKpiExportButton', () => {
   });
 
   it('still exports, without the brand mentions sheet, when they cannot be read', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockRejectedValue(new ApiRequestError('Server error', 500));
+    vi.mocked(fetchBrandAppearances).mockRejectedValue(new ApiRequestError('Server error', 500));
 
     await clickExport();
 
@@ -78,7 +82,7 @@ describe('GroupKpiExportButton', () => {
   });
 
   it('clears the previous notice when exporting again', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockRejectedValueOnce(new ApiRequestError('Server error', 500)).mockReturnValueOnce(new Promise(vi.fn()));
+    vi.mocked(fetchBrandAppearances).mockRejectedValueOnce(new ApiRequestError('Server error', 500)).mockReturnValueOnce(new Promise(vi.fn()));
 
     await clickExport();
     await screen.findByRole('status');
@@ -96,7 +100,7 @@ describe('GroupKpiExportButton', () => {
   });
 
   it('holds the button while the workbook is being built', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockReturnValue(new Promise(vi.fn()));
+    vi.mocked(fetchBrandAppearances).mockReturnValue(new Promise(vi.fn()));
 
     await clickExport();
 
