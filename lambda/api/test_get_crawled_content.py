@@ -16,6 +16,7 @@ from unittest.mock import call, patch
 import pytest
 from boto3.dynamodb.conditions import Key
 
+from shared.cursors import encode_cursor
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
@@ -78,10 +79,38 @@ def test_reads_the_newest_rows_of_the_requested_partition(crawled_content_module
     table, status, body = _read(crawled_content_module, [_CRAWL], query)
 
     assert table.query.call_args_list == [expected_query]
-    assert (status, body) == (200, {'items': [_CRAWL], 'count': 1})
+    assert (status, body) == (200, {'items': [_CRAWL], 'count': 1, 'next_token': None})
 
 
 def test_passes_the_oembed_fields_of_a_video_crawl_through(crawled_content_module):
     _table, _status, body = _read(crawled_content_module, [_VIDEO_CRAWL], {'url': _VIDEO_URL})
 
     assert body['items'] == [_VIDEO_CRAWL]
+
+
+def test_leaves_the_page_text_out_when_content_is_not_asked_for(crawled_content_module):
+    crawl = {**_CRAWL, 'content': 'Texto completo de la página', 'content_length': 27}
+
+    _table, _status, body = _read(
+        crawled_content_module, [crawl], {'url': _URL, 'include_history': 'true', 'include_content': 'false'},
+    )
+
+    assert body['items'] == [{**_CRAWL, 'content_length': 27}]
+
+
+def test_keeps_the_page_text_by_default(crawled_content_module):
+    crawl = {**_CRAWL, 'content': 'Texto completo de la página'}
+
+    _table, _status, body = _read(crawled_content_module, [crawl], {'url': _URL})
+
+    assert body['items'] == [crawl]
+
+
+def test_resumes_the_history_from_the_next_token(crawled_content_module):
+    token = str(encode_cursor({'normalized_url': _URL, 'crawled_at': _CRAWL['crawled_at']}))
+
+    table, _status, _body = _read(
+        crawled_content_module, [], {'url': _URL, 'include_history': 'true', 'next_token': token},
+    )
+
+    assert table.query.call_args.kwargs['ExclusiveStartKey'] == {'normalized_url': _URL, 'crawled_at': _CRAWL['crawled_at']}
