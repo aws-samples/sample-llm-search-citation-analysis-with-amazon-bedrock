@@ -11,7 +11,7 @@ const mockApiGet = apiGet as ReturnType<typeof vi.fn>;
 
 describe('dashboard API', () => {
   describe('fetchCrawlHistory', () => {
-    it('requests the 20 latest crawls of the encoded URL', async () => {
+    it('requests the 20 latest crawls of the encoded URL without their page text', async () => {
       mockApiGet.mockResolvedValue({
         items: [],
         count: 0 
@@ -20,7 +20,7 @@ describe('dashboard API', () => {
       await fetchCrawlHistory('https://example.com/a b');
 
       expect(mockApiGet).toHaveBeenCalledWith(
-        '/crawled-content?url=https%3A%2F%2Fexample.com%2Fa+b&include_history=true&limit=20'
+        '/crawled-content?url=https%3A%2F%2Fexample.com%2Fa+b&include_history=true&limit=20&include_content=false'
       );
     });
 
