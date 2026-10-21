@@ -41,6 +41,7 @@ export function buildSentimentExamplesResponse(overrides: Partial<SentimentExamp
     provider: 'openai',
     total: 1,
     examples: [buildSentimentExample()],
+    next_token: null,
     ...overrides,
   };
 }
@@ -82,6 +83,18 @@ export const REJECTED_SENTIMENT_EXAMPLES_BODIES: ReadonlyArray<[description: str
   ['a total that is not a number', {
     ...VALID,
     total: '1',
+  }],
+  ['a next token that is not a string', {
+    ...VALID,
+    next_token: 7,
+  }],
+  ['a body without a next token', {
+    scope: VALID.scope,
+    keywords_truncated: VALID.keywords_truncated,
+    sentiment: VALID.sentiment,
+    provider: VALID.provider,
+    total: VALID.total,
+    examples: VALID.examples,
   }],
   ['examples that are not a list', {
     ...VALID,
