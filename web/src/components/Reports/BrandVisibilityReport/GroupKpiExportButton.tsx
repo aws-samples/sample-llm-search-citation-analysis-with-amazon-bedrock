@@ -3,7 +3,7 @@ import type { ReportScope } from '../../../types';
 import type {
   GroupKpiHistoryResponse, GroupRun
 } from '../../../types/domain/groupKpiHistory';
-import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
+import { fetchBrandAppearances } from '../../../api/brandMentions';
 import { getErrorMessage } from '../../../infrastructure';
 import { exportGroupKpiReport } from './groupKpiExport';
 import { useExportAction } from '../../ui/useExportAction';
@@ -42,7 +42,11 @@ export function GroupKpiExportButton({
     exporting, handleExport
   } = useExportAction(async () => {
     setNotice(null);
-    const mentions = await fetchBrandMentionsAtRun(scope, run.timestamp, marketId).catch((error: unknown) => {
+    const mentions = await fetchBrandAppearances({
+      scope,
+      marketId,
+      filters: { timestamp: run.timestamp },
+    }).catch((error: unknown) => {
       setNotice({
         tone: 'warning',
         text: `Exported without the brand mentions sheet: ${getErrorMessage(error, 'brands')}`,

@@ -19,12 +19,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   useBrandMentions: vi.fn(),
-  exportBrandMentions: vi.fn(),
+  exportBrandMentionsFor: vi.fn(),
 }));
 
 vi.mock('../../hooks/useBrandMentions', () => ({useBrandMentions: mocks.useBrandMentions,}));
 
-vi.mock('./brandMentionsExport', () => ({exportBrandMentions: mocks.exportBrandMentions,}));
+vi.mock('./brandMentionsExport', () => ({exportBrandMentionsFor: mocks.exportBrandMentionsFor,}));
 
 vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
@@ -88,7 +88,7 @@ describe('BrandsView', () => {
       loading: false,
       error: null,
     });
-    mocks.exportBrandMentions.mockResolvedValue(undefined);
+    mocks.exportBrandMentionsFor.mockResolvedValue(undefined);
   });
 
   it('renders the Brand Mentions heading when there are no keywords', () => {
@@ -235,16 +235,42 @@ describe('BrandsView', () => {
     )).toBeInTheDocument();
   });
 
-  it('exports the currently returned server response when the button is pressed', async () => {
+  it('exports every appearance of the selected scope and filters when the button is pressed', async () => {
     renderAndPressExport();
 
     await waitFor(() => {
-      expect(mocks.exportBrandMentions).toHaveBeenCalledWith(brandMentionsExportResponse, 'hotels');
+      expect(mocks.exportBrandMentionsFor).toHaveBeenCalledWith({
+        scope: KEYWORD_REPORT_SCOPE,
+        marketId: null,
+        filters: {
+          classification: null,
+          query_prompt_id: null,
+          timestamp: null,
+        },
+      }, 'hotels');
     });
   });
 
+  it('says how many brands the capped summary leaves out', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      data: {
+        ...brandMentionsExportResponse,
+        aggregated: {
+          ...brandMentionsExportResponse.aggregated,
+          matching_brands: 140,
+          brands_truncated: true,
+        },
+      },
+      loading: false,
+      error: null,
+    });
+    renderWithBrandScope();
+
+    expect(screen.getByText('Showing the top 2 of 140 brands by aggregate score; the Excel export has every mention.')).toBeInTheDocument();
+  });
+
   it('shows the export loading state while the workbook is being generated', () => {
-    mocks.exportBrandMentions.mockImplementation(() => new Promise(vi.fn()));
+    mocks.exportBrandMentionsFor.mockImplementation(() => new Promise(vi.fn()));
     renderAndPressExport();
 
     expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();

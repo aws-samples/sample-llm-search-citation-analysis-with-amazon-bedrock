@@ -1,4 +1,6 @@
-import type { BrandMentionsResponse } from '../../../../types';
+import type {
+  AggregatedBrand, BrandMentionsResponse
+} from '../../../../types';
 import {
   ReportSection,
   pendingSectionPlaceholder,
@@ -29,7 +31,8 @@ const MAX_EXAMPLES_PER_POLARITY = 2;
  * examples confirm what's working and provide language to amplify.
  *
  * We pull from the per-provider `appearances` array on each first-party
- * brand so the quotes stay tied to a specific provider/rank. Examples
+ * brand (a single-keyword summary carries every appearance of the run) so
+ * the quotes stay tied to a specific provider/rank. Examples
  * with neither a `sentiment_quote` nor a `sentiment_reason` are skipped — a
  * sentiment label with nothing to back it is not useful in a printed report.
  * The quote is the engine's own words; the reason is the extraction's
@@ -50,7 +53,7 @@ export function SentimentExamplesSection({
     return null;
   }
 
-  const examples = collectExamples(mentions.aggregated.first_party_brands);
+  const examples = collectExamples(mentions.aggregated.brands.filter((brand) => brand.classification === 'first_party'));
 
   if (examples.length === 0) {
     return (
@@ -84,7 +87,7 @@ export function SentimentExamplesSection({
   );
 }
 
-function collectExamples(brands: BrandMentionsResponse['aggregated']['first_party_brands']): SentimentExample[] {
+function collectExamples(brands: readonly AggregatedBrand[]): SentimentExample[] {
   const grouped: Record<string, SentimentExample[]> = {};
   for (const polarity of SENTIMENT_ORDER) grouped[polarity] = [];
 

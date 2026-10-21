@@ -2,46 +2,114 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  fetchBrandMentionsAtRun, InvalidBrandMentionsResponseError
+  brandMentionsParams, fetchBrandAppearances, InvalidBrandMentionsResponseError
 } from './brandMentions';
 import { mockApiGet } from './clientMock-fixtures';
-import { BRAND_MENTIONS_AT_RUN } from '../components/Reports/BrandVisibilityReport/groupKpiExport-fixtures';
+import {
+  APPEARANCE_PAGE_1, APPEARANCE_PAGE_2, HOTEL_GROUP, RUN
+} from './brandMentions-fixtures';
 
 vi.mock('./client', () => import('./clientMock-fixtures'));
 
-const HOTEL_GROUP = {
-  kind: 'group',
-  groupId: 'hotel-sol' 
-} as const;
+describe('fetchBrandAppearances', () => {
+  it('reads the first page of the scope at the requested run', async () => {
+    mockApiGet.mockResolvedValue({
+      ...APPEARANCE_PAGE_1,
+      next_token: null 
+    });
 
-describe('fetchBrandMentionsAtRun', () => {
-  it('reads the scope at the exact run', async () => {
-    mockApiGet.mockResolvedValue(BRAND_MENTIONS_AT_RUN);
-
-    await fetchBrandMentionsAtRun(HOTEL_GROUP, '2026-09-08T06:00:00.000000Z');
+    await fetchBrandAppearances({
+      scope: HOTEL_GROUP,
+      marketId: null,
+      filters: { timestamp: RUN } 
+    });
 
     expect(mockApiGet).toHaveBeenCalledWith('/brand-mentions', {
       params: {
         group_id: 'hotel-sol',
-        timestamp: '2026-09-08T06:00:00.000000Z' 
+        timestamp: RUN,
+        view: 'appearances',
+        limit: '2000' 
       },
     });
   });
 
-  it('returns the brand mentions the API answered', async () => {
-    mockApiGet.mockResolvedValue(BRAND_MENTIONS_AT_RUN);
+  it('returns every appearance of every page in page order', async () => {
+    mockApiGet.mockResolvedValueOnce(APPEARANCE_PAGE_1).mockResolvedValueOnce(APPEARANCE_PAGE_2);
 
-    await expect(fetchBrandMentionsAtRun(HOTEL_GROUP, 'ts')).resolves.toStrictEqual(BRAND_MENTIONS_AT_RUN);
+    const rows = await fetchBrandAppearances({
+      scope: HOTEL_GROUP,
+      marketId: null,
+      filters: {} 
+    });
+
+    expect(rows).toStrictEqual([...APPEARANCE_PAGE_1.appearances, ...APPEARANCE_PAGE_2.appearances]);
   });
 
-  it('refuses an answer that is not brand mentions', async () => {
+  it('sends the previous page token and the brand when one is asked for', async () => {
+    mockApiGet.mockResolvedValueOnce(APPEARANCE_PAGE_1).mockResolvedValueOnce(APPEARANCE_PAGE_2);
+
+    await fetchBrandAppearances({
+      scope: HOTEL_GROUP,
+      marketId: 'es',
+      filters: { classification: 'first_party' },
+      brand: 'Hotel Sol' 
+    });
+
+    expect(mockApiGet).toHaveBeenLastCalledWith('/brand-mentions', {
+      params: {
+        group_id: 'hotel-sol',
+        market_id: 'es',
+        classification: 'first_party',
+        brand: 'Hotel Sol',
+        view: 'appearances',
+        limit: '2000',
+        next_token: APPEARANCE_PAGE_1.next_token,
+      },
+    });
+  });
+
+  it('refuses an answer that is not an appearances page', async () => {
     mockApiGet.mockResolvedValue({ aggregated: {} });
 
-    await expect(fetchBrandMentionsAtRun(HOTEL_GROUP, 'ts')).rejects.toThrow(InvalidBrandMentionsResponseError);
-    await expect(fetchBrandMentionsAtRun(HOTEL_GROUP, 'ts')).rejects.toThrow('Brand mentions API returned an invalid response');
+    const read = fetchBrandAppearances({
+      scope: HOTEL_GROUP,
+      marketId: null,
+      filters: {} 
+    });
+
+    await expect(read).rejects.toThrow(InvalidBrandMentionsResponseError);
+  });
+
+  it('refuses a page sequence that repeats a token', async () => {
+    mockApiGet.mockResolvedValue(APPEARANCE_PAGE_1);
+
+    const read = fetchBrandAppearances({
+      scope: HOTEL_GROUP,
+      marketId: null,
+      filters: {} 
+    });
+
+    await expect(read).rejects.toThrow('Brand mentions API repeated a continuation token');
   });
 
   it('names its error for the logs', () => {
     expect(new InvalidBrandMentionsResponseError().name).toBe('InvalidBrandMentionsResponseError');
+  });
+});
+
+describe('brandMentionsParams', () => {
+  it('leaves out the filters that are not set', () => {
+    expect(brandMentionsParams({
+      kind: 'keyword',
+      keyword: 'hotel sol' 
+    }, null, {
+      classification: null,
+      query_prompt_id: 'familia',
+      timestamp: null 
+    })).toStrictEqual({
+      keyword: 'hotel sol',
+      query_prompt_id: 'familia' 
+    });
   });
 });

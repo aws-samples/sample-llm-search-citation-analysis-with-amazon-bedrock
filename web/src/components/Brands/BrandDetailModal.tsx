@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import type {
   AggregatedBrand, ProviderBrandData 
 } from '../../types';
+import type { BrandAppearancesRequest } from '../../api/brandMentions';
 import { ProviderResponsesTab } from './ProviderResponsesTab';
 import { BrandOverviewTab } from './BrandOverviewTab';
 import { SelfReflectionPanel } from '../SelfReflection/SelfReflectionPanel';
@@ -20,6 +21,8 @@ import {
 
 interface BrandDetailModalProps {
   brand: AggregatedBrand;
+  /** The summary's scope and filters, for "Show all appearances". */
+  appearancesRequest?: BrandAppearancesRequest | null;
   providerData: ProviderBrandData[];
   keyword: string;
   queryPromptId?: string | null;
@@ -51,6 +54,7 @@ const modalTabs = (providerCount: number): ReadonlyArray<TabDefinition<ModalTab>
 
 export const BrandDetailModal = ({
   brand,
+  appearancesRequest = null,
   providerData,
   keyword,
   queryPromptId,
@@ -119,7 +123,7 @@ export const BrandDetailModal = ({
 
         <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === 'overview' && (
-            <BrandOverviewTab brand={brand} />
+            <BrandOverviewTab brand={brand} appearancesRequest={appearancesRequest} />
           )}
           {activeTab === 'responses' && (
             <ProviderResponsesTab brand={brand} providerData={providerData} />
