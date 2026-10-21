@@ -15,12 +15,16 @@ function largerShare(leader: BrandLeaderboardRow | null, brand: BrandLeaderboard
   return leading === null || brand.share_of_voice > leading ? brand : leader;
 }
 
-/** Your rank, the share-of-voice leader and the brand count of a leaderboard sorted by visibility score. */
-export function benchmarkStanding(brands: readonly BrandLeaderboardRow[]): BenchmarkStanding {
-  const index = brands.findIndex((brand) => brand.classification === 'first_party');
+/** Your rank, the share-of-voice leader and the brand count of a leaderboard sorted by visibility score.
+ *
+ * `brands` may be the top of a longer leaderboard (`/visibility` lists its most visible brands, then
+ * yours wherever it ranks): the rank is then the row's `position`, and `brandsTotal` counts every brand.
+ */
+export function benchmarkStanding(brands: readonly BrandLeaderboardRow[], brandsTotal: number = brands.length): BenchmarkStanding {
+  const ours = brands.findIndex((brand) => brand.classification === 'first_party');
   return {
-    rank: index === -1 ? null : index + 1,
+    rank: ours === -1 ? null : brands[ours].position ?? ours + 1,
     leader: brands.reduce<BrandLeaderboardRow | null>(largerShare, null),
-    brandsNamed: brands.length,
+    brandsNamed: brandsTotal,
   };
 }

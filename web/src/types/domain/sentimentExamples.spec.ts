@@ -22,6 +22,13 @@ describe('isSentimentExamplesResponse', () => {
     }))).toBe(true);
   });
 
+  it('accepts a page that points at the next one', () => {
+    expect(isSentimentExamplesResponse(buildSentimentExamplesResponse({
+      total: 37,
+      next_token: 'eyJvZmZzZXQiOjF9',
+    }))).toBe(true);
+  });
+
   it.each(['positive', 'neutral', 'mixed', 'negative'] as const)('accepts the %s sentiment', (sentiment) => {
     expect(isSentimentExamplesResponse(buildSentimentExamplesResponse({ sentiment }))).toBe(true);
   });

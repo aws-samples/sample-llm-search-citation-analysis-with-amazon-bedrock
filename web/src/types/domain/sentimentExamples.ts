@@ -40,10 +40,12 @@ export interface SentimentExamplesResponse {
   sentiment: SentimentLabel;
   /** The AI engine the examples are limited to; `null` for every engine. */
   provider: string | null;
-  /** Every matching sighting in the scope; `examples` holds the first ones. */
+  /** Every matching sighting in the scope; `examples` holds one page of them. */
   total: number;
-  /** Newest run first, then keyword, engine and brand. */
+  /** Newest run first, then keyword, engine and brand; at most `limit`, fewer when the answers are long. */
   examples: SentimentExample[];
+  /** Fetches the next page (`next_token=`); `null` on the last one. */
+  next_token: string | null;
 }
 
 function isSentimentLabel(value: unknown): value is SentimentLabel {
@@ -86,6 +88,7 @@ export function isSentimentExamplesResponse(value: unknown): value is SentimentE
     && isSentimentLabel(value.sentiment)
     && isNullableString(value.provider)
     && typeof value.total === 'number'
+    && isNullableString(value.next_token)
     && Array.isArray(value.examples)
     && value.examples.every(isSentimentExample);
 }

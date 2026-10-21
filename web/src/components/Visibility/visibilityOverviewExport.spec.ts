@@ -27,7 +27,7 @@ vi.mock('../../exporters/excelGenerator', async (importOriginal) => ({
   exportWorkbook: vi.fn(),
 }));
 
-const CONTEXT_ROW_COUNT = 18;
+const CONTEXT_ROW_COUNT = 19;
 
 describe('visibilityOverviewSheets', () => {
   it('builds the summary, definitions, keywords, brands, engines, sources and history sheets in that order', () => {
@@ -58,6 +58,7 @@ describe('visibilityOverviewSheets', () => {
       ['Change compared with', 'Each keyword\'s previous run'],
       ['Keywords compared', 1],
       ['Cited domains', 3],
+      ['Brands named', 2],
     ]);
   });
 

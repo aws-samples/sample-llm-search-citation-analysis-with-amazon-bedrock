@@ -5,7 +5,8 @@ export const mockSingleCompetitorRollup: CompetitorReportResponse = {
   rollup: {
     competitor: 'Adidas',
     outranked_keywords: [],
-    exclusive_sources: [],
+    exclusive_source_count: 0,
+    high_priority_source_count: 0,
     outreach_targets: [],
   },
 };

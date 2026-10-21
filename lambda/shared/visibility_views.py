@@ -22,6 +22,7 @@ from typing import Any
 
 from shared.kpi_engine import (
     COMPETITOR,
+    FIRST_PARTY,
     Answer,
     brand_kpis,
     brand_table,
@@ -40,6 +41,9 @@ PERIODS = tuple(_PERIOD_FORMATS)
 #: The most cited domains a visibility view lists.
 SOURCES_LIMIT = 25
 
+#: The most visible brands a visibility view lists (first-party and tracked brands are listed wherever they rank).
+BRANDS_LIMIT = 100
+
 #: The competitors whose share of voice is followed over time, next to the tracked brand.
 BRAND_TREND_COMPETITORS = 5
 
@@ -56,6 +60,16 @@ def _latest_timestamp(answers: Iterable[Answer]) -> str | None:
 
 def _of_persona(answers: Iterable[Answer], persona: str | None) -> list[Answer]:
     return [answer for answer in answers if persona is None or answer.persona == persona]
+
+
+def _listed_brands(rows: list[dict[str, Any]], tracked_brands: Iterable[str]) -> list[dict[str, Any]]:
+    """The first ``BRANDS_LIMIT`` leaderboard rows, then the first-party and tracked brands ranked below them."""
+    tracked = {name.lower() for name in tracked_brands}
+    beyond = [
+        row for row in rows[BRANDS_LIMIT:]
+        if row['classification'] == FIRST_PARTY or row['name'].lower() in tracked
+    ]
+    return rows[:BRANDS_LIMIT] + beyond
 
 
 def _run_change(
@@ -80,6 +94,7 @@ def visibility_view(
     previous_by_keyword: Mapping[str, Iterable[Answer]] | None = None,
     persona: str | None = None,
     brand: str | None = None,
+    tracked_brands: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Every KPI over the given latest-run answers of each keyword, pooled.
 
@@ -88,8 +103,11 @@ def visibility_view(
     (``None`` without such a keyword). ``persona`` keeps the answers of one
     persona; ``brand`` narrows the leaderboard to brands whose name contains
     it (the KPIs are unchanged). A keyword whose latest run has no answer is
-    reported without KPIs. ``engines`` breaks every KPI down by AI engine;
-    ``sources`` lists the ``SOURCES_LIMIT`` most cited domains (of
+    reported without KPIs. ``brands`` lists the ``BRANDS_LIMIT`` most visible
+    brands (of ``brands_total``), then every first-party brand and every
+    ``tracked_brands`` name ranked below them; each row's ``position`` is its
+    place in the whole leaderboard. ``engines`` breaks every KPI down by AI
+    engine; ``sources`` lists the ``SOURCES_LIMIT`` most cited domains (of
     ``sources_total``).
     """
     domains = list(owned_domains)
@@ -105,7 +123,7 @@ def visibility_view(
         }
         for keyword, answers in latest.items()
     ]
-    brands = brand_table(pooled)
+    brands = [{**row, 'position': index + 1} for index, row in enumerate(brand_table(pooled))]
     if brand:
         brands = [row for row in brands if brand.lower() in row['name'].lower()]
     sources = source_table(pooled, domains)
@@ -115,7 +133,8 @@ def visibility_view(
         'keywords_with_data': sum(row['has_data'] for row in rows),
         'kpis': brand_kpis(pooled, domains),
         'change': _run_change(latest, previous, domains),
-        'brands': brands,
+        'brands': _listed_brands(brands, tracked_brands),
+        'brands_total': len(brands),
         'engines': engine_breakdown(pooled, domains),
         'sources': sources[:SOURCES_LIMIT],
         'sources_total': len(sources),
@@ -249,6 +268,7 @@ def trend_view(
 
 
 __all__ = [
+    'BRANDS_LIMIT',
     'BRAND_TREND_COMPETITORS',
     'LATEST_BRANDS_LIMIT',
     'PERIODS',

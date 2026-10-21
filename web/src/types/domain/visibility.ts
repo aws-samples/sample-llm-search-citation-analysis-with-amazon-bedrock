@@ -23,9 +23,9 @@ export interface BrandLeaderboardRow {
   /** How many keywords' answers name the brand. */
   keywords: number;
   net_sentiment: number | null;
+  /** The brand's place in the whole leaderboard (1 = most visible); on `/visibility` rows only. */
+  position?: number;
 }
-
-/** One keyword of a visibility view: its latest run, or no data. */
 export interface KeywordVisibilityRow {
   keyword: string;
   timestamp: string | null;
@@ -50,7 +50,10 @@ export interface VisibilityResponse {
   kpis: BrandKpis;
   /** Latest against previous run over the keywords answered in both; `null` without such a keyword. */
   change: ScopeChange | null;
+  /** The 100 most visible brands, then your and your tracked brands wherever they rank. */
   brands: BrandLeaderboardRow[];
+  /** How many distinct brands the answers name (after the `brand` filter). */
+  brands_total: number;
   /** Every KPI per AI engine, engines in name order. */
   engines: EngineKpis[];
   /** The most cited domains (at most 25), most cited first. */
@@ -167,6 +170,8 @@ export interface CitationGapsResponse {
     coverage_rate: number;
   };
   keywords_analyzed?: number;
+  /** Scoped rollups: whether keywords of the scope were left out (at most 100 are read). */
+  keywords_truncated?: boolean;
   keyword_summaries?: Array<{
     keyword: string;
     gap_count: number;

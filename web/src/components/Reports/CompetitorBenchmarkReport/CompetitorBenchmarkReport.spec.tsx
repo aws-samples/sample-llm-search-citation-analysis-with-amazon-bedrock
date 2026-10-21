@@ -23,7 +23,10 @@ const renderBenchmark = sectionsRenderer(BenchmarkSections);
 
 const NIKE = buildBrandRow('Nike', { classification: 'first_party' });
 const ADIDAS = buildBrandRow('Adidas');
-const LATEST_BRANDS = reportWithVisibility({ brands: buildLatestBrands() });
+const LATEST_BRANDS = reportWithVisibility({
+  brands: buildLatestBrands(),
+  brands_total: 3,
+});
 
 describe('Competitor Benchmark headline', () => {
   it('shows your share of voice', () => {

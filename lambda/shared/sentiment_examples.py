@@ -25,6 +25,7 @@ from shared.kpi_engine import (
     answer_from_row,
     sighting_from_brand,
 )
+from shared.response_budget import PAGE_BUDGET_BYTES, take_within_budget
 
 #: The brand classifications an example can be read for; first-party by default.
 ExampleClassification = Literal['first_party', 'competitor']
@@ -102,18 +103,24 @@ def sentiment_examples(
     provider: str | None = None,
     classification: ExampleClassification = FIRST_PARTY,
     limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    max_bytes: int = PAGE_BUDGET_BYTES,
 ) -> tuple[int, list[dict[str, Any]]]:
-    """How many ``classification`` sightings in ``rows`` are labelled ``sentiment``, and the first ``limit`` of them.
+    """How many ``classification`` sightings in ``rows`` are labelled ``sentiment``, and one page of them.
 
     ``classification`` is each sighting's stored classification, first-party
     by default. ``provider`` keeps one AI engine's answers. Examples are ordered newest
     run first, then by keyword, provider and brand (keyword and brand
-    case-insensitively).
+    case-insensitively). The page starts at ``offset`` and holds at most
+    ``limit`` examples, fewer when their JSON would pass ``max_bytes`` (an
+    answer carries up to ``ANSWER_TEXT_CAP`` characters, 6 bytes each once
+    escaped when non-ASCII); it always holds one example when any is left.
     """
     examples = [example for row in rows for example in _row_examples(row, sentiment, provider, classification)]
     examples.sort(key=lambda example: (example['keyword'].lower(), example['provider'], example['brand'].lower()))
     examples.sort(key=lambda example: example['timestamp'], reverse=True)
-    return len(examples), examples[:limit]
+    page, _truncated = take_within_budget(examples[offset:], max_bytes=max_bytes, max_items=limit)
+    return len(examples), page
 
 
 __all__ = [
