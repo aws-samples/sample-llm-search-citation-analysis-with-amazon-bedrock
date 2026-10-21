@@ -1,8 +1,8 @@
 import type { BrandMentionsResponse } from '../../../types';
 import type { ExcelSheet } from '../../../exporters/excelGenerator';
 import {
-  buildChange, buildDeltas, buildDriver, buildHistory, buildKeywordChange, buildKeywordHistory, buildKeywordRun, buildRun,
-  RUN_2, unknownKpis
+  buildChange, buildDeltas, buildDetail, buildDriver, buildHistory, buildKeywordChange, buildKeywordHistory, buildKeywordRun, buildRun,
+  buildRunDrivers, RUN_2, unknownKpis
 } from './groupKpiHistory-fixtures';
 import { groupKpiReportSheets } from './groupKpiExport';
 
@@ -114,12 +114,12 @@ export function sheetRows(sheets: readonly ExcelSheet[], name: string): Record<s
 /** The workbook of `buildHistory()` for its second (compared) group run, with `mentions` as the raw-data sheet. */
 export function selectedRunSheets(mentions: BrandMentionsResponse | null = BRAND_MENTIONS_AT_RUN): ExcelSheet[] {
   const history = buildHistory();
-  return groupKpiReportSheets(history, 'Hotel Sol', history.runs[1], mentions, EXPORTED_AT);
+  return groupKpiReportSheets(history, 'Hotel Sol', history.runs[1], buildDetail(), mentions, EXPORTED_AT);
 }
 
 /** The Summary rows of `buildHistory()` for the run at `index`, as [Metric, Value, Change, Trend]. */
 export function summaryCells(index: number, history = buildHistory()): unknown[][] {
-  const sheets = groupKpiReportSheets(history, 'Hotel Sol', history.runs[index], null, EXPORTED_AT);
+  const sheets = groupKpiReportSheets(history, 'Hotel Sol', history.runs[index], buildDetail(), null, EXPORTED_AT);
   return sheetRows(sheets, 'Summary').map((row) => [row.Metric, row.Value, row.Change, row.Trend]);
 }
 
@@ -141,21 +141,23 @@ export function unknownValueSheets(): ExcelSheet[] {
   const base = buildHistory();
   const run = buildRun({
     kpis: unknownKpis(),
-    change: buildChange({
-      deltas: buildDeltas(),
-      drivers: [buildDriver({
-        mention: null,
-        deltas: buildDeltas(),
-      })],
-    }),
+    change: buildChange({ deltas: buildDeltas() }),
   });
   const history = {
     ...base,
     runs: [run],
+  };
+  const detail = buildDetail({
+    drivers: [buildRunDrivers({
+      drivers: [buildDriver({
+        mention: null,
+        deltas: buildDeltas(),
+      })],
+    })],
     keywords: [buildKeywordHistory('k', [buildKeywordRun({
       kpis: unknownKpis(),
       change: buildKeywordChange('gained'),
     })])],
-  };
-  return groupKpiReportSheets(history, 'Hotel Sol', run, null, EXPORTED_AT);
+  });
+  return groupKpiReportSheets(history, 'Hotel Sol', run, detail, null, EXPORTED_AT);
 }

@@ -32,6 +32,7 @@ vi.mock('./useBrandVisibilityReport', () => ({useBrandVisibilityReport: vi.fn()}
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
 vi.mock('../../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
+vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
 
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';

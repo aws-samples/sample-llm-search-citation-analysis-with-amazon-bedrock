@@ -40,6 +40,8 @@ interface ReportInputs {
 
 /** `/reports/group-kpis` for a keyword group, with the run and keyword the reader picked. */
 export interface GroupKpiSource {
+  /** The group: the drivers and keyword runs are read for it on demand. */
+  readonly scope: ReportScope;
   readonly history: ReportSlice<GroupKpiHistoryResponse>;
   readonly days: number;
   readonly runTimestamp: string | null;
@@ -151,6 +153,7 @@ function GroupKpiSourceLayer({
 
   const ready = useReportReady([history]);
   const groupKpis: GroupKpiSource = {
+    scope: inputs.scope,
     history: {
       data: history.data,
       loading: history.loading,

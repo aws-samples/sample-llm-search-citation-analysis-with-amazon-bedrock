@@ -6,6 +6,7 @@ import type {
 import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
 import { getErrorMessage } from '../../../infrastructure';
 import { exportGroupKpiReport } from './groupKpiExport';
+import { fetchGroupKpiDetail } from './groupKpiDetail';
 import { useExportAction } from '../../ui/useExportAction';
 import { useSelectedMarketId } from '../../Markets/marketSelectionContext';
 
@@ -42,6 +43,12 @@ export function GroupKpiExportButton({
     exporting, handleExport
   } = useExportAction(async () => {
     setNotice(null);
+    const target = {
+      scope,
+      marketId,
+    };
+    // The workbook needs every keyword's runs and every run's drivers; without them there is no export.
+    const detail = await fetchGroupKpiDetail(target, history.days, history.runs);
     const mentions = await fetchBrandMentionsAtRun(scope, run.timestamp, marketId).catch((error: unknown) => {
       setNotice({
         tone: 'warning',
@@ -49,7 +56,7 @@ export function GroupKpiExportButton({
       });
       return null;
     });
-    await exportGroupKpiReport(history, scopeLabel, run, mentions);
+    await exportGroupKpiReport(history, scopeLabel, run, detail, mentions);
   }, (error) => {
     setNotice({
       tone: 'error',

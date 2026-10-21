@@ -148,8 +148,32 @@ def build_group_kpi_history(
     drivers against the previous group run. Partial runs carry ``change: None``
     and are never the base of a comparison.
     """
+    answers = {keyword: answers_from_rows(rows_by_keyword.get(keyword, ())) for keyword in keywords}
+    return group_kpi_history_from_answers(keywords, answers, owned_domains)
+
+
+def _keyword_kpis_by_run(answers: Iterable[Answer], domains: list[str]) -> dict[str, dict[str, Any]]:
+    return {timestamp: brand_kpis(run, domains) for timestamp, run in answers_by_run(answers).items()}
+
+
+def keyword_run_histories(
+    keywords: list[str],
+    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    owned_domains: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Each keyword's drill-down (``keyword_history``): the ``keywords`` of ``build_group_kpi_history`` without the group runs."""
     domains = list(owned_domains)
-    answers = {keyword: answers_by_run(answers_from_rows(rows_by_keyword.get(keyword, ()))) for keyword in keywords}
+    return [keyword_history(keyword, _keyword_kpis_by_run(answers_by_keyword.get(keyword, ()), domains)) for keyword in keywords]
+
+
+def group_kpi_history_from_answers(
+    keywords: list[str],
+    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    owned_domains: Iterable[str] = (),
+) -> dict[str, Any]:
+    """``build_group_kpi_history`` over answers already read (``shared.kpi_engine.Answer``)."""
+    domains = list(owned_domains)
+    answers = {keyword: answers_by_run(answers_by_keyword.get(keyword, ())) for keyword in keywords}
     kpis = {
         keyword: {timestamp: brand_kpis(run, domains) for timestamp, run in runs.items()}
         for keyword, runs in answers.items()
@@ -185,13 +209,44 @@ def build_group_kpi_history(
     }
 
 
+def summary_run(run: Mapping[str, Any]) -> dict[str, Any]:
+    """A run of ``build_group_kpi_history`` with its change's drivers replaced by their count (``drivers_count``)."""
+    change = run['change']
+    if change is None:
+        return dict(run)
+    return {
+        **run,
+        'change': {**{key: value for key, value in change.items() if key != 'drivers'}, 'drivers_count': len(change['drivers'])},
+    }
+
+
+def keyword_summary(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """A keyword's drill-down reduced to how many runs it has and its latest run (``None`` without one)."""
+    runs = entry['runs']
+    return {'keyword': entry['keyword'], 'runs_count': len(runs), 'latest': runs[-1] if runs else None}
+
+
+def run_drivers(runs: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The drivers of every compared group run of ``build_group_kpi_history``'s ``runs``, oldest first."""
+    return [
+        {'timestamp': run['timestamp'], 'previous_timestamp': run['change']['previous_timestamp'], 'drivers': run['change']['drivers']}
+        for run in runs
+        if run['change'] is not None
+    ]
+
+
 __all__ = [
     'DRIVER_IMPACT_KPIS',
     'GROUP_RUN_MIN_COVERAGE',
     'answers_by_run',
     'build_group_kpi_history',
     'compare_group_runs',
+    'group_kpi_history_from_answers',
     'keyword_history',
+    'keyword_run_histories',
+    'keyword_summary',
     'mention_change',
+    'run_drivers',
     'run_models',
+    'summary_run',
 ]

@@ -12,6 +12,7 @@ import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { itShowsKpiTable } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
+vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
 
 const IMPACT_NOTE = 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.';
 

@@ -5,7 +5,9 @@ import {
   screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { buildHistory } from './groupKpiHistory-fixtures';
+import {
+  buildDetail, buildHistory
+} from './groupKpiHistory-fixtures';
 import {
   BRAND_MENTIONS_AT_RUN, WorkbookWriteError as WorkbookError
 } from './groupKpiExport-fixtures';
@@ -14,17 +16,44 @@ import {
 } from './GroupKpiReport-fixtures';
 import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
 import { exportGroupKpiReport } from './groupKpiExport';
+import {
+  fetchGroupKpiDetail, GroupKpiDetailError
+} from './groupKpiDetail';
 import { ApiRequestError } from '../../../infrastructure';
 
 vi.mock('../../../api/brandMentions', () => ({ fetchBrandMentionsAtRun: vi.fn() }));
 vi.mock('./groupKpiExport', () => ({ exportGroupKpiReport: vi.fn() }));
+vi.mock('./groupKpiDetail', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./groupKpiDetail')>(),
+  fetchGroupKpiDetail: vi.fn(),
+}));
 
 const HISTORY = buildHistory();
 const RUN = HISTORY.runs[1];
+const DETAIL = buildDetail();
 
 describe('GroupKpiExportButton', () => {
   beforeEach(() => {
     vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
+    vi.mocked(fetchGroupKpiDetail).mockResolvedValue(DETAIL);
+  });
+
+  it('reads every keyword\'s runs and every run\'s drivers of the period', async () => {
+    await clickExport();
+
+    expect(fetchGroupKpiDetail).toHaveBeenCalledWith({
+      scope: HOTEL_SOL_SCOPE,
+      marketId: null,
+    }, 90, HISTORY.runs);
+  });
+
+  it('writes no workbook when the keyword runs or drivers cannot be read', async () => {
+    vi.mocked(fetchGroupKpiDetail).mockRejectedValue(new GroupKpiDetailError('Group KPI API returned an invalid keyword page'));
+
+    await clickExport();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Excel export failed: /);
+    expect(exportGroupKpiReport).not.toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, DETAIL, BRAND_MENTIONS_AT_RUN);
   });
 
   it('fetches the brand mentions of the selected run', async () => {
@@ -36,7 +65,7 @@ describe('GroupKpiExportButton', () => {
   it('exports the history, the run and its brand mentions', async () => {
     await clickExport();
 
-    await waitFor(() => expect(exportGroupKpiReport).toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, BRAND_MENTIONS_AT_RUN));
+    await waitFor(() => expect(exportGroupKpiReport).toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, DETAIL, BRAND_MENTIONS_AT_RUN));
   });
 
   it('still exports, without the brand mentions sheet, when they cannot be read', async () => {
@@ -44,7 +73,7 @@ describe('GroupKpiExportButton', () => {
 
     await clickExport();
 
-    await waitFor(() => expect(exportGroupKpiReport).toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, null));
+    await waitFor(() => expect(exportGroupKpiReport).toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, DETAIL, null));
     expect(screen.getByRole('status')).toHaveTextContent('Exported without the brand mentions sheet: Failed to load brand mentions');
   });
 

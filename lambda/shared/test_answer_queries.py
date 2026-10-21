@@ -12,6 +12,7 @@ from shared.answer_queries import (
     history_since,
     latest_run_timestamp,
     previous_run_timestamp,
+    query_keyword_rows_capped,
     query_keyword_rows_since,
     query_keyword_run_rows,
     query_last_two_runs_rows,
@@ -19,9 +20,12 @@ from shared.answer_queries import (
 )
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
 from testing.dynamodb_stubs import fake_table
+from testing.search_results_fixtures import sort_condition
+from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
 RUN_2 = '2026-09-08T06:00:00.000000Z'
+WINDOW_START = '2026-01-01T00:00:00.000000Z'
 
 
 def _key_condition(call: Any) -> tuple[Any, Any]:
@@ -230,3 +234,47 @@ class TestHistorySince:
 
     def test_defaults_to_the_current_time(self):
         assert history_since(0) <= datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+class TestCappedWindowRows:
+    """``query_keyword_rows_capped`` over three runs of four answers each (12 rows)."""
+
+    ROWS = group_window_rows(1, 3, answers_per_run=4)[volume_keyword(0)]
+    KEYWORD = volume_keyword(0)
+
+    def test_reads_the_whole_window_oldest_first_under_the_cap(self):
+        capped = query_keyword_rows_capped(paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5), self.KEYWORD, WINDOW_START, 12)
+
+        assert ([row['timestamp_provider'] for row in capped.rows], capped.cut) == (sorted(row['timestamp_provider'] for row in self.ROWS), None)
+
+    def test_drops_the_oldest_run_the_cap_stopped_inside(self):
+        capped = query_keyword_rows_capped(paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5), self.KEYWORD, WINDOW_START, 6)
+
+        assert (sorted({row['timestamp'] for row in capped.rows}), capped.cut) == ([run_timestamp(2)], run_timestamp(1))
+
+    def test_drops_a_whole_run_when_the_cap_ends_on_its_last_row(self):
+        capped = query_keyword_rows_capped(paged_search_results_table({self.KEYWORD: self.ROWS}), self.KEYWORD, WINDOW_START, 8)
+
+        assert (sorted({row['timestamp'] for row in capped.rows}), capped.cut) == ([run_timestamp(1), run_timestamp(2)], run_timestamp(0))
+
+    def test_reads_the_window_newest_first_from_its_start(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS})
+
+        query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100)
+
+        kwargs = table.query.call_args.kwargs
+        assert (sort_condition(kwargs), kwargs['ScanIndexForward'], kwargs['ProjectionExpression']) == (('>=', WINDOW_START), False, ANSWER_PROJECTION)
+
+    def test_reads_through_the_last_row_of_the_run_until(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS})
+
+        capped = query_keyword_rows_capped(table, self.KEYWORD, run_timestamp(0), 100, until=run_timestamp(1))
+
+        assert sorted({row['timestamp'] for row in capped.rows}) == [run_timestamp(0), run_timestamp(1)]
+
+    def test_asks_for_one_row_past_the_cap_at_most(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS})
+
+        query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 6)
+
+        assert [call.kwargs['Limit'] for call in table.query.call_args_list] == [7]

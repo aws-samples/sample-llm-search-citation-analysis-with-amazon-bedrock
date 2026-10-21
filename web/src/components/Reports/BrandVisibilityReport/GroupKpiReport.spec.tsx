@@ -11,13 +11,14 @@ import {
   headlineCardLabels, sectionTable, sectionTitled, statFigure
 } from '../layout/reportQueries-fixtures';
 import {
-  buildChange, buildHistory, buildRun, historyWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
+  buildChange, buildHistory, buildRun, detailWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 import {
   itAsksForOwnedDomains, itShowsHeadlineCards, itShowsNoComparison
 } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
+vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
 
 describe('GroupKpiReport headline cards of the latest group run, not of a newer partial run', () => {
   it('shows four cards: mention rate, share of voice, visibility score and citation rate', () => {
@@ -128,7 +129,7 @@ describe('GroupKpiReport drivers', () => {
   });
 
   it('says when no keyword changed', () => {
-    renderGroupKpiReport({ history: buildHistory({ runs: [buildRun({ change: buildChange({ drivers: [] }) })] }) });
+    renderGroupKpiReport({ history: buildHistory({ runs: [buildRun({ change: buildChange({ drivers_count: 0 }) })] }) });
 
     expect(screen.getByText('No keyword changed between these runs.')).toBeInTheDocument();
   });
@@ -138,9 +139,23 @@ describe('GroupKpiReport drivers', () => {
     ['lost', 'No longer mentioned'],
     [null, 'Unchanged'],
   ] as const)('labels a keyword whose brand mention is %s as "%s"', (mention, label) => {
-    renderGroupKpiReport({ history: historyWithDriverMention(mention) });
+    renderGroupKpiReport({ detail: detailWithDriverMention(mention) });
 
     expect(sectionTable('What changed')[1][1]).toBe(label);
+  });
+
+  it('says how many keywords are being loaded behind the change', () => {
+    renderGroupKpiReport({ detailState: { loading: true } });
+
+    expect(within(sectionTitled('What changed')).getByText('Loading the 1 keywords behind this change…')).toBeInTheDocument();
+  });
+
+  it('reports drivers that could not be read', () => {
+    renderGroupKpiReport({ detailState: { error: 'Failed to fetch what drove the change' } });
+
+    expect(within(sectionTitled('What changed')).getByRole('alert')).toHaveTextContent(
+      'Could not load the keywords behind this change: Failed to fetch what drove the change',
+    );
   });
 });
 

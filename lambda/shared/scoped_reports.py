@@ -7,20 +7,26 @@ read at most ``SCOPE_KEYWORDS_CAP`` of the scope's keywords and echo the scope
 next to whether the cap cut it short. ``required_report_scope`` and
 ``capped_scope`` are those two steps; scope parsing itself lives in
 ``shared.scope_params``. ``TREND_WINDOW_PARAMS`` are the ``period`` / ``days``
-rules ``/trends`` and ``/reports/overview`` share.
+rules ``/trends`` and ``/reports/overview`` share. ``load_window_answers`` is
+the bounded windowed read behind ``/trends``, ``/reports/overview``,
+``/reports/group-kpis`` and the stability facts of ``/reports/insights``.
 """
 
 from __future__ import annotations
 
 import functools
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
+from shared.answer_queries import query_keyword_rows_capped
+from shared.kpi_engine import Answer, answers_from_rows
 from shared.scope_params import (
     MARKET_PARAM,
     SCOPE_KEYWORDS_CAP,
     SCOPE_PARAMS,
     ReportScope,
+    map_scope_keywords,
     scope_from_request,
     scope_keywords_from_request,
 )
@@ -89,6 +95,62 @@ def optional_scope_keywords(keywords_table: Callable[[], Any]) -> Decorator:
     ``scope_keywords_from_request`` without calling the handler.
     """
     return _scope_decorator(keywords_table, scope_keywords_from_request)
+
+
+#: SearchResults rows one windowed report reads at most, over all its keywords.
+#: About 8 s of reads and parsing at ~2 KB a projected row; the 30-day trend of
+#: 100 keywords at 24 answers a day is 72,000 rows.
+WINDOW_ROWS_CAP = 120_000
+
+#: The least rows a keyword is read, however many keywords share the cap: a few runs of every engine and persona.
+MIN_ROWS_PER_KEYWORD = 1_000
+
+
+def rows_per_keyword(keyword_count: int, cap: int = WINDOW_ROWS_CAP) -> int:
+    """The rows each of ``keyword_count`` keywords may read so that together they stay near ``cap``."""
+    return max(MIN_ROWS_PER_KEYWORD, cap // max(1, keyword_count))
+
+
+@dataclass(frozen=True)
+class WindowAnswers:
+    """Each keyword's answers of a window, cut at one run timestamp shared by every keyword."""
+
+    answers: dict[str, list[Answer]]
+    truncated_before: str | None
+    """``None`` when the window was read whole; else the run timestamp at and before which no answer was kept."""
+
+
+def load_window_answers(
+    table: Any,
+    keywords: list[str],
+    since: str,
+    *,
+    until: str | None = None,
+    max_rows: int | None = None,
+) -> WindowAnswers:
+    """Each keyword's answers from ``since`` on (through the run ``until``), read in parallel and bounded.
+
+    Each keyword reads at most ``max_rows`` rows (default ``rows_per_keyword``),
+    newest first. When a keyword's cap cuts its window, every keyword is cut at
+    the latest of those cuts, so the answers kept are every answer of the runs
+    after ``truncated_before``: a shorter window, never a window with holes.
+    A keyword whose read fails has no answers (logged by ``map_scope_keywords``).
+    """
+    limit = max_rows if max_rows is not None else rows_per_keyword(len(keywords))
+
+    def read(keyword: str) -> tuple[list[Answer], str | None]:
+        capped = query_keyword_rows_capped(table, keyword, since, limit, until=until)
+        return answers_from_rows(capped.rows), capped.cut
+
+    results = map_scope_keywords(keywords, read, lambda _keyword: ([], None))
+    cut = max((keyword_cut for _answers, keyword_cut in results if keyword_cut is not None), default=None)
+    return WindowAnswers(
+        answers={
+            keyword: answers if cut is None else [answer for answer in answers if answer.timestamp > cut]
+            for keyword, (answers, _cut) in zip(keywords, results, strict=True)
+        },
+        truncated_before=cut,
+    )
 
 
 def capped_scope(scope: ReportScope, cap: int = SCOPE_KEYWORDS_CAP) -> tuple[list[str], dict[str, Any]]:

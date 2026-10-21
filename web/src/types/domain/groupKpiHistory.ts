@@ -1,7 +1,8 @@
 /**
  * `GET /reports/group-kpis`: every analysis run of a keyword group with its
- * KPIs, the keywords that drove each change, and a per-keyword drill-down of
- * every run. KPIs: `docs/kpi-definitions.md`; run semantics:
+ * KPIs and each keyword's latest run (`view=summary`), each keyword's runs
+ * (`view=keywords`, paged) and the keywords that drove each change
+ * (`view=drivers`, paged). KPIs: `docs/kpi-definitions.md`; run semantics:
  * `lambda/shared/group_kpi_history.py`.
  */
 import type { ReportScopeInfo } from './baseTypes';
@@ -54,7 +55,8 @@ export interface GroupRunChange {
   previous_timestamp: string;
   deltas: KpiDeltas;
   trends: Record<TrendedKpiId, KpiTrend>;
-  drivers: GroupRunDriver[];
+  /** How many keywords moved; the drivers themselves are read with `view=drivers`. */
+  drivers_count: number;
   keywords_entered: string[];
   keywords_left: string[];
 }
@@ -83,9 +85,19 @@ export interface KeywordRun {
   } | null;
 }
 
+/** One keyword's runs in the window, oldest first (`view=keywords`). */
 export interface KeywordRunHistory {
   keyword: string;
   runs: KeywordRun[];
+  /** Older runs were left out to keep the page within its size budget. */
+  runs_truncated?: boolean;
+}
+
+/** One keyword in the summary: how many runs it has in the window and its latest one. */
+export interface KeywordRunSummary {
+  keyword: string;
+  runs_count: number;
+  latest: KeywordRun | null;
 }
 
 export interface GroupKpiHistoryResponse {
@@ -96,7 +108,30 @@ export interface GroupKpiHistoryResponse {
   /** Whether owned domains are configured, so the citation KPIs are measured. */
   citations_configured: boolean;
   runs: GroupRun[];
+  /** Older runs were left out to keep the summary within its size budget. */
+  runs_truncated: boolean;
+  /** The run the read stopped at when the period holds more data than one report reads; `null` when read whole. */
+  truncated_before: string | null;
+  keywords: KeywordRunSummary[];
+}
+
+/** The keywords that drove one compared group run (`view=drivers`). */
+export interface GroupRunDrivers {
+  timestamp: string;
+  previous_timestamp: string;
+  drivers: GroupRunDriver[];
+}
+
+/** A page of `view=keywords`. */
+export interface GroupKeywordRunsPage {
   keywords: KeywordRunHistory[];
+  next_token: string | null;
+}
+
+/** A page of `view=drivers`. */
+export interface GroupRunDriversPage {
+  changes: GroupRunDrivers[];
+  next_token: string | null;
 }
 
 function isGroupRun(value: unknown): value is GroupRun {
@@ -111,11 +146,43 @@ function isKeywordRunHistory(value: unknown): value is KeywordRunHistory {
   return isRecord(value) && typeof value.keyword === 'string' && Array.isArray(value.runs);
 }
 
+function isKeywordRunSummary(value: unknown): value is KeywordRunSummary {
+  return isRecord(value)
+    && typeof value.keyword === 'string'
+    && typeof value.runs_count === 'number'
+    && (value.latest === null || isRecord(value.latest));
+}
+
+function isGroupRunDrivers(value: unknown): value is GroupRunDrivers {
+  return isRecord(value)
+    && typeof value.timestamp === 'string'
+    && typeof value.previous_timestamp === 'string'
+    && Array.isArray(value.drivers);
+}
+
+function isNextToken(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
 export function isGroupKpiHistoryResponse(value: unknown): value is GroupKpiHistoryResponse {
   return isRecord(value)
     && isRecord(value.scope)
     && Array.isArray(value.runs)
     && value.runs.every(isGroupRun)
     && Array.isArray(value.keywords)
-    && value.keywords.every(isKeywordRunHistory);
+    && value.keywords.every(isKeywordRunSummary);
+}
+
+export function isGroupKeywordRunsPage(value: unknown): value is GroupKeywordRunsPage {
+  return isRecord(value)
+    && Array.isArray(value.keywords)
+    && value.keywords.every(isKeywordRunHistory)
+    && isNextToken(value.next_token);
+}
+
+export function isGroupRunDriversPage(value: unknown): value is GroupRunDriversPage {
+  return isRecord(value)
+    && Array.isArray(value.changes)
+    && value.changes.every(isGroupRunDrivers)
+    && isNextToken(value.next_token);
 }
