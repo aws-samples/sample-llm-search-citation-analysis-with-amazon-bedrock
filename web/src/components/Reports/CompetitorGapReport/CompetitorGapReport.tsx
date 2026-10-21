@@ -27,6 +27,15 @@ import { rollupSlice } from './sections/rollupSection';
  * the api client into a flat `currentRollup` shape that the section
  * components can consume directly.
  */
+/**
+ * The competitor the report may load: the URL's one only once the brand
+ * config lists it. An unknown one (deleted, or a bookmark from another
+ * config) is redirected away, and the API refuses it with a 400.
+ */
+function configuredSelection(selected: string | null, configured: readonly string[]): string | null {
+  return selected !== null && configured.includes(selected) ? selected : null;
+}
+
 export function CompetitorGapReport() {
   const params = useParams<{ competitor?: string }>();
   const navigate = useNavigate();
@@ -62,7 +71,7 @@ export function CompetitorGapReport() {
     }
   }, [selected, configuredCompetitors, navigate]);
 
-  const data = useCompetitorGap(selected);
+  const data = useCompetitorGap(configuredSelection(selected, configuredCompetitors));
 
   usePrintMode({ ready: Boolean(selected) && data.ready });
 
@@ -80,7 +89,7 @@ export function CompetitorGapReport() {
     );
   }
 
-  if (!selected) {
+  if (!selected || !configuredCompetitors.includes(selected)) {
     return (
       <ReportLayout
         title="Competitor Gap"

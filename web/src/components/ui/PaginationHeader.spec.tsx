@@ -25,6 +25,12 @@ describe('PaginationHeader', () => {
     expect(screen.getByText('101-110 of 110')).toBeInTheDocument();
   });
 
+  it('displays 0 of 0 when nothing matches', () => {
+    renderPaginationHeader({ total: 0 });
+
+    expect(screen.getByText('0 of 0')).toBeInTheDocument();
+  });
+
   it('displays the item count when the page size is All', () => {
     renderPaginationHeader({ pageSize: SHOW_ALL_ITEMS });
 

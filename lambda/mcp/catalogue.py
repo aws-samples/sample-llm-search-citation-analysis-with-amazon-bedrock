@@ -363,6 +363,33 @@ def _provider_summary(data: Any) -> JsonObject:
     return {'providers': [{field: item.get(field) for field in _PROVIDER_FIELDS} for item in providers if isinstance(item, dict)]}
 
 
+# What an engine answer keeps in a brand-mentions summary: the full text is
+# what makes the answer outgrow the result cap; a preview and the length stay.
+_ENGINE_ANSWER_DROPPED = ('full_response', 'seo_feedback', 'geo_feedback')
+
+
+def _brand_mentions_summary(data: Any) -> Any:
+    """A brand-mentions summary sized for a tool result: each brand's aggregates, each engine's answer without its text.
+
+    The brands' appearance previews and the answers' full text are what push a
+    group summary past ``MAX_RESULT_CHARS`` (a model then gets only a text
+    preview); ``view=appearances`` pages every appearance. An appearances page
+    passes through unchanged.
+    """
+    if not isinstance(data, dict) or 'aggregated' not in data:
+        return data
+    aggregated = data['aggregated'] if isinstance(data['aggregated'], dict) else {}
+    brands = [
+        {field: value for field, value in brand.items() if field != 'appearances'}
+        for brand in aggregated.get('brands', []) if isinstance(brand, dict)
+    ]
+    engines = [
+        {field: value for field, value in answer.items() if field not in _ENGINE_ANSWER_DROPPED}
+        for answer in data.get('by_provider', []) if isinstance(answer, dict)
+    ]
+    return {**data, 'aggregated': {**aggregated, 'brands': brands}, 'by_provider': engines}
+
+
 # --- Argument validation -------------------------------------------------------
 
 _JSON_TYPES: dict[str, type] = {'string': str, 'boolean': bool, 'array': list, 'object': dict}
@@ -693,6 +720,7 @@ OPERATIONS: tuple[Tool, ...] = (
         _get_route('brand-mentions', '/api/brand-mentions', 'provider', 'classification', 'query_prompt_id', 'timestamp',
                    'view', 'brand', 'limit', 'next_token', scope=True),
         ({'keyword': _EXAMPLE_KEYWORD}, {'keyword': _EXAMPLE_KEYWORD, 'provider': 'openai'}),
+        shape=_brand_mentions_summary,
     ),
     _tool(
         'get_persona_rankings', _BRAND_MENTIONS,

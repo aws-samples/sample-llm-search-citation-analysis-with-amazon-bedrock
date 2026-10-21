@@ -33,6 +33,13 @@ handed over through S3 instead of failing.
 - **Persona rankings and the self-reflection POST read the newest run.** Once a keyword's results passed 1 MB they
   took the "latest" run from the oldest page.
 - **Prompt insights honours `limit` up to 100** (values above 20 had no effect).
+- **Citation URLs longer than 1,024 bytes are stored** (`shared.utils.normalize_url` → `bounded_url`): DynamoDB caps the
+  Citations sort key at 1,024 bytes, so a Google Travel hotel link with an opaque `ap=` state blob failed its write and
+  the citation was lost. An oversized query string is dropped (the page address stays); anything longer is cut and
+  ends with a SHA-256 digest so two long URLs never share a key.
+- **The Competitor Gap report no longer asks for a competitor the brand config does not list** (a bookmark from
+  another configuration answered 400 while the page redirected); it waits for the configured list first.
+- **The pager says "0 of 0"** when a filter matches nothing (it said "1-0 of 0").
 - **Raw responses browse every file of a folder** (it stopped at the first 1,000 S3 keys without saying so).
 - **Content Studio rows stay under DynamoDB's 400 KB item cap**: `raw_content` is dropped first; a row that still does
   not fit fails with `content_too_large` instead of losing the generation silently.
@@ -75,7 +82,13 @@ handed over through S3 instead of failing.
   cuts transfer, not the Lambda cap, which is measured before compression.
 - **MCP tools** gain the new parameters (`next_token` on every paginated tool, citations sort and filters,
   brand-mention appearances, group KPI views). A result the 50,000-character cap cuts keeps its `next_token` with a
-  note to ask again with a smaller `limit`.
+  note to ask again with a smaller `limit`. `get_brand_mentions` returns each brand's aggregates and each engine's
+  answer without its full text (a 30-keyword group summary came back as a cut text preview; now about 40,000
+  characters of structured data), with `view=appearances` for every appearance.
+- **The Dashboard lists the newest 5 open alerts**, with "Show all N alerts" to expand the rest (20 open alerts
+  filled the page).
+- A YouTube video whose details cannot be read (private, removed, not embeddable) is logged at INFO like any failed
+  navigation, not as a warning.
 
 ### Added
 

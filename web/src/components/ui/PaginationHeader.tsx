@@ -37,6 +37,13 @@ const PageButton = ({
  * Header of a paginated table: the page-size select, the visible range and,
  * when there is more than one page, a First / Prev / Next / Last pager.
  */
+/** "1-25 of 120"; "0 of 0" when nothing matches (never "1-0 of 0"); "All 120" when every item shows. */
+function rangeLabel(showAll: boolean, startIndex: number, endIndex: number, total: number): string {
+  if (showAll) return `All ${total}`;
+  if (total === 0) return '0 of 0';
+  return `${startIndex + 1}-${Math.min(endIndex, total)} of ${total}`;
+}
+
 export const PaginationHeader = ({
   page,
   pageSize,
@@ -70,7 +77,7 @@ export const PaginationHeader = ({
             <option value={SHOW_ALL_ITEMS}>All ({total})</option>
           </select>
           <span className="text-gray-500 text-xs sm:text-sm">
-            {showAll ? `All ${total}` : `${startIndex + 1}-${Math.min(endIndex, total)} of ${total}`}
+            {rangeLabel(showAll, startIndex, endIndex, total)}
           </span>
         </div>
         {totalPages > 1 && (

@@ -9,7 +9,7 @@ import { formatDate } from '../../formatting/dateFormatter';
 import { buildAlertItem } from '../../types/domain/alerts-fixtures';
 import { AlertsPanel } from './AlertsPanel';
 import {
-  buildAlertsPanelHookResult, buildAlertsPanelMembership
+  buildAlertsPanelHookResult, buildAlertsPanelMembership, buildOpenAlertsOfRuns
 } from './AlertsPanel-fixtures';
 import { renderWithMarketSelection } from '../Markets/markets-fixtures';
 
@@ -173,5 +173,45 @@ describe('AlertsPanel markets', () => {
     renderWithMarketSelection(<AlertsPanel />);
 
     expect(screen.queryByText('Market:')).not.toBeInTheDocument();
+  });
+});
+
+describe('AlertsPanel preview', () => {
+  function renderOpenAlerts(count: number) {
+    mockUseOpenAlerts.mockReturnValue(buildOpenAlertsOfRuns(count));
+    render(<AlertsPanel />);
+  }
+
+  it('lists only the newest five of twenty open alerts, newest run first', () => {
+    renderOpenAlerts(20);
+
+    expect(screen.getAllByRole('listitem').map((row) => row.querySelector('p.text-gray-700')?.textContent)).toStrictEqual([
+      'Alert of run 19.', 'Alert of run 18.', 'Alert of run 17.', 'Alert of run 16.', 'Alert of run 15.',
+    ]);
+  });
+
+  it('keeps the total in the open-alert count', () => {
+    renderOpenAlerts(20);
+
+    expect(screen.getByText('20 open alerts')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['lists every open alert after "Show all" is pressed', ['Show all 20 alerts'], 20],
+    ['goes back to the newest five when the list is collapsed again', ['Show all 20 alerts', 'Show the newest 5'], 5],
+  ])('%s', async (_name, buttons, rows) => {
+    renderOpenAlerts(20);
+
+    for (const name of buttons) {
+      await userEvent.click(screen.getByRole('button', { name }));
+    }
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(rows);
+  });
+
+  it('offers no "Show all" when five or fewer alerts are open', () => {
+    renderOpenAlerts(5);
+
+    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
   });
 });

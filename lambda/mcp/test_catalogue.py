@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any, ClassVar
 
 import pytest
 from catalogue import (
@@ -348,6 +349,39 @@ class TestProviderShape:
         assert shape is not None
 
         assert shape(['not', 'a', 'dict']) == {'providers': []}
+
+
+class TestBrandMentionsShape:
+    """A group summary must fit a tool result, so previews and answer text are left to view=appearances."""
+
+    SUMMARY: ClassVar[dict[str, Any]] = {
+        'keyword': 'parador',
+        'aggregated': {
+            'brands': [{'name': 'Paradores', 'total_mentions': 3, 'appearances': [{'provider': 'openai', 'rank': 1}]}],
+            'total_unique_brands': 1,
+        },
+        'by_provider': [{'provider': 'openai', 'response_preview': 'Paradores…', 'full_response': 'x' * 12_000,
+                         'seo_feedback': 'long', 'geo_feedback': 'long', 'citations': ['https://example.com']}],
+    }
+
+    @staticmethod
+    def _shape() -> Any:
+        shape = find_operation('get_brand_mentions').shape
+        assert shape is not None
+        return shape
+
+    def test_keeps_each_brands_aggregates_without_its_appearance_preview(self):
+        assert self._shape()(self.SUMMARY)['aggregated']['brands'] == [{'name': 'Paradores', 'total_mentions': 3}]
+
+    def test_keeps_each_engine_answer_without_its_full_text(self):
+        assert self._shape()(self.SUMMARY)['by_provider'] == [
+            {'provider': 'openai', 'response_preview': 'Paradores…', 'citations': ['https://example.com']},
+        ]
+
+    def test_passes_an_appearances_page_through_unchanged(self):
+        page = {'appearances': [{'brand': 'Paradores', 'rank': 1}], 'next_token': 'abc'}
+
+        assert self._shape()(page) == page
 
 
 class TestSpendEntries:

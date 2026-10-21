@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   GLOBAL_MARKET_ID,
   type AlertItem, type AlertMetricValue, type AlertSeverity, type AlertType, type Market
@@ -34,6 +35,14 @@ const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
 
 function countLabel(count: number): string {
   return count === 1 ? '1 open alert' : `${count} open alerts`;
+}
+
+/** Open alerts the dashboard lists before "Show all". */
+export const DASHBOARD_ALERT_PREVIEW = 5;
+
+/** Newest run first; alerts of one run keep the order the API gave them. */
+function newestFirst(items: readonly AlertItem[]): AlertItem[] {
+  return [...items].sort((left, right) => right.run_timestamp.localeCompare(left.run_timestamp));
 }
 
 function metricValueLabel(metricValue: AlertMetricValue): string {
@@ -127,6 +136,10 @@ export function AlertsPanel() {
   } = useOpenAlerts();
   const { isAdmin } = useIsAdmin();
   const { catalog } = useMarketSelection();
+  const [showAll, setShowAll] = useState(false);
+  const sorted = newestFirst(items);
+  const visible = showAll ? sorted : sorted.slice(0, DASHBOARD_ALERT_PREVIEW);
+  const hidden = sorted.length - visible.length;
 
   return (
     <section
@@ -162,7 +175,7 @@ export function AlertsPanel() {
       )}
       {items.length > 0 && (
         <ul className="divide-y divide-gray-200">
-          {items.map((alertItem) => (
+          {visible.map((alertItem) => (
             <AlertRow
               key={alertItem.id}
               alertItem={alertItem}
@@ -173,6 +186,18 @@ export function AlertsPanel() {
             />
           ))}
         </ul>
+      )}
+      {(hidden > 0 || showAll) && sorted.length > DASHBOARD_ALERT_PREVIEW && (
+        <div className="border-t border-gray-200 p-3 text-center">
+          <button
+            type="button"
+            onClick={() => { setShowAll(!showAll); }}
+            aria-expanded={showAll}
+            className="text-sm font-medium text-blue-600 hover:text-blue-800"
+          >
+            {showAll ? `Show the newest ${DASHBOARD_ALERT_PREVIEW}` : `Show all ${sorted.length} alerts`}
+          </button>
+        </div>
       )}
     </section>
   );
