@@ -58,6 +58,7 @@ function scopeContextRows(visibility: VisibilityResponse, trends: HistoricalTren
     contextRow('Change compared with', 'Each keyword\'s previous run'),
     contextRow('Keywords compared', visibility.change?.keywords_compared ?? ''),
     contextRow('Cited domains', visibility.sources_total),
+    contextRow('Brands named', visibility.brands_total),
   ];
 }
 

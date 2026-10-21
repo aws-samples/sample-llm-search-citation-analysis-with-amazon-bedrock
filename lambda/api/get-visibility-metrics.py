@@ -21,6 +21,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import query_last_two_runs_rows
 from shared.api_response import success_response
+from shared.brand_visibility import tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.scope_params import (
@@ -69,11 +70,15 @@ def scope_visibility(
     *,
     persona: str | None,
     brand: str | None,
+    tracked_brands: list[str] | None = None,
 ) -> dict[str, Any]:
     """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords."""
     keywords, scope_fields = capped_scope(scope)
     latest, previous = load_last_two_runs(keywords)
-    view = visibility_view(keywords, latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand)
+    view = visibility_view(
+        keywords, latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand,
+        tracked_brands=tracked_brands or (),
+    )
     return {
         **scope_fields,
         'citations_configured': bool(owned_domains),
@@ -90,8 +95,12 @@ def scope_visibility(
 @required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
 def handler(event, context, report_scope, brand=None, query_prompt_id=None):
     """GET /api/visibility — the KPIs of a scope's latest runs (see the module docstring)."""
-    owned_domains = owned_domains_from(get_brand_config())
+    config = get_brand_config()
+    first_party, competitors = tracked_brand_names(config)
     return success_response(
-        scope_visibility(report_scope, owned_domains, persona=query_prompt_id, brand=brand),
+        scope_visibility(
+            report_scope, owned_domains_from(config), persona=query_prompt_id, brand=brand,
+            tracked_brands=[*first_party, *competitors],
+        ),
         event,
     )

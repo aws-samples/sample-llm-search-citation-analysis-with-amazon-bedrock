@@ -9,6 +9,7 @@ import pytest
 from shared.kpi_engine import TRENDED_KPIS, Answer, answers_from_rows
 from shared.visibility_views import (
     BRAND_TREND_COMPETITORS,
+    BRANDS_LIMIT,
     LATEST_BRANDS_LIMIT,
     PERIODS,
     SOURCES_LIMIT,
@@ -82,6 +83,14 @@ class TestVisibilityView:
 
         assert ([brand['name'] for brand in view['brands']], view['kpis']['answers']) == ([HOTEL], 3)
 
+    def test_gives_each_brand_its_place_in_the_whole_leaderboard(self):
+        view = visibility_view(['spa', 'beach'], self.ANSWERS, brand='sol')
+
+        assert ([brand['position'] for brand in view['brands']], view['brands_total']) == ([2], 1)
+
+    def test_counts_every_brand_of_the_leaderboard(self):
+        assert visibility_view(['spa', 'beach'], self.ANSWERS)['brands_total'] == 2
+
     def test_keeps_the_answers_of_one_persona(self):
         answers = {'spa': [_hotel_first('spa', DAY_2, persona='family'), _rival_only('spa', DAY_2)]}
 
@@ -140,6 +149,31 @@ class TestVisibilityView:
         change = visibility_view(['spa'], latest, previous_by_keyword=previous, persona='family')['change']
 
         assert change['deltas']['mention_rate'] == 100.0
+
+
+class TestBrandsLimit:
+    # BRANDS_LIMIT + 20 brands, each in its own answer at rank 1, so one beats the next on the name only;
+    # 'Zz Hotel Sol' (first party) and 'Zz Tracked Rival' sort last of all.
+    ANSWERS = {
+        'spa': [
+            *(_answer('spa', DAY_2, (f'Brand {index:03d}', 'other', 1)) for index in range(BRANDS_LIMIT + 20)),
+            _answer('spa', DAY_2, ('Zz Hotel Sol', 'first_party', 1)),
+            _answer('spa', DAY_2, ('Zz Tracked Rival', 'other', 1)),
+        ],
+    }
+
+    def test_lists_the_most_visible_brands_up_to_the_limit_then_the_tracked_ones(self):
+        brands = visibility_view(['spa'], self.ANSWERS, tracked_brands=['zz tracked rival'])['brands']
+
+        assert [brand['name'] for brand in brands[BRANDS_LIMIT - 1:]] == [f'Brand {BRANDS_LIMIT - 1:03d}', 'Zz Hotel Sol', 'Zz Tracked Rival']
+
+    def test_keeps_the_first_party_brand_below_the_limit_without_tracked_names(self):
+        brands = visibility_view(['spa'], self.ANSWERS)['brands']
+
+        assert [(brand['name'], brand['position']) for brand in brands[BRANDS_LIMIT:]] == [('Zz Hotel Sol', BRANDS_LIMIT + 21)]
+
+    def test_counts_every_brand_beyond_the_limit(self):
+        assert visibility_view(['spa'], self.ANSWERS)['brands_total'] == BRANDS_LIMIT + 22
 
 
 class TestPeriodKey:

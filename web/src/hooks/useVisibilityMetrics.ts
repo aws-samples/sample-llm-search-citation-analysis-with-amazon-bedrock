@@ -14,6 +14,7 @@ function isVisibilityResponse(value: unknown): value is VisibilityResponse {
     && isRecord(value.scope)
     && isRecord(value.kpis)
     && Array.isArray(value.brands)
+    && typeof value.brands_total === 'number'
     && Array.isArray(value.keywords);
 }
 
