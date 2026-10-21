@@ -13,10 +13,13 @@ interface ContentHistoryProps {
   loading: boolean;
   onDelete: (id: string) => Promise<boolean>;
   onMarkViewed: (id: string) => Promise<boolean>;
+  /** Set while older items remain past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export const ContentHistory = ({
-  history, loading, onDelete, onMarkViewed
+  history, loading, onDelete, onMarkViewed, onLoadMore, loadingMore = false
 }: ContentHistoryProps) => {
   const [selectedItem, setSelectedItem] = useState<ContentStudioHistory | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -83,6 +86,17 @@ export const ContentHistory = ({
           />
         ))}
       </div>
+
+      {onLoadMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="mt-3 w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+        >
+          {loadingMore ? 'Loading…' : 'Load older content'}
+        </button>
+      )}
 
       {selectedItem && (
         <ContentDetailModal

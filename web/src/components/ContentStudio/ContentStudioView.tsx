@@ -169,6 +169,8 @@ interface TabsProps {
   /** The ideas have not arrived yet, so the high-priority count is unknown. */
   ideasPending: boolean;
   unviewedCount: number;
+  /** The API stopped counting at its cap. */
+  unviewedCountCapped: boolean;
   historyLength: number;
   /** The `TabPanel` the tabs control. */
   panelId: string;
@@ -192,15 +194,16 @@ const HighPriorityBadge = ({
 
 /** The Generated Content badge: unviewed pieces pulse; otherwise the size of the history. */
 const HistoryBadge = ({
-  unviewedCount, historyLength
+  unviewedCount, unviewedCountCapped, historyLength
 }: {
   readonly unviewedCount: number;
+  readonly unviewedCountCapped: boolean;
   readonly historyLength: number;
 }) => {
   if (unviewedCount > 0) {
     return (
       <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
-        {unviewedCount} new
+        {unviewedCount}{unviewedCountCapped ? '+' : ''} new
       </span>
     );
   }
@@ -218,7 +221,7 @@ function ideasPending(activeTab: TabType, loading: boolean, ideas: readonly Cont
 }
 
 const Tabs = ({
-  activeTab, setActiveTab, highPriorityCount, ideasPending, unviewedCount, historyLength, panelId
+  activeTab, setActiveTab, highPriorityCount, ideasPending, unviewedCount, unviewedCountCapped, historyLength, panelId
 }: TabsProps) => (
   <TabBar
     label="Content Studio"
@@ -235,7 +238,7 @@ const Tabs = ({
       {
         id: 'history',
         label: 'Generated Content',
-        badge: <HistoryBadge unviewedCount={unviewedCount} historyLength={historyLength} />,
+        badge: <HistoryBadge unviewedCount={unviewedCount} unviewedCountCapped={unviewedCountCapped} historyLength={historyLength} />,
       },
     ]}
     activeId={activeTab}
@@ -267,6 +270,10 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     ideas,
     history,
     unviewedCount,
+    unviewedCountCapped,
+    historyHasMore,
+    historyLoadingMore,
+    loadMoreHistory,
     loading,
     generating,
     error,
@@ -361,6 +368,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
         highPriorityCount={highPriorityCount}
         ideasPending={ideasPending(activeTab, loading, ideas)}
         unviewedCount={unviewedCount}
+        unviewedCountCapped={unviewedCountCapped}
         historyLength={history.length}
         panelId={panelId}
       />
@@ -405,6 +413,8 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
               loading={loading}
               onDelete={deleteContent}
               onMarkViewed={markViewed}
+              onLoadMore={historyHasMore ? () => void loadMoreHistory() : undefined}
+              loadingMore={historyLoadingMore}
             />
           </div>
         )}
