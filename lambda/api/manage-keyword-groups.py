@@ -25,6 +25,7 @@ from functools import partial, wraps
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 # Add shared module to path
@@ -67,6 +68,9 @@ MAX_MEMBERSHIP_CHANGES = 500
 # a group of thousands of keywords outlasts API Gateway's 29 s integration limit.
 # Ten also matches botocore's default connection pool, so no thread waits for one.
 MEMBERSHIP_WRITE_WORKERS = 10
+# Keywords GSI: partition `status`, sort `keyword`, ALL projection; sparse
+# (rows without a status are absent).
+STATUS_INDEX = 'StatusIndex'
 
 _Route = Callable[..., dict[str, Any]]
 
@@ -104,15 +108,18 @@ def _member_counts() -> dict[str, int]:
     Counting it would recreate exactly the mismatch above for rows predating
     the field. The keyword list marks such a row Paused for the same reason,
     and activating it writes the attribute, which puts it in the index.
+
+    So the counts come from that same index: one query of the ``active``
+    partition, projected to ``group_ids``, instead of a scan of every keyword.
+    The result is the same; the read skips paused and inactive rows.
     """
     counts: dict[str, int] = {}
     for item in collect_all_items(
-        keywords_table.scan,
-        ProjectionExpression='group_ids, #status',
-        ExpressionAttributeNames={'#status': 'status'},
+        keywords_table.query,
+        IndexName=STATUS_INDEX,
+        KeyConditionExpression=Key('status').eq(ACTIVE_KEYWORD_STATUS),
+        ProjectionExpression='group_ids',
     ):
-        if item.get('status') != ACTIVE_KEYWORD_STATUS:
-            continue
         for group_id in item.get('group_ids') or ():
             counts[group_id] = counts.get(group_id, 0) + 1
     return counts
