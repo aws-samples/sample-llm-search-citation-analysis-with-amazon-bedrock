@@ -1,7 +1,9 @@
 import { useId } from 'react';
 import type {
-  KeywordRun, KeywordRunHistory
+  KeywordRun, KeywordRunSummary
 } from '../../../../types/domain/groupKpiHistory';
+import type { ReportScope } from '../../../../types';
+import { useKeywordRuns } from '../../../../hooks/useGroupKpiDetail';
 import { formatDate } from '../../../../formatting/dateFormatter';
 import {
   formatKpi, formatKpiDelta
@@ -12,10 +14,15 @@ import {
 } from '../../layout';
 
 interface Props {
-  readonly keywords: readonly KeywordRunHistory[];
-  readonly selected: KeywordRunHistory;
+  /** The group the keywords belong to and the period: the selected keyword's runs are read on demand. */
+  readonly scope: ReportScope;
+  readonly days: number;
+  readonly keywords: readonly KeywordRunSummary[];
+  readonly selected: KeywordRunSummary;
   readonly onSelect: (keyword: string) => void;
 }
+
+const NOTE_CLASS = 'text-sm text-gray-500 dark:text-gray-400';
 
 function mentionCell(run: KeywordRun): string {
   const mentioned = (run.kpis.mentions ?? 0) > 0 ? 'Yes' : 'No';
@@ -60,15 +67,45 @@ function runColumns(): ReadonlyArray<ReportTableColumn<KeywordRun>> {
   ];
 }
 
+interface RunsTableProps {
+  readonly scope: ReportScope;
+  readonly days: number;
+  readonly keyword: string;
+}
+
+/** The runs of one keyword, newest first, read when it is shown. */
+function RunsTable({
+  scope, days, keyword
+}: RunsTableProps) {
+  const {
+    history, loading, error
+  } = useKeywordRuns(scope, days, keyword);
+  if (error !== null) {
+    return <p role="alert" className="text-sm text-red-700">{`Could not load this keyword's runs: ${error}`}</p>;
+  }
+  if (loading || history === null) {
+    return <p className={NOTE_CLASS}>Loading this keyword&apos;s runs…</p>;
+  }
+  const runs = [...history.runs].reverse();
+  return (
+    <>
+      {/* Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical */}
+      <ReportTable columns={runColumns()} rows={runs} rowKey={(run) => run.timestamp} />
+      {history.runs_truncated === true && (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Older runs are left out; export to Excel for the newest runs of every keyword.</p>
+      )}
+    </>
+  );
+}
+
 /**
  * Every run of one keyword, newest first, with its change since that
  * keyword's previous run — to see which keywords move the group's KPIs.
  */
 export function KeywordRunsSection({
-  keywords, selected, onSelect
+  scope, days, keywords, selected, onSelect
 }: Props) {
   const pickerId = useId();
-  const runs = [...selected.runs].reverse();
 
   return (
     <ReportSection title="Keyword detail" subtitle="Every analysis run of one keyword, newest first, with its change since that keyword's previous run.">
@@ -81,15 +118,14 @@ export function KeywordRunsSection({
           className="rounded-lg border border-gray-200 p-1 text-xs dark:border-gray-700 dark:bg-gray-800"
         >
           {keywords.map((entry) => (
-            <option key={entry.keyword} value={entry.keyword}>{`${entry.keyword} (${entry.runs.length} runs)`}</option>
+            <option key={entry.keyword} value={entry.keyword}>{`${entry.keyword} (${entry.runs_count} runs)`}</option>
           ))}
         </select>
       </div>
-      {runs.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">No analysis run of this keyword in the selected period.</p>
+      {selected.runs_count === 0 ? (
+        <p className={NOTE_CLASS}>No analysis run of this keyword in the selected period.</p>
       ) : (
-        // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-        <ReportTable columns={runColumns()} rows={runs} rowKey={(run) => run.timestamp} />
+        <RunsTable scope={scope} days={days} keyword={selected.keyword} />
       )}
     </ReportSection>
   );

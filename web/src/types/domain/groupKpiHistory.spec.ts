@@ -1,9 +1,11 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { isGroupKpiHistoryResponse } from './groupKpiHistory';
 import {
-  buildHistory, buildKeywordHistory, buildRun
+  isGroupKeywordRunsPage, isGroupKpiHistoryResponse, isGroupRunDriversPage
+} from './groupKpiHistory';
+import {
+  buildHistory, buildKeywordHistory, buildKeywordSummary, buildRun, buildRunDrivers, KEYWORD_HISTORIES
 } from '../../components/Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 
 describe('isGroupKpiHistoryResponse', () => {
@@ -64,15 +66,94 @@ describe('isGroupKpiHistoryResponse', () => {
     ['a keyword without a name', {
       ...buildHistory(),
       keywords: [{
-        ...buildKeywordHistory('k', []),
+        ...buildKeywordSummary('k', []),
         keyword: 1 
       }] 
     }],
-    ['a keyword without runs', {
+    ['a keyword without a run count', {
       ...buildHistory(),
-      keywords: [{ keyword: 'k' }] 
+      keywords: [{
+        keyword: 'k',
+        latest: null 
+      }] 
+    }],
+    ['a keyword whose latest run is not an object', {
+      ...buildHistory(),
+      keywords: [{
+        ...buildKeywordSummary('k', []),
+        latest: 'RUN_1' 
+      }] 
     }],
   ])('rejects a payload with %s', (_label, payload) => {
     expect(isGroupKpiHistoryResponse(payload)).toBe(false);
+  });
+});
+
+describe('isGroupKeywordRunsPage', () => {
+  it('accepts a page of keyword runs with a next token', () => {
+    expect(isGroupKeywordRunsPage({
+      keywords: KEYWORD_HISTORIES,
+      next_token: 'abc' 
+    })).toBe(true);
+  });
+
+  it('accepts the last page', () => {
+    expect(isGroupKeywordRunsPage({
+      keywords: [],
+      next_token: null 
+    })).toBe(true);
+  });
+
+  it.each([
+    ['no next token', { keywords: [] }],
+    ['a keyword without runs', {
+      keywords: [{ keyword: 'k' }],
+      next_token: null 
+    }],
+    ['a keyword without a name', {
+      keywords: [{
+        ...buildKeywordHistory('k', []),
+        keyword: 2 
+      }],
+      next_token: null 
+    }],
+  ])('rejects a page with %s', (_label, payload) => {
+    expect(isGroupKeywordRunsPage(payload)).toBe(false);
+  });
+});
+
+describe('isGroupRunDriversPage', () => {
+  it('accepts a page of run drivers', () => {
+    expect(isGroupRunDriversPage({
+      changes: [buildRunDrivers()],
+      next_token: null 
+    })).toBe(true);
+  });
+
+  it.each([
+    ['changes that are not a list', {
+      changes: {},
+      next_token: null 
+    }],
+    ['a change without a previous run', {
+      changes: [{
+        ...buildRunDrivers(),
+        previous_timestamp: null 
+      }],
+      next_token: null 
+    }],
+    ['a change without drivers', {
+      changes: [{
+        ...buildRunDrivers(),
+        drivers: 'none' 
+      }],
+      next_token: null 
+    }],
+    ['a numeric next token', {
+      changes: [],
+      next_token: 3 
+    }],
+  ])('rejects a page with %s', (_label, payload) => {
+    expect(isGroupRunDriversPage(payload)).toBe(false);
   });
 });

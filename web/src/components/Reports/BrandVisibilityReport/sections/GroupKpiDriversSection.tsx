@@ -1,16 +1,22 @@
 import type {
-  GroupRun, GroupRunDriver
+  GroupRun, GroupRunChange, GroupRunDriver
 } from '../../../../types/domain/groupKpiHistory';
+import type { ReportScope } from '../../../../types';
 import { formatDate } from '../../../../formatting/dateFormatter';
 import { formatKpiDelta } from '../../../../formatting/kpiFormatter';
 import {
   KPI_DEFINITIONS, type KpiId
 } from '../../../../constants/kpiDefinitions';
+import { useRunDrivers } from '../../../../hooks/useGroupKpiDetail';
 import {
   emphasisColumn, kpiColumn, ReportSection, ReportTable, type ReportTableColumn
 } from '../../layout';
 
-interface Props {readonly run: GroupRun;}
+interface Props {
+  /** The group the run belongs to: its drivers are read on demand. */
+  readonly scope: ReportScope;
+  readonly run: GroupRun;
+}
 
 const MENTION_LABELS = {
   gained: 'Now mentioned',
@@ -23,6 +29,8 @@ const SUMMARY_KPIS: readonly KpiId[] = [
 ];
 
 const IMPACT_NOTE = 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.';
+
+const NOTE_CLASS = 'text-sm text-gray-500 dark:text-gray-400';
 
 function deltaColumn(id: KpiId): ReportTableColumn<GroupRunDriver> {
   return kpiColumn(id, (driver) => formatKpiDelta(id, driver.deltas[id]));
@@ -62,17 +70,42 @@ function noComparisonMessage(run: GroupRun): string {
     : 'This is a partial run (less than half of the group\'s keywords); it is not compared with group runs. See the keyword detail below.';
 }
 
+interface DriversTableProps {
+  readonly scope: ReportScope;
+  readonly run: string;
+  readonly change: GroupRunChange;
+}
+
+/** The drivers of one compared run, read when it is shown. */
+function DriversTable({
+  scope, run, change
+}: DriversTableProps) {
+  const {
+    drivers, loading, error
+  } = useRunDrivers(scope, run, change);
+  if (error !== null) {
+    return <p role="alert" className="text-sm text-red-700">{`Could not load the keywords behind this change: ${error}`}</p>;
+  }
+  if (loading || drivers === null) {
+    return <p className={NOTE_CLASS}>{`Loading the ${change.drivers_count} keywords behind this change…`}</p>;
+  }
+  // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
+  return <ReportTable columns={driverColumns()} rows={drivers} rowKey={(driver) => driver.keyword} />;
+}
+
 /**
  * What moved the group's KPIs between the selected group run and the one
  * before it: the group changes, then every keyword that changed, largest
  * mention-rate impact first.
  */
-export function GroupKpiDriversSection({ run }: Props) {
+export function GroupKpiDriversSection({
+  scope, run
+}: Props) {
   const { change } = run;
   if (change === null) {
     return (
       <ReportSection title="What changed">
-        <p className="text-sm text-gray-500 dark:text-gray-400">{noComparisonMessage(run)}</p>
+        <p className={NOTE_CLASS}>{noComparisonMessage(run)}</p>
       </ReportSection>
     );
   }
@@ -85,11 +118,10 @@ export function GroupKpiDriversSection({ run }: Props) {
       <p className="mb-3 text-sm text-gray-700 dark:text-gray-300">
         {SUMMARY_KPIS.map((id) => `${KPI_DEFINITIONS[id].label} ${formatKpiDelta(id, change.deltas[id])}`).join(' · ')}
       </p>
-      {change.drivers.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">No keyword changed between these runs.</p>
+      {change.drivers_count === 0 ? (
+        <p className={NOTE_CLASS}>No keyword changed between these runs.</p>
       ) : (
-        // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-        <ReportTable columns={driverColumns()} rows={change.drivers} rowKey={(driver) => driver.keyword} />
+        <DriversTable scope={scope} run={run.timestamp} change={change} />
       )}
       {change.keywords_entered.length > 0 && (
         <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">{`New in this run: ${change.keywords_entered.join(', ')}`}</p>
