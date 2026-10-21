@@ -31,8 +31,14 @@ from shared.dynamo_decimal import to_int
 # Brands in one summary answer, best aggregate score first (the total is reported).
 BRAND_LIMIT = 100
 
-# Best-ranked appearances embedded in each brand summary (the count is reported).
+# Best-ranked appearances embedded in each brand summary of a multi-keyword
+# scope (the count is reported).
 APPEARANCE_PREVIEW_LIMIT = 5
+
+# The same for one keyword: a brand appears at most once per answer of the
+# run, so this keeps every appearance of a run of up to 30 answers (10
+# engines x 3 personas), which the Keyword Deep Dive's sentiment examples read.
+KEYWORD_APPEARANCE_LIMIT = 30
 
 # Newest distinct runs listed in ``available_runs``.
 RUN_LISTING_LIMIT = 50
@@ -205,8 +211,8 @@ def _sentiment_counts(appearances: Iterable[Mapping[str, Any]]) -> dict[str, int
     return {label: counts[label] for label in SENTIMENT_LABELS if counts[label]}
 
 
-def summarize_brand(entry: Mapping[str, Any]) -> dict[str, Any]:
-    """The bounded summary of one ``collect_brands`` entry."""
+def summarize_brand(entry: Mapping[str, Any], preview_limit: int = APPEARANCE_PREVIEW_LIMIT) -> dict[str, Any]:
+    """The bounded summary of one ``collect_brands`` entry, with its ``preview_limit`` best-ranked appearances."""
     appearances: list[dict[str, Any]] = entry['appearances']
     preview = sorted(appearances, key=lambda appearance: to_int(appearance.get('rank'), UNRANKED))
     return {
@@ -223,7 +229,7 @@ def summarize_brand(entry: Mapping[str, Any]) -> dict[str, Any]:
         'keyword_count': len(entry['keywords']),
         'appearance_count': len(appearances),
         'sentiment_counts': _sentiment_counts(appearances),
-        'appearances': preview[:APPEARANCE_PREVIEW_LIMIT],
+        'appearances': preview[:preview_limit],
     }
 
 
@@ -233,7 +239,9 @@ def _classified(brands: list[dict[str, Any]], classification: str | None) -> lis
     return [entry for entry in brands if entry['classification'] == classification]
 
 
-def brand_summary(results: Iterable[Mapping[str, Any]], classification: str | None) -> dict[str, Any]:
+def brand_summary(
+    results: Iterable[Mapping[str, Any]], classification: str | None, preview_limit: int = APPEARANCE_PREVIEW_LIMIT,
+) -> dict[str, Any]:
     """The ``aggregated`` block of a summary answer.
 
     ``brands``: the best ``BRAND_LIMIT`` brands of ``classification`` (all
@@ -244,7 +252,7 @@ def brand_summary(results: Iterable[Mapping[str, Any]], classification: str | No
     counts = Counter(entry['classification'] for entry in brands)
     matching = _classified(brands, classification)
     return {
-        'brands': [summarize_brand(entry) for entry in matching[:BRAND_LIMIT]],
+        'brands': [summarize_brand(entry, preview_limit) for entry in matching[:BRAND_LIMIT]],
         'total_unique_brands': len(brands),
         'matching_brands': len(matching),
         'brands_truncated': len(matching) > BRAND_LIMIT,
@@ -301,6 +309,7 @@ __all__ = [
     'APPEARANCE_PREVIEW_LIMIT',
     'BRAND_LIMIT',
     'FULL_RESPONSE_MAX_CHARS',
+    'KEYWORD_APPEARANCE_LIMIT',
     'KEYWORD_ATTRIBUTE_NAMES',
     'KEYWORD_PROJECTION',
     'RUN_LISTING_DEEP_KEYWORDS',

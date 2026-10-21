@@ -101,6 +101,11 @@ class TestBrandSummary:
         assert ([appearance['rank'] for appearance in brand['appearances']], brand['appearance_count']) == ([1, 2, 3, 5, 7], 7)
         assert len(brand['appearances']) == APPEARANCE_PREVIEW_LIMIT
 
+    def test_previews_up_to_the_given_limit(self):
+        rows = [_row(f'p{rank}', [_brand('Rival', rank=rank)]) for rank in range(1, 9)]
+
+        assert len(brand_summary(rows, None, 8)['brands'][0]['appearances']) == 8
+
     def test_reports_each_providers_best_rank(self):
         rows = [_row('openai', [_brand('Rival', rank=4)]), _row('openai', [_brand('Rival', rank=2)], keyword='b'),
                 _row('gemini', [_brand('Rival', rank=6)])]

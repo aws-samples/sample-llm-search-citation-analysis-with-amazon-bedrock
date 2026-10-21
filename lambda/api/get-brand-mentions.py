@@ -25,6 +25,7 @@ sys.path.insert(0, '/opt/python')
 from shared.answer_queries import latest_run_timestamp
 from shared.api_response import not_found_response, success_response, validation_error
 from shared.brand_mention_views import (
+    KEYWORD_APPEARANCE_LIMIT,
     KEYWORD_ATTRIBUTE_NAMES,
     KEYWORD_PROJECTION,
     RUN_LISTING_DEEP_KEYWORDS,
@@ -164,7 +165,7 @@ def get_keyword_brand_mentions(
         'available_runs': list_runs(table, keyword, latest),
         'config': brand_config,
         'by_provider': [provider_entry(row) for row in rows],
-        'aggregated': brand_summary(rows, classification),
+        'aggregated': brand_summary(rows, classification, KEYWORD_APPEARANCE_LIMIT),
     }
 
 

@@ -6,8 +6,9 @@ brands per answer with the extraction's Spanish prose
 the group answer carried every appearance twice (``brands`` plus
 ``first_party_brands`` / ``competitor_brands``): measured with the old handler
 at 49 MB for this data set (a 60-keyword group: 15 MB); now about 0.6 MB
-whatever the group size. A single keyword with ten 60,000-character Spanish
-answers was 1.2 MB (grows with answer length); now 0.36 MB.
+whatever the group size. A single keyword with eighteen 60,000-character Spanish
+answers (9 engines x 2 personas) was 2.1 MB (grows with answer length); the
+answer text is now cut at 12,000 characters (0.74 MB).
 """
 
 from __future__ import annotations
@@ -88,7 +89,7 @@ def test_stays_within_page_budget_when_a_large_group_is_paged_by_appearance(bran
 
 
 def test_stays_within_page_budget_when_one_keyword_has_long_answers(brand_mentions):
-    rows = volume_rows(1, response_chars=60_000, providers=('openai', 'perplexity', 'gemini', 'claude', 'bedrock'))
+    rows = volume_rows(1, response_chars=60_000)
     with _report(brand_mentions, rows, 1) as report:
         response = report.call({'keyword': volume_keyword_text(0)})
 
