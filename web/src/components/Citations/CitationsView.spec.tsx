@@ -90,6 +90,12 @@ describe('CitationsView', () => {
     ]));
   });
 
+  it('says the figures cover part of the scope when the API hit its read cap', async () => {
+    renderCitationsView(buildCitationsPage({ truncated: true }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/cover part of it/);
+  });
+
   it('asks for the keyword texts when exporting', async () => {
     renderCitationsView(ARTICLE_PAGE);
     await screen.findByText('example.com');

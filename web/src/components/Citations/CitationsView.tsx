@@ -210,6 +210,12 @@ export const CitationsView = ({
 
         <ErrorAlert message={view.error ?? exportError} />
 
+        {view.totals?.truncated === true && (
+          <output className="block text-sm text-amber-700">
+            This scope has more citations than one request can read: the totals and the list cover part of it. Narrow the scope to a keyword group or market for complete figures.
+          </output>
+        )}
+
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
           {summaryCards(view.totals).map(([label, value]) => (
