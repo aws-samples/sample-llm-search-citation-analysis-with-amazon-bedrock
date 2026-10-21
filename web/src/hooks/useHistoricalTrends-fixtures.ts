@@ -41,4 +41,8 @@ export const REJECTED_TRENDS_BODIES: ReadonlyArray<[description: string, body: u
     ...mockGroupTrendsResponse,
     latest: null,
   }],
+  ['a window cut that is not a timestamp', {
+    ...mockGroupTrendsResponse,
+    truncated_before: 5,
+  }],
 ];

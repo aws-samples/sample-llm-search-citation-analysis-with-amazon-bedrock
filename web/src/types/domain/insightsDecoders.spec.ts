@@ -21,6 +21,10 @@ describe('isReportInsightsResponse', () => {
     expect(isReportInsightsResponse(emptyReportInsights())).toBe(true);
   });
 
+  it('accepts insights whose group history read stopped at a run', () => {
+    expect(isReportInsightsResponse(buildReportInsights({ history_truncated_before: '2026-10-05T06:50:33Z' }))).toBe(true);
+  });
+
   it('accepts a brand whose position, sentiment and gaps are unknown', () => {
     const unknownBrand = buildPortfolioBrand({
       average_position: null,
