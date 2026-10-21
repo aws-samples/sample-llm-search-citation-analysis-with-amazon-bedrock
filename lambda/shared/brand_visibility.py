@@ -96,6 +96,7 @@ def load_recent_search_results(
     *,
     max_keywords: int,
     keywords: Sequence[str] | None = None,
+    projection: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent SearchResults rows for the keywords under analysis.
 
@@ -116,6 +117,9 @@ def load_recent_search_results(
         max_keywords: Cap on how many keywords are queried.
         keywords: Explicit keyword texts (e.g. a keyword group); ``None`` or
             empty means "discover the active keywords".
+        projection: The attributes the partition queries read (``#ts`` stands
+            for ``timestamp``), so a caller that needs no answer text does not
+            read it; ``None`` reads whole rows.
     """
     search_table = dynamodb.Table(search_table_name)
 
@@ -128,6 +132,9 @@ def load_recent_search_results(
         response = search_table.scan(Limit=FALLBACK_SCAN_LIMIT)
         return response.get('Items', [])
 
+    projected = {} if projection is None else {
+        'ProjectionExpression': projection, 'ExpressionAttributeNames': {'#ts': 'timestamp'},
+    }
     items: list[dict[str, Any]] = []
     for keyword in keywords[:max_keywords]:
         try:
@@ -135,6 +142,7 @@ def load_recent_search_results(
                 KeyConditionExpression=Key('keyword').eq(keyword),
                 ScanIndexForward=False,
                 Limit=RESULTS_PER_KEYWORD,
+                **projected,
             )
             items.extend(response.get('Items', []))
         except Exception:

@@ -236,11 +236,14 @@ class TestConfigurationGuards:
 
 
 class TestFetchingSearchResults:
-    def test_queries_each_keyword_for_its_twenty_most_recent_rows(self, insights_module):
+    def test_queries_each_keyword_for_its_twenty_most_recent_rows_without_the_answer_text(self, insights_module):
         keywords = ['best running shoes', 'trail running shoes']
 
         assert _search_queries(insights_module, keywords) == [
-            call(KeyConditionExpression=Key('keyword').eq(keyword), ScanIndexForward=False, Limit=20)
+            call(
+                KeyConditionExpression=Key('keyword').eq(keyword), ScanIndexForward=False, Limit=20,
+                ProjectionExpression='#ts, keyword, provider, brands', ExpressionAttributeNames={'#ts': 'timestamp'},
+            )
             for keyword in keywords
         ]
 
@@ -561,6 +564,16 @@ class TestHandler:
 
         assert [prompt['keyword'] for prompt in body['losing_prompts']] == ['marathon training plan']
 
+    @pytest.mark.parametrize(('limit', 'listed'), [('30', 30), ('100', 45)])
+    def test_honours_a_limit_above_twenty_up_to_every_prompt(self, insights_module, limit, listed):
+        results: dict[str, list[dict[str, Any]]] = {}
+        for index in range(45):
+            results |= _run(f'losing prompt {index:02d}', _brand('first_party', 7))
+
+        _, body = _get_insights(insights_module, results, query={'type': 'losing', 'limit': limit})
+
+        assert len(body['losing_prompts']) == listed
+
     def test_rejects_an_unknown_type_with_400(self, insights_module):
         status, body = _get_insights(insights_module, _mixed_results(), query={'type': 'neutral'})
 
@@ -636,7 +649,7 @@ class TestScope:
     def test_hands_the_scopes_keywords_to_the_analysis(self, insights_module):
         arguments = _analysis_arguments(insights_module, {'group_id': 'shoes'})
 
-        assert arguments == (_CONFIG, ['best running shoes', 'trail running shoes'])
+        assert arguments == (_CONFIG, ['best running shoes', 'trail running shoes'], 20)
 
     def test_analyzes_one_keyword_for_a_keyword_scope(self, insights_module):
         _, body = _get_insights(insights_module, _mixed_results(), query={'keyword': 'marathon training plan'})
@@ -665,4 +678,4 @@ class TestScope:
     def test_hands_no_keywords_to_the_analysis_without_a_scope(self, insights_module):
         arguments = _analysis_arguments(insights_module, None)
 
-        assert arguments == (_CONFIG, None)
+        assert arguments == (_CONFIG, None, 20)
