@@ -187,6 +187,11 @@ exclude = [
 ignore_decorators = [
     "@pytest.fixture",
 ]
+# Attributes third-party code reads, never ours: a store to them looks dead.
+#   trust_env — requests.Session reads it (lambda/mcp/invoke.py spill_session).
+ignore_names = [
+    "trust_env",
+]
 # 60% is the tier vulture assigns every unused function, class, method,
 # attribute and variable; only unused imports (90%) and unreachable code (100%)
 # score higher. A higher floor therefore cannot report a dead function at all.

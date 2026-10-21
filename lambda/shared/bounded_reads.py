@@ -1,10 +1,9 @@
 """
-Bounded DynamoDB partition reads: page-capped partitions and newest-first single pages.
+Bounded DynamoDB partition reads: page-capped partitions.
 
 ``/citations`` and ``/citations/url-breakdown`` stop after a fixed number of
 1 MB pages of a partition (``shared.dynamodb_batch.collect_capped_items`` says
-whether they stopped early so the caller can log the truncation), and
-``/searches`` / ``/crawled-content`` read one newest-first page of a partition.
+whether they stopped early so the caller can log the truncation).
 """
 
 from __future__ import annotations
@@ -29,12 +28,3 @@ def collect_capped_partition(
 ) -> tuple[list[dict[str, Any]], bool]:
     """``collect_capped_items`` over the partition ``key_name = value`` (of the GSI ``index_name`` when given)."""
     return collect_capped_items(table.query, max_pages, **_partition_query(key_name, value, index_name))
-
-
-def newest_items(table: Any, key_name: str, value: str, limit: int, *, index_name: str | None = None) -> list[dict[str, Any]]:
-    """The newest ``limit`` rows of the partition ``key_name = value`` (one page, sort key descending).
-
-    ``index_name`` reads a GSI partition instead of the table's own.
-    """
-    params = _partition_query(key_name, value, index_name)
-    return table.query(**params, ScanIndexForward=False, Limit=limit).get('Items', [])

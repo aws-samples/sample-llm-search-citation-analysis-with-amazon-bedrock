@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from shared.response_budget import PAGE_BUDGET_BYTES, SPILL_THRESHOLD_BYTES, envelope_bytes
+from shared.response_budget import PAGE_BUDGET_BYTES, envelope_bytes
 
 # One sentence of answer-like text; 'ó', 'ñ', 'é', 'á' each serialize to 6 bytes.
 _SPANISH_SENTENCE = 'La compañía aérea ofrece más opciones de conexión en la región según la opinión de expertos. '
@@ -42,9 +42,3 @@ def assert_within_page_budget(response: Mapping[str, Any], budget: int = PAGE_BU
     size = response_bytes(response)
     allowed = budget + budget // 4
     assert size <= allowed, f'response is {size:,} bytes, over the {allowed:,}-byte page budget'
-
-
-def assert_below_spill_threshold(response: Mapping[str, Any]) -> None:
-    """Fail when the response would be spilled to S3 (or, without the guard, fail with a 502)."""
-    size = response_bytes(response)
-    assert size < SPILL_THRESHOLD_BYTES, f'response is {size:,} bytes, at or over the spill threshold'

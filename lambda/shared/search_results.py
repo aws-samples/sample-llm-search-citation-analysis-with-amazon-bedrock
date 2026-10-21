@@ -20,8 +20,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from boto3.dynamodb.conditions import Key
-
 # One projected Scan page is enough to enumerate a small Keywords table; the cap
 # keeps a large table from turning the call into a full-table read.
 DEFAULT_KEYWORD_SCAN_LIMIT = 500
@@ -42,19 +40,6 @@ def scan_keyword_texts(table: Any, limit: int = DEFAULT_KEYWORD_SCAN_LIMIT) -> l
     response = table.scan(ProjectionExpression='keyword', Limit=limit)
     items: list[dict[str, Any]] = response.get('Items', [])
     return [item['keyword'] for item in items if item.get('keyword')]
-
-
-def query_keyword_items(table: Any, keyword: str, *, sort_key_prefix: str | None = None) -> list[dict[str, Any]]:
-    """The first page of one keyword's partition: every provider's row from every stored run.
-
-    ``sort_key_prefix`` narrows the read to the rows whose ``timestamp_provider``
-    starts with it, which is how a caller asks for one specific run.
-    """
-    condition = Key('keyword').eq(keyword)
-    if sort_key_prefix:
-        condition = condition & Key('timestamp_provider').begins_with(sort_key_prefix)
-    response = table.query(KeyConditionExpression=condition)
-    return response.get('Items', [])
 
 
 def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:

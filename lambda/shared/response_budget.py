@@ -32,8 +32,9 @@ from shared.dynamo_decimal import DecimalEncoder
 LAMBDA_RESPONSE_LIMIT_BYTES = 6 * 1024 * 1024
 
 # Room under the cap for the runtime's framing and for headers the measurement
-# cannot see (API Gateway adds its own). Every response above it is spilled.
-SPILL_THRESHOLD_BYTES = 5_000_000
+# cannot see (API Gateway adds its own): about 5 MB. Every response above it
+# is spilled.
+SPILL_THRESHOLD_BYTES = LAMBDA_RESPONSE_LIMIT_BYTES * 4 // 5
 
 # One page of a list. Small enough for a fast first paint and far below the
 # spill threshold even after the envelope's second round of escaping.
