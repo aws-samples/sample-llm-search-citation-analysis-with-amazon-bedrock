@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import { useRawResponses } from './useRawResponses';
 import {
-  mockBrowseResponse, mockFileContent, createMockFetch, renderRawResponsesAfter
+  mockBrowseResponse, mockFileContent, createMockFetch, renderRawResponsesAfter, firstBrowsePage, lastBrowsePage
 } from './useRawResponses-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { waitForLoaded } from '../test/loadedHook';
@@ -25,10 +25,12 @@ describe('useRawResponses', () => {
 
     expect(result.current).toStrictEqual({
       loading: false,
+      loadingMore: false,
       error: null,
       browseData: null,
       fileContent: null,
       browse: expect.any(Function),
+      loadMore: expect.any(Function),
       getFile: expect.any(Function),
       getDownloadUrl: expect.any(Function),
       clearFile: expect.any(Function),
@@ -46,6 +48,44 @@ describe('useRawResponses', () => {
     await renderRawResponsesAfter(run);
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url);
+  });
+
+  describe('loadMore', () => {
+    const pagedFetch = () => createMockFetch({
+      browseResponse: firstBrowsePage,
+      nextBrowseResponse: lastBrowsePage 
+    });
+
+    it('requests the next page of the folder on screen with its next_token', async () => {
+      const { result } = await renderRawResponsesAfter((hook) => hook.browse('2024-01-01/'), pagedFetch());
+
+      await act(() => result.current.loadMore());
+
+      expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
+        'https://api.test.com/raw-responses/browse?prefix=2024-01-01%2F&bucket=responses&next_token=page-2'
+      );
+    });
+
+    it('appends the next page newest first and keeps its next_token', async () => {
+      const { result } = await renderRawResponsesAfter((hook) => hook.browse('2024-01-01/'), pagedFetch());
+
+      await act(() => result.current.loadMore());
+
+      expect(result.current.browseData).toStrictEqual({
+        ...lastBrowsePage,
+        files: [...lastBrowsePage.files, ...firstBrowsePage.files],
+        total_files: 2,
+      });
+    });
+
+    it('sends no request when the listing has no further page', async () => {
+      const { result } = await renderRawResponsesAfter((hook) => hook.browse());
+      mockAuthenticatedFetch.mockClear();
+
+      await act(() => result.current.loadMore());
+
+      expect(mockAuthenticatedFetch).not.toHaveBeenCalledWith(expect.stringContaining('next_token'));
+    });
   });
 
   describe('browse', () => {

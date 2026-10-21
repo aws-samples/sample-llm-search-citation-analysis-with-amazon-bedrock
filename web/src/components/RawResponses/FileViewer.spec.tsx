@@ -32,6 +32,36 @@ describe('FileViewer', () => {
   });
 
   describe('raw content display', () => {
+    it('shows a download notice instead of content when the file is too large to preview', () => {
+      renderFileViewer({
+        content: buildContent({
+          content: null,
+          is_json: false,
+          size: 3 * 1024 * 1024,
+          too_large: true,
+          max_inline_bytes: 1_000_000,
+        }),
+      });
+
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'This file is 3.0 MB, too large to preview here (the limit is 976.6 KB). Download it to open it.'
+      );
+    });
+
+    it('keeps the download button when the file is too large to preview', () => {
+      const onDownload = vi.fn();
+      renderFileViewer({
+        onDownload,
+        content: buildContent({
+          content: null,
+          too_large: true 
+        }),
+      });
+
+      screen.getByRole('button', { name: /download/i }).click();
+
+      expect(onDownload).toHaveBeenCalledTimes(1);
+    });
     it('displays plain text for non-JSON content', () => {
       renderFileViewer({
         content: buildContent({

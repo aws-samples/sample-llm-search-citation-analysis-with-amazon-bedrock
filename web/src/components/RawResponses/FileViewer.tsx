@@ -78,6 +78,20 @@ export const FileViewer = ({
     return <ViewerLoading label="Loading file..." />;
   }
 
+  if (content.too_large === true) {
+    return (
+      <div className="space-y-4">
+        <ViewerHeader
+          name={file.name}
+          details={<>{formatSize(content.size)} • {formatDate(content.last_modified)}</>}
+        >
+          <DownloadButton onClick={onDownload} />
+        </ViewerHeader>
+        <TooLargeNotice size={content.size} limit={content.max_inline_bytes} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <FileHeader
@@ -116,6 +130,18 @@ interface FileHeaderProps {
   onCopy: () => void;
   onDownload: () => void;
 }
+
+const TooLargeNotice = ({
+  size, limit
+}: {
+  size: number;
+  limit: number | undefined 
+}) => (
+  <output className="block p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+    This file is {formatSize(size)}, too large to preview here
+    {limit === undefined ? '' : ` (the limit is ${formatSize(limit)})`}. Download it to open it.
+  </output>
+);
 
 const FileHeader = ({
   file, content, onCopy, onDownload 
