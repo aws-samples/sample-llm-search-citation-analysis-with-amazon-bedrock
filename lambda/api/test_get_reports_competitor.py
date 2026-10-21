@@ -424,7 +424,7 @@ def test_gap_helper_populates_cache_on_first_call(mod):
     mod._sibling_cache.clear()
     sentinel = object()
     mod._load_sibling = lambda filename, attr: (
-        (lambda *_a, **_k: sentinel) if attr == 'latest_run_gaps'
+        (lambda *_a, **_k: sentinel) if attr == 'classify_latest_run'
         else (_ for _ in ()).throw(AssertionError(f'unexpected {attr!r}'))
     )
     assert mod._gap_helper()() is sentinel
@@ -480,7 +480,12 @@ def test_rollup_continues_when_gap_helper_raises(raw_mod):
 
 def test_keyword_evidence_hands_the_latest_run_rows_to_the_gap_helper(raw_mod):
     received = []
-    raw_mod._sibling_cache['gap'] = lambda rows, config: received.append(rows) or []
+
+    def classify(rows, _config):
+        received.append(rows)
+        return [], [], 0
+
+    raw_mod._sibling_cache['gap'] = classify
     items = [
         _search_item([], timestamp='2026-05-14T00:00:00Z', citations=['https://old.example']),
         _search_item([], citations=['https://new.example']),

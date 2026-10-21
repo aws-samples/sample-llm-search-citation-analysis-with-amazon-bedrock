@@ -88,9 +88,9 @@ class TestLargeGroup:
         assert (result['keywords_truncated'], result['keywords_analyzed']) == (True, 10)
 
 
-class TestLatestRunGaps:
+class TestClassifyLatestRun:
     def test_lists_every_competitor_only_source_of_the_rows(self):
-        gaps = _mod.latest_run_gaps(_run_rows(), CONFIG)
+        gaps, _covered, _cited = _mod.classify_latest_run(_run_rows(), CONFIG)
 
         assert (len(gaps), gaps[0]['provider_count'], gaps[0]['priority']) == (20, 8, 'high')
 
@@ -100,4 +100,6 @@ class TestLatestRunGaps:
             {'name': 'Altiplano Air', 'classification': 'first_party'},
         ]}]
 
-        assert _mod.latest_run_gaps(rows, CONFIG) == []
+        gaps, covered, cited = _mod.classify_latest_run(rows, CONFIG)
+
+        assert (gaps, [source['url'] for source in covered], cited) == ([], ['https://both.example/a'], 1)

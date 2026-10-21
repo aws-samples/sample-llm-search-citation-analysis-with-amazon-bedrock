@@ -113,10 +113,10 @@ def _load_sibling(filename: str, attr: str) -> Callable:
 
 
 def _gap_helper() -> Callable:
-    """Lazy-load ``latest_run_gaps(latest_items, config)`` from get-citation-gaps.py."""
+    """Lazy-load ``classify_latest_run(latest_items, config)`` from get-citation-gaps.py."""
     if 'gap' not in _sibling_cache:
         _sibling_cache['gap'] = _load_sibling(
-            'get-citation-gaps.py', 'latest_run_gaps'
+            'get-citation-gaps.py', 'classify_latest_run'
         )
     return _sibling_cache['gap']
 
@@ -198,7 +198,7 @@ def _keyword_evidence(keyword: str, config: dict[str, Any]) -> KeywordEvidence:
     """
     rows = _latest_run_rows(keyword)
     try:
-        gaps = _gap_helper()(rows, config) if rows else []
+        gaps = _gap_helper()(rows, config)[0] if rows else []
     except Exception:
         logger.exception('gap helper failed for %r', keyword)
         gaps = []

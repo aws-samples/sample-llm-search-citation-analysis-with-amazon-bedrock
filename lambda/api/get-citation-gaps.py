@@ -255,15 +255,18 @@ def _gaps_and_covered_sources(
     return gaps, covered_sources
 
 
-def latest_run_gaps(latest_items: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every gap of one keyword's latest-run rows (``provider``, ``citations``, ``brands``), ranked, not enriched.
+def classify_latest_run(
+    latest_items: list[dict[str, Any]], config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """One keyword's latest-run rows (``provider``, ``citations``, ``brands``) as ``(gaps, covered_sources, cited_urls)``.
 
-    The classification ``analyze_citation_gaps`` applies, for callers that
-    already hold the rows (``/reports/competitor``).
+    Both lists ranked and not enriched; ``cited_urls`` counts every distinct
+    URL the rows cite. Also what ``/reports/competitor`` classifies its rows with.
     """
     first_party_list, competitors_list = tracked_brand_names(config)
     source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
-    return _gaps_and_covered_sources(source_brand_map, config)[0]
+    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
+    return gaps, covered_sources, len(source_brand_map)
 
 
 def _first_party_brand_error(config: dict[str, Any]) -> dict[str, str] | None:
@@ -281,7 +284,6 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
         return configuration_error
 
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    first_party_list, competitors_list = tracked_brand_names(config)
 
     response = search_table.query(
         KeyConditionExpression=Key('keyword').eq(keyword),
@@ -297,8 +299,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
 
     latest_timestamp, latest_items = latest_run(items)
 
-    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
-    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
+    gaps, covered_sources, cited_urls = classify_latest_run(latest_items, config)
 
     domain_gaps: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for gap in gaps:
@@ -323,7 +324,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': percent(len(covered_sources), len(source_brand_map)) if source_brand_map else 0,
+            'coverage_rate': percent(len(covered_sources), cited_urls) if cited_urls else 0,
         },
     }
 
