@@ -104,6 +104,10 @@ def _integer(description: str, minimum: int, maximum: int) -> JsonObject:
     return {'type': 'integer', 'minimum': minimum, 'maximum': maximum, 'description': description}
 
 
+def _boolean(description: str) -> JsonObject:
+    return {'type': 'boolean', 'description': description}
+
+
 def _string_list(description: str, max_items: int | None = None) -> JsonObject:
     spec: JsonObject = {'type': 'array', 'items': {'type': 'string'}, 'description': description}
     if max_items is not None:
@@ -130,6 +134,8 @@ _PERIODS = ('day', 'week', 'month')
 _PROVIDER = _enum('One AI engine', _ENGINES)
 _PERSONA_ID = _string('Persona (query prompt) id')
 _DAYS = _integer('Window in days', 1, 365)
+_NEXT_TOKEN = _string('Cursor from the previous page')
+_PAGINATED = ' Paginated: pass next_token to continue.'
 
 
 # --- Request building ----------------------------------------------------------
@@ -370,7 +376,11 @@ def _is_json_type(value: Any, expected: str) -> bool:
 
 def _check_range(name: str, value: int, spec: JsonObject) -> None:
     minimum, maximum = spec.get('minimum'), spec.get('maximum')
-    if (minimum is not None and value < minimum) or (maximum is not None and value > maximum):
+    if maximum is None:
+        if minimum is not None and value < minimum:
+            raise InvalidArguments(f'{name} must be at least {minimum}')
+        return
+    if (minimum is not None and value < minimum) or value > maximum:
         raise InvalidArguments(f'{name} must be between {minimum} and {maximum}')
 
 
@@ -551,8 +561,9 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'get_report', _REPORTS,
-        'Report data. kind=overview: KPIs, trend, movers, recommendations. trends: KPI time series. group_kpis: per-run '
-        'KPI history (scope required). competitor: keywords a competitor outranks you on and its exclusive sources.',
+        'kind=overview: KPIs, trend, movers, recommendations. trends: KPI series. group_kpis: run KPI history (scope '
+        'required; keywords/drivers views paged). competitor: keywords it beats you on, exclusive-source counts, top 10 '
+        'outreach targets.',
         ('report', 'executive summary', 'overview', 'trend', 'history', 'time series', 'group kpis', 'competitor benchmark',
          'outranked', 'movers', 'improving', 'declining'),
         _schema({
@@ -561,30 +572,45 @@ OPERATIONS: tuple[Tool, ...] = (
             'period': _enum('Trend bucket', _PERIODS),
             'days': _DAYS,
             'top': _integer('Movers per list (overview)', 1, 10),
-            'competitor': _string('Competitor brand (competitor)'),
+            'competitor': _string('Competitor brand (competitor; omit = first 10 configured)'),
             'keyword_limit': _integer('Keywords per competitor (competitor)', 1, 100),
+            'view': _enum('group_kpis: summary (default), keywords (per-keyword runs, paged), drivers (per-run drivers, paged)',
+                          ('summary', 'keywords', 'drivers')),
+            'detail_keyword': _string('group_kpis view=keywords: one keyword'),
+            'from_run': _string('group_kpis view=drivers: run range'),
+            'to_run': _string('group_kpis view=drivers: run range'),
+            'limit': _integer('group_kpis view=keywords: keywords per page', 1, 25),
+            'next_token': _string('group_kpis views keywords/drivers: cursor from the previous page'),
         }, ('kind',)),
         _dispatch_route('kind', {
             'overview': _get_route('stats-insights', '/api/reports/overview', 'period', 'days', 'top', scope=False),
             'trends': _get_route('stats-insights', '/api/trends', 'period', 'days', scope=False),
-            'group_kpis': _get_route('stats-insights', '/api/reports/group-kpis', 'days', scope=True),
+            'group_kpis': _get_route('stats-insights', '/api/reports/group-kpis', 'days', 'view', 'detail_keyword',
+                                     'from_run', 'to_run', 'limit', 'next_token', scope=True),
             'competitor': _get_route('stats-insights', '/api/reports/competitor', 'competitor', 'keyword_limit'),
         }),
         ({'kind': 'overview', 'days': 30}, {'kind': 'group_kpis', 'group_id': _EXAMPLE_GROUP, 'days': 90}), direct=True,
     ),
     _tool(
         'get_citations', _CITATIONS,
-        'Citations. view=list: most-cited URLs with counts per engine, provider and brand totals. view=gaps: sources the '
-        'engines cite that never cite you, by domain, with coverage rate. Scope optional (default: everything).',
+        'Citations. view=list: most-cited URLs with counts per engine, provider and brand totals; paginated (next_token). '
+        'view=gaps: sources the engines cite that never cite you, by domain, with coverage rate. Scope optional.',
         ('citations', 'sources', 'urls', 'cited pages', 'citation gaps', 'coverage', 'domains', 'links', 'references',
          'who gets cited'),
         _schema({
             'view': _enum('list or gaps', ('list', 'gaps')),
             **_SCOPE_PROPERTIES,
-            'limit': _integer('Keywords to analyse for gaps', 1, 100),
+            'limit': _integer('gaps: keywords to analyse (max 100); list: URLs per page (default 100, max 1000)', 1, 1000),
+            'next_token': _string('list: cursor from the previous page'),
+            'sort': _enum('list: sort column', ('citations', 'keywords', 'domain')),
+            'order': _enum('list: sort order', ('desc', 'asc')),
+            'url_contains': _string('list: only URLs containing this text'),
+            'min_citations': {'type': 'integer', 'minimum': 0, 'description': 'list: only URLs cited at least this often'},
+            'content_type': _enum('list: all, video or page', ('all', 'video', 'page')),
         }, ('view',)),
         _dispatch_route('view', {
-            'list': _get_route('citations-content', '/api/citations', scope=False),
+            'list': _get_route('citations-content', '/api/citations', 'limit', 'next_token', 'sort', 'order',
+                               'url_contains', 'min_citations', 'content_type', scope=False),
             'gaps': _get_route('stats-insights', '/api/citation-gaps', 'limit', scope=False),
         }),
         ({'view': 'list', 'keyword': _EXAMPLE_KEYWORD}, {'view': 'gaps', 'group_id': _EXAMPLE_GROUP}), direct=True,
@@ -649,19 +675,23 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'get_brand_mentions', _BRAND_MENTIONS,
-        'What each engine answered for a keyword: the ChatGPT, Perplexity, Gemini and Claude responses, brands '
-        'mentioned, positions, sentiment and citations; aggregated brands for a wider scope. ' + _SCOPE_RULE,
+        'What each engine answered for a keyword (text cut at 12,000 chars): brands (top 100, total given), positions, '
+        'sentiment, citations. view=appearances: every appearance, paginated. ' + _SCOPE_RULE,
         ('answer', 'response', 'chatgpt', 'what the engine said', 'brands mentioned', 'position', 'rank', 'sentiment',
-         'full response', 'prompt result', 'latest answer'),
+         'full response', 'prompt result', 'latest answer', 'appearances'),
         _schema({
             **_SCOPE_PROPERTIES,
             'provider': _PROVIDER,
             'classification': _enum('Only these brands', ('first_party', 'competitor', 'other')),
             'query_prompt_id': _PERSONA_ID,
             'timestamp': _string('A run timestamp from available_runs'),
+            'view': _enum('summary (default) or appearances (every brand appearance, paginated)', ('summary', 'appearances')),
+            'brand': _string('With view=appearances: only this brand'),
+            'limit': _integer('Appearances per page', 1, 2000),
+            'next_token': _NEXT_TOKEN,
         }),
         _get_route('brand-mentions', '/api/brand-mentions', 'provider', 'classification', 'query_prompt_id', 'timestamp',
-                   scope=True),
+                   'view', 'brand', 'limit', 'next_token', scope=True),
         ({'keyword': _EXAMPLE_KEYWORD}, {'keyword': _EXAMPLE_KEYWORD, 'provider': 'openai'}),
     ),
     _tool(
@@ -684,32 +714,39 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'list_recent_searches', 'Recent Searches',
-        'Recent raw search runs (one row per keyword, engine and persona) with timestamps and status.',
+        'Recent raw search runs (one row per keyword, engine and persona) with timestamps and status.' + _PAGINATED,
         ('recent searches', 'runs', 'history', 'raw rows', 'search results', 'latest run', 'when did it run'),
         _schema({
             'keyword': _string('Only this keyword'),
             'provider': _string('Only this provider id'),
             'query_prompt_id': _PERSONA_ID,
-            'limit': _integer('Rows', 1, 1000),
+            'limit': _integer('Rows', 1, 500),
+            'next_token': _NEXT_TOKEN,
+            'include_response': _boolean('With the full answer text'),
         }),
-        _get_route('citations-content', '/api/searches', 'keyword', 'provider', 'query_prompt_id', 'limit'),
+        _get_route('citations-content', '/api/searches', 'keyword', 'provider', 'query_prompt_id', 'limit', 'next_token',
+                   'include_response'),
         ({'keyword': _EXAMPLE_KEYWORD, 'limit': 20},),
     ),
     _tool(
         'get_crawled_page', _CITATIONS,
-        'Crawled content of a cited page by exact URL: summary, SEO analysis and screenshot link.',
+        'Crawled content of a cited page by exact URL: summary, SEO analysis and screenshot link.' + _PAGINATED,
         ('crawl', 'page', 'url', 'content', 'seo', 'screenshot', 'page summary', 'what is on the page'),
         _schema({
             'url': _string('The cited page URL, exactly as cited'),
-            'include_history': {'type': 'boolean', 'description': 'Every crawl, not only the latest'},
+            'include_history': _boolean('Every crawl, not only the latest'),
+            'include_content': _boolean('With the crawled page text (default true)'),
             'limit': _integer('Rows', 1, 500),
+            'next_token': _NEXT_TOKEN,
         }, ('url',)),
-        _get_route('citations-content', '/api/crawled-content', 'url', 'include_history', 'limit'),
+        _get_route('citations-content', '/api/crawled-content', 'url', 'include_history', 'include_content', 'limit',
+                   'next_token'),
         ({'url': 'https://example.com/guide'},),
     ),
     _tool(
         'get_sentiment_examples', _VISIBILITY,
-        'Example answer passages with a given sentiment about your brands, or about competitors, per engine. ' + _SCOPE_RULE,
+        'Example answer passages with a given sentiment about your brands, or about competitors, per engine. '
+        + _SCOPE_RULE + _PAGINATED,
         ('sentiment', 'examples', 'quotes', 'excerpts', 'positive', 'negative', 'tone', 'answer passages', 'competitor criticism'),
         _schema({
             **_SCOPE_PROPERTIES,
@@ -717,8 +754,10 @@ OPERATIONS: tuple[Tool, ...] = (
             'classification': _enum('Whose passages: your brands (default) or competitors', ('first_party', 'competitor')),
             'provider': _PROVIDER,
             'limit': _integer('Examples', 1, 50),
+            'next_token': _string('Continuation token from the previous page'),
         }, ('sentiment',)),
-        _get_route('stats-insights', '/api/visibility/sentiment-examples', 'sentiment', 'classification', 'provider', 'limit', scope=True),
+        _get_route('stats-insights', '/api/visibility/sentiment-examples', 'sentiment', 'classification', 'provider', 'limit',
+                   'next_token', scope=True),
         ({'group_id': _EXAMPLE_GROUP, 'sentiment': 'negative'},),
     ),
     _tool(
@@ -747,9 +786,10 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'list_schedules', _SCHEDULE,
-        'Scheduled analysis runs: name, scope, cadence, timezone, enabled flag and next run.',
+        'Scheduled analysis runs: name, scope, cadence, timezone, enabled flag and next run.' + _PAGINATED,
         ('schedules', 'scheduled runs', 'cron', 'recurring', 'automation', 'cadence', 'weekly', 'daily'),
-        _schema({}), _get_route('config-mgmt', '/api/schedules'), ({},),
+        _schema({'limit': _integer('Schedules', 1, 100), 'next_token': _NEXT_TOKEN}),
+        _get_route('config-mgmt', '/api/schedules', 'limit', 'next_token'), ({},),
     ),
     _tool(
         'list_alerts', _DASHBOARD,
@@ -772,13 +812,14 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'list_research_jobs', _KEYWORD_RESEARCH,
-        'Recent keyword research jobs (expansion, competitor URL, research agent), newest first, with status.',
+        'Recent keyword research jobs (expansion, competitor URL, research agent), newest first, with status.' + _PAGINATED,
         ('research jobs', 'keyword research', 'research history', 'expansion', 'competitor analysis', 'research agent'),
         _schema({
             'type': _enum('Only this job type', ('expansion', 'competitor', 'agent')),
             'limit': _integer('Jobs', 1, 100),
+            'next_token': _NEXT_TOKEN,
         }),
-        _get_route('keyword-mgmt', '/api/keyword-research/history', 'type', 'limit'), ({'limit': 10},),
+        _get_route('keyword-mgmt', '/api/keyword-research/history', 'type', 'limit', 'next_token'), ({'limit': 10},),
     ),
     _tool(
         'get_research_job', _KEYWORD_RESEARCH,
@@ -795,10 +836,11 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'list_content_items', _CONTENT_STUDIO,
-        'Content Studio history: generated content and briefs, newest first, with status and the generated text.',
+        'Content Studio history: generated content and briefs, newest first, with status and the generated text.'
+        + _PAGINATED,
         ('content studio', 'generated content', 'briefs', 'landing pages', 'drafts', 'content history', 'copy'),
-        _schema({'limit': _integer('Items', 1, 100)}),
-        _get_route('content-studio', '/api/content-studio/history', 'limit'), ({'limit': 10},),
+        _schema({'limit': _integer('Items', 1, 100), 'next_token': _NEXT_TOKEN}),
+        _get_route('content-studio', '/api/content-studio/history', 'limit', 'next_token'), ({'limit': 10},),
     ),
     _tool(
         'get_content_item', _CONTENT_STUDIO,
