@@ -32,10 +32,11 @@ def _row(url: str, keyword: str, count: int = 1, **extra: Any) -> dict[str, Any]
     return {'keyword': keyword, 'normalized_url': url, 'citation_count': count, 'citing_providers': ['openai'], **extra}
 
 
-def _citations(module, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _citations(module, rows: list[dict[str, Any]], query: dict[str, str] | None = None) -> dict[str, Any]:
     table = fake_table(scan={'Items': rows})
+    event = api_gateway_event('GET', '/api/citations', query={'include_keywords': 'true', **(query or {})})
     with patch.object(module, 'citations_table', table):
-        status, body = parse_response(module.handler(api_gateway_event('GET', '/api/citations'), None))
+        status, body = parse_response(module.handler(event, None))
     assert status == 200
     return body
 

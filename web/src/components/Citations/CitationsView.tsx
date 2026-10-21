@@ -1,9 +1,6 @@
-import React, {
-  useState,
-  useMemo,
-} from 'react';
+import React, { useState } from 'react';
 import type {
-  CrawledContent, TopUrl
+  CitationsPage, CrawledContent, TopUrl
 } from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
@@ -15,10 +12,9 @@ import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
 import { PaginationHeader } from '../ui/PaginationHeader';
 import { Spinner } from '../ui/Spinner';
-import { paginate } from '../ui/pagination';
+import { pageWindow } from '../ui/pagination';
 import { 
   parseApiResponse, 
-  filterAndSortCitations, 
   safeJsonParse,
   fetchBreakdownData,
   citationExportRows,
@@ -28,15 +24,58 @@ import type {
   ContentTypeFilter, SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
 import { exportToExcel } from '../../exporters/excelGenerator';
+import { fetchAllCitationUrls } from '../../api/citationPages';
+import {
+  useMarketCitations, type MarketCitations
+} from '../../hooks/useMarketCitations';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useSelectedMarketId } from '../Markets/marketSelectionContext';
+import { ErrorAlert } from '../ui/ErrorAlert';
 import { StrokeIcon } from '../ui/StrokeIcon';
 
+/** How long the URL search waits for typing to pause before asking the API. */
+export const URL_SEARCH_DEBOUNCE_MS = 300;
+
 interface CitationsViewProps {
-  citations: TopUrl[];
+  /** Rows to show until the first page arrives (the dashboard's first page), when every market is shown. */
+  placeholder?: readonly TopUrl[];
   onNavigateToRawResponses?: (path: string) => void;
 }
 
+/** The stat cards: totals over the whole scope, whatever the filters. */
+function summaryCards(totals: CitationsPage | null): ReadonlyArray<readonly [string, string]> {
+  const urls = totals?.total_urls ?? 0;
+  const citations = totals?.total_citation_count ?? 0;
+  return [
+    ['Total URLs', urls.toLocaleString()],
+    ['Citations', citations.toLocaleString()],
+    ['Avg/URL', urls > 0 ? (citations / urls).toFixed(1) : '0'],
+  ];
+}
+
+function nextSort(previous: SortConfig, column: SortColumn): SortConfig {
+  if (previous.column !== column) return {
+    column,
+    direction: 'desc',
+  };
+  return {
+    column,
+    direction: previous.direction === 'desc' ? 'asc' : 'desc',
+  };
+}
+
+/** The rows to show: the placeholder until the first page of every market combined arrives, then the page. */
+function visibleRows(view: MarketCitations, marketId: string | null, placeholder?: readonly TopUrl[]): TopUrl[] {
+  if (view.totals === null && marketId === null && placeholder !== undefined) return [...placeholder];
+  return view.citations;
+}
+
+function isFiltered(searchQuery: string, minCitations: number | '', contentType: ContentTypeFilter): boolean {
+  return searchQuery !== '' || minCitations !== '' || contentType !== 'all';
+}
+
 export const CitationsView = ({
-  citations, onNavigateToRawResponses 
+  placeholder, onNavigateToRawResponses 
 }: CitationsViewProps) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
@@ -49,39 +88,32 @@ export const CitationsView = ({
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<CrawledContent | null>(null);
   const [loadingCitation, setLoadingCitation] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortConfig>({
     column: 'citations',
     direction: 'desc' 
   });
+  const marketId = useSelectedMarketId();
+  const urlContains = useDebouncedValue(searchQuery, URL_SEARCH_DEBOUNCE_MS);
+  const listQuery = {
+    sort: sortBy,
+    urlContains,
+    minCitations,
+    contentType,
+  };
+  const view = useMarketCitations({
+    ...listQuery,
+    page: currentPage,
+    pageSize: itemsPerPage,
+  });
+  const pageCitations = visibleRows(view, marketId, placeholder);
+  const totalItems = view.totals?.matched_urls ?? pageCitations.length;
+  const { startIndex } = pageWindow(totalItems, currentPage, itemsPerPage);
 
   const handleSort = (column: SortColumn) => {
-    setSortBy(prev => {
-      if (prev.column === column) {
-        return {
-          column,
-          direction: prev.direction === 'desc' ? 'asc' : 'desc' 
-        };
-      }
-      return {
-        column,
-        direction: 'desc' 
-      };
-    });
+    setSortBy(prev => nextSort(prev, column));
+    setCurrentPage(1);
   };
-
-  // Filter and sort citations
-  const filteredCitations = useMemo(() => 
-    filterAndSortCitations(citations, searchQuery, minCitations, sortBy, contentType),
-  [citations, searchQuery, minCitations, sortBy, contentType]
-  );
-
-  const {
-    pageItems: paginatedCitations, totalItems, startIndex
-  } = paginate(filteredCitations, currentPage, itemsPerPage);
-
-  // Stats
-  const totalCitationCount = citations.reduce((sum, c) => sum + c.citation_count, 0);
-  const avgCitations = citations.length > 0 ? (totalCitationCount / citations.length).toFixed(1) : '0';
 
   const handleItemsPerPageChange = (value: number) => {
     setItemsPerPage(value);
@@ -133,17 +165,30 @@ export const CitationsView = ({
   };
 
   const downloadToExcel = async () => {
-    await exportToExcel({
-      data: citationExportRows(filteredCitations),
-      columns: CITATION_EXPORT_COLUMNS,
-      sheetName: 'Citations',
-      fileName: `citations-${new Date().toISOString().split('T')[0]}.xlsx`,
-    });
+    setExportError(null);
+    try {
+      const everyUrl = await fetchAllCitationUrls({
+        ...listQuery,
+        urlContains: searchQuery,
+        marketId,
+      }, { includeKeywords: true });
+      await exportToExcel({
+        data: citationExportRows(everyUrl),
+        columns: CITATION_EXPORT_COLUMNS,
+        sheetName: 'Citations',
+        fileName: `citations-${new Date().toISOString().split('T')[0]}.xlsx`,
+      });
+    } catch (err) {
+      console.error('Error exporting citations:', err);
+      setExportError('The citations could not be exported. Please try again.');
+    }
   };
+
+  const hasFilters = isFiltered(searchQuery, minCitations, contentType);
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-6" aria-busy={view.loading}>
         {/* Header with explanation */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
           <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Citations</h2>
@@ -163,13 +208,17 @@ export const CitationsView = ({
           </div>
         </div>
 
+        <ErrorAlert message={view.error ?? exportError} />
+
+        {view.totals?.truncated === true && (
+          <output className="block text-sm text-amber-700">
+            This scope has more citations than one request can read: the totals and the list cover part of it. Narrow the scope to a keyword group or market for complete figures.
+          </output>
+        )}
+
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
-          {([
-            ['Total URLs', citations.length.toLocaleString()],
-            ['Citations', totalCitationCount.toLocaleString()],
-            ['Avg/URL', avgCitations],
-          ] as const).map(([label, value]) => (
+          {summaryCards(view.totals).map(([label, value]) => (
             <div key={label} className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
               <div className="text-xs sm:text-sm text-gray-500">{label}</div>
               <div className="text-lg sm:text-2xl font-semibold text-gray-900">{value}</div>
@@ -205,7 +254,7 @@ export const CitationsView = ({
             <table className="min-w-full divide-y divide-gray-200">
               <CitationTableHeader sort={sortBy} onSort={handleSort} />
               <tbody className="bg-white divide-y divide-gray-200">
-                {paginatedCitations.map((citation, idx) => {
+                {pageCitations.map((citation, idx) => {
                   const globalRank = startIndex + idx + 1;
                   const isExpanded = expandedRow === idx;
                   const breakdown = breakdownData[citation.url] ?? [];
@@ -230,9 +279,9 @@ export const CitationsView = ({
             </table>
           </div>
 
-          {paginatedCitations.length === 0 && (
+          {pageCitations.length === 0 && !view.loading && (
             <div className="text-center py-12 text-gray-500">
-              {searchQuery || minCitations || contentType !== 'all' ? 'No citations match your filters' : 'No citations yet'}
+              {hasFilters ? 'No citations match your filters' : 'No citations yet'}
             </div>
           )}
         </div>

@@ -5,7 +5,9 @@ import { renderLoadedHook } from '../test/loadedHook';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
-import { useDashboardData } from './useDashboardData';
+import {
+  DASHBOARD_PANEL_PATHS, useDashboardData
+} from './useDashboardData';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
@@ -77,6 +79,7 @@ interface MockFetchOverrides {
   stats?: unknown;
   citations?: unknown;
   searches?: unknown;
+  searchesNextToken?: string | null;
   keywords?: Keyword[];
   /** Raw payload of the first ordinary keyword page; wins over `keywords`. */
   keywordsPage?: unknown;
@@ -92,8 +95,11 @@ interface MockFetchOverrides {
 export function createMockFetch(overrides: MockFetchOverrides = {}) {
   const payloadsByUrl = new Map<string, unknown>([
     [`${MOCK_API_BASE_URL}/stats`, overrides.stats ?? mockStats],
-    [`${MOCK_API_BASE_URL}/citations`, overrides.citations ?? mockCitations],
-    [`${MOCK_API_BASE_URL}/searches`, { searches: overrides.searches ?? mockSearches }],
+    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[1]}`, overrides.citations ?? mockCitations],
+    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[2]}`, {
+      searches: overrides.searches ?? mockSearches,
+      next_token: overrides.searchesNextToken ?? null,
+    }],
     [MOCK_AUTHORITATIVE_KEYWORDS_URL, overrides.authoritativeResponse ?? mockAuthoritativeKeywordsResponse],
     [MOCK_KEYWORDS_URL, overrides.keywordsPage ?? buildKeywordsPage(overrides.keywords ?? mockKeywords)],
     ...Object.entries(overrides.extraPayloads ?? {}),

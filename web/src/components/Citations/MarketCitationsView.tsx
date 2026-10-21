@@ -1,23 +1,18 @@
-import { useMarketCitations } from '../../hooks/useMarketCitations';
 import type { TopUrl } from '../../types';
-import { ErrorAlert } from '../ui/ErrorAlert';
 import { CitationsView } from './CitationsView';
 
 interface MarketCitationsViewProps {
-  /** Every market's citations, from the dashboard load. */
-  readonly citations: TopUrl[];
+  /** The dashboard load's first page (every market combined), shown until the table's own page arrives. */
+  readonly citations?: TopUrl[];
   readonly onNavigateToRawResponses?: (path: string) => void;
 }
 
-/** The Citations tab narrowed to the header's market (every market combined by default). */
+/**
+ * The Citations tab narrowed to the header's market (every market combined
+ * by default): the table asks the API for each page it shows.
+ */
 export function MarketCitationsView({
   citations, onNavigateToRawResponses
 }: MarketCitationsViewProps) {
-  const view = useMarketCitations(citations);
-  return (
-    <div aria-busy={view.loading}>
-      <ErrorAlert message={view.error} />
-      <CitationsView citations={view.citations} onNavigateToRawResponses={onNavigateToRawResponses} />
-    </div>
-  );
+  return <CitationsView placeholder={citations} onNavigateToRawResponses={onNavigateToRawResponses} />;
 }

@@ -12,6 +12,9 @@ import { exportToExcel } from '../../exporters/excelGenerator';
 import {
   SEARCH_EXCEL_COLUMNS, searchExcelRows
 } from '../../exporters/searchResultExporter';
+import { fetchAllSearches } from '../../api/searchPages';
+import { ErrorAlert } from '../ui/ErrorAlert';
+import { useSearchPages } from './useSearchPages';
 import {
   KeywordGroup,
   getUniqueProviders,
@@ -22,13 +25,19 @@ import {
 } from './SearchesViewComponents';
 
 interface SearchesViewProps {
+  /** The newest page of runs (the dashboard load). */
   searches: Search[];
+  /** The token of the page after `searches`; `null` (the default) when there is none. */
+  nextToken?: string | null;
   onNavigateToRawResponses?: (path: string) => void;
 }
 
 export const SearchesView = ({
-  searches, onNavigateToRawResponses 
+  searches: firstPage, nextToken = null, onNavigateToRawResponses 
 }: SearchesViewProps) => {
+  const pages = useSearchPages(firstPage, nextToken);
+  const { searches } = pages;
+  const [exportError, setExportError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -66,13 +75,19 @@ export const SearchesView = ({
   };
 
   const downloadToExcel = async () => {
-    const excelData = buildExcelData(searches);
-    await exportToExcel({
-      data: excelData,
-      columns: SEARCH_EXCEL_COLUMNS,
-      sheetName: 'Searches',
-      fileName: `searches-${new Date().toISOString().split('T')[0]}.xlsx`,
-    });
+    setExportError(null);
+    try {
+      const excelData = buildExcelData(await fetchAllSearches());
+      await exportToExcel({
+        data: excelData,
+        columns: SEARCH_EXCEL_COLUMNS,
+        sheetName: 'Searches',
+        fileName: `searches-${new Date().toISOString().split('T')[0]}.xlsx`,
+      });
+    } catch (err) {
+      console.error('[searches] Error exporting searches:', err);
+      setExportError('The searches could not be exported. Please try again.');
+    }
   };
 
   const {
@@ -95,6 +110,7 @@ export const SearchesView = ({
   return (
     <>
       <div className="space-y-6">
+        <ErrorAlert message={pages.error ?? exportError} />
         <StatsCards
           totalSearches={totalSearches}
           keywordCount={keywordGroups.length}
@@ -131,6 +147,19 @@ export const SearchesView = ({
           searchQuery={searchQuery}
           providerFilter={providerFilter}
         />
+
+        {pages.hasMore && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => void pages.loadMore()}
+              disabled={pages.loadingMore}
+              className="px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+            >
+              {pages.loadingMore ? 'Loading…' : 'Load older searches'}
+            </button>
+          </div>
+        )}
       </div>
 
 

@@ -1,42 +1,85 @@
 import { renderHook } from '@testing-library/react';
 import { vi } from 'vitest';
 import { answerEveryFetch } from '../test/fetchStubs';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   buildMarketSelectionMock, marketSelectionWrapper
 } from '../components/Markets/markets-fixtures';
 import type {
-  Citations, TopUrl
+  CitationsPage, TopUrl
 } from '../types';
-import { useMarketCitations } from './useMarketCitations';
+import {
+  useMarketCitations, type CitationTableRequest
+} from './useMarketCitations';
 
-/** What the dashboard load holds for every market combined. */
-export const COMBINED_CITATIONS: TopUrl[] = [{
-  url: 'https://www.kayak.com/altiplano',
-  citation_count: 4,
-}];
+export function buildCitationsPage(overrides: Partial<CitationsPage> = {}): CitationsPage {
+  return {
+    provider_stats: [],
+    brand_stats: [],
+    top_urls: [{
+      url: 'https://www.despegar.cl/vuelos',
+      citation_count: 2,
+    }],
+    total_urls: 40,
+    total_citation_count: 120,
+    matched_urls: 40,
+    next_token: null,
+    truncated: false,
+    ...overrides,
+  };
+}
 
-/** `GET /citations?market_id=cl-es`. */
-export const CHILEAN_CITATIONS: Citations = {
-  provider_stats: [],
-  brand_stats: [],
-  top_urls: [{
-    url: 'https://www.despegar.cl/vuelos',
-    citation_count: 2,
-  }],
+/** The table's first view: most cited first, no filters, 25 per page. */
+export const DEFAULT_TABLE_REQUEST: CitationTableRequest = {
+  sort: {
+    column: 'citations',
+    direction: 'desc',
+  },
+  urlContains: '',
+  minCitations: '',
+  contentType: 'all',
+  page: 1,
+  pageSize: 25,
 };
 
 interface RenderOptions {
   /** The header's market choice (`null` = every market combined). */
-  readonly market: string | null;
+  readonly market?: string | null;
+  readonly request?: Partial<CitationTableRequest>;
   readonly status?: number;
+  readonly body?: CitationsPage;
 }
 
-/** `useMarketCitations(COMBINED_CITATIONS)` under a header with `market` picked; every request answers `CHILEAN_CITATIONS`. */
-export function renderMarketCitations({
-  market, status = 200
-}: RenderOptions) {
+/** `useMarketCitations(request)` under a header with `market` picked; every request answers `body`. */
+export function renderCitationTable({
+  market = null, request = {}, status = 200, body = buildCitationsPage()
+}: RenderOptions = {}) {
   vi.spyOn(console, 'error').mockImplementation(vi.fn());
-  answerEveryFetch(status === 200 ? CHILEAN_CITATIONS : { error: 'unavailable' }, status);
+  answerEveryFetch(status === 200 ? body : { error: 'unavailable' }, status);
   const wrapper = marketSelectionWrapper(buildMarketSelectionMock({ selectedMarketId: market }));
-  return renderHook(() => useMarketCitations(COMBINED_CITATIONS), { wrapper });
+  return renderHook(() => useMarketCitations({
+    ...DEFAULT_TABLE_REQUEST,
+    ...request,
+  }), { wrapper });
+}
+
+export const FIRST_OF_TWO: TopUrl = {
+  url: 'https://a.example/primera',
+  citation_count: 9,
+};
+export const SECOND_OF_TWO: TopUrl = {
+  url: 'https://b.example/segunda',
+  citation_count: 3,
+};
+
+/** Two pages: the first hands out `page-2`, the second ends the list. */
+export function answerTwoCitationPages(): void {
+  mockAuthenticatedFetch.mockImplementation((input) => {
+    const second = new URL(String(input)).searchParams.get('next_token') === 'page-2';
+    return Promise.resolve(createMockJsonResponse(buildCitationsPage({
+      top_urls: [second ? SECOND_OF_TWO : FIRST_OF_TWO],
+      next_token: second ? null : 'page-2',
+    })));
+  });
 }

@@ -19,7 +19,10 @@ vi.mock('react-chartjs-2', () => ({
 
 /** Mounts the detail once the API has answered with the three runs, newest one in the middle. */
 async function renderLoadedDetail(): Promise<void> {
-  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({ searches: UNSORTED_RUNS }));
+  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
+    searches: UNSORTED_RUNS,
+    next_token: null,
+  }));
   render(<KeywordDetail keyword="altiplano air flights to cusco" onClose={vi.fn()} />);
   await screen.findByText('Run History');
 }
@@ -48,5 +51,14 @@ describe('KeywordDetail', () => {
 
     expect(screen.getAllByText(/^(openai|perplexity|gemini)$/).map((badge) => badge.textContent))
       .toStrictEqual(['openai', 'perplexity', 'gemini']);
+  });
+
+  it('asks for the keyword runs with their answer text', async () => {
+    await renderLoadedDetail();
+
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+      'https://api.test.com/searches?keyword=altiplano+air+flights+to+cusco&include_response=true&limit=500',
+      expect.anything(),
+    );
   });
 });

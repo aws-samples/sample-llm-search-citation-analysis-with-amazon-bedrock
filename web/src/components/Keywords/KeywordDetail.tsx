@@ -1,9 +1,7 @@
 import {
   useState, useEffect 
 } from 'react';
-import {
-  API_BASE_URL, authenticatedFetch 
-} from '../../infrastructure';
+import { fetchKeywordSearches } from '../../api/searchPages';
 import type { Search } from '../../types';
 import { summarizeSearches } from '../../formatting/searchSummary';
 import { Spinner } from '../ui/Spinner';
@@ -51,12 +49,6 @@ interface KeywordDetailProps {
   onNavigateToRawResponses?: (path: string) => void;
 }
 
-interface SearchResponse {searches?: Search[];}
-
-function isSearchResponse(value: unknown): value is SearchResponse {
-  return value !== null && typeof value === 'object';
-}
-
 export const KeywordDetail = ({
   keyword,
   onClose,
@@ -74,14 +66,10 @@ export const KeywordDetail = ({
   const fetchKeywordStats = async () => {
     try {
       setLoading(true);
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/searches?keyword=${encodeURIComponent(keyword)}`
-      );
-      const json: unknown = await response.json();
-      const data: SearchResponse = isSearchResponse(json) ? json : { searches: [] };
+      const searches = await fetchKeywordSearches(keyword);
       const {
         sorted, latestTimestamp, ...totals
-      } = summarizeSearches(data.searches ?? []);
+      } = summarizeSearches(searches);
 
       setStats({
         ...totals,
