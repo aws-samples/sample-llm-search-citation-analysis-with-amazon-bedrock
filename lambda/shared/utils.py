@@ -1,5 +1,6 @@
 """Utility functions for Lambda functions."""
 
+import hashlib
 import logging
 import os
 import unicodedata
@@ -170,7 +171,7 @@ def normalize_url(url: str) -> str:
         # The only error `urlparse` raises for a string (e.g. an unbalanced
         # IPv6 bracket); the URL is kept verbatim rather than dropped.
         logger.warning('Error normalizing URL %s: %s', url, e)
-        return url
+        return bounded_url(url)
 
     clean_params = {
         key: value for key, value in parse_qs(parsed.query).items() if not is_tracking_parameter(key)
@@ -182,7 +183,35 @@ def normalize_url(url: str) -> str:
     if clean_query:
         normalized += f"?{clean_query}"
 
-    return normalized
+    return bounded_url(normalized, without_query=f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
+
+
+# A normalized URL is the sort key of the Citations table, and DynamoDB caps a
+# sort key at 1,024 bytes; a longer one fails the write ("Aggregated size of
+# all range keys has exceeded the size limit"), so the citation was lost.
+MAX_NORMALIZED_URL_BYTES = 1024
+
+# Hex digits of the SHA-256 suffix that keeps cut URLs distinct.
+_URL_DIGEST_CHARS = 16
+
+
+def bounded_url(url: str, *, without_query: str | None = None) -> str:
+    """``url`` when it fits ``MAX_NORMALIZED_URL_BYTES`` of UTF-8; otherwise a stable, distinct key that does.
+
+    A URL that only outgrows the cap through its query string (an opaque state
+    blob such as Google Travel's ``ap=``) keeps its scheme, host and path,
+    which still name the page and stay navigable. Anything longer is cut and
+    ends with ``#`` plus a SHA-256 digest of the whole URL, so two long URLs
+    never share a key.
+    """
+    if len(url.encode('utf-8')) <= MAX_NORMALIZED_URL_BYTES:
+        return url
+    if without_query is not None and len(without_query.encode('utf-8')) <= MAX_NORMALIZED_URL_BYTES:
+        return without_query
+    digest = hashlib.sha256(url.encode('utf-8')).hexdigest()[:_URL_DIGEST_CHARS]
+    room = MAX_NORMALIZED_URL_BYTES - len(digest) - 1
+    prefix = url.encode('utf-8')[:room].decode('utf-8', errors='ignore')
+    return f'{prefix}#{digest}'
 
 
 # Query parameters that only say where a visitor came from, never which page

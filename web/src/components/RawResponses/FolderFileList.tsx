@@ -1,6 +1,7 @@
 import type { S3Item } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { formatSize } from './fileSizeFormatter';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   ARCHIVE_PATHS, CHEVRON_RIGHT_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
@@ -15,10 +16,13 @@ interface FolderFileListProps {
   };
   onFolderClick: (folder: S3Item) => void;
   onFileClick: (file: S3Item) => void;
+  /** Set when the folder has entries past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export const FolderFileList = ({
-  browseData, onFolderClick, onFileClick 
+  browseData, onFolderClick, onFileClick, onLoadMore, loadingMore = false
 }: FolderFileListProps) => {
   const isEmpty = browseData.folders.length === 0 && browseData.files.length === 0;
 
@@ -38,10 +42,13 @@ export const FolderFileList = ({
         ))}
       </div>
 
+      <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load more" layoutClassName="mt-3 " />
+
       {(browseData.total_folders > 0 || browseData.total_files > 0) && (
         <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-400">
           {browseData.total_folders} folder{browseData.total_folders === 1 ? '' : 's'},{' '}
           {browseData.total_files} file{browseData.total_files === 1 ? '' : 's'}
+          {onLoadMore ? ' loaded' : ''}
         </div>
       )}
     </div>

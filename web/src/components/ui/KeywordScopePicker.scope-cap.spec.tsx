@@ -22,7 +22,9 @@ const overCapLists = {
   groups: [overCapGroup],
 };
 
-describe('KeywordScopePicker server scope cap', () => {
+// Each test renders 1,001 keyword rows: about 1 s alone, but it ran past the
+// 5 s default under full-suite parallel load (seen with Vite 8.3).
+describe('KeywordScopePicker server scope cap', { timeout: 15_000 }, () => {
   it('mirrors the 1000-id MAX_SCOPE_IDS limit of lambda/shared/keyword_groups.py', () => {
     expect(MAX_SCOPE_KEYWORD_IDS).toBe(1000);
   });

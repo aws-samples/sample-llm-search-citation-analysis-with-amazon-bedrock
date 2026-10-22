@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from testing.env import SELF_REFLECTION_ENV
 from testing.handler_fixtures import handler_fixture
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,18 +27,7 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 # `self-reflection.py` builds its AWS clients at import, so it is loaded with
 # boto3 patched and the table env vars in place; only the pure brand lookup is
 # exercised here, so one load per module is enough.
-reflection = handler_fixture(
-    _API_DIR,
-    'self-reflection.py',
-    'self_reflection_under_test',
-    env={
-        'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
-        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-        'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
-        'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
-        'CORS_ORIGIN_PARAM': '',
-    },
-)
+reflection = handler_fixture(_API_DIR, 'self-reflection.py', 'self_reflection_under_test', env=SELF_REFLECTION_ENV)
 
 
 def brand_entry(name: str, rank: int, classification: str = 'competitor') -> dict[str, Any]:

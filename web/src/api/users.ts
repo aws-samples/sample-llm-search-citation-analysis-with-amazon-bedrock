@@ -1,6 +1,7 @@
 import {
   apiGet, apiPost, apiPut, apiDelete 
 } from './client';
+import { withNextToken } from './cursorPages';
 
 /** Cognito's account states, as `manage-users.py` passes them through. */
 export type CognitoUserStatus =
@@ -26,10 +27,10 @@ export interface CognitoUser {
 
 export interface ListUsersResponse {
   users: CognitoUser[];
-  total: number;
+  count: number;
   limit: number;
-  offset: number;
-  has_more: boolean;
+  /** Continues the listing (wraps Cognito's pagination token); `null` on the last page. */
+  next_token: string | null;
 }
 
 export interface InviteUserRequest {
@@ -60,8 +61,8 @@ export interface ResetPasswordResponse {
 /** The most users `GET /users` returns per page. */
 export const USERS_PAGE_LIMIT = 100;
 
-export async function listUsers(limit = 50, offset = 0): Promise<ListUsersResponse> {
-  return apiGet<ListUsersResponse>(`/users?limit=${limit}&offset=${offset}`);
+export async function listUsers(limit = 50, nextToken: string | null = null): Promise<ListUsersResponse> {
+  return apiGet<ListUsersResponse>('/users', { params: withNextToken({ limit: String(limit) }, nextToken) });
 }
 
 export async function inviteUser(request: InviteUserRequest): Promise<InviteUserResponse> {

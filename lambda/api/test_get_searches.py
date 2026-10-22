@@ -1,19 +1,17 @@
 """
-Characterization tests for get-searches.py (GET /api/searches).
+Tests for get-searches.py (GET /api/searches).
 
-The handler had no tests. These pin the three read shapes -- one keyword's
-partition, one provider's ``ProviderIndex`` slice, and the unfiltered fan-out
-over every configured provider -- plus the in-memory filters (provider,
-persona), the newest-first ordering and the ``count`` / ``limit`` contract.
+They pin the three read shapes -- one keyword's partition, one provider's
+``ProviderIndex`` slice, and the unfiltered newest-first merge over every
+configured provider -- plus the after-read filters (provider, persona), the
+list projection without the answer text, and the ``next_token`` contract.
 
-The SearchResults table is a ``MagicMock`` from ``testing.dynamodb_stubs``;
-tests swap it in for the module-level ``table`` the handler queries.
+Call-shape tests use ``MagicMock`` tables; behaviour tests use
+``testing.partition_tables.PagedTable``, which pages like DynamoDB.
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Mapping
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -21,55 +19,38 @@ import pytest
 from boto3.dynamodb.conditions import Key
 
 from shared.config import PROVIDERS
+from shared.partition_pages import projection_params
 from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
+from testing.partition_tables import PagedTable
+from testing.searches_fixtures import SEARCH_RESULTS_INDEXES, searches_handler
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-searches_module = handler_fixture(
-    _API_DIR,
-    'get-searches.py',
-    'get_searches_under_test',
-    env={'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results', 'CORS_ORIGIN_PARAM': ''},
-)
+searches_module = searches_handler('get_searches_under_test')
 
 _KEYWORD = 'best running shoes'
 _OLDER = '2026-05-01T08:00:00Z'
 _LATEST = '2026-05-02T08:00:00Z'
 
 
-def _row(provider: str, timestamp: str, **fields: Any) -> dict[str, Any]:
-    """One SearchResults row for ``_KEYWORD``: what ``provider`` answered at ``timestamp``."""
-    return {'keyword': _KEYWORD, 'provider': provider, 'timestamp': timestamp, **fields}
+def _row(provider: str, timestamp: str, keyword: str = _KEYWORD, **fields: Any) -> dict[str, Any]:
+    """One SearchResults row: what ``provider`` answered for ``keyword`` at ``timestamp``."""
+    persona = fields.get('query_prompt_id', 'default')
+    return {
+        'keyword': keyword, 'timestamp_provider': f'{timestamp}#{provider}#{persona}',
+        'provider': provider, 'timestamp': timestamp, **fields,
+    }
 
 
-_OPENAI_OLDER = _row('openai', _OLDER)
-_GEMINI_LATEST = _row('gemini', _LATEST)
-
-
-def _fan_out_table(answers: Mapping[str, Any]) -> MagicMock:
-    """A table answering the unfiltered per-provider queries, in ``PROVIDERS`` order.
-
-    ``answers`` maps a provider to its query response, or to an exception to
-    raise; providers left out answer an empty page.
-    """
-    table = MagicMock()
-    table.query.side_effect = [answers.get(provider, {'Items': []}) for provider in PROVIDERS]
-    return table
-
-
-def _get_searches(module: Any, table: MagicMock, query: Mapping[str, str] | None = None) -> tuple[int, Any]:
+def _get_searches(module: Any, table: Any, query: dict[str, str] | None = None) -> tuple[int, Any]:
     """GET /api/searches with ``query`` against ``table``: ``(status, decoded body)``."""
     event = api_gateway_event('GET', '/api/searches', query=query)
     with patch.object(module, 'table', table):
         return parse_response(module.handler(event, None))
 
 
-def _two_provider_fan_out() -> MagicMock:
-    """The unfiltered fan-out where openai has an older row and gemini the newest."""
-    return _fan_out_table({'openai': {'Items': [_OPENAI_OLDER]}, 'gemini': {'Items': [_GEMINI_LATEST]}})
+def _paged(*rows: dict[str, Any], **options: Any) -> PagedTable:
+    return PagedTable(list(rows), SEARCH_RESULTS_INDEXES, **options)
 
 
 @pytest.fixture
@@ -77,28 +58,49 @@ def empty_table() -> MagicMock:
     return fake_table(query={'Items': []})
 
 
+def _keyword_query(limit: int, **options: Any) -> dict[str, Any]:
+    """The newest-first ``query`` of the ``_KEYWORD`` partition, ``limit`` rows, plus ``options``."""
+    return {'KeyConditionExpression': Key('keyword').eq(_KEYWORD), 'ScanIndexForward': False, 'Limit': limit, **options}
+
+
 class TestKeywordReads:
-    def test_queries_the_keyword_partition_newest_first_up_to_the_limit(self, searches_module, empty_table):
+    def test_queries_the_keyword_partition_newest_first_projected_up_to_the_limit(self, searches_module, empty_table):
         _get_searches(searches_module, empty_table, {'keyword': _KEYWORD, 'limit': '2'})
 
-        empty_table.query.assert_called_once_with(
-            KeyConditionExpression=Key('keyword').eq(_KEYWORD), ScanIndexForward=False, Limit=2
-        )
+        empty_table.query.assert_called_once_with(**_keyword_query(2, **projection_params(searches_module.LIST_ATTRIBUTES)))
+
+    def test_reads_whole_rows_when_the_response_text_is_asked_for(self, searches_module, empty_table):
+        _get_searches(searches_module, empty_table, {'keyword': _KEYWORD, 'include_response': 'true'})
+
+        empty_table.query.assert_called_once_with(**_keyword_query(50))
 
     def test_returns_the_keyword_rows_newest_first_with_their_count(self, searches_module):
         older, newer = _row('openai', _OLDER), _row('gemini', _LATEST)
-        table = fake_table(query={'Items': [older, newer]})
 
-        status, body = _get_searches(searches_module, table, {'keyword': _KEYWORD})
+        status, body = _get_searches(searches_module, _paged(older, newer), {'keyword': _KEYWORD})
 
-        assert (status, body) == (200, {'searches': [newer, older], 'count': 2})
+        assert (status, body) == (200, {'searches': [newer, older], 'count': 2, 'next_token': None})
+
+    def test_leaves_the_answer_text_out_of_list_rows(self, searches_module):
+        table = _paged(_row('openai', _LATEST, response='La respuesta completa', status='success'))
+
+        _, body = _get_searches(searches_module, table, {'keyword': _KEYWORD})
+
+        assert body['searches'] == [_row('openai', _LATEST, status='success')]
+
+    def test_keeps_the_answer_text_when_it_is_asked_for(self, searches_module):
+        row = _row('openai', _LATEST, response='La respuesta completa')
+
+        _, body = _get_searches(searches_module, _paged(row), {'keyword': _KEYWORD, 'include_response': 'true'})
+
+        assert body['searches'] == [row]
 
     def test_keeps_only_the_named_providers_rows_matched_case_insensitively(self, searches_module):
-        table = fake_table(query={'Items': [_row('openai', _LATEST), _row('gemini', _OLDER)]})
+        table = _paged(_row('openai', _LATEST), _row('gemini', _OLDER))
 
         _, body = _get_searches(searches_module, table, {'keyword': _KEYWORD, 'provider': 'Gemini'})
 
-        assert body == {'searches': [_row('gemini', _OLDER)], 'count': 1}
+        assert body['searches'] == [_row('gemini', _OLDER)]
 
 
 class TestProviderReads:
@@ -106,87 +108,90 @@ class TestProviderReads:
         _get_searches(searches_module, empty_table, {'provider': 'OpenAI', 'limit': '3'})
 
         empty_table.query.assert_called_once_with(
-            IndexName='ProviderIndex', KeyConditionExpression=Key('provider').eq('openai'), ScanIndexForward=False, Limit=3
+            IndexName='ProviderIndex', KeyConditionExpression=Key('provider').eq('openai'),
+            ScanIndexForward=False, Limit=3, **projection_params(searches_module.LIST_ATTRIBUTES),
         )
 
     def test_returns_the_providers_rows_newest_first(self, searches_module):
-        older, newer = _row('openai', _OLDER), _row('openai', _LATEST)
-        table = fake_table(query={'Items': [older, newer]})
+        older, newer = _row('openai', _OLDER), _row('openai', _LATEST, keyword='hotel')
 
-        _, body = _get_searches(searches_module, table, {'provider': 'openai'})
+        _, body = _get_searches(searches_module, _paged(older, newer), {'provider': 'openai'})
 
-        assert body == {'searches': [newer, older], 'count': 2}
+        assert body['searches'] == [newer, older]
 
 
-class TestUnfilteredFanOut:
+class TestUnfilteredMerge:
     def test_queries_the_provider_index_once_per_configured_provider(self, searches_module):
-        table = _fan_out_table({})
+        table = MagicMock(wraps=_paged())
 
         _get_searches(searches_module, table)
 
-        assert [call.kwargs['IndexName'] for call in table.query.call_args_list] == ['ProviderIndex'] * len(PROVIDERS)
-        assert [call.kwargs['KeyConditionExpression'] for call in table.query.call_args_list] == [
-            Key('provider').eq(provider) for provider in PROVIDERS
-        ]
+        assert sorted(call.kwargs['KeyConditionExpression'].get_expression()['values'][1]
+                      for call in table.query.call_args_list) == sorted(PROVIDERS)
 
-    def test_spreads_the_default_limit_of_five_hundred_across_the_providers(self, searches_module):
-        table = _fan_out_table({})
+    def test_reads_the_page_limit_from_every_provider(self, searches_module):
+        table = MagicMock(wraps=_paged())
 
-        _get_searches(searches_module, table)
+        _get_searches(searches_module, table, {'limit': '20'})
 
-        assert {call.kwargs['Limit'] for call in table.query.call_args_list} == {500 // len(PROVIDERS)}
-
-    def test_reads_at_least_fifty_rows_per_provider_when_the_limit_is_small(self, searches_module):
-        table = _fan_out_table({})
-
-        _get_searches(searches_module, table, {'limit': '100'})
-
-        assert {call.kwargs['Limit'] for call in table.query.call_args_list} == {50}
+        assert {call.kwargs['Limit'] for call in table.query.call_args_list} == {20}
 
     def test_merges_every_providers_rows_newest_first(self, searches_module):
-        _, body = _get_searches(searches_module, _two_provider_fan_out())
+        older, newer = _row('openai', _OLDER), _row('gemini', _LATEST)
 
-        assert body == {'searches': [_GEMINI_LATEST, _OPENAI_OLDER], 'count': 2}
+        _, body = _get_searches(searches_module, _paged(older, newer))
+
+        assert body == {'searches': [newer, older], 'count': 2, 'next_token': None}
 
     def test_skips_a_provider_whose_query_fails_and_returns_the_others(self, searches_module):
         gemini_row = _row('gemini', _LATEST)
-        table = _fan_out_table({'openai': throttled(), 'gemini': {'Items': [gemini_row]}})
+        table = _paged(_row('openai', _OLDER), gemini_row, failures={'openai': throttled()})
 
         status, body = _get_searches(searches_module, table)
 
-        assert (status, body) == (200, {'searches': [gemini_row], 'count': 1})
+        assert (status, body['searches']) == (200, [gemini_row])
 
-    def test_truncates_the_merged_rows_to_the_limit_while_counting_them_all(self, searches_module):
-        _, body = _get_searches(searches_module, _two_provider_fan_out(), {'limit': '1'})
+    def test_retries_a_failed_provider_on_the_next_page(self, searches_module):
+        table = _paged(_row('openai', _OLDER), _row('gemini', _LATEST), failures={'openai': throttled()})
 
-        assert body == {'searches': [_GEMINI_LATEST], 'count': 2}
+        _, body = _get_searches(searches_module, table)
+
+        assert body['next_token'] is not None
+
+    def test_stops_at_the_limit_and_hands_out_a_token_for_the_rest(self, searches_module):
+        older, newer = _row('openai', _OLDER), _row('gemini', _LATEST)
+        table = _paged(older, newer)
+
+        _, first = _get_searches(searches_module, table, {'limit': '1'})
+        _, second = _get_searches(searches_module, table, {'limit': '1', 'next_token': first['next_token']})
+
+        assert (first['searches'], second['searches'], second['next_token']) == ([newer], [older], None)
 
 
 class TestPersonaFilter:
     def test_keeps_only_the_rows_of_the_requested_persona(self, searches_module):
         rows = [_row('openai', _LATEST, query_prompt_id='traveller'), _row('gemini', _OLDER, query_prompt_id='planner')]
-        table = fake_table(query={'Items': rows})
 
-        _, body = _get_searches(searches_module, table, {'keyword': _KEYWORD, 'query_prompt_id': 'planner'})
+        _, body = _get_searches(searches_module, _paged(*rows), {'keyword': _KEYWORD, 'query_prompt_id': 'planner'})
 
-        assert body == {'searches': [rows[1]], 'count': 1}
+        assert body['searches'] == [rows[1]]
 
     def test_treats_rows_without_a_persona_as_the_default_persona(self, searches_module):
-        unlabelled, labelled = _row('openai', _LATEST), _row('gemini', _OLDER, query_prompt_id='planner')
-        table = fake_table(query={'Items': [unlabelled, labelled]})
+        unlabelled = _row('openai', _LATEST)
+        labelled = _row('gemini', _OLDER, query_prompt_id='planner')
 
-        _, body = _get_searches(searches_module, table, {'keyword': _KEYWORD, 'query_prompt_id': 'default'})
+        _, body = _get_searches(searches_module, _paged(unlabelled, labelled), {'query_prompt_id': 'default'})
 
-        assert body == {'searches': [unlabelled], 'count': 1}
+        assert body['searches'] == [unlabelled]
 
 
 class TestValidation:
-    def test_rejects_a_limit_above_one_thousand_with_400_before_reading(self, searches_module):
+    def test_rejects_a_limit_above_five_hundred_with_400_before_reading(self, searches_module):
         table = fake_table(query={'Items': []})
 
-        status, body = _get_searches(searches_module, table, {'limit': '1001'})
+        status, body = _get_searches(searches_module, table, {'limit': '501'})
 
-        assert (status, body) == (400, {'error': 'limit must be at most 1000', 'field': 'limit'})
+        assert (status, body) == (400, {'error': 'limit must be at most 500', 'field': 'limit'})
         table.query.assert_not_called()
 
     def test_rejects_a_keyword_over_five_hundred_characters_with_400(self, searches_module):

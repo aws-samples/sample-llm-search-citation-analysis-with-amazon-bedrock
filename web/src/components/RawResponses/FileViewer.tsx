@@ -78,6 +78,15 @@ export const FileViewer = ({
     return <ViewerLoading label="Loading file..." />;
   }
 
+  if (content.too_large === true) {
+    return (
+      <div className="space-y-4">
+        <FileHeader file={file} content={content} onDownload={onDownload} />
+        <TooLargeNotice size={content.size} limit={content.max_inline_bytes} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <FileHeader
@@ -113,9 +122,22 @@ export const FileViewer = ({
 interface FileHeaderProps {
   file: S3Item;
   content: RawResponseContent;
-  onCopy: () => void;
+  /** Copies the content; no Copy button without it (a file too large to preview). */
+  onCopy?: () => void;
   onDownload: () => void;
 }
+
+const TooLargeNotice = ({
+  size, limit
+}: {
+  size: number;
+  limit: number | undefined 
+}) => (
+  <output className="block p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+    This file is {formatSize(size)}, too large to preview here
+    {limit === undefined ? '' : ` (the limit is ${formatSize(limit)})`}. Download it to open it.
+  </output>
+);
 
 const FileHeader = ({
   file, content, onCopy, onDownload 
@@ -124,13 +146,15 @@ const FileHeader = ({
     name={file.name}
     details={<>{formatSize(content.size)} • {formatDate(content.last_modified)}</>}
   >
-    <button
-      onClick={onCopy}
-      className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
-    >
-      <ClipboardIcon className="w-4 h-4" />
-      <span className="sr-only sm:not-sr-only">Copy</span>
-    </button>
+    {onCopy && (
+      <button
+        onClick={onCopy}
+        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
+      >
+        <ClipboardIcon className="w-4 h-4" />
+        <span className="sr-only sm:not-sr-only">Copy</span>
+      </button>
+    )}
     <DownloadButton onClick={onDownload} />
   </ViewerHeader>
 );

@@ -15,6 +15,7 @@ import {
   buildLatestBrands, buildPeriodChange, buildTrendPoint
 } from '../layout/reportPayload-fixtures';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
+import { cutNoteText } from '../layout/HistoryCutNote-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
@@ -110,6 +111,19 @@ describe('Sentiment over time', () => {
     renderSentiment(reportWithTrends({ trend_data: [buildTrendPoint('2026-09-08', { kpis: buildKpis({ net_sentiment: null }) })] }));
 
     expect(within(sectionTitled('Net sentiment over time')).getByText(/^Net sentiment over 1 period/).textContent).toMatch(/Latest \(2026-09-08\): —\.$/);
+  });
+
+  it('says after which run the trend covers the scope when its window read was cut short', () => {
+    renderSentiment(reportWithTrends({ truncated_before: '2026-08-20T06:50:33Z' }));
+
+    expect(within(sectionTitled('Net sentiment over time')).getByRole('note'))
+      .toHaveTextContent(cutNoteText('2026-08-20T06:50:33Z'));
+  });
+
+  it('adds no cut note to the trend when its window was read whole', () => {
+    renderSentiment(reportWithTrends({ truncated_before: null }));
+
+    expect(within(sectionTitled('Net sentiment over time')).queryByRole('note')).not.toBeInTheDocument();
   });
 });
 

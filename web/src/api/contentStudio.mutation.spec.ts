@@ -52,9 +52,29 @@ const signalledReadCases: {
     read: (signal) => fetchContentHistory(7, signal),
     expected: {
       history: [],
+      nextToken: null,
       unviewedCount: 0,
+      unviewedCountCapped: false,
     },
     url: 'https://api.test.com/content-studio/history?limit=7',
+  },
+  {
+    name: 'gets the history page after next_token and decodes the capped unviewed count',
+    payload: {
+      history: [],
+      total_count: 0,
+      next_token: 'page-3',
+      unviewed_count: 99,
+      unviewed_count_capped: true,
+    },
+    read: (signal) => fetchContentHistory(20, signal, 'page-2'),
+    expected: {
+      history: [],
+      nextToken: 'page-3',
+      unviewedCount: 99,
+      unviewedCountCapped: true,
+    },
+    url: 'https://api.test.com/content-studio/history?limit=20&next_token=page-2',
   },
   {
     name: 'gets encoded content status with the caller abort signal',

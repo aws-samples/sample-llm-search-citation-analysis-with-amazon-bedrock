@@ -3,6 +3,7 @@ import type {
   KeywordStabilityRow, ReportInsightsResponse
 } from '../../../types/domain/insights';
 import type { ReportTableColumn } from '../layout';
+import { TruncatedHistoryNote } from '../layout/HistoryCutNote';
 import { MarkedName } from './InsightChip';
 import {
   InsightsTableSection, type InsightsSectionProps
@@ -68,6 +69,7 @@ export function RunStabilitySection(slice: InsightsSectionProps) {
       // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
       rowKey={(row) => row.keyword}
       emptyMessage={STABILITY_EMPTY}
+      notice={(response) => <TruncatedHistoryNote truncatedBefore={response.history_truncated_before} />}
     />
   );
 }

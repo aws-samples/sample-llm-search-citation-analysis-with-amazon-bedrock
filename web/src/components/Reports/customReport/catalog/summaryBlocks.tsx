@@ -105,7 +105,7 @@ function GroupEvolutionBlock({ group }: GroupBlockProps) {
 function GroupDriversBlock({ group }: GroupBlockProps) {
   return (
     <GroupKpiGate group={group} title="What changed">
-      {(history) => <GroupKpiDriversSection run={resolveRun(history.runs, group.runTimestamp)} />}
+      {(history) => <GroupKpiDriversSection scope={group.scope} run={resolveRun(history.runs, group.runTimestamp)} />}
     </GroupKpiGate>
   );
 }
@@ -115,7 +115,15 @@ function GroupKeywordsBlock({ group }: GroupBlockProps) {
     <GroupKpiGate group={group} title="Keyword detail">
       {(history) => {
         const selected = resolveKeyword(history.keywords, group.keyword);
-        return selected && <KeywordRunsSection keywords={history.keywords} selected={selected} onSelect={group.selectKeyword} />;
+        return selected && (
+          <KeywordRunsSection
+            scope={group.scope}
+            days={history.days}
+            keywords={history.keywords}
+            selected={selected}
+            onSelect={group.selectKeyword}
+          />
+        );
       }}
     </GroupKpiGate>
   );

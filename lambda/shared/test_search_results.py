@@ -3,21 +3,16 @@ Tests for shared.search_results — the SearchResults reads the report endpoints
 
 - the table name comes from the required environment variable
 - the keyword listing is one projected, capped Scan page without empty keywords
-- one keyword's partition is read by partition key, optionally for one run
 - the latest run is the newest timestamp's rows; missing timestamps sort first
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
-from boto3.dynamodb.conditions import Key
 
 from shared.search_results import (
     DEFAULT_KEYWORD_SCAN_LIMIT,
     latest_run,
-    query_keyword_items,
     scan_keyword_texts,
     search_results_table_name,
 )
@@ -65,42 +60,6 @@ class TestScanKeywordTexts:
         scan_keyword_texts(table, limit=25)
 
         assert table.scan.call_args.kwargs['Limit'] == 25
-
-
-class TestQueryKeywordItems:
-    def test_returns_the_rows_of_the_keyword_partition(self):
-        rows = [_row(_LATEST, 'openai'), _row(_OLDER, 'gemini')]
-        table = fake_table(query={'Items': rows})
-
-        assert query_keyword_items(table, 'best running shoes') == rows
-
-    @pytest.mark.parametrize(
-        'prefix_kwargs',
-        [
-            pytest.param({}, id='no_sort_key_prefix'),
-            pytest.param({'sort_key_prefix': ''}, id='empty_sort_key_prefix_reads_every_run'),
-        ],
-    )
-    def test_queries_by_the_keyword_partition_key_alone(self, prefix_kwargs):
-        table = fake_table(query={'Items': []})
-
-        query_keyword_items(table, 'best running shoes', **prefix_kwargs)
-
-        table.query.assert_called_once_with(KeyConditionExpression=Key('keyword').eq('best running shoes'))
-
-    def test_narrows_to_one_run_when_a_sort_key_prefix_is_given(self):
-        table = fake_table(query={'Items': []})
-
-        query_keyword_items(table, 'best running shoes', sort_key_prefix=_LATEST)
-
-        expected = Key('keyword').eq('best running shoes') & Key('timestamp_provider').begins_with(_LATEST)
-        table.query.assert_called_once_with(KeyConditionExpression=expected)
-
-    def test_returns_no_rows_when_the_page_has_no_items_key(self):
-        table = MagicMock()
-        table.query.return_value = {'Count': 0}
-
-        assert query_keyword_items(table, 'best running shoes') == []
 
 
 class TestLatestRun:

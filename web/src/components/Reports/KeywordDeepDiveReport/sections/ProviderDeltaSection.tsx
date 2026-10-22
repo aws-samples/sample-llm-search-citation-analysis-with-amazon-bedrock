@@ -33,7 +33,7 @@ export function ProviderDeltaSection({
   });
   if (!gate.ready) return gate.placeholder;
 
-  const firstParty = gate.value.aggregated.first_party_brands;
+  const firstParty = gate.value.aggregated.brands.filter((brand) => brand.classification === 'first_party');
   if (firstParty.length === 0) {
     return (
       <ReportSectionPlaceholder
@@ -77,6 +77,5 @@ function providerColumns(
 }
 
 function rankOn(brand: AggregatedBrand, provider: string): string {
-  const appearance = brand.appearances.find((a) => a.provider === provider);
-  return appearance ? `#${appearance.rank}` : '—';
+  return provider in brand.provider_ranks ? `#${brand.provider_ranks[provider]}` : '—';
 }

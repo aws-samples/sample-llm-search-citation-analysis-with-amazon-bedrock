@@ -82,6 +82,26 @@ describe('ResearchHistory', () => {
     });
   });
 
+  describe('load older research', () => {
+    it('shows no load button when every job is loaded', () => {
+      renderHistoryWithItems([buildHistoryItem()]);
+
+      expect(screen.queryByRole('button', { name: 'Load older research' })).not.toBeInTheDocument();
+    });
+
+    it('asks for the next page when the load button is pressed', async () => {
+      const onLoadMore = vi.fn();
+      renderHistory({
+        history: [buildHistoryItem()],
+        onLoadMore 
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Load older research' }));
+
+      expect(onLoadMore).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('refresh', () => {
     it('calls onRefresh on mount', () => {
       const onRefresh = vi.fn();

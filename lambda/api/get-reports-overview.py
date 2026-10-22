@@ -148,6 +148,7 @@ def build_overview(
         'scope': trends['scope'],
         'period_type': period,
         'days_analyzed': days,
+        'truncated_before': trends.get('truncated_before'),
         'keywords_analyzed': trends['keywords_analyzed'],
         'keywords_with_data': trends['keywords_with_data'],
         'citations_configured': trends['citations_configured'],

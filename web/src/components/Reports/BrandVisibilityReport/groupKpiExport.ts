@@ -11,9 +11,10 @@ import {
   exportWorkbook, scopedExcelFileName, type ExcelSheet
 } from '../../../exporters/excelGenerator';
 import type {
-  GroupKpiHistoryResponse, GroupRun, KeywordRunHistory, KpiDeltas, MentionChange
+  GroupKpiHistoryResponse, GroupRun, GroupRunDrivers, KeywordRunHistory, KpiDeltas, MentionChange
 } from '../../../types/domain/groupKpiHistory';
-import type { BrandMentionsResponse } from '../../../types';
+import type { GroupKpiDetail } from './groupKpiDetail';
+import type { BrandAppearanceRow } from '../../../types';
 import {
   GROUP_REPORT_DEFINITIONS, KPI_SPECS, type KpiSpec, type KpiUnit
 } from '../../../constants/kpiDefinitions';
@@ -97,11 +98,9 @@ function historySheet(runs: readonly GroupRun[]): ExcelSheet {
   };
 }
 
-function driverRows(run: GroupRun): Record<string, Cell>[] {
-  const { change } = run;
-  if (change === null) return [];
+function driverRows(change: GroupRunDrivers): Record<string, Cell>[] {
   return change.drivers.map((driver) => ({
-    Run: run.timestamp,
+    Run: change.timestamp,
     'Compared with run': change.previous_timestamp,
     Keyword: driver.keyword,
     'Brand mention': mentionChange(driver.mention),
@@ -111,12 +110,12 @@ function driverRows(run: GroupRun): Record<string, Cell>[] {
   }));
 }
 
-function driversSheet(runs: readonly GroupRun[]): ExcelSheet {
+function driversSheet(changes: readonly GroupRunDrivers[]): ExcelSheet {
   return {
     name: 'Drivers',
     // Stryker disable next-line ArrowFunction: column widths are presentation only
     columns: sheetWidths(28, 28, 40, 20, 18, 18, ...KPI_SPECS.map(() => 20)),
-    data: runs.flatMap(driverRows),
+    data: changes.flatMap(driverRows),
   };
 }
 
@@ -135,20 +134,25 @@ function keywordRunsSheet(keywords: readonly KeywordRunHistory[]): ExcelSheet {
   };
 }
 
-/** Every sheet of the per-group workbook; the brand mentions sheet only when `mentions` is given. */
+/**
+ * Every sheet of the per-group workbook; the brand mentions sheet only when
+ * `mentions` is given. `detail` holds what the summary leaves out: every
+ * keyword's runs and every compared run's drivers (`fetchGroupKpiDetail`).
+ */
 export function groupKpiReportSheets(
   history: GroupKpiHistoryResponse,
   scopeLabel: string,
   run: GroupRun,
-  mentions: BrandMentionsResponse | null,
+  detail: GroupKpiDetail,
+  mentions: readonly BrandAppearanceRow[] | null,
   generatedAt: Date,
 ): ExcelSheet[] {
   const sheets = [
     summarySheet(history, scopeLabel, run, generatedAt),
     definitionsSheet(GROUP_REPORT_DEFINITIONS),
     historySheet(history.runs),
-    driversSheet(history.runs),
-    keywordRunsSheet(history.keywords),
+    driversSheet(detail.drivers),
+    keywordRunsSheet(detail.keywords),
   ];
   if (mentions === null) return sheets;
   return [...sheets, {
@@ -166,8 +170,9 @@ export async function exportGroupKpiReport(
   history: GroupKpiHistoryResponse,
   scopeLabel: string,
   run: GroupRun,
-  mentions: BrandMentionsResponse | null,
+  detail: GroupKpiDetail,
+  mentions: readonly BrandAppearanceRow[] | null,
   date = new Date(),
 ): Promise<void> {
-  await exportWorkbook(groupKpiReportSheets(history, scopeLabel, run, mentions, date), groupKpiReportFileName(scopeLabel, date));
+  await exportWorkbook(groupKpiReportSheets(history, scopeLabel, run, detail, mentions, date), groupKpiReportFileName(scopeLabel, date));
 }

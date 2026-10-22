@@ -26,6 +26,14 @@ from boto3.dynamodb.conditions import Key
 # keeps a large table from turning the call into a full-table read.
 DEFAULT_KEYWORD_SCAN_LIMIT = 500
 
+# Rows read per keyword to isolate its latest run. One run writes one row per
+# provider x persona (9 providers x a handful of personas today), so 50
+# comfortably covers a full run while keeping the read small.
+LATEST_RUN_ITEM_LIMIT = 50
+
+# What ``query_latest_run`` reads of each row: never the answer text.
+LATEST_RUN_PROJECTION = '#ts, provider, citations, brands'
+
 
 def search_results_table_name() -> str:
     """The SearchResults table, from the required ``DYNAMODB_TABLE_SEARCH_RESULTS`` variable."""
@@ -44,19 +52,6 @@ def scan_keyword_texts(table: Any, limit: int = DEFAULT_KEYWORD_SCAN_LIMIT) -> l
     return [item['keyword'] for item in items if item.get('keyword')]
 
 
-def query_keyword_items(table: Any, keyword: str, *, sort_key_prefix: str | None = None) -> list[dict[str, Any]]:
-    """The first page of one keyword's partition: every provider's row from every stored run.
-
-    ``sort_key_prefix`` narrows the read to the rows whose ``timestamp_provider``
-    starts with it, which is how a caller asks for one specific run.
-    """
-    condition = Key('keyword').eq(keyword)
-    if sort_key_prefix:
-        condition = condition & Key('timestamp_provider').begins_with(sort_key_prefix)
-    response = table.query(KeyConditionExpression=condition)
-    return response.get('Items', [])
-
-
 def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """The newest ``timestamp`` among ``items`` and the rows stamped with it (one per provider).
 
@@ -65,3 +60,19 @@ def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """
     latest = max((item.get('timestamp', '') for item in items), default='')
     return latest, [item for item in items if item.get('timestamp') == latest]
+
+
+def query_latest_run(table: Any, keyword: str) -> tuple[str, list[dict[str, Any]]]:
+    """``latest_run`` of ``keyword``'s newest ``LATEST_RUN_ITEM_LIMIT`` rows, read as one projected page.
+
+    The projection (``LATEST_RUN_PROJECTION``) never includes the answer text.
+    A keyword without rows gives ``('', [])``.
+    """
+    response = table.query(
+        KeyConditionExpression=Key('keyword').eq(keyword),
+        ScanIndexForward=False,
+        Limit=LATEST_RUN_ITEM_LIMIT,
+        ProjectionExpression=LATEST_RUN_PROJECTION,
+        ExpressionAttributeNames={'#ts': 'timestamp'},
+    )
+    return latest_run(response.get('Items', []))

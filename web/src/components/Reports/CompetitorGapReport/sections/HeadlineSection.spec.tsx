@@ -43,22 +43,22 @@ describe('HeadlineSection — count derivation', () => {
   });
 
   it('renders the exclusive-source count from the rollup', () => {
-    renderHeadline(loadedRollup({ exclusive_sources: [buildSource({ priority: 'high' }), buildSource({ priority: 'medium' })] }));
+    renderHeadline(loadedRollup({
+      exclusive_source_count: 37,
+      outreach_targets: [buildSource({ priority: 'high' })],
+    }));
     const label = screen.getByText('Exclusive sources').parentElement;
-    expect(label).toHaveTextContent('2');
+    expect(label).toHaveTextContent('37');
   });
 
-  it('counts only high-priority sources for the high-lift metric', () => {
+  it('renders the high-priority source count for the high-lift metric', () => {
     renderHeadline(loadedRollup({
-      exclusive_sources: [
-        buildSource({ priority: 'high' }),
-        buildSource({ priority: 'high' }),
-        buildSource({ priority: 'medium' }),
-        buildSource({ priority: 'low' }),
-      ],
+      exclusive_source_count: 37,
+      high_priority_source_count: 12,
+      outreach_targets: [buildSource({ priority: 'high' }), buildSource({ priority: 'medium' })],
     }));
     const label = screen.getByText('High-lift targets').parentElement;
-    expect(label).toHaveTextContent('2');
+    expect(label).toHaveTextContent('12');
   });
 
   it('renders the keywords-analyzed count in the subhead', () => {

@@ -1,26 +1,16 @@
 import { useEffect } from 'react';
-import type {
-  BrandMentionsResponse, ReportScope
-} from '../types';
+import type { ReportScope } from '../types';
 import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 import {
-  decodeReportScope, encodeReportScope, reportScopeParams
+  decodeReportScope, encodeReportScope
 } from '../components/ui/reportScope';
 import {
   apiRequestErrors, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
-
-/** The `/brand-mentions` answer: the aggregate and the runs the scope can be read at. */
-export function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
-  return typeof data === 'object'
-    && data !== null
-    && 'aggregated' in data
-    && 'available_runs' in data
-    && Array.isArray(data.available_runs);
-}
-
-/** The server-side filters of `/brand-mentions`, keyed by query parameter; `null` leaves one out. */
-type BrandMentionsFilters = Record<'classification' | 'query_prompt_id' | 'timestamp', string | null>;
+import {
+  brandMentionsParams, type BrandMentionsFilters
+} from '../api/brandMentions';
+import { isBrandMentionsResponse } from '../api/brandMentionsDecoders';
 
 const brandMentionsEndpoint = {
   errorContext: 'brands',
@@ -31,16 +21,10 @@ const brandMentionsEndpoint = {
   // them as an invalid format instead. Kept as-is to preserve the hook's
   // observable error messages.
   rejectBackendErrorBody: false,
-  buildRequest: (scope: ReportScope, marketId: string | null, filters: BrandMentionsFilters) => {
-    const params = new URLSearchParams(reportScopeParams(scope, marketId));
-    for (const [name, value] of Object.entries(filters)) {
-      if (value) params.append(name, value);
-    }
-    return {
-      path: '/brand-mentions',
-      params,
-    };
-  },
+  buildRequest: (scope: ReportScope, marketId: string | null, filters: BrandMentionsFilters) => ({
+    path: '/brand-mentions',
+    params: new URLSearchParams(brandMentionsParams(scope, marketId, filters)),
+  }),
 };
 
 /**

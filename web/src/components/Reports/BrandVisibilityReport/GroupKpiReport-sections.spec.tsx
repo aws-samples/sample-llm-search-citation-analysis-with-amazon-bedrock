@@ -6,17 +6,21 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  failedHistory, keywordDetailMentions, LOADING_HISTORY, NO_RUN_HISTORY, renderGroupKpiReport
+  failedHistory, keywordDetailMentions, LOADING_HISTORY, NO_RUN_HISTORY, renderGroupKpiReport, withKeywordRun
 } from './GroupKpiReport-fixtures';
 import {
-  definitionTerms, definitionTexts, sectionTable
+  definitionTerms, definitionTexts, sectionTable, sectionTitled
 } from '../layout/reportQueries-fixtures';
 import {
-  buildHistory, buildKeywordChange, buildKeywordRun, buildRun, buildRunSeries, historyWithKeywordRun, KEYWORD_KPIS, RUN_2
+  buildDetail, buildHistory, buildKeywordChange, buildKeywordRun, buildRun, buildRunSeries, KEYWORD_HISTORIES, KEYWORD_KPIS, RUN_1, RUN_2
 } from './groupKpiHistory-fixtures';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import {
+  cutNoteText, getCutNoteElement
+} from '../layout/HistoryCutNote-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
+vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
 
 const CHARTED = 'Mention rate, Share of voice, Visibility score, Top-1 share, Citation rate';
 
@@ -96,39 +100,35 @@ describe('GroupKpiReport keyword detail', () => {
   });
 
   it('labels a keyword run where the brand became mentioned as "Yes (new)"', () => {
-    renderGroupKpiReport({ history: historyWithKeywordRun(buildKeywordRun({ change: buildKeywordChange('gained') })) });
+    renderGroupKpiReport(withKeywordRun(buildKeywordRun({ change: buildKeywordChange('gained') })));
 
     expect(keywordDetailMentions()).toStrictEqual(['Yes (new)']);
   });
 
   it('labels a keyword run with unknown mentions as not mentioned', () => {
-    renderGroupKpiReport({
-      history: historyWithKeywordRun(buildKeywordRun({
-        kpis: {
-          ...KEYWORD_KPIS,
-          mentions: null
-        }
-      }))
-    });
+    renderGroupKpiReport(withKeywordRun(buildKeywordRun({
+      kpis: {
+        ...KEYWORD_KPIS,
+        mentions: null
+      }
+    })));
 
     expect(keywordDetailMentions()).toStrictEqual(['No']);
   });
 
   it('shows a value without a change when that value could not be compared', () => {
-    renderGroupKpiReport({ history: historyWithKeywordRun(buildKeywordRun({ change: buildKeywordChange(null, { mention_rate: 5 }) })) });
+    renderGroupKpiReport(withKeywordRun(buildKeywordRun({ change: buildKeywordChange(null, { mention_rate: 5 }) })));
 
     expect(sectionTable('Keyword detail')[1].slice(3, 6)).toStrictEqual(['50.0% (+5.0 pts)', '25.0%', '1.50']);
   });
 
   it('shows an unknown answer count as a dash', () => {
-    renderGroupKpiReport({
-      history: historyWithKeywordRun(buildKeywordRun({
-        kpis: {
-          ...KEYWORD_KPIS,
-          answers: null
-        }
-      }))
-    });
+    renderGroupKpiReport(withKeywordRun(buildKeywordRun({
+      kpis: {
+        ...KEYWORD_KPIS,
+        answers: null
+      }
+    })));
 
     expect(sectionTable('Keyword detail')[1][2]).toBe('2 of —');
   });
@@ -221,5 +221,46 @@ describe('GroupKpiReport download and coverage notes', () => {
     renderGroupKpiReport();
 
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('says after which run the report starts when the period held more data than one report reads', () => {
+    renderGroupKpiReport({ history: buildHistory({ truncated_before: RUN_2 }) });
+
+    expect(getCutNoteElement()).toHaveTextContent(cutNoteText(RUN_2));
+  });
+
+  it('says from which run the report starts when older runs were left out of the summary', () => {
+    renderGroupKpiReport({ history: buildHistory({ runs_truncated: true }) });
+
+    expect(screen.getByRole('note')).toHaveTextContent(`the report covers the runs from ${new Date(RUN_1).toLocaleString()} on`);
+  });
+});
+
+describe('GroupKpiReport keyword detail reads', () => {
+  it('says the selected keyword\'s runs are loading', () => {
+    renderGroupKpiReport({ detailState: { loading: true } });
+
+    expect(within(sectionTitled('Keyword detail')).getByText('Loading this keyword\'s runs…')).toBeInTheDocument();
+  });
+
+  it('reports runs that could not be read', () => {
+    renderGroupKpiReport({ detailState: { error: 'Failed to fetch the keyword\'s runs' } });
+
+    expect(within(sectionTitled('Keyword detail')).getByRole('alert')).toHaveTextContent(
+      'Could not load this keyword\'s runs: Failed to fetch the keyword\'s runs',
+    );
+  });
+
+  it('says when older runs of the keyword were left out', () => {
+    renderGroupKpiReport({
+      detail: buildDetail({
+        keywords: [{
+          ...KEYWORD_HISTORIES[1],
+          runs_truncated: true 
+        }] 
+      }) 
+    });
+
+    expect(screen.getByText(/^Older runs are left out/)).toBeInTheDocument();
   });
 });

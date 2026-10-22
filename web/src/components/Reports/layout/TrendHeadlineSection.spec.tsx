@@ -15,6 +15,9 @@ import {
 } from './reportQueries-fixtures';
 import { TREND_DEFINITION } from '../../../constants/kpiDefinitions';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
+import {
+  CUT_RUN, cutNoteText, getCutNoteElement
+} from './HistoryCutNote-fixtures';
 
 function renderHeadline(overrides: Partial<HistoricalTrendsResponse> = {}): void {
   const view = buildTrendView(overrides);
@@ -83,5 +86,19 @@ describe('TrendHeadlineSection keywords by trend', () => {
 
     expect(screen.getByRole('heading', { name: new RegExp(KEYWORD_TRENDS_HEADING) })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `About ${TREND_DEFINITION.label}` })).toHaveAccessibleDescription(TREND_DEFINITION.definition);
+  });
+});
+
+describe('TrendHeadlineSection window cut', () => {
+  it('says after which run the trend covers the scope when its window read was cut short', () => {
+    renderHeadline({ truncated_before: CUT_RUN });
+
+    expect(getCutNoteElement()).toHaveTextContent(cutNoteText(CUT_RUN));
+  });
+
+  it('adds no cut note when the window was read whole', () => {
+    renderHeadline({ truncated_before: null });
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 });

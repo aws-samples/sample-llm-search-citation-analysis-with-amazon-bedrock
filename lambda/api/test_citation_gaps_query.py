@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, call
 
+from shared.search_results import LATEST_RUN_ITEM_LIMIT
 from testing.citation_gaps_fixtures import load_citation_gaps
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 
@@ -101,7 +102,7 @@ class TestLatestRunQueryShape:
 
         kwargs = search_table.query.call_args.kwargs
         assert kwargs['ScanIndexForward'] is False
-        assert kwargs['Limit'] == _mod.LATEST_RUN_ITEM_LIMIT
+        assert kwargs['Limit'] == LATEST_RUN_ITEM_LIMIT
         assert kwargs['ProjectionExpression'] == '#ts, provider, citations, brands'
         assert kwargs['ExpressionAttributeNames'] == {'#ts': 'timestamp'}
 

@@ -51,6 +51,13 @@ KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 _UNRANKED = 999
 # Keywords whose recent results the insights read (one partition query each).
 _MAX_KEYWORDS = 50
+# Prompts per list by default, and at most (``limit``); every list is cut to it before shaping.
+DEFAULT_LIMIT = 20
+MAX_LIMIT = 100
+# What the insights read of each SearchResults row: never the answer text.
+_RESULT_PROJECTION = '#ts, keyword, provider, brands'
+# The one list a `type` keeps.
+_TYPE_LISTS = {'winning': 'winning_prompts', 'losing': 'losing_prompts', 'opportunities': 'opportunity_prompts'}
 
 
 def get_all_keywords() -> list[str]:
@@ -171,12 +178,12 @@ def _analyze_keyword(keyword: str, results: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
+def _rank_prompts(prompts: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     """Bucket prompts by status, rank each bucket by its score, and shape the insights payload.
 
     Neutral prompts sit in the winning bucket (unscored, so after every scored
-    win) and count toward the win rate. Each bucket is cut to its top 20 while
-    the summary counts every prompt.
+    win) and count toward the win rate. Each bucket is cut to its top ``limit``
+    while the summary counts every prompt.
     """
     winning_prompts = [p for p in prompts if p['status'] in ('winning', 'neutral')]
     losing_prompts = [p for p in prompts if p['status'] == 'losing']
@@ -188,9 +195,9 @@ def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         'total_prompts_analyzed': len(prompts),
-        'winning_prompts': winning_prompts[:20],  # Top 20
-        'losing_prompts': losing_prompts[:20],
-        'opportunity_prompts': opportunity_prompts[:20],
+        'winning_prompts': winning_prompts[:limit],
+        'losing_prompts': losing_prompts[:limit],
+        'opportunity_prompts': opportunity_prompts[:limit],
         'summary': {
             'winning_count': len(winning_prompts),
             'losing_count': len(losing_prompts),
@@ -200,13 +207,16 @@ def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def analyze_prompt_brand_correlation(config: dict[str, Any], keywords: Sequence[str] | None = None) -> dict[str, Any]:
+def analyze_prompt_brand_correlation(
+    config: dict[str, Any], keywords: Sequence[str] | None = None, limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
     """
     Analyze correlation between prompts and brand mentions.
 
     ``keywords`` restricts the analysis to those keyword texts (a report
     scope); by default the tracked keywords are read from the Keywords table.
-    Either way at most ``_MAX_KEYWORDS`` of them are queried.
+    Either way at most ``_MAX_KEYWORDS`` of them are queried, without their
+    answer text. Each list holds at most ``limit`` prompts.
 
     Returns insights on:
     - Which prompts trigger first-party brand mentions
@@ -226,22 +236,24 @@ def analyze_prompt_brand_correlation(config: dict[str, Any], keywords: Sequence[
         return {"error": "No keywords configured"}
 
     # The 20 most recent rows of each of the first 50 keywords, one partition query each.
-    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=_MAX_KEYWORDS, keywords=keywords)
+    items = load_recent_search_results(
+        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=_MAX_KEYWORDS, keywords=keywords, projection=_RESULT_PROJECTION,
+    )
     logger.info('Queried %s total items across %s keywords', len(items), len(keywords))
     keyword_results = _group_by_keyword(items)
     prompts = [_analyze_keyword(keyword, results) for keyword, results in keyword_results.items()]
-    return _rank_prompts(prompts)
+    return _rank_prompts(prompts, limit)
 
 
 @api_handler
 @validate({
     'type': {'type': str, 'choices': ['winning', 'losing', 'opportunities', 'all'], 'default': 'all'},
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20},
+    'limit': {'type': int, 'min': 1, 'max': MAX_LIMIT, 'default': DEFAULT_LIMIT},
     **SCOPE_QUERY_PARAMS,
 })
 @optional_scope_keywords(lambda: dynamodb.Table(KEYWORDS_TABLE))
 def handler(
-    event: dict[str, Any], context: Any, keywords: list[str] | None, type: str = 'all', limit: int = 20
+    event: dict[str, Any], context: Any, keywords: list[str] | None, type: str = 'all', limit: int = DEFAULT_LIMIT
 ) -> dict[str, Any]:
     """
     API handler for prompt insights.
@@ -255,32 +267,15 @@ def handler(
           are analysed, as before.
     """
     config = get_brand_config()
-    insights = analyze_prompt_brand_correlation(config, keywords)
+    insights = analyze_prompt_brand_correlation(config, keywords, limit)
     if 'error' in insights:
         # A missing prerequisite (no first-party brand, no keywords) is the
         # caller's configuration to fix, so it gets 400 with the actual reason.
         return validation_error(insights['error'], event)
 
-    # Filter by type if specified
-    if type == 'winning':
-        insights = {
-            'winning_prompts': insights['winning_prompts'][:limit],
-            'summary': insights['summary']
-        }
-    elif type == 'losing':
-        insights = {
-            'losing_prompts': insights['losing_prompts'][:limit],
-            'summary': insights['summary']
-        }
-    elif type == 'opportunities':
-        insights = {
-            'opportunity_prompts': insights['opportunity_prompts'][:limit],
-            'summary': insights['summary']
-        }
-    else:
-        # Apply limit to all categories
-        insights['winning_prompts'] = insights['winning_prompts'][:limit]
-        insights['losing_prompts'] = insights['losing_prompts'][:limit]
-        insights['opportunity_prompts'] = insights['opportunity_prompts'][:limit]
+    # One list (with the summary) when a type is given; every list is already cut to `limit`.
+    list_key = _TYPE_LISTS.get(type)
+    if list_key is not None:
+        insights = {list_key: insights[list_key], 'summary': insights['summary']}
 
     return success_response(insights, event)

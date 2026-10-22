@@ -8,10 +8,11 @@
  * list, which the server cannot do across pages.
  */
 import { apiGet } from './client';
-import type { Keyword } from '../types';
 import {
-  isKeywordsPage, type KeywordsPage
-} from '../types/domain/keywordDecoders';
+  collectCursorPages, withNextToken, type CursorPage
+} from './cursorPages';
+import type { Keyword } from '../types';
+import { isKeywordsPage } from '../types/domain/keywordDecoders';
 
 /** The keywords API answered with something other than a well-formed page sequence. */
 export class KeywordPageError extends Error {
@@ -27,46 +28,21 @@ export interface FetchAllKeywordsOptions {
   authoritative?: boolean;
 }
 
-function keywordPageParams(
-  nextToken: string | null,
-  authoritative: boolean
-): Record<string, string> | undefined {
-  const params: Record<string, string> = {
-    ...(authoritative ? { authoritative: 'true' } : {}),
-    ...(nextToken === null ? {} : { next_token: nextToken }),
-  };
-  return Object.keys(params).length > 0 ? params : undefined;
-}
-
 async function fetchKeywordPage(
   nextToken: string | null,
   options: FetchAllKeywordsOptions
-): Promise<KeywordsPage> {
+): Promise<CursorPage<Keyword>> {
   const payload = await apiGet<unknown>('/keywords', {
     signal: options.signal,
-    params: keywordPageParams(nextToken, options.authoritative === true),
+    params: withNextToken(options.authoritative === true ? { authoritative: 'true' } : {}, nextToken),
   });
   if (!isKeywordsPage(payload)) {
     throw new KeywordPageError('Keywords API returned an invalid page');
   }
-  return payload;
-}
-
-async function collectKeywordPages(
-  nextToken: string | null,
-  seenTokens: Set<string>,
-  collected: Keyword[],
-  options: FetchAllKeywordsOptions
-): Promise<Keyword[]> {
-  const page = await fetchKeywordPage(nextToken, options);
-  collected.push(...page.keywords);
-  if (page.next_token === null) return collected;
-  // A server that hands back a token it already issued would loop forever.
-  if (seenTokens.has(page.next_token)) {
-    throw new KeywordPageError('Keywords API repeated a continuation token');
-  }
-  seenTokens.add(page.next_token);
-  return collectKeywordPages(page.next_token, seenTokens, collected, options);
+  return {
+    items: payload.keywords,
+    nextToken: payload.next_token,
+  };
 }
 
 /** Newest first by `created_at`; equal timestamps keep their page order. */
@@ -82,6 +58,9 @@ function compareNewestFirst(left: Keyword, right: Keyword): number {
 export async function fetchAllKeywords(
   options: FetchAllKeywordsOptions = {}
 ): Promise<Keyword[]> {
-  const keywords = await collectKeywordPages(null, new Set<string>(), [], options);
+  const keywords = await collectCursorPages(
+    async (nextToken: string | null) => fetchKeywordPage(nextToken, options),
+    () => new KeywordPageError('Keywords API repeated a continuation token')
+  );
   return keywords.sort(compareNewestFirst);
 }

@@ -51,7 +51,16 @@ from shared.content_brief import (
     single_keyword_brief,
     validate_template_placeholders,
 )
-from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
+from shared.content_row_size import fit_generation_result
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    optional_limit,
+    parse_json_body,
+    route_handler,
+    validate,
+)
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
@@ -60,6 +69,7 @@ from shared.dynamodb_batch import (
 )
 from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
 from shared.keyword_groups import MAX_GROUP_ID_LENGTH
+from shared.merged_pages import MergedPage, MergeSpec, decode_positions, merged_page, query_reader
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.search_results import search_results_table_name
@@ -1266,45 +1276,42 @@ def _history_freshness(item: dict[str, Any]) -> tuple[str, str]:
     return str(item.get("updated_at") or created_at), created_at
 
 
-def _deduplicate_history(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep the newest index image for each content id."""
-    newest_by_id: dict[str, dict[str, Any]] = {}
-    without_id: list[dict[str, Any]] = []
-    for item in items:
-        content_id = item.get("id")
-        if not isinstance(content_id, str) or not content_id:
-            without_id.append(item)
-            continue
-        existing = newest_by_id.get(content_id)
-        if existing is None or _history_freshness(item) > _history_freshness(existing):
-            newest_by_id[content_id] = item
-    return [*newest_by_id.values(), *without_id]
+# History pages merge the four status partitions of StatusCreatedIndex newest
+# first; the token holds one index position per status (shared.merged_pages).
+HISTORY_MERGE = MergeSpec(
+    partitions=CONTENT_STATUSES,
+    key_names=("id", "status", "created_at"),
+    sort_key=lambda item: (str(item.get("created_at", "")),),
+    identity=lambda item: item.get("id") if isinstance(item.get("id"), str) else None,
+    freshness=_history_freshness,
+)
+# Read for debugging or generation only; no history consumer shows them, and
+# together they can be most of a row's 400 KB.
+_HISTORY_OMITTED_FIELDS = frozenset({"idea_data", "raw_content"})
 
 
-def get_content_history(limit: int = 20) -> list[dict[str, Any]]:
-    """Merge status indexes, deduplicate stale images, and return newest rows."""
+def _history_view(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if key not in _HISTORY_OMITTED_FIELDS}
+
+
+def get_content_history(limit: int = 20, positions: dict[str, Any] | None = None) -> MergedPage:
+    """One newest-first history page over the status partitions, cut to the page budget."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
-    items: list[dict[str, Any]] = []
-    for status in CONTENT_STATUSES:
-        response = table.query(
-            IndexName=HISTORY_INDEX,
-            KeyConditionExpression=Key("status").eq(status),
-            ScanIndexForward=False,
-            Limit=limit,
-        )
-        items.extend(response.get("Items", []))
-    deduplicated = _deduplicate_history(items)
-    for item in deduplicated:
+    read = query_reader(table, index_name=HISTORY_INDEX, partition_attribute="status")
+    page = merged_page(read, HISTORY_MERGE, positions or dict.fromkeys(CONTENT_STATUSES), limit)
+    for item in page.items:
         _fail_if_generation_timed_out(item)
-    deduplicated.sort(
-        key=lambda item: (str(item.get("created_at", "")), str(item.get("updated_at", ""))),
-        reverse=True,
-    )
-    return deduplicated[:limit]
+    return MergedPage([_history_view(item) for item in page.items], page.next_token)
 
 
-def get_unviewed_count() -> int:
-    """Count every unviewed generated row through the status index."""
+# The badge reads "99+" beyond this; counting exactly would read every
+# generated row (whole rows: the index projects ALL) on each history call.
+UNVIEWED_COUNT_CAP = 99
+_UNVIEWED_COUNT_MAX_PAGES = 5
+
+
+def get_unviewed_count() -> tuple[int, bool]:
+    """Unviewed generated rows, at most ``UNVIEWED_COUNT_CAP``; ``True`` when there may be more."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
     params: dict[str, Any] = {
         "IndexName": HISTORY_INDEX,
@@ -1315,16 +1322,19 @@ def get_unviewed_count() -> int:
     }
     count = 0
     try:
-        while True:
+        for _page in range(_UNVIEWED_COUNT_MAX_PAGES):
             response = table.query(**params)
             count += response.get("Count", 0)
             last_key = response.get("LastEvaluatedKey")
+            if count > UNVIEWED_COUNT_CAP:
+                return UNVIEWED_COUNT_CAP, True
             if not last_key:
-                return count
+                return count, False
             params["ExclusiveStartKey"] = last_key
     except Exception:
         logger.exception("Failed to get unviewed count")
-        return 0
+        return 0, False
+    return count, True
 
 
 def delete_content(content_id: str) -> dict[str, Any]:
@@ -1576,11 +1586,15 @@ def _process_generation_async(
             claim.attempt,
         )
         generation_result = generate_content(idea, get_brand_config())
-        if generation_result.get("success"):
-            _finish_generation(content_id, claim_owner, "generated", generation_result)
+        status, generation_result = fit_generation_result(
+            idea,
+            "generated" if generation_result.get("success") else "failed",
+            generation_result,
+        )
+        _finish_generation(content_id, claim_owner, status, generation_result)
+        if status == "generated":
             logger.info("Generation completed for content_id=%s attempt=%s", content_id, claim.attempt)
         else:
-            _finish_generation(content_id, claim_owner, "failed", generation_result)
             logger.error(
                 "Generation failed for content_id=%s attempt=%s: %s",
                 content_id,
@@ -2098,14 +2112,23 @@ def _mark_viewed(event: dict[str, Any], context: Any, body: dict) -> dict[str, A
     return api_response(500, result, event)
 
 
-@validate({"limit": {"type": int, "min": 1, "max": 100, "default": 20}})
-def _get_history(event: dict[str, Any], context: Any, limit: int) -> dict[str, Any]:
-    history = get_content_history(limit)
+@validate({"limit": optional_limit(default=20, max_val=100), **CURSOR_QUERY_PARAM})
+def _get_history(
+    event: dict[str, Any], context: Any, limit: int, next_token: str | None = None
+) -> dict[str, Any]:
+    """GET /content-studio/history: one newest-first page (``next_token`` continues it)."""
+    positions = decode_positions(next_token, HISTORY_MERGE)
+    if positions is None:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, "next_token")
+    page = get_content_history(limit, positions)
+    unviewed_count, unviewed_capped = get_unviewed_count()
     return success_response(
         {
-            "history": history,
-            "total_count": len(history),
-            "unviewed_count": get_unviewed_count(),
+            "history": page.items,
+            "total_count": len(page.items),
+            "next_token": page.next_token,
+            "unviewed_count": unviewed_count,
+            "unviewed_count_capped": unviewed_capped,
         },
         event,
     )

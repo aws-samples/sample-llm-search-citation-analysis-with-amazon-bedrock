@@ -22,7 +22,7 @@ inputs) are listed as ``legacy``; saving one rewrites it as v2 under the same
 ``Name``.
 
 Routes (mutations are Admin-only):
-    GET    /api/schedules              list
+    GET    /api/schedules              list, one page (limit, next_token)
     POST   /api/schedules              create
     GET    /api/schedules/{id}
     PUT    /api/schedules/{id}         full update (name, form, scope, enabled)
@@ -37,6 +37,7 @@ import re
 import secrets
 import sys
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -47,9 +48,18 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
-from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    optional_limit,
+    parse_json_body,
+    route_handler,
+    validate,
+)
 from shared.keyword_groups import describe_scope, load_existing_group_ids, validate_scope
 from shared.log_safety import log_text
+from shared.response_budget import PAGE_BUDGET_BYTES, json_bytes
 from shared.utils import get_timestamp_compact
 
 logger = logging.getLogger(__name__)
@@ -63,6 +73,11 @@ STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 SCHEDULE_ROLE_ARN = os.environ['SCHEDULE_ROLE_ARN']
 KEYWORD_GROUPS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORD_GROUPS', 'CitationAnalysis-KeywordGroups')
 SCHEDULE_GROUP = 'citation-analysis-schedules'
+# GET /api/schedules pages: schedules per page, and GetSchedule calls in flight
+# (EventBridge Scheduler allows 50 GetSchedule TPS by default).
+SCHEDULE_PAGE_DEFAULT = 50
+SCHEDULE_PAGE_MAX = 100
+DETAIL_WORKERS = 8
 
 SCHEDULE_ID_PREFIX = 'sch-'
 FREQUENCIES = ('daily', 'weekly', 'monthly')
@@ -280,16 +295,32 @@ def _ensure_schedule_group() -> None:
         scheduler.create_schedule_group(Name=SCHEDULE_GROUP)
 
 
-def _list_all_schedule_names() -> list[str]:
-    names: list[str] = []
+def _list_schedule_summaries() -> list[dict[str, Any]]:
+    """Every ListSchedules summary in the group (name and creation date; 100 per call, no details)."""
+    summaries: list[dict[str, Any]] = []
     params: dict[str, Any] = {'GroupName': SCHEDULE_GROUP, 'MaxResults': 100}
     while True:
         response = scheduler.list_schedules(**params)
-        names.extend(summary['Name'] for summary in response.get('Schedules', []) if 'Name' in summary)
+        summaries.extend(dict(summary) for summary in response.get('Schedules', []) if 'Name' in summary)
         token = response.get('NextToken')
         if not token:
-            return names
+            return summaries
         params['NextToken'] = token
+
+
+def _newest_first_names(summaries: list[dict[str, Any]]) -> list[str]:
+    """Schedule names newest first by creation date, ties by name (a stable order for offset cursors)."""
+    ordered = sorted(summaries, key=lambda summary: summary['Name'])
+    ordered.sort(key=lambda summary: _iso(summary.get('CreationDate')) or '', reverse=True)
+    return [summary['Name'] for summary in ordered]
+
+
+def _get_details(names: list[str]) -> list[Mapping[str, Any] | None]:
+    """GetSchedule for each name, ``DETAIL_WORKERS`` at a time, in ``names`` order (``None`` once deleted)."""
+    if not names:
+        return []
+    with ThreadPoolExecutor(max_workers=min(DETAIL_WORKERS, len(names))) as pool:
+        return list(pool.map(_get_detail, names))
 
 
 def _get_detail(schedule_id: str) -> Mapping[str, Any] | None:
@@ -368,23 +399,54 @@ def _form_fields(body: dict[str, Any]) -> dict[str, Any]:
 # Routes
 # =============================================================================
 
-def _list_schedules(event: dict[str, Any]) -> dict[str, Any]:
-    """GET /api/schedules — every schedule, newest first."""
+def _page_views(details: list[Mapping[str, Any] | None]) -> tuple[list[dict[str, Any]], int]:
+    """The views of ``details`` that fit the page budget, and how many details they used up.
+
+    A schedule deleted between the listing and its GetSchedule (``None``) is
+    passed over; the first schedule is always kept so the cursor advances.
+    """
+    views: list[dict[str, Any]] = []
+    used = 2
+    for index, detail in enumerate(details):
+        if detail is None:
+            continue
+        view = describe_schedule(detail)
+        cost = json_bytes(view) + 2
+        if views and used + cost > PAGE_BUDGET_BYTES:
+            return views, index
+        views.append(view)
+        used += cost
+    return views, len(details)
+
+
+def _list_schedules(event: dict[str, Any], limit: int, next_token: str | None) -> dict[str, Any]:
+    """GET /api/schedules — one page, newest first; ``next_token`` continues it.
+
+    Names and creation dates come from ListSchedules; GetSchedule (the scope
+    and form live in the target input) runs only for this page, in parallel.
+    A page is cut to the response page budget: a keyword scope can carry up
+    to 1,000 ids.
+    """
+    offset = decode_offset_cursor(next_token)
+    if offset is None:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
     _ensure_schedule_group()
-    schedules = []
-    for name in _list_all_schedule_names():
-        detail = _get_detail(name)
-        if detail:
-            schedules.append(describe_schedule(detail))
-    schedules.sort(key=lambda item: item.get('created_at') or '', reverse=True)
-    return success_response({'schedules': schedules, 'count': len(schedules)}, event)
+    names = _newest_first_names(_list_schedule_summaries())
+    schedules, consumed = _page_views(_get_details(names[offset:offset + limit]))
+    return success_response({
+        'schedules': schedules,
+        'count': len(schedules),
+        'total': len(names),
+        'next_token': encode_offset_cursor(offset + consumed, len(names)),
+    }, event)
 
 
-def _get_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /api/schedules or GET /api/schedules/{id}."""
+@validate({'limit': optional_limit(default=SCHEDULE_PAGE_DEFAULT, max_val=SCHEDULE_PAGE_MAX), **CURSOR_QUERY_PARAM})
+def _get_handler(event: dict[str, Any], context: Any, limit: int, next_token: str | None = None) -> dict[str, Any]:
+    """GET /api/schedules (one page, ``limit`` / ``next_token``) or GET /api/schedules/{id}."""
     schedule_id = _path_id(event)
     if not schedule_id:
-        return _list_schedules(event)
+        return _list_schedules(event, limit, next_token)
     detail = _get_detail(schedule_id)
     if not detail:
         return not_found_response(resource='Schedule', event=event)

@@ -25,8 +25,14 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
-function isOptionalString(value: unknown): value is string | null | undefined {
-  return value === undefined || value === null || typeof value === 'string';
+/** A string or `null`. */
+export function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+/** A string, `null`, or absent. */
+export function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value);
 }
 
 export function isKeyword(value: unknown): value is Keyword {

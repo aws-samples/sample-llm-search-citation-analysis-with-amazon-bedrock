@@ -23,6 +23,9 @@ import type {
   GenerateContentResponse,
 } from '../types';
 import { useContentStudioBatchTracking } from './useContentStudioBatchTracking';
+import {
+  CONTENT_HISTORY_PAGE_SIZE, useContentHistoryPaging
+} from './useContentHistoryPaging';
 
 const GENERATING_POLL_INTERVAL = 10000;
 const MAX_CONSECUTIVE_STATUS_FAILURES = 3;
@@ -57,6 +60,7 @@ export function useContentStudio() {
   const [ideas, setIdeas] = useState<ContentIdea[]>([]);
   const [history, setHistory] = useState<ContentStudioHistory[]>([]);
   const [unviewedCount, setUnviewedCount] = useState(0);
+  const [unviewedCountCapped, setUnviewedCountCapped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +111,16 @@ export function useContentStudio() {
   }, []);
   // Stryker restore ArrayDeclaration
 
+  const reportHistoryPageError = useCallback((requestError: unknown) => {
+    if (mountedRef.current) setError(getErrorMessage(requestError, 'content'));
+    console.error('[content] Error loading more history:', requestError);
+  }, []);
+  const {
+    applyFirstPage, loadMoreHistory, historyHasMore, historyLoadingMore
+  } = useContentHistoryPaging(setHistory, reportHistoryPageError);
+
   const fetchHistory = useCallback(async (
-    limit = 20
+    limit = CONTENT_HISTORY_PAGE_SIZE
   ): Promise<ContentStudioHistory[]> => {
     historyRequestRef.current?.abort();
     const controller = new AbortController();
@@ -119,8 +131,9 @@ export function useContentStudio() {
     try {
       const response = await requestContentHistory(limit, controller.signal);
       if (!mountedRef.current || latestHistoryReadRef.current !== operation) return [];
-      setHistory(response.history);
+      applyFirstPage(response);
       setUnviewedCount(response.unviewedCount);
+      setUnviewedCountCapped(response.unviewedCountCapped);
       return response.history;
     } catch (requestError) {
       if (!mountedRef.current || latestHistoryReadRef.current !== operation) return [];
@@ -131,7 +144,7 @@ export function useContentStudio() {
       if (historyRequestRef.current === controller) historyRequestRef.current = null;
       finishLoading(operation);
     }
-  }, [beginLoading, finishLoading]);
+  }, [applyFirstPage, beginLoading, finishLoading]);
 
   const {
     activeBatches,
@@ -389,6 +402,10 @@ export function useContentStudio() {
     ideas,
     history,
     unviewedCount,
+    unviewedCountCapped,
+    historyHasMore,
+    historyLoadingMore,
+    loadMoreHistory,
     loading,
     generating,
     error: pollingError ?? error,

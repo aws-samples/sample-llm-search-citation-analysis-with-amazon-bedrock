@@ -9,6 +9,114 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.41.0] - 2026-10-21
+
+A customer's dashboard failed to load with a bare 502: `GET /api/citations` built a response larger than AWS Lambda's
+6 MiB cap (`RequestEntityTooLarge`). An audit of every route found the same growth in eight more (the dashboard's
+`/api/searches`, brand mentions, group KPI history, the competitor rollup, content and research history, schedules,
+raw files) and unbounded reads that would hit API Gateway's 29 s timeout as data grows. Every route now declares how
+its response is bounded, the at-risk ones are paginated or summarized, and a response that still outgrows the cap is
+handed over through S3 instead of failing.
+
+### Fixed
+
+- **Responses too large for Lambda no longer fail.** `shared.api_response` measures every response the way the Lambda
+  runtime does (the whole proxy envelope: the body escaped a second time, every non-ASCII character as a 6-byte
+  `\uXXXX`). Above about 5 MB the body goes to the keywords bucket under `api-responses/` (expired after a day) and the
+  route answers its original status with `{"spilled_response": {"url", "size_bytes", "expires_in"}}` and
+  `X-Spilled-Response: true`. The URL is a 5-minute presigned GET on the regional endpoint; the bucket allows browser
+  GETs from the dashboard origin only. The dashboard's `authenticatedFetch` and the MCP server's `invoke_route` follow
+  the pointer (no credentials sent; https on `*.amazonaws.com` only; the MCP refuses bodies over 32 MB), so callers
+  see the real body. If S3 fails, the route answers a 500 with `code: response_too_large` instead of a bare 502. Each
+  spill logs `spilled_api_response route=… bytes=…` as an error and each response over 1 MB `large_api_response` as a
+  warning (CloudWatch Logs Insights: `filter @message like /large_api_response|spilled_api_response/`).
+- **Persona rankings and the self-reflection POST read the newest run.** Once a keyword's results passed 1 MB they
+  took the "latest" run from the oldest page.
+- **Prompt insights honours `limit` up to 100** (values above 20 had no effect).
+- **Citation URLs longer than 1,024 bytes are stored** (`shared.utils.normalize_url` → `bounded_url`): DynamoDB caps the
+  Citations sort key at 1,024 bytes, so a Google Travel hotel link with an opaque `ap=` state blob failed its write and
+  the citation was lost. An oversized query string is dropped (the page address stays); anything longer is cut and
+  ends with a SHA-256 digest so two long URLs never share a key.
+- **The Competitor Gap report no longer asks for a competitor the brand config does not list** (a bookmark from
+  another configuration answered 400 while the page redirected); it waits for the configured list first.
+- **The pager says "0 of 0"** when a filter matches nothing (it said "1-0 of 0").
+- **Raw responses browse every file of a folder** (it stopped at the first 1,000 S3 keys without saying so).
+- **Content Studio rows stay under DynamoDB's 400 KB item cap**: `raw_content` is dropped first; a row that still does
+  not fit fails with `content_too_large` instead of losing the generation silently.
+
+### Changed
+
+- **Paginated routes** (`limit` + `next_token`, each page cut to 1 MB; `shared.cursors`, `shared.response_budget`):
+  - `/api/citations`: server-side sort (`sort`, `order`), filters (`url_contains`, `min_citations`, `content_type`),
+    `offset` for the pager; every page carries the scope totals (`total_urls`, `provider_stats`, `brand_stats`, …).
+    The per-URL keyword list is sent only with `include_keywords=true`. Keywords are read in parallel with a shared
+    100-page cap, reported as `truncated`. The Citations table pages on the server; its Excel export follows every page.
+  - `/api/searches`: default 50 rows (max 500), newest first across providers, without the answer text unless
+    `include_response=true`. Recent Searches loads older pages on demand; its Excel export follows every page.
+  - `/api/crawled-content` (`include_content`), `/api/visibility/sentiment-examples` ("Load more answers"),
+    `/api/content-studio/history` and `/api/keyword-research/history` ("Load older"), `/api/schedules` (details
+    fetched for the page only, 8 at a time), `/api/raw-responses/browse` ("Load more"), `/api/users` (Cognito's
+    token; groups for the page only).
+- **Summaries instead of everything:**
+  - `/api/brand-mentions` answers the top 100 brands (`matching_brands`, `brands_truncated`) with a five-appearance
+    preview each (30 for one keyword) and no duplicated `first_party_brands`/`competitor_brands` lists; engine answers
+    are cut at 12,000 characters (the expanded answer says so, with its full length). `view=appearances` pages every appearance for the drill-down and the Excel exports.
+    Each keyword reads only its selected run, never its whole history. A 200-keyword group answer went from 49 MB to
+    about 0.6 MB.
+  - `/api/reports/group-kpis` answers the group series and each keyword's latest KPIs; `view=keywords` and
+    `view=drivers` page the per-keyword runs and the per-run drivers, which the report loads when shown and the
+    Excel export assembles.
+  - `/api/reports/competitor` without `competitor` rolls up at most 10 competitors (`competitors_truncated`) and
+    reports exclusive-source counts instead of the lists; reads are one projected latest-run query per keyword.
+  - `/api/visibility` lists the top 100 brands plus every first-party and configured brand (`brands_total`,
+    `position`).
+  - `/api/raw-responses/file` answers files over 1 MB with a presigned `download_url` (`too_large: true`).
+- **Bounded reads** (timeouts): `/api/trends`, `/api/reports/overview`, `/api/reports/insights`,
+  `/api/reports/group-kpis` and the report-insights worker read at most 120,000 rows newest first; when the cap stops a
+  read, every keyword is cut at the same run, the response names it (`truncated_before`,
+  `history_truncated_before`) and the reports say where history starts. `/api/stats` counts tables over 64 MB from
+  DescribeTable (`counts_approximate`; the dashboard marks those counts "≈") and runs its counters in parallel.
+  `/api/citation-gaps` reads at most 100 keywords of a group (`keywords_truncated`). The Content Studio unviewed badge
+  stops at "99+". Keyword group counts come from one StatusIndex query instead of a table scan.
+- **API Gateway compresses** responses of 1 KiB or more for clients that accept gzip (`minCompressionSize`). This
+  cuts transfer, not the Lambda cap, which is measured before compression.
+- **MCP tools** gain the new parameters (`next_token` on every paginated tool, citations sort and filters,
+  brand-mention appearances, group KPI views). A result the 50,000-character cap cuts keeps its `next_token` with a
+  note to ask again with a smaller `limit`. `get_brand_mentions` returns each brand's aggregates and each engine's
+  answer without its full text (a 30-keyword group summary came back as a cut text preview; now about 40,000
+  characters of structured data), with `view=appearances` for every appearance.
+- **The Dashboard lists the newest 5 open alerts**, with "Show all N alerts" to expand the rest (20 open alerts
+  filled the page).
+- A YouTube video whose details cannot be read (private, removed, not embeddable) is logged at INFO like any failed
+  navigation, not as a warning.
+
+### Added
+
+- **Route size-policy registry** (`test-fixtures/route-size-policies.json`): every API Gateway route declares its
+  policy (`paginated`, `top_n`, `summary`, `single_item`, `bounded`) and bound. `lib/response-size.spec.ts` fails
+  when a route is missing or stale; `lambda/api/test_route_size_policies.py` checks the router route maps and that
+  every growing route names a volume test that exists.
+- **Volume tests** (`lambda/api/test_*_volume.py`, helpers in `lambda/testing/response_size.py`): each at-risk route
+  is fed a large, realistic data set in accented Spanish and must stay within its 1 MB page budget, measured on the
+  proxy envelope.
+
+### Security
+
+- **Vite 8.3.5** (root and `web/`, was 8.2.1/8.2.2): fixes the six open Dependabot alerts (GHSA-587h-7wmj-h5pm,
+  GHSA-r825-w8mm-5pxw, GHSA-698v-4r3x-3vcv in its `launch-editor`) and three dev-server advisories (GHSA-9jrq-w75r-8gcw,
+  GHSA-rq7h-c2jc-7f22, GHSA-vfpm-58rq-9qcg). Rolldown and PostCSS moved with it.
+- **pytest 9.0.3+** in `lambda/requirements-dev.txt` (PYSEC-2026-1845; dev toolchain only).
+- Still open: `braces` ≤ 3.0.3 (GHSA-vfj7-8cjw-p6xm, stack exhaustion on deeply nested glob patterns) reaches the
+  dashboard only through Tailwind CSS 3.4's build-time file watcher and content globs, which are our own config, and
+  no patched 3.x exists. The fix is the Tailwind 4 migration (`npm audit fix --force`), a separate change to the
+  styling of every component.
+
+### Removed
+
+- `shared.bounded_reads.newest_items`, `shared.search_results.query_keyword_items`,
+  `shared.scope_params.query_keyword_rows`, `shared.dynamodb_batch.count_partition_items` and `count_all_items`: the
+  bounded reads replaced their last callers.
+
 ## [2.40.0] - 2026-10-11
 
 ### Added

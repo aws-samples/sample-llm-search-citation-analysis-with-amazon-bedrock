@@ -2,7 +2,7 @@ import {
   useId, useState
 } from 'react';
 import type {
-  GroupKpiHistoryResponse, GroupRun, KeywordRunHistory
+  GroupKpiHistoryResponse, GroupRun, KeywordRunSummary
 } from '../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../types';
 import {
@@ -16,6 +16,10 @@ import { GroupKpiDriversSection } from './sections/GroupKpiDriversSection';
 import { KeywordRunsSection } from './sections/KeywordRunsSection';
 import { GroupKpiExportButton } from './GroupKpiExportButton';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import { formatDate } from '../../../formatting/dateFormatter';
+import {
+  ReportCutNote, runsAfter
+} from '../layout/HistoryCutNote';
 
 /** The periods the report offers, in days. */
 const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
@@ -39,11 +43,25 @@ export function resolveRun(runs: readonly GroupRun[], timestamp: string | null):
 }
 
 /** The chosen keyword if the group still has it, else the first keyword with runs, else the first keyword. */
-export function resolveKeyword(keywords: readonly KeywordRunHistory[], keyword: string | null): KeywordRunHistory | null {
+export function resolveKeyword(keywords: readonly KeywordRunSummary[], keyword: string | null): KeywordRunSummary | null {
   return keywords.find((entry) => entry.keyword === keyword)
-    ?? keywords.find((entry) => entry.runs.length > 0)
+    ?? keywords.find((entry) => entry.runs_count > 0)
     ?? keywords[0]
     ?? null;
+}
+
+/** Which runs the report covers when the read was cut short; `null` when it covers the whole period. */
+function coveredRuns(history: GroupKpiHistoryResponse): string | null {
+  if (history.truncated_before !== null) return runsAfter(history.truncated_before);
+  const oldestShown = history.runs_truncated ? history.runs[0]?.timestamp : undefined;
+  return oldestShown === undefined ? null : `from ${formatDate(oldestShown)} on`;
+}
+
+/** Why the report starts later than the period: the period holds more data than one report reads. */
+export function HistoryCutNote({ history }: { readonly history: GroupKpiHistoryResponse }) {
+  const covers = coveredRuns(history);
+  if (covers === null) return null;
+  return <ReportCutNote covers={covers} />;
 }
 
 /** A group section's loading, error and "no run in the period" states; ready once the group has a run. */
@@ -122,6 +140,7 @@ export function GroupKpiReport({
           {`This group has more keywords than one report covers; only the first ${keywords.length} are included.`}
         </p>
       )}
+      <HistoryCutNote history={gate.value} />
       <GroupKpiHeadlineSection runs={runs} selected={run} onSelect={setRunTimestamp} citationsConfigured={citationsConfigured} />
       <GroupKpiTrendSection
         runs={runs}
@@ -129,9 +148,9 @@ export function GroupKpiReport({
         includePartial={includePartial}
         onIncludePartialChange={setIncludePartial}
       />
-      <GroupKpiDriversSection run={run} />
+      <GroupKpiDriversSection scope={scope} run={run} />
       {selectedKeyword !== null && (
-        <KeywordRunsSection keywords={keywords} selected={selectedKeyword} onSelect={setKeyword} />
+        <KeywordRunsSection scope={scope} days={days} keywords={keywords} selected={selectedKeyword} onSelect={setKeyword} />
       )}
       <KpiDefinitionsSection definitions={GROUP_REPORT_DEFINITIONS} />
     </>

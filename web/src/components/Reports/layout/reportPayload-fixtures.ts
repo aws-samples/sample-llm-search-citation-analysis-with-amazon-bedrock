@@ -312,6 +312,7 @@ export function buildVisibility(overrides: Partial<VisibilityResponse> = {}): Vi
       buildBrandRow('Nike', { classification: 'first_party' }),
       buildBrandRow('Adidas', { visibility_score: 30 }),
     ],
+    brands_total: 2,
     engines: buildEngines(),
     sources: buildSources(),
     sources_total: 3,

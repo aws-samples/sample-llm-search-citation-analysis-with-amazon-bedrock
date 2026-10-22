@@ -1,5 +1,6 @@
 import type { HistoricalTrendsResponse } from '../../../types';
 import type { BrandKpis } from '../../../types/domain/groupKpiHistory';
+import { TruncatedHistoryNote } from './HistoryCutNote';
 import { KpiHeadline } from './KpiHeadline';
 import {
   KeywordTrendCounts, type KeywordTrendCountValues
@@ -12,7 +13,7 @@ import { ReportSection } from './ReportSection';
 /** What `GET /trends` and `GET /reports/overview` both say about a scope's latest standing. */
 type TrendStanding = Pick<
   HistoricalTrendsResponse,
-  'change' | 'citations_configured' | 'days_analyzed' | 'keywords_analyzed' | 'keywords_with_data' | 'period_type'
+  'change' | 'citations_configured' | 'days_analyzed' | 'keywords_analyzed' | 'keywords_with_data' | 'period_type' | 'truncated_before'
 >;
 
 interface Props {
@@ -37,6 +38,7 @@ export function TrendHeadlineSection({
 }: Props) {
   return (
     <ReportSection title="Headline" subtitle={headlineSubtitle(kpis, standing)}>
+      <TruncatedHistoryNote truncatedBefore={standing.truncated_before} />
       <KpiHeadline
         kpis={kpis}
         comparison={periodComparison(standing.change, standing.period_type)}

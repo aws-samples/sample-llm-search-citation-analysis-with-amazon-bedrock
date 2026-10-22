@@ -15,7 +15,7 @@ const BRANDS_NAMED_INFO = 'How many distinct brands the answers name: yours, com
 function BenchmarkCards({ visibility }: { readonly visibility: VisibilityResponse }) {
   const {
     rank, leader, brandsNamed
-  } = benchmarkStanding(visibility.brands);
+  } = benchmarkStanding(visibility.brands, visibility.brands_total);
   return (
     <>
       <KpiChangeCard id="share_of_voice" visibility={visibility} />

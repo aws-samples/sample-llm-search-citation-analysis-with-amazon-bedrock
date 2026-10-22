@@ -51,6 +51,12 @@ ACTIVE_KEYWORDS = [
 RUN_TS = '2026-09-18T10:00:00Z'
 OLD_TS = '2026-09-10T10:00:00Z'
 
+#: The airline brand configuration of the volume reports: one first-party brand, one competitor.
+AIRLINE_BRAND_CONFIG: Mapping[str, Any] = {
+    'tracked_brands': {'first_party': ['Altiplano Air'], 'competitors': ['Cóndor Vuelos']},
+    'first_party_domains': ['altiplano.example'],
+}
+
 
 def load_scoped_handler(directory: str, filename: str, suffix: str = '_scopes') -> ModuleType:
     """``filename`` loaded with ``SCOPE_ENV`` in place and ``boto3.resource`` stubbed."""

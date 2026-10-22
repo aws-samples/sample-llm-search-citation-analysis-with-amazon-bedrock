@@ -32,10 +32,8 @@ export function HeadlineSection({
   if (!gate.ready) return gate.placeholder;
 
   const outrankedCount = gate.value.outranked_keywords.length;
-  const exclusiveCount = gate.value.exclusive_sources.length;
-  const highLiftCount = gate.value.exclusive_sources.filter(
-    (s) => s.priority === 'high',
-  ).length;
+  const exclusiveCount = gate.value.exclusive_source_count;
+  const highLiftCount = gate.value.high_priority_source_count;
 
   return (
     <ReportSection title="Headline">

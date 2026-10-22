@@ -5,7 +5,7 @@ import {
   exportGroupKpiReport, groupKpiReportFileName, groupKpiReportSheets
 } from './groupKpiExport';
 import {
-  buildHistory, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
+  buildDetail, buildHistory, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 import { exportWorkbook } from '../../../exporters/excelGenerator';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
@@ -161,7 +161,7 @@ describe('groupKpiReportSheets KPI history', () => {
       runs: [run]
     };
 
-    expect(sheetRows(groupKpiReportSheets(history, 'Hotel Sol', run, null, GENERATED_AT), 'KPI history')[0].Models).toBe('openai: a, b; gemini: c');
+    expect(sheetRows(groupKpiReportSheets(history, 'Hotel Sol', run, buildDetail(), null, GENERATED_AT), 'KPI history')[0].Models).toBe('openai: a, b; gemini: c');
   });
 });
 
@@ -242,7 +242,7 @@ describe('exportGroupKpiReport', () => {
   });
 
   it('writes the workbook under that name', async () => {
-    await exportGroupKpiReport(HISTORY, 'Hotel Sol', SELECTED, null, GENERATED_AT);
+    await exportGroupKpiReport(HISTORY, 'Hotel Sol', SELECTED, buildDetail(), null, GENERATED_AT);
 
     expect(exportWorkbook).toHaveBeenCalledWith(selectedRunSheets(null), 'group-visibility-report-hotel-sol-2026-09-28.xlsx');
   });

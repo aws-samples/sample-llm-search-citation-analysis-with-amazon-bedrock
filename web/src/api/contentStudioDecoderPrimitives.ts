@@ -5,14 +5,12 @@ class InvalidContentStudioResponseError extends TypeError {
   }
 }
 
-export { isRecord } from '../types/domain/keywordDecoders';
+export {
+  isNullableString, isRecord
+} from '../types/domain/keywordDecoders';
 
 export function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-export function isNullableString(value: unknown): value is string | null {
-  return typeof value === 'string' || value === null;
 }
 
 export function isOptionalString(value: unknown): value is string | undefined {

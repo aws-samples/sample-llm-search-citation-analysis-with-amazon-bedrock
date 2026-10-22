@@ -52,6 +52,19 @@ describe('benchmarkStanding', () => {
     expect(benchmarkStanding(buildLatestBrands()).brandsNamed).toBe(3);
   });
 
+  it('ranks your brand by its leaderboard position when it is listed below the top brands', () => {
+    const brands = [buildBrandRow('Adidas', { position: 1 }), buildBrandRow('Nike', {
+      classification: 'first_party',
+      position: 437,
+    })];
+
+    expect(benchmarkStanding(brands, 4210).rank).toBe(437);
+  });
+
+  it('counts the brands of the whole leaderboard when only its top is listed', () => {
+    expect(benchmarkStanding(buildLatestBrands(), 4210).brandsNamed).toBe(4210);
+  });
+
   it('stands nowhere in an empty leaderboard', () => {
     expect(benchmarkStanding([])).toStrictEqual({
       rank: null,

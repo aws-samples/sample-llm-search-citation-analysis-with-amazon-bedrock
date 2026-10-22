@@ -22,6 +22,7 @@ import pytest
 
 from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.env import SCHEDULE_ENV
 from testing.events import parse_response
 from testing.module_loader import load_handler_module
 
@@ -48,12 +49,7 @@ def _mock_boto3_client(service, *args, **kwargs):
     return mock_stepfunctions if service == 'stepfunctions' else mock_scheduler
 
 
-_test_env = {
-    'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
-    'SCHEDULE_ROLE_ARN': 'arn:aws:iam::123456789012:role/test-scheduler-role',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-    'CORS_ORIGIN_PARAM': '',
-}
+_test_env = SCHEDULE_ENV
 
 with (
     patch('boto3.client', side_effect=_mock_boto3_client),

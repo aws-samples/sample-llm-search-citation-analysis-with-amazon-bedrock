@@ -29,4 +29,8 @@ export const REJECTED_OVERVIEW_BODIES: ReadonlyArray<[description: string, body:
     ...mockReportsOverview,
     error: { message: 'No overview' },
   }],
+  ['a window cut that is not a timestamp', {
+    ...mockReportsOverview,
+    truncated_before: 5,
+  }],
 ];

@@ -16,7 +16,12 @@ interface StatCardProps {
   readonly icon: ReactNode;
   /** Accent tone applied to the icon badge. Defaults to `gray`. */
   readonly tone?: StatCardTone;
+  /** The value is an estimate: shown as "≈ value" with an explanation. */
+  readonly approximate?: boolean;
 }
+
+/** Why a total may be an estimate, as the tooltip and screen readers say it. */
+export const APPROXIMATE_COUNT_NOTE = 'Approximate count: large tables are counted from a total refreshed every few hours.';
 
 const toneClasses: Record<StatCardTone, {
   bg: string;
@@ -51,7 +56,7 @@ const toneClasses: Record<StatCardTone, {
 };
 
 export const StatCard = ({
-  title, value, icon, tone = 'gray',
+  title, value, icon, tone = 'gray', approximate = false,
 }: StatCardProps) => {
   const colors = toneClasses[tone];
 
@@ -60,7 +65,11 @@ export const StatCard = ({
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-500 text-sm mb-1">{title}</p>
-          <p className="text-3xl font-semibold text-gray-900">{value.toLocaleString()}</p>
+          <p className="text-3xl font-semibold text-gray-900" title={approximate ? APPROXIMATE_COUNT_NOTE : undefined}>
+            {approximate && <span aria-hidden="true">≈ </span>}
+            {approximate && <span className="sr-only">{`${APPROXIMATE_COUNT_NOTE} `}</span>}
+            {value.toLocaleString()}
+          </p>
         </div>
         <div className={`${colors.bg} ${colors.text} p-3 rounded-xl`}>
           {icon}

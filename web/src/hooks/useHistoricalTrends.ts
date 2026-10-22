@@ -2,6 +2,7 @@ import type {
   HistoricalTrendsResponse, PeriodType, ReportScope
 } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
+import { isTruncationMark } from '../types/domain/truncationDecoders';
 import { useMarketScopedFetch } from './useMarketScopedFetch';
 import { reportScopeParams } from '../components/ui/reportScope';
 import {
@@ -14,7 +15,8 @@ function isHistoricalTrendsResponse(value: unknown): value is HistoricalTrendsRe
     && isRecord(value.scope)
     && Array.isArray(value.trend_data)
     && isRecord(value.latest)
-    && Array.isArray(value.keyword_trends);
+    && Array.isArray(value.keyword_trends)
+    && isTruncationMark(value.truncated_before);
 }
 
 const historicalTrendsEndpoint = {

@@ -100,6 +100,8 @@ Not verified yet. If it offers the same OAuth form as Quick web, use the same va
 
 Catalogue reads include providers, personas, engine answers, persona rankings, prompt insights, report insights (`get_report_insights`), recent searches, crawled pages, sentiment examples, custom reports (list and one by id), schedules, KPI alerts, run status (`get_run_status`), research jobs and templates, and Content Studio items.
 
+Large lists come in pages: keywords, the citation list, recent searches, crawled pages, brand appearances (`get_brand_mentions` `view=appearances`), group KPI keywords and drivers (`get_report` `kind=group_kpis`), sentiment examples, schedules, research jobs and Content Studio items return `next_token`; pass it back with the same arguments for the next page (`null` on the last page). A result over 50,000 characters is cut to a first page and marked `truncated`; when it also has a `next_token`, ask again with a smaller `limit` first, because the cursor continues after the whole page. An API answer over 5 MB is read by the server from its temporary S3 copy, so tools see the same data as the dashboard.
+
 Prompts (`prompts/list`, `prompts/get`):
 
 - `geo_audit(group)`: an audit of one keyword group built from visibility, insights, KPI history and citation gaps. It quotes only numbers the tools returned.

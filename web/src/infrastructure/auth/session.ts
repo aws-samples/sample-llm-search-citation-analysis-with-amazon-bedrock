@@ -1,4 +1,7 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
+import {
+  followSpilledResponse, isSpilledResponse
+} from './spilledResponse';
 
 /** The Cognito group that gates administrative routes.
  *
@@ -63,16 +66,20 @@ export async function getUserGroups(): Promise<string[]> {
 }
 
 /**
- * Make an authenticated fetch request with JWT token
+ * Make an authenticated fetch request with JWT token.
+ *
+ * A response the API spilled to S3 (too large for Lambda) is followed, so
+ * callers always see the real body.
  */
 export async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = await getAuthToken();
   
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     headers: {
       ...options.headers,
       ...(token && { Authorization: `Bearer ${token}` }),
     },
   });
+  return isSpilledResponse(response) ? followSpilledResponse(response, options.signal) : response;
 }

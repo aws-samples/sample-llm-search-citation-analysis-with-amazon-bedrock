@@ -254,6 +254,15 @@ class TestLimit:
     def test_returns_twenty_examples_by_default(self) -> None:
         assert len(sentiment_examples(self.ROWS, 'negative')[1]) == 20
 
+    def test_starts_the_page_at_offset(self) -> None:
+        assert brands_of(sentiment_examples(self.ROWS, 'negative', limit=2, offset=23)[1]) == ['Brand 23', 'Brand 24']
+
+    def test_returns_no_example_past_the_end(self) -> None:
+        assert sentiment_examples(self.ROWS, 'negative', offset=25) == (25, [])
+
+    def test_cuts_the_page_at_max_bytes_but_keeps_one_example(self) -> None:
+        assert brands_of(sentiment_examples(self.ROWS, 'negative', max_bytes=10)[1]) == ['Brand 00']
+
 
 class TestProjection:
     def test_reads_an_answers_attributes_its_text_and_its_persona_name(self) -> None:

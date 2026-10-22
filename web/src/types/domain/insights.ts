@@ -193,4 +193,6 @@ export interface ReportInsightsResponse {
   insights: Insight[];
   /** The written narrative stored for a keyword group's latest run; `null` for other scopes and while none is stored. */
   narrative: InsightsNarrative | null;
+  /** The run the group history read stopped at (the stability facts cover the runs after it); `null`/absent when read whole. */
+  history_truncated_before?: string | null;
 }

@@ -50,7 +50,7 @@ describe('useUserManagement', () => {
     it('asks for the first page of 100 users on mount', async () => {
       await renderLoadedUserManagement();
 
-      expect(mockApi.listUsers).toHaveBeenCalledWith(100, 0);
+      expect(mockApi.listUsers).toHaveBeenCalledWith(100, null);
     });
 
     it('follows the pages until the server has no more', async () => {
@@ -59,10 +59,10 @@ describe('useUserManagement', () => {
       const result = await renderLoadedUserManagement();
 
       expect(result.current.users).toStrictEqual(mockUsers);
-      expect(mockApi.listUsers).toHaveBeenCalledWith(100, 1);
+      expect(mockApi.listUsers).toHaveBeenCalledWith(100, '1');
     });
 
-    it('sets the total the server reports', async () => {
+    it('sets the total to the number of users loaded', async () => {
       const result = await renderLoadedUserManagement();
 
       expect(result.current.total).toBe(2);
@@ -226,6 +226,6 @@ describe('useUserManagement', () => {
 
     await act(() => run(result.current));
 
-    expect(mockApi.listUsers).toHaveBeenCalledWith(100, 0);
+    expect(mockApi.listUsers).toHaveBeenCalledWith(100, null);
   });
 });

@@ -82,42 +82,6 @@ export function citationExportRows(citations: TopUrl[]) {
   }));
 }
 
-function matchesContentType(citation: TopUrl, contentType: ContentTypeFilter): boolean {
-  if (contentType === 'all') return true;
-  return (contentType === 'video') === isVideoCitation(citation);
-}
-
-/**
- * Filter and sort citations based on search criteria.
- */
-export function filterAndSortCitations(
-  citations: TopUrl[],
-  searchQuery: string,
-  minCitations: number | '',
-  sort: SortConfig,
-  contentType: ContentTypeFilter = 'all',
-): TopUrl[] {
-  const filtered = citations.filter((citation) => {
-    const matchesSearch = searchQuery === '' || 
-      citation.url.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesMin = minCitations === '' || 
-      citation.citation_count >= minCitations;
-    return matchesSearch && matchesMin && matchesContentType(citation, contentType);
-  });
-
-  const dir = sort.direction === 'asc' ? 1 : -1;
-
-  return [...filtered].sort((a, b) => {
-    if (sort.column === 'keywords') {
-      return ((a.keyword_count ?? 0) - (b.keyword_count ?? 0)) * dir;
-    }
-    if (sort.column === 'domain') {
-      return getDomain(a.url).localeCompare(getDomain(b.url)) * dir;
-    }
-    return (a.citation_count - b.citation_count) * dir;
-  });
-}
-
 /**
  * Fetch breakdown data for a URL.
  */

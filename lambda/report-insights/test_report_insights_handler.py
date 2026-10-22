@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared import scoped_reports
 from shared.markets import markets_from_item
 from shared.models import BedrockInvocationError
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
@@ -323,3 +324,43 @@ class TestOutcome:
 
     def test_omits_the_market_of_a_global_outcome(self, worker_module) -> None:
         assert worker_module.GroupRun('altiplano', [], None).outcome(status='failed') == {'group_id': 'altiplano', 'status': 'failed'}
+
+
+# --- History window: read bounded like GET /api/reports/insights -----------------------
+
+_OLDEST_RUN = '2026-10-05T06:50:33.000000Z'
+_MIDDLE_RUN = '2026-10-06T06:50:33.000000Z'
+#: Three runs of one keyword, newest first as a ``ScanIndexForward=False`` query returns them.
+_THREE_RUNS = [
+    ranked_answer_row('vuelos baratos a lima', 'openai', 1, timestamp)
+    for timestamp in (RUN_TIMESTAMP, _MIDDLE_RUN, _OLDEST_RUN)
+]
+
+
+def _history_reads(search: MagicMock) -> list[dict]:
+    """The SearchResults queries that read the history window (newest first)."""
+    return [call.kwargs for call in search.query.call_args_list if call.kwargs.get('ScanIndexForward') is False]
+
+
+class TestHistoryWindow:
+    def _generated_and_cut(self, worker_module) -> tuple[int, int]:
+        """``(generated, history_truncated)`` of one worker run over ``_THREE_RUNS``."""
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), rows=_THREE_RUNS):
+            result = worker_module.handler(_workflow_event('group-1'), None)
+        return result['generated'], result['history_truncated']
+
+    def test_counts_no_history_cut_when_the_window_is_read_whole(self, worker_module) -> None:
+        assert self._generated_and_cut(worker_module) == (1, 0)
+
+    def test_counts_the_history_cut_when_the_window_holds_more_rows_than_one_report_reads(self, worker_module) -> None:
+        with patch.object(scoped_reports, 'rows_per_keyword', return_value=2):
+            assert self._generated_and_cut(worker_module) == (1, 1)
+
+    def test_reads_each_keyword_history_with_the_report_row_cap(self, worker_module) -> None:
+        search = MagicMock()
+        search.query.return_value = {'Items': _THREE_RUNS}
+
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), search=search):
+            worker_module.handler(_workflow_event('group-1'), None)
+
+        assert [read['Limit'] for read in _history_reads(search)] == [scoped_reports.rows_per_keyword(2) + 1] * 2

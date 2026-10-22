@@ -276,6 +276,10 @@ export const REJECTED_REPORT_INSIGHTS_BODIES: ReadonlyArray<[description: string
     ...VALID,
     timestamp: 5,
   }],
+  ['a history cut that is not a timestamp', {
+    ...VALID,
+    history_truncated_before: 5,
+  }],
   ['facts without the engines list', {
     ...VALID,
     facts: {

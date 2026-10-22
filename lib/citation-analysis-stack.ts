@@ -117,6 +117,14 @@ const WORKFLOW_RUNS_PREFIX = 'runs/';
 const WORKFLOW_RUNS_RETENTION_DAYS = 30;
 
 /**
+ * Keywords-bucket prefix for API responses too large for Lambda's 6 MiB cap
+ * (`lambda/shared/response_spill.py` SPILL_PREFIX). Each object is read once,
+ * through a 5-minute presigned URL, so a day is ample.
+ */
+const API_RESPONSE_SPILL_PREFIX = 'api-responses/';
+const API_RESPONSE_SPILL_RETENTION_DAYS = 1;
+
+/**
  * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the old
  * ProcessKeywords concurrency of 3 with providers called in sequence (32
  * keywords took 62 minutes), so the old 2-hour timeout ended runs at ~60
@@ -972,6 +980,12 @@ export class CitationAnalysisStack extends cdk.Stack {
           prefix: WORKFLOW_RUNS_PREFIX,
           expiration: cdk.Duration.days(WORKFLOW_RUNS_RETENTION_DAYS),
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+        {
+          id: 'ExpireSpilledApiResponses',
+          enabled: true,
+          prefix: API_RESPONSE_SPILL_PREFIX,
+          expiration: cdk.Duration.days(API_RESPONSE_SPILL_RETENTION_DAYS),
         },
       ],
     });
@@ -2247,6 +2261,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         // reproduction if you must, then turn it back off.
         dataTraceEnabled: false,
       },
+      // gzip/deflate JSON bodies of 1 KiB or more for clients that accept it
+      // (browsers do). Cuts transfer for large pages several-fold; it does not
+      // raise the Lambda 6 MiB response cap, which is measured before this.
+      minCompressionSize: cdk.Size.kibibytes(1),
       // CORS preflight: API Gateway handles OPTIONS with wildcard origins.
       // Actual CORS enforcement happens at Lambda level via SSM parameter containing CloudFront domain.
       // This two-layer approach is required because CloudFront is created after API Gateway.
@@ -2837,7 +2855,21 @@ export class CitationAnalysisStack extends cdk.Stack {
       if (devMode) {
         fn.addEnvironment('ALLOW_LOCALHOST', 'true');
       }
+      // Responses too large for Lambda's 6 MiB cap are spilled here
+      // (lambda/shared/response_spill.py); the handler presigns the GET.
+      fn.addEnvironment('API_RESPONSE_BUCKET', keywordsBucket.bucketName);
+      allow(fn, ['s3:PutObject', 's3:GetObject'], [keywordsBucket.arnForObjects(`${API_RESPONSE_SPILL_PREFIX}*`)]);
     }
+
+    // The dashboard downloads spilled responses from their presigned URLs
+    // with fetch(), which needs CORS on the bucket. Only GET from the
+    // dashboard's own origin; the URL itself is the (short-lived) credential.
+    keywordsBucket.addCorsRule({
+      allowedMethods: [s3.HttpMethods.GET],
+      allowedOrigins: devMode ? [cloudFrontOrigin, 'http://localhost:5173'] : [cloudFrontOrigin],
+      allowedHeaders: [],
+      maxAge: 3600,
+    });
 
     // ========================================
     // Optimize Lambda Permissions

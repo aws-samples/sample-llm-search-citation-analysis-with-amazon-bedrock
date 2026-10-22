@@ -24,11 +24,12 @@ from boto3.dynamodb.conditions import Attr, Key
 
 sys.path.insert(0, '/opt/python')
 
+from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
-from shared.search_results import latest_run, query_keyword_items, search_results_table_name
+from shared.search_results import search_results_table_name
 from shared.utils import brand_names_match, get_brand_config, get_timestamp, parse_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,10 @@ SEARCH_RESULTS_TABLE = search_results_table_name()
 SELF_REFLECTION_TABLE = os.environ['DYNAMODB_TABLE_SELF_REFLECTION']
 QUERY_PROMPTS_TABLE = os.environ['DYNAMODB_TABLE_QUERY_PROMPTS']
 CACHE_TTL_HOURS = 24
+
+# What the reflection prompt reads of each answer of the latest run.
+_ANSWER_PROJECTION = 'keyword, #ts, provider, query_prompt_id, brands, #rs'
+_ANSWER_NAMES = {'#ts': 'timestamp', '#rs': 'response'}
 
 SELF_REFLECTION_PROMPT = """You are analysing an AI search response to explain brand ranking decisions.
 
@@ -142,8 +147,11 @@ def fetch_search_data(keyword: str, query_prompt_id: str) -> tuple[str, list[dic
 
     ``('', [])`` when the keyword has no results, or none for that persona.
     """
-    items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
-    _, latest_items = latest_run(items)
+    # Newest-first by sort key: a partition past one 1 MB page no longer
+    # answers from its oldest runs.
+    latest_items = query_latest_run_rows(
+        dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, projection=_ANSWER_PROJECTION, attribute_names=_ANSWER_NAMES,
+    )
     persona_items = [
         item for item in latest_items
         if query_prompt_id in (None, '', 'all') or item.get('query_prompt_id', 'default') == query_prompt_id

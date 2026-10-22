@@ -52,6 +52,7 @@ export interface ReportsOverviewResponse {
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];
   top_recommendations: Recommendation[];
+  truncated_before?: HistoricalTrendsResponse['truncated_before'];
 }
 
 export interface CompetitorOutrankedKeyword {
@@ -76,12 +77,18 @@ export interface CompetitorExclusiveSource {
 export interface CompetitorRollup {
   competitor: string;
   outranked_keywords: CompetitorOutrankedKeyword[];
-  exclusive_sources: CompetitorExclusiveSource[];
+  /** Every source citing the competitor but no first-party brand (only the best ten are listed). */
+  exclusive_source_count: number;
+  /** How many of those sources are high priority (cited by two engines or more). */
+  high_priority_source_count: number;
+  /** The ten exclusive sources with the best outreach lift. */
   outreach_targets: CompetitorExclusiveSource[];
 }
 
 /** `GET /reports/competitor?competitor=…`: the rollup of that one competitor. */
 export interface CompetitorReportResponse {
   keywords_analyzed: number;
+  /** Whether active keywords beyond `keyword_limit` were left out. */
+  keywords_truncated?: boolean;
   rollup: CompetitorRollup;
 }

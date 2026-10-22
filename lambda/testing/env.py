@@ -26,6 +26,32 @@ KEYWORD_RESEARCH_ENV: Mapping[str, str] = {
     'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
 }
 
+# The four tables get-stats.py counts (and CORS without an origin parameter).
+STATS_ENV: Mapping[str, str] = {
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
+    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
+    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
+    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
+    'CORS_ORIGIN_PARAM': '',
+}
+
+# What self-reflection.py resolves at import: the reflections it stores and the tables it reads.
+SELF_REFLECTION_ENV: Mapping[str, str] = {
+    'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
+    'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
+    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
+    'CORS_ORIGIN_PARAM': '',
+}
+
+# What manage-schedule.py resolves at import: the workflow it schedules, the role Scheduler assumes, the groups table.
+SCHEDULE_ENV: Mapping[str, str] = {
+    'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
+    'SCHEDULE_ROLE_ARN': 'arn:aws:iam::123456789012:role/test-scheduler-role',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
+    'CORS_ORIGIN_PARAM': '',
+}
+
 
 def setdefault_env(defaults: Mapping[str, str]) -> None:
     """``os.environ.setdefault`` for every pair, for modules loaded at collection time.

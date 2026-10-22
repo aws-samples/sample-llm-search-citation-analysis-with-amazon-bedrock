@@ -2,8 +2,9 @@ import {
   fireEvent, screen
 } from '@testing-library/react';
 import type {
-  BrandMentionsResponse, Keyword, ReportScope
+  BrandAppearanceRow, BrandMentionsResponse, Keyword, ReportScope
 } from '../../types';
+import { ONE_BRAND_ONE_COMPETITOR } from '../../hooks/useBrandMentions-fixtures';
 
 export const LATEST_BRAND_RUN = '2026-09-18T10:00:00Z';
 export const HISTORICAL_BRAND_RUN = '2026-09-10T10:00:00Z';
@@ -58,9 +59,17 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
         overall_rank: 1,
         aggregate_score: 22,
         classification: 'first_party',
-        providers: ['openai', 'gemini'],
+        providers: ['gemini', 'openai'],
+        provider_ranks: {
+          gemini: 2,
+          openai: 1,
+        },
         keyword_count: 2,
-        keywords: ['best hotels galicia', 'hotel coruna spa'],
+        appearance_count: 2,
+        sentiment_counts: {
+          positive: 1,
+          neutral: 1,
+        },
         appearances: [
           {
             keyword: 'hotel coruna spa',
@@ -92,8 +101,10 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
         aggregate_score: 21,
         classification: 'competitor',
         providers: ['openai'],
+        provider_ranks: { openai: 3 },
         keyword_count: 1,
-        keywords: ['hotel coruna spa'],
+        appearance_count: 1,
+        sentiment_counts: { negative: 1 },
         appearances: [{
           keyword: 'hotel coruna spa',
           provider: 'openai',
@@ -105,13 +116,16 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
         }],
       },
     ],
-    total_unique_brands: 2,
-    first_party_brands: [],
-    competitor_brands: [],
-    summary: {
-      first_party_count: 1,
-      competitor_count: 1,
-      other_count: 0,
-    },
+    ...ONE_BRAND_ONE_COMPETITOR,
   },
 };
+
+/** The `view=appearances` rows of `brandMentionsExportResponse`, tagged with their brand. */
+export const brandMentionsExportRows: BrandAppearanceRow[] = brandMentionsExportResponse.aggregated.brands.flatMap(
+  (brand) => brand.appearances.map((appearance) => ({
+    ...appearance,
+    brand: brand.name,
+    classification: brand.classification,
+    overall_rank: brand.overall_rank,
+  }))
+);

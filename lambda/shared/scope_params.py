@@ -35,9 +35,8 @@ A handler wires the scope in three places::
 ``**scope_params`` collects exactly the values ``@validate`` injects for
 ``SCOPE_QUERY_PARAMS``; every other query parameter keeps its own named
 argument. Scoped reports then fan out over the resolved keywords with
-``query_keyword_rows`` (one projected SearchResults partition per keyword),
-and the report aggregators compose KPI functions of sibling handler files
-through ``load_sibling_function``.
+``map_scope_keywords``, and the report aggregators compose KPI functions of
+sibling handler files through ``load_sibling_function``.
 """
 
 from __future__ import annotations
@@ -50,12 +49,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
 from shared.api_response import validation_error
 from shared.constants import MAX_KEYWORD_LENGTH
-from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.markets import GLOBAL_MARKET_ID, is_market_filter_id
@@ -265,23 +262,6 @@ def map_scope_keywords[ResultT](
         return []
     with ThreadPoolExecutor(max_workers=min(SCOPE_MAX_WORKERS, len(keywords))) as pool:
         return list(pool.map(guarded, keywords))
-
-
-def query_keyword_rows(table: Any, keyword: str, projection: str) -> list[dict[str, Any]]:
-    """Every SearchResults row of one keyword (projected), following pagination.
-
-    The per-keyword read behind every scoped report: each keyword text a scope
-    resolves to is one partition of the table. ``projection`` names the
-    attributes to read, with ``#ts`` standing for the reserved word
-    ``timestamp``; it never includes the LLM response text, so a 60-keyword
-    group does not pull megabytes of prose through one 29s API request.
-    """
-    return collect_all_items(
-        table.query,
-        KeyConditionExpression=Key('keyword').eq(keyword),
-        ProjectionExpression=projection,
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
 
 
 def load_sibling_function(anchor_file: str, filename: str, attr: str, alias_suffix: str) -> Callable:

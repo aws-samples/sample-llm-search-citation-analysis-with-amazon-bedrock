@@ -7,16 +7,20 @@ import { ConfirmModal } from '../ui/Modal';
 import { CollectionIcon } from '../ui';
 import { ContentDetailModal } from './ContentDetailModal';
 import { HistoryListItem } from './HistoryListItem';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 
 interface ContentHistoryProps {
   history: ContentStudioHistory[];
   loading: boolean;
   onDelete: (id: string) => Promise<boolean>;
   onMarkViewed: (id: string) => Promise<boolean>;
+  /** Set while older items remain past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 export const ContentHistory = ({
-  history, loading, onDelete, onMarkViewed
+  history, loading, onDelete, onMarkViewed, onLoadMore, loadingMore = false
 }: ContentHistoryProps) => {
   const [selectedItem, setSelectedItem] = useState<ContentStudioHistory | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -83,6 +87,8 @@ export const ContentHistory = ({
           />
         ))}
       </div>
+
+      <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load older content" layoutClassName="mt-3 " />
 
       {selectedItem && (
         <ContentDetailModal

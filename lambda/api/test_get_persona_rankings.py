@@ -12,7 +12,12 @@ from shared.kpi_engine import answers_from_rows, brand_table
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
-from testing.search_results_fixtures import report_dynamodb, search_result_row, search_results_table
+from testing.search_results_fixtures import (
+    oldest_page_first_table,
+    report_dynamodb,
+    search_result_row,
+    search_results_table,
+)
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {
@@ -104,3 +109,36 @@ def test_rejects_a_persona_missing_from_the_query_prompts_table(get_rankings):
     assert get_rankings({'query_prompt_id': 'ghost'}) == (
         400, {'error': 'Persona not found: ghost', 'field': 'query_prompt_id'},
     )
+
+
+_OLD_RUN = '2026-08-01T06:00:00.000000Z'
+
+
+def _rankings_from(persona_module: Any, table: Any) -> dict[str, Any]:
+    prompts = fake_table(scan={'Items': [{'id': 'default', 'name': 'Default'}]})
+    with patch.object(persona_module, 'dynamodb', report_dynamodb(table, other_tables={'test-query-prompts': prompts})):
+        return persona_module.get_persona_rankings(_KEYWORD)
+
+
+def test_ranks_the_latest_run_when_the_oldest_page_holds_only_older_runs(persona_module):
+    old = search_result_row(_KEYWORD, 'openai', [_brand('Old Hotel', 1)], timestamp=_OLD_RUN)
+    table = oldest_page_first_table({_KEYWORD: [old, *_ROWS]})
+
+    brands = _rankings_from(persona_module, table)['personas'][0]['brands']
+
+    assert [brand['name'] for brand in brands] == ['Hotel Sol', 'Rival Inn']
+
+
+def test_reads_the_partition_newest_first(persona_module):
+    table = search_results_table({_KEYWORD: _ROWS})
+
+    _rankings_from(persona_module, table)
+
+    assert table.query.call_args_list[0].kwargs['ScanIndexForward'] is False
+
+
+def test_answers_a_message_for_a_keyword_never_analysed(persona_module):
+    body = _rankings_from(persona_module, search_results_table({}))
+
+    assert (body['personas'], body['message']) == ([], 'No search results found for this keyword.')
+

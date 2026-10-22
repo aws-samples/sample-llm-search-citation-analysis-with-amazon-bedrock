@@ -20,6 +20,7 @@ import {
 } from '../../formatting/researchStatus';
 import { ResearchListSkeleton } from './ResearchListSkeleton';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
@@ -30,6 +31,9 @@ interface ResearchHistoryProps extends Pick<ResearchRunViewProps, 'onRetry' | 'o
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
+  /** Set while older jobs remain past the loaded pages. */
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
@@ -68,6 +72,8 @@ export const ResearchHistory = ({
   onRefresh,
   onRetry,
   onKeywordsAdded,
+  onLoadMore,
+  loadingMore = false,
 }: ResearchHistoryProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -106,6 +112,8 @@ export const ResearchHistory = ({
           ))}
         </div>
       )}
+
+      <LoadMoreButton onLoadMore={history.length > 0 ? onLoadMore : undefined} loading={loadingMore} label="Load older research" />
     </div>
   );
 };

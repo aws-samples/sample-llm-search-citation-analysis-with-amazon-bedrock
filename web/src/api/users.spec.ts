@@ -16,29 +16,35 @@ vi.mock('./client', () => import('./clientMock-fixtures'));
 
 describe('users API', () => {
   describe('listUsers', () => {
-    it('fetches users with default pagination', async () => {
+    it('fetches the first page of users with the default limit', async () => {
       const mockResponse = {
         users: [],
-        total: 0,
-        has_more: false 
+        count: 0,
+        limit: 50,
+        next_token: null 
       };
       mockApiGet.mockResolvedValue(mockResponse);
 
       const result = await listUsers();
 
       expect(result).toStrictEqual(mockResponse);
-      expect(mockApiGet).toHaveBeenCalledWith('/users?limit=50&offset=0');
+      expect(mockApiGet).toHaveBeenCalledWith('/users', { params: { limit: '50' } });
     });
 
-    it('fetches users with custom pagination', async () => {
+    it('sends next_token when continuing the listing', async () => {
       mockApiGet.mockResolvedValue({
         users: [],
-        total: 100 
+        next_token: null 
       });
 
-      await listUsers(25, 50);
+      await listUsers(25, 'page-2');
 
-      expect(mockApiGet).toHaveBeenCalledWith('/users?limit=25&offset=50');
+      expect(mockApiGet).toHaveBeenCalledWith('/users', {
+        params: {
+          limit: '25',
+          next_token: 'page-2' 
+        } 
+      });
     });
   });
 

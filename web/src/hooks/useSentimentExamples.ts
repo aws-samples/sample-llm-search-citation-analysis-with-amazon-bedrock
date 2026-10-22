@@ -13,11 +13,14 @@ const sentimentExamplesEndpoint = {
   logMessage: '[sentiment] Error fetching sentiment examples:',
   isValidResponse: isSentimentExamplesResponse,
   ...fetchErrors('SentimentExamplesFetchError', 'Failed to fetch sentiment examples'),
-  buildRequest: (marketId: string | null, scope: ReportScope, sentiment: SentimentLabel, provider?: string, limit?: number) => {
+  buildRequest: (
+    marketId: string | null, scope: ReportScope, sentiment: SentimentLabel, provider?: string, limit?: number, nextToken?: string,
+  ) => {
     const params = new URLSearchParams(reportScopeParams(scope, marketId));
     params.append('sentiment', sentiment);
     if (provider) params.append('provider', provider);
     if (limit !== undefined) params.append('limit', String(limit));
+    if (nextToken !== undefined) params.append('next_token', nextToken);
     return {
       path: '/visibility/sentiment-examples',
       params,

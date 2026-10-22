@@ -10,6 +10,7 @@ import type {
 } from './insights';
 import { isInsightsNarrative } from './insightsNarrativeDecoders';
 import { isRecord } from './keywordDecoders';
+import { isTruncationMark } from './truncationDecoders';
 import {
   isCitationOwnershipFacts, isCompetitorCaveatRow, isNullableNumber, isOwnedPagesFacts, isPromptEngineFacts
 } from './insightFactDecoders';
@@ -104,5 +105,6 @@ export function isReportInsightsResponse(value: unknown): value is ReportInsight
     && isInsightFacts(value.facts)
     && Array.isArray(value.insights)
     && value.insights.every(isInsight)
-    && (value.narrative === null || isInsightsNarrative(value.narrative));
+    && (value.narrative === null || isInsightsNarrative(value.narrative))
+    && isTruncationMark(value.history_truncated_before);
 }

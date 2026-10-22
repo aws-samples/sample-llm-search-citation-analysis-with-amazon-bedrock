@@ -3,6 +3,8 @@ import {
 } from 'react';
 import { validateApiConfig } from '../api/client';
 import { fetchAllKeywords } from '../api/keywordPages';
+import { DASHBOARD_CITATIONS_LIMIT } from '../api/citationPages';
+import { isStats } from '../types/domain/statsDecoders';
 import {
   API_BASE_URL,
   authenticatedFetch,
@@ -19,11 +21,20 @@ import type {
 // the Lambda commits after the immediate reconciliation read.
 export const LATE_KEYWORD_RECONCILIATION_MS = 125_000;
 
-/** @internal Response from the searches API */
-interface SearchesResponse { searches: Search[] }
+/** The dashboard's first page of recent searches (list rows, no answer text); the view loads older pages on demand. */
+export const DASHBOARD_SEARCHES_LIMIT = 100;
 
-function isStats(value: unknown): value is Stats {
-  return typeof value === 'object' && value !== null && 'total_searches' in value;
+/** The panel requests: small first pages, so the dashboard never pulls a whole scope. */
+export const DASHBOARD_PANEL_PATHS = [
+  '/stats',
+  `/citations?limit=${DASHBOARD_CITATIONS_LIMIT}`,
+  `/searches?limit=${DASHBOARD_SEARCHES_LIMIT}`,
+] as const;
+
+/** @internal Response from the searches API */
+interface SearchesResponse {
+  searches: Search[];
+  next_token?: string | null;
 }
 
 function isCitations(value: unknown): value is Citations {
@@ -67,11 +78,9 @@ function validateResponses(responses: Response[]): void {
 
 /** Stats, citations and searches payloads, in that order. */
 async function fetchPanelPayloads(signal: AbortSignal): Promise<unknown[]> {
-  const responses = await Promise.all([
-    authenticatedFetch(`${API_BASE_URL}/stats`, { signal }),
-    authenticatedFetch(`${API_BASE_URL}/citations`, { signal }),
-    authenticatedFetch(`${API_BASE_URL}/searches`, { signal }),
-  ]);
+  const responses = await Promise.all(
+    DASHBOARD_PANEL_PATHS.map(async (path) => authenticatedFetch(`${API_BASE_URL}${path}`, { signal }))
+  );
 
   validateResponses(responses);
 
@@ -113,6 +122,7 @@ export const useDashboardData = () => {
   const [stats, setStats] = useState<Stats | null>(null);
   const [citations, setCitations] = useState<Citations | null>(null);
   const [searches, setSearches] = useState<Search[]>([]);
+  const [searchesNextToken, setSearchesNextToken] = useState<string | null>(null);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +143,10 @@ export const useDashboardData = () => {
 
     if (isStats(statsJson)) setStats(statsJson);
     if (isCitations(citationsJson)) setCitations(citationsJson);
-    if (isSearchesResponse(searchesJson)) setSearches(searchesJson.searches);
+    if (isSearchesResponse(searchesJson)) {
+      setSearches(searchesJson.searches);
+      setSearchesNextToken(typeof searchesJson.next_token === 'string' ? searchesJson.next_token : null);
+    }
     if (keywordGenerationRef.current === requestKeywordGeneration) {
       setKeywords(keywordList);
     }
@@ -146,6 +159,7 @@ export const useDashboardData = () => {
     setStats(getEmptyStats());
     setCitations(getEmptyCitations());
     setSearches([]);
+    setSearchesNextToken(null);
     if (keywordGenerationRef.current === requestKeywordGeneration) {
       setKeywords([]);
     }
@@ -268,6 +282,8 @@ export const useDashboardData = () => {
     stats,
     citations,
     searches,
+    /** Token of the page after `searches` (`null` when it is the last one). */
+    searchesNextToken,
     keywords,
     setKeywords,
     loading,

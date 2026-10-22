@@ -3,6 +3,7 @@ import type {
   HistoricalTrendsResponse, VisibilityResponse
 } from '../../../types';
 import { ReportSection } from '../layout/ReportSection';
+import { TruncatedHistoryNote } from '../layout/HistoryCutNote';
 import { ReportSectionPlaceholder } from '../layout/ReportSectionPlaceholder';
 import { ReportStatGrid } from '../layout/ReportStatGrid';
 import type { SectionGate } from '../layout/sectionGate';
@@ -48,11 +49,20 @@ export function LatestRunSection({
   return <GatedSection gate={gateLatestRuns(report, frame.title)} {...frame} />;
 }
 
-/** A section drawn from the trend (`/trends`): its loading, error and empty placeholders, then its heading around `children`. */
+/** A section drawn from the trend (`/trends`): its loading, error and empty placeholders, then its heading around `children`, noting a cut window. */
 export function TrendSection({
-  report, ...frame
+  report, children, ...frame
 }: Omit<ScopeSectionFrameProps<HistoricalTrendsResponse>, 'emptyMessage'>) {
-  return <GatedSection gate={gateTrend(report, frame.title)} {...frame} />;
+  return (
+    <GatedSection gate={gateTrend(report, frame.title)} {...frame}>
+      {(trends) => (
+        <>
+          <TruncatedHistoryNote truncatedBefore={trends.truncated_before} />
+          {children(trends)}
+        </>
+      )}
+    </GatedSection>
+  );
 }
 
 interface HeadlineProps {

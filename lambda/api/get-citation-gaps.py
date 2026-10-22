@@ -18,7 +18,6 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
 # Add shared module to path
@@ -31,13 +30,14 @@ from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
 from shared.kpi_engine import is_owned_domain, normalize_domain, percent
 from shared.scope_params import (
+    SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     all_active_scope,
     keywords_table_name,
     scope_from_request,
 )
-from shared.search_results import latest_run, search_results_table_name
+from shared.search_results import query_latest_run, search_results_table_name
 from shared.utils import extract_domain, get_brand_config
 from shared.youtube import content_type_for
 
@@ -51,12 +51,6 @@ dynamodb = boto3.resource(
 )
 
 KEYWORDS_TABLE = keywords_table_name()
-
-# Upper bound on items fetched per keyword when isolating the latest
-# analysis run. One run writes one SearchResults item per provider x
-# persona (9 providers x a handful of personas today), so 50 comfortably
-# covers a full run while keeping the read small.
-LATEST_RUN_ITEM_LIMIT = 50
 
 # Concurrency for SearchResults classification in the all-keywords path.
 # Crawl enrichment starts only after this pool has closed.
@@ -254,6 +248,20 @@ def _gaps_and_covered_sources(
     return gaps, covered_sources
 
 
+def classify_latest_run(
+    latest_items: list[dict[str, Any]], config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """One keyword's latest-run rows (``provider``, ``citations``, ``brands``) as ``(gaps, covered_sources, cited_urls)``.
+
+    Both lists ranked and not enriched; ``cited_urls`` counts every distinct
+    URL the rows cite. Also what ``/reports/competitor`` classifies its rows with.
+    """
+    first_party_list, competitors_list = tracked_brand_names(config)
+    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
+    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
+    return gaps, covered_sources, len(source_brand_map)
+
+
 def _first_party_brand_error(config: dict[str, Any]) -> dict[str, str] | None:
     """Return the public error contract when first-party brands are missing."""
     tracked_brands = config.get('tracked_brands', {})
@@ -268,25 +276,11 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
     if configuration_error is not None:
         return configuration_error
 
-    search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    first_party_list, competitors_list = tracked_brand_names(config)
-
-    response = search_table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword),
-        ScanIndexForward=False,
-        Limit=LATEST_RUN_ITEM_LIMIT,
-        ProjectionExpression='#ts, provider, citations, brands',
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
-    items: list[dict[str, Any]] = response.get('Items', [])
-
-    if not items:
+    latest_timestamp, latest_items = query_latest_run(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
+    if not latest_items:
         return {'error': f'No data found for keyword: {keyword}'}
 
-    latest_timestamp, latest_items = latest_run(items)
-
-    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
-    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
+    gaps, covered_sources, cited_urls = classify_latest_run(latest_items, config)
 
     domain_gaps: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for gap in gaps:
@@ -311,7 +305,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': percent(len(covered_sources), len(source_brand_map)) if source_brand_map else 0,
+            'coverage_rate': percent(len(covered_sources), cited_urls) if cited_urls else 0,
         },
     }
 
@@ -327,7 +321,13 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
 
 
 def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportScope | None) -> dict[str, Any]:
-    """Analyze citation gaps across the active keywords of a scope."""
+    """Analyze citation gaps across the active keywords of a scope.
+
+    Every scope reads a bounded number of keyword partitions: ``limit`` of
+    every active keyword (the default and ``scope=all``), or a group's or id
+    list's keywords up to ``SCOPE_KEYWORDS_CAP`` (``limit`` never cuts a group
+    below that). ``keywords_truncated`` says whether keywords were left out.
+    """
     configuration_error = _first_party_brand_error(config)
     if configuration_error is not None:
         return configuration_error
@@ -336,7 +336,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportS
     resolved = scope if scope is not None else all_active_scope(keywords_table)
     keywords = sorted(resolved.keywords, key=str.casefold)
     if scope is not None and scope.kind != 'all':
-        limit = max(limit, len(keywords))
+        limit = min(max(limit, len(keywords)), SCOPE_KEYWORDS_CAP)
 
     selected_keywords = keywords[:limit]
     all_gaps: list[dict[str, Any]] = []
@@ -373,6 +373,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportS
 
     return {
         'scope': resolved.describe(),
+        'keywords_truncated': len(selected_keywords) < len(keywords),
         'keywords_analyzed': len(keyword_summaries),
         'keyword_summaries': sorted(keyword_summaries, key=lambda summary: -summary['high_priority_gaps']),
         'top_gaps': top_gaps,

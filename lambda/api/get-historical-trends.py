@@ -10,6 +10,10 @@ previous period, and each keyword's own move. Formulas in
 Scope: at most one of ``keyword=``, ``group_id=``, ``keyword_ids=`` or
 ``scope=all``. Without one, every active keyword (capped at
 ``_ALL_KEYWORDS_CAP``, the dashboard's historical breadth).
+
+The window is read newest first, at most ``shared.scoped_reports.WINDOW_ROWS_CAP``
+rows; when the cap stops it, ``truncated_before`` names the run it stopped at
+and every number covers the runs after it (``null`` for a window read whole).
 """
 
 import logging
@@ -19,21 +23,21 @@ from typing import Any
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.answer_queries import history_since, query_keyword_rows_since
+from shared.answer_queries import history_since
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
-from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.kpi_engine import owned_domains_from
 from shared.scope_params import (
     SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     all_active_scope,
     keywords_table_name,
-    map_scope_keywords,
     scope_from_request,
     scoped_dynamodb_resource,
 )
-from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope
+from shared.scoped_reports import TREND_WINDOW_PARAMS, WindowAnswers, capped_scope
+from shared.scoped_reports import load_window_answers as load_scoped_window_answers
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import trend_view
@@ -52,15 +56,9 @@ SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 
-def load_window_answers(keywords: list[str], since: str) -> dict[str, list[Answer]]:
-    """Each keyword's answers from ``since`` on, read in parallel; a failed read has none (logged)."""
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    answers = map_scope_keywords(
-        keywords,
-        lambda keyword: answers_from_rows(query_keyword_rows_since(table, keyword, since)),
-        lambda _keyword: [],
-    )
-    return {keyword: answers[index] for index, keyword in enumerate(keywords)}
+def load_window_answers(keywords: list[str], since: str) -> WindowAnswers:
+    """Each keyword's answers from ``since`` on, read in parallel and bounded (``shared.scoped_reports.load_window_answers``)."""
+    return load_scoped_window_answers(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, since)
 
 
 def _resolve_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:
@@ -74,14 +72,16 @@ def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_do
     """The trend view of ``scope`` over the last ``days`` days (also behind ``/reports/overview``)."""
     keywords, scope_fields = capped_scope(*_resolve_scope(scope))
     since = history_since(days)
+    window = load_window_answers(keywords, since)
     return {
         **scope_fields,
         'period_type': period,
         'days_analyzed': days,
         'since': since,
+        'truncated_before': window.truncated_before,
         'keywords_analyzed': len(keywords),
         'citations_configured': bool(owned_domains),
-        **trend_view(keywords, load_window_answers(keywords, since), period, owned_domains),
+        **trend_view(keywords, window.answers, period, owned_domains),
     }
 
 

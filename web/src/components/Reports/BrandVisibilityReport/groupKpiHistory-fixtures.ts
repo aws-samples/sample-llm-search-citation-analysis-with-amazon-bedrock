@@ -1,7 +1,8 @@
 import type {
-  BrandKpis, GroupKpiHistoryResponse, GroupRun, GroupRunChange, GroupRunDriver, KeywordRun, KeywordRunHistory, KpiDeltas,
-  KpiTrend, MentionChange, TrendedKpiId
+  BrandKpis, GroupKpiHistoryResponse, GroupRun, GroupRunChange, GroupRunDriver, GroupRunDrivers, KeywordRun, KeywordRunHistory,
+  KeywordRunSummary, KpiDeltas, KpiTrend, MentionChange, TrendedKpiId
 } from '../../../types/domain/groupKpiHistory';
+import type { GroupKpiDetail } from './groupKpiDetail';
 
 export const RUN_1 = '2026-09-01T06:00:00.000000Z';
 export const RUN_2 = '2026-09-08T06:00:00.000000Z';
@@ -140,9 +141,19 @@ export function buildChange(overrides: Partial<GroupRunChange> = {}): GroupRunCh
     previous_timestamp: RUN_1,
     deltas: GROUP_DELTAS,
     trends: GROUP_TRENDS,
-    drivers: [buildDriver()],
+    drivers_count: 1,
     keywords_entered: [],
     keywords_left: [],
+    ...overrides,
+  };
+}
+
+/** The drivers of the RUN_2 group run (`view=drivers`): "hotel sol spa" alone unless overridden. */
+export function buildRunDrivers(overrides: Partial<GroupRunDrivers> = {}): GroupRunDrivers {
+  return {
+    timestamp: RUN_2,
+    previous_timestamp: RUN_1,
+    drivers: [buildDriver()],
     ...overrides,
   };
 }
@@ -237,6 +248,30 @@ export function buildKeywordHistory(keyword: string, runs: KeywordRun[]): Keywor
   };
 }
 
+/** The summary entry of a keyword whose runs are `runs`: their count and the latest. */
+export function buildKeywordSummary(keyword: string, runs: KeywordRun[]): KeywordRunSummary {
+  return {
+    keyword,
+    runs_count: runs.length,
+    latest: runs[runs.length - 1] ?? null,
+  };
+}
+
+/** The drill-down of `buildHistory()`'s keywords: "hotel sol beach" without runs, "hotel sol spa" with two. */
+export const KEYWORD_HISTORIES: KeywordRunHistory[] = [
+  buildKeywordHistory('hotel sol beach', []),
+  buildKeywordHistory('hotel sol spa', [buildKeywordRun(), LOST_KEYWORD_RUN]),
+];
+
+/** What the export and the on-demand sections read besides `buildHistory()`: its keyword runs and its run's drivers. */
+export function buildDetail(overrides: Partial<GroupKpiDetail> = {}): GroupKpiDetail {
+  return {
+    keywords: KEYWORD_HISTORIES,
+    drivers: [buildRunDrivers()],
+    ...overrides,
+  };
+}
+
 /**
  * Two group runs (RUN_1 baseline, RUN_2 after the brand lost "hotel sol spa")
  * and a partial rerun at RUN_3, with two keywords in the drill-down: "hotel
@@ -253,6 +288,8 @@ export function buildHistory(overrides: Partial<GroupKpiHistoryResponse> = {}): 
     group_run_min_coverage: 50,
     keywords_truncated: false,
     citations_configured: true,
+    runs_truncated: false,
+    truncated_before: null,
     runs: [
       buildRun({
         timestamp: RUN_1,
@@ -277,10 +314,7 @@ export function buildHistory(overrides: Partial<GroupKpiHistoryResponse> = {}): 
         }),
       }),
     ],
-    keywords: [
-      buildKeywordHistory('hotel sol beach', []),
-      buildKeywordHistory('hotel sol spa', [buildKeywordRun(), LOST_KEYWORD_RUN]),
-    ],
+    keywords: KEYWORD_HISTORIES.map((entry) => buildKeywordSummary(entry.keyword, entry.runs)),
     ...overrides,
   };
 }
@@ -303,12 +337,17 @@ export function historyWithoutOwnedDomains(): GroupKpiHistoryResponse {
   };
 }
 
-/** One group run whose single driver's brand mention changed as `mention` says. */
-export function historyWithDriverMention(mention: MentionChange): GroupKpiHistoryResponse {
-  return buildHistory({runs: [buildRun({change: buildChange({drivers: [buildDriver({ mention })]})})]});
+/** The drivers of one group run whose single driver's brand mention changed as `mention` says. */
+export function detailWithDriverMention(mention: MentionChange): GroupKpiDetail {
+  return buildDetail({ drivers: [buildRunDrivers({ drivers: [buildDriver({ mention })] })] });
 }
 
 /** A group whose only keyword, "k", has the single run `run`. */
 export function historyWithKeywordRun(run: KeywordRun): GroupKpiHistoryResponse {
-  return buildHistory({ keywords: [buildKeywordHistory('k', [run])] });
+  return buildHistory({ keywords: [buildKeywordSummary('k', [run])] });
+}
+
+/** The drill-down of `historyWithKeywordRun(run)`. */
+export function detailWithKeywordRun(run: KeywordRun): GroupKpiDetail {
+  return buildDetail({ keywords: [buildKeywordHistory('k', [run])] });
 }

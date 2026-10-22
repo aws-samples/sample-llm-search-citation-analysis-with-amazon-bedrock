@@ -1,5 +1,5 @@
 import {
-  useState, useCallback 
+  useState, useCallback, useRef
 } from 'react';
 import {
   API_BASE_URL, authenticatedFetch, getErrorMessage 
@@ -7,6 +7,7 @@ import {
 import type {
   S3BrowseResponse, RawResponseContent 
 } from '../types';
+import { mergeBrowsePages } from './rawResponsesPages';
 
 class RawResponsesError extends Error {
   constructor(message: string) {
@@ -37,6 +38,13 @@ interface RawResponsesRequest {
   param: 'prefix' | 'key';
   value: string;
   bucket: BucketType;
+  /** The browse page to continue from. */
+  nextToken?: string;
+}
+
+function requestUrl(request: RawResponsesRequest): string {
+  const base = `${API_BASE_URL}/raw-responses/${request.endpoint}?${request.param}=${encodeURIComponent(request.value)}&bucket=${request.bucket}`;
+  return request.nextToken === undefined ? base : `${base}&next_token=${encodeURIComponent(request.nextToken)}`;
 }
 
 /**
@@ -48,8 +56,7 @@ async function requestRawResponses<TPayload>(
   request: RawResponsesRequest,
   isPayload: (data: unknown) => data is TPayload,
 ): Promise<TPayload | null> {
-  const url = `${API_BASE_URL}/raw-responses/${request.endpoint}?${request.param}=${encodeURIComponent(request.value)}&bucket=${request.bucket}`;
-  const response = await authenticatedFetch(url);
+  const response = await authenticatedFetch(requestUrl(request));
   if (!response.ok) {
     throw new RawResponsesError(`HTTP ${response.status}`);
   }
@@ -62,6 +69,11 @@ export const useRawResponses = () => {
   const [error, setError] = useState<string | null>(null);
   const [browseData, setBrowseData] = useState<S3BrowseResponse | null>(null);
   const [fileContent, setFileContent] = useState<RawResponseContent | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const browsedFolderRef = useRef<{
+    prefix: string;
+    bucket: BucketType 
+  } | null>(null);
 
   const reportFailure = useCallback((err: unknown, action: string): null => {
     setError(getErrorMessage(err, 'rawResponses'));
@@ -92,12 +104,45 @@ export const useRawResponses = () => {
   // Stryker restore ArrayDeclaration
 
   // Stryker disable ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
-  const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => load({
-    endpoint: 'browse',
-    param: 'prefix',
-    value: prefix,
-    bucket,
-  }, isS3BrowseResponse, setBrowseData, 'browsing'), [load]);
+  const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => {
+    const folder = {
+      prefix,
+      bucket 
+    };
+    browsedFolderRef.current = folder;
+    return load({
+      endpoint: 'browse',
+      param: 'prefix',
+      value: prefix,
+      bucket,
+    }, isS3BrowseResponse, setBrowseData, 'browsing');
+  }, [load]);
+  // Stryker restore ArrayDeclaration
+
+  /** Appends the next page of the folder on screen; ignored once another folder is browsed meanwhile. */
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
+  const loadMore = useCallback(async (): Promise<void> => {
+    const folder = browsedFolderRef.current;
+    const nextToken = browseData?.next_token;
+    if (folder === null || typeof nextToken !== 'string') return;
+    setLoadingMore(true);
+    try {
+      const page = await requestRawResponses({
+        endpoint: 'browse',
+        param: 'prefix',
+        value: folder.prefix,
+        bucket: folder.bucket,
+        nextToken,
+      }, isS3BrowseResponse);
+      if (page && browsedFolderRef.current === folder) {
+        setBrowseData((current) => (current === null ? page : mergeBrowsePages(current, page)));
+      }
+    } catch (err) {
+      reportFailure(err, 'loading more entries');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [browseData, reportFailure]);
   // Stryker restore ArrayDeclaration
 
   // Stryker disable ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
@@ -131,10 +176,12 @@ export const useRawResponses = () => {
 
   return {
     loading,
+    loadingMore,
     error,
     browseData,
     fileContent,
     browse,
+    loadMore,
     getFile,
     getDownloadUrl,
     clearFile,

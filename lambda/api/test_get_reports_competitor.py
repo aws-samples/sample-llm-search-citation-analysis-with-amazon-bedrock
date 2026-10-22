@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from shared.scope_params import ReportScope
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
 
@@ -79,17 +80,18 @@ DEFAULT_GAPS = {
 
 @pytest.fixture
 def mod(monkeypatch: pytest.MonkeyPatch):
-    """get-reports-competitor.py with the gap helper and both DynamoDB lookups stubbed.
+    """get-reports-competitor.py with the per-keyword evidence and the keyword listing stubbed.
 
-    The sibling cache is primed with the gap fixture; the per-keyword rank
-    lookup and the keyword listing are replaced for the test's lifetime.
+    Each keyword's evidence comes from the rank and gap fixtures; the keyword
+    listing answers the rank fixture's keywords, for the test's lifetime.
     """
     with patch.dict(os.environ, _ENV):
         module = load_handler_module(_API_DIR, 'get-reports-competitor.py')
 
-    module._sibling_cache['gap'] = lambda keyword, config: DEFAULT_GAPS.get(keyword, {})
-    monkeypatch.setattr(module, '_latest_brand_ranks', lambda keyword: DEFAULT_RANKS.get(keyword, {}))
-    monkeypatch.setattr(module, '_list_tracked_keywords', lambda limit: list(DEFAULT_RANKS.keys())[:limit])
+    monkeypatch.setattr(module, '_keyword_evidence', lambda keyword, config: module.KeywordEvidence(
+        keyword, DEFAULT_RANKS.get(keyword, {}), DEFAULT_GAPS.get(keyword, {}).get('gaps', []),
+    ))
+    monkeypatch.setattr(module, '_list_tracked_keywords', lambda limit: (list(DEFAULT_RANKS)[:limit], len(DEFAULT_RANKS)))
     return module
 
 
@@ -164,13 +166,14 @@ def test_outreach_lift_handles_zero_citations_without_blowing_up(mod):
 @pytest.fixture
 def running_shoes_rollup(mod):
     """Adidas's rollup over the one keyword where it outranks the first party."""
-    return mod._build_competitor_rollup('Adidas', ['best running shoes'], CONFIG)
+    return mod._build_competitor_rollup('Adidas', mod._collect_evidence(['best running shoes'], CONFIG), CONFIG)
 
 
 @pytest.fixture
 def two_keyword_rollup(mod):
     """Adidas's rollup over a keyword it outranks us on and one where we already win."""
-    return mod._build_competitor_rollup('Adidas', ['best running shoes', 'best hiking boots'], CONFIG)
+    evidence = mod._collect_evidence(['best running shoes', 'best hiking boots'], CONFIG)
+    return mod._build_competitor_rollup('Adidas', evidence, CONFIG)
 
 
 def test_rollup_picks_keywords_where_competitor_outranks_first_party(two_keyword_rollup):
@@ -201,67 +204,81 @@ def test_rollup_records_providers_for_outranked_row(running_shoes_rollup):
 
 
 def test_rollup_finds_exclusive_sources_for_named_competitor(two_keyword_rollup):
-    urls = [s['url'] for s in two_keyword_rollup['exclusive_sources']]
+    urls = [s['url'] for s in two_keyword_rollup['outreach_targets']]
     assert 'https://example.com/shoes-review' in urls
 
 
 def test_rollup_propagates_priority_and_lift_for_exclusive_source(running_shoes_rollup):
-    source = running_shoes_rollup['exclusive_sources'][0]
+    source = running_shoes_rollup['outreach_targets'][0]
     assert source['priority'] == 'high'
     # provider_count=3, citation_count=9, lift = 3 * log(10) ~= 6.91
-    assert source['lift_score'] > 0
+    assert source['lift_score'] == 6.91
+
+
+def test_rollup_counts_the_exclusive_and_high_priority_sources(running_shoes_rollup):
+    counts = (running_shoes_rollup['exclusive_source_count'], running_shoes_rollup['high_priority_source_count'])
+    assert counts == (1, 1)
 
 
 def test_rollup_skips_sources_naming_other_competitors(two_keyword_rollup):
-    urls = [s['url'] for s in two_keyword_rollup['exclusive_sources']]
+    urls = [s['url'] for s in two_keyword_rollup['outreach_targets']]
     # Asics-only and Merrell-only sources should not be in Adidas's rollup
     assert 'https://other.com/asics' not in urls
     assert 'https://outside.com/merrell' not in urls
 
 
+def _one_keyword_evidence(mod, gaps):
+    """Evidence of keyword ``kw``: Adidas outranks Nike, with ``gaps``."""
+    return [mod.KeywordEvidence('kw', ADIDAS_OUTRANKS_NIKE, gaps)]
+
+
 def test_rollup_orders_outreach_targets_by_lift_score_descending(mod):
     # Build a fixture with 3 sources of different lift scores so ordering
     # is meaningfully tested (the default fixture only has 1 per keyword).
-    mod._sibling_cache['gap'] = lambda keyword, config: {
-        'gaps': [
-            {
-                'url': 'https://low.com', 'domain': 'low.com',
-                'priority': 'low', 'citation_count': 1, 'provider_count': 1,
-                'providers': ['openai'], 'competitor_brands': ['Adidas'],
-            },
-            {
-                'url': 'https://high.com', 'domain': 'high.com',
-                'priority': 'high', 'citation_count': 20, 'provider_count': 4,
-                'providers': ['openai', 'p', 'g', 'c'], 'competitor_brands': ['Adidas'],
-            },
-            {
-                'url': 'https://mid.com', 'domain': 'mid.com',
-                'priority': 'medium', 'citation_count': 5, 'provider_count': 2,
-                'providers': ['openai', 'g'], 'competitor_brands': ['Adidas'],
-            },
-        ],
-    } if keyword == 'kw' else {'gaps': []}
-    mod._latest_brand_ranks = lambda keyword: ADIDAS_OUTRANKS_NIKE
-    rollup = mod._build_competitor_rollup('Adidas', ['kw'], CONFIG)
+    gaps = [
+        {
+            'url': 'https://low.com', 'domain': 'low.com',
+            'priority': 'low', 'citation_count': 1, 'provider_count': 1,
+            'providers': ['openai'], 'competitor_brands': ['Adidas'],
+        },
+        {
+            'url': 'https://high.com', 'domain': 'high.com',
+            'priority': 'high', 'citation_count': 20, 'provider_count': 4,
+            'providers': ['openai', 'p', 'g', 'c'], 'competitor_brands': ['Adidas'],
+        },
+        {
+            'url': 'https://mid.com', 'domain': 'mid.com',
+            'priority': 'medium', 'citation_count': 5, 'provider_count': 2,
+            'providers': ['openai', 'g'], 'competitor_brands': ['Adidas'],
+        },
+    ]
+    rollup = mod._build_competitor_rollup('Adidas', _one_keyword_evidence(mod, gaps), CONFIG)
     targets = rollup['outreach_targets']
-    assert targets[0]['url'] == 'https://high.com'
-    assert targets[-1]['url'] == 'https://low.com'
+    assert [target['url'] for target in targets] == ['https://high.com', 'https://mid.com', 'https://low.com']
+
+
+_FIFTEEN_SOURCES = [
+    {
+        'url': f'https://s{i}.com', 'domain': f's{i}.com',
+        'priority': 'high' if i % 3 == 0 else 'medium', 'citation_count': i + 1, 'provider_count': 2,
+        'providers': ['openai', 'g'], 'competitor_brands': ['Adidas'],
+    }
+    for i in range(15)
+]
 
 
 def test_rollup_caps_outreach_targets_at_ten_when_more_exist(mod):
-    # Generate 15 distinct sources for one keyword so the cap kicks in.
-    sources = [
-        {
-            'url': f'https://s{i}.com', 'domain': f's{i}.com',
-            'priority': 'high', 'citation_count': i + 1, 'provider_count': 2,
-            'providers': ['openai', 'g'], 'competitor_brands': ['Adidas'],
-        }
-        for i in range(15)
-    ]
-    mod._sibling_cache['gap'] = lambda keyword, config: {'gaps': sources}
-    mod._latest_brand_ranks = lambda keyword: ADIDAS_OUTRANKS_NIKE
-    rollup = mod._build_competitor_rollup('Adidas', ['kw'], CONFIG)
+    rollup = mod._build_competitor_rollup('Adidas', _one_keyword_evidence(mod, _FIFTEEN_SOURCES), CONFIG)
     assert len(rollup['outreach_targets']) == 10
+
+
+def test_rollup_counts_every_exclusive_source_beyond_the_listed_targets(mod):
+    rollup = mod._build_competitor_rollup('Adidas', _one_keyword_evidence(mod, _FIFTEEN_SOURCES), CONFIG)
+    assert (rollup['exclusive_source_count'], rollup['high_priority_source_count']) == (15, 5)
+
+
+def test_rollup_no_longer_lists_every_exclusive_source(running_shoes_rollup):
+    assert 'exclusive_sources' not in running_shoes_rollup
 
 
 # --- build_competitor_rollups (top level) --------------------------------
@@ -302,6 +319,34 @@ def test_build_records_keywords_analyzed_count(mod):
         CONFIG, competitor='Adidas', keyword_limit=2,
     )
     assert payload['keywords_analyzed'] == 2
+
+
+@pytest.mark.parametrize(('keyword_limit', 'truncated'), [(2, True), (3, False)])
+def test_build_flags_active_keywords_beyond_the_keyword_limit(mod, keyword_limit, truncated):
+    payload = mod.build_competitor_rollups(CONFIG, competitor='Adidas', keyword_limit=keyword_limit)
+    assert payload['keywords_truncated'] is truncated
+
+
+_MANY_COMPETITORS = {'tracked_brands': {'first_party': ['Nike'], 'competitors': [f'Rival {i:02d}' for i in range(14)]}}
+
+
+def test_build_rolls_up_at_most_the_first_ten_configured_competitors(mod):
+    payload = mod.build_competitor_rollups(_MANY_COMPETITORS, competitor=None, keyword_limit=10)
+    assert [rollup['competitor'] for rollup in payload['rollups']] == [f'Rival {i:02d}' for i in range(10)]
+
+
+def test_build_lists_every_configured_competitor_and_flags_the_cut(mod):
+    payload = mod.build_competitor_rollups(_MANY_COMPETITORS, competitor=None, keyword_limit=10)
+    assert (len(payload['competitors']), payload['competitors_truncated']) == (14, True)
+
+
+def test_build_reads_each_keyword_once_for_every_competitor(mod, monkeypatch):
+    reads = []
+    monkeypatch.setattr(mod, '_keyword_evidence', lambda keyword, config: reads.append(keyword) or mod.KeywordEvidence(keyword))
+
+    mod.build_competitor_rollups(CONFIG, competitor=None, keyword_limit=10)
+
+    assert sorted(reads) == sorted(DEFAULT_RANKS)
 
 
 # --- handler -------------------------------------------------------------
@@ -379,7 +424,7 @@ def test_gap_helper_populates_cache_on_first_call(mod):
     mod._sibling_cache.clear()
     sentinel = object()
     mod._load_sibling = lambda filename, attr: (
-        (lambda *_a, **_k: sentinel) if attr == 'analyze_citation_gaps'
+        (lambda *_a, **_k: sentinel) if attr == 'classify_latest_run'
         else (_ for _ in ()).throw(AssertionError(f'unexpected {attr!r}'))
     )
     assert mod._gap_helper()() is sentinel
@@ -404,60 +449,87 @@ class GapHelperError(Exception):
     """Raised by tests to exercise the rollup's gap-failure fallback."""
 
 
-def test_rollup_continues_when_gap_helper_raises(mod):
+def _search_item(brands, timestamp='2026-05-15T00:00:00Z', provider='openai', citations=()):
+    """One SearchResults row as `_latest_run_rows` reads it."""
+    return {'timestamp': timestamp, 'provider': provider, 'brands': brands, 'citations': list(citations)}
+
+
+def _search_table_dynamodb(items):
+    """A resource whose tables answer every query with `items`."""
+    return fake_dynamodb_resource(fake_table(query={'Items': items}))
+
+
+def test_rollup_continues_when_gap_helper_raises(raw_mod):
     # When the citation-gap call fails for a keyword, the rollup should
     # still surface the outranked-keyword data without exclusive sources.
     def boom(*_a, **_k):
         raise GapHelperError('gap helper exploded')
-    mod._sibling_cache['gap'] = boom
-    rollup = mod._build_competitor_rollup(
-        'Adidas', ['best running shoes'], CONFIG,
-    )
-    # Outranked is still computed from the rank fixture.
+    raw_mod._sibling_cache['gap'] = boom
+    items = [_search_item([
+        {'name': 'Adidas', 'rank': 1, 'classification': 'competitor'},
+        {'name': 'Nike', 'rank': 2, 'classification': 'first_party'},
+    ])]
+    with patch.object(raw_mod, 'dynamodb', _search_table_dynamodb(items)):
+        evidence = [raw_mod._keyword_evidence('best running shoes', CONFIG)]
+    rollup = raw_mod._build_competitor_rollup('Adidas', evidence, CONFIG)
+    # Outranked is still computed from the ranks of the rows.
     assert rollup['outranked_keywords'][0]['keyword'] == 'best running shoes'
-    # Exclusive sources is empty since the gap call failed.
-    assert rollup['exclusive_sources'] == []
+    # No exclusive source since the gap call failed.
+    assert rollup['exclusive_source_count'] == 0
+
+
+def test_keyword_evidence_hands_the_latest_run_rows_to_the_gap_helper(raw_mod):
+    received = []
+
+    def classify(rows, _config):
+        received.append(rows)
+        return [], [], 0
+
+    raw_mod._sibling_cache['gap'] = classify
+    items = [
+        _search_item([], timestamp='2026-05-14T00:00:00Z', citations=['https://old.example']),
+        _search_item([], citations=['https://new.example']),
+    ]
+    with patch.object(raw_mod, 'dynamodb', _search_table_dynamodb(items)):
+        raw_mod._keyword_evidence('shoes', CONFIG)
+    assert received == [[items[1]]]
+
+
+def test_latest_run_rows_reads_one_projected_page_newest_first(raw_mod):
+    table = fake_table(query={'Items': []})
+    with patch.object(raw_mod, 'dynamodb', fake_dynamodb_resource(table)):
+        raw_mod._latest_run_rows('shoes')
+    kwargs = table.query.call_args.kwargs
+    assert (kwargs['ProjectionExpression'], kwargs['Limit'], kwargs['ScanIndexForward']) == (
+        '#ts, provider, citations, brands', 50, False,
+    )
 
 
 # --- _list_tracked_keywords -----------------------------------------------
 
 
-def _scanning_dynamodb(items):
-    """A resource whose tables answer every scan with `items`."""
-    return fake_dynamodb_resource(fake_table(scan={'Items': items}))
-
-
-def _keywords_table_listing(raw_mod, items, limit):
-    """``_list_tracked_keywords(limit)`` over a Keywords table whose scan answers ``items``."""
-    with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'), patch.object(raw_mod, 'dynamodb', _scanning_dynamodb(items)):
+def _keywords_table_listing(raw_mod, keywords, limit):
+    """``_list_tracked_keywords(limit)`` when the active keywords are ``keywords``."""
+    scope = ReportScope('all', tuple(keywords), {'mode': 'all'}, 'All keywords')
+    with patch.object(raw_mod, 'all_active_scope', return_value=scope):
         return raw_mod._list_tracked_keywords(limit)
 
 
-def test_list_tracked_keywords_reads_distinct_keywords_from_the_keywords_table(raw_mod):
-    # 'shoes' twice to verify de-dup
-    items = [{'keyword': 'shoes'}, {'keyword': 'boots'}, {'keyword': 'shoes'}]
-
-    assert _keywords_table_listing(raw_mod, items, 50) == ['shoes', 'boots']
+def test_list_tracked_keywords_reads_the_active_keywords_in_order(raw_mod):
+    assert _keywords_table_listing(raw_mod, ['boots', 'shoes'], 50) == (['boots', 'shoes'], 2)
 
 
-def test_list_tracked_keywords_caps_result_at_limit(raw_mod):
-    assert len(_keywords_table_listing(raw_mod, [{'keyword': f'kw-{i}'} for i in range(20)], 5)) == 5
+def test_list_tracked_keywords_caps_result_at_limit_and_counts_every_active_keyword(raw_mod):
+    assert _keywords_table_listing(raw_mod, [f'kw-{i:02d}' for i in range(20)], 5) == ([f'kw-{i:02d}' for i in range(5)], 20)
 
 
-# --- _latest_brand_ranks --------------------------------------------------
-
-
-def _search_item(brands, timestamp='2026-05-15T00:00:00Z', provider='openai'):
-    """One SearchResults row as `_latest_brand_ranks` reads it."""
-    return {'timestamp': timestamp, 'provider': provider, 'brands': brands}
+# --- _brand_ranks ---------------------------------------------------------
 
 
 def _latest_ranks(raw_mod, items):
-    """Run `_latest_brand_ranks('shoes')` against a search table returning `items`."""
-    fake_dynamodb = fake_dynamodb_resource(fake_table(query={'Items': items}))
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            return raw_mod._latest_brand_ranks('shoes')
+    """The brand ranks of the latest run of 'shoes' when the search table answers `items`."""
+    with patch.object(raw_mod, 'dynamodb', _search_table_dynamodb(items)):
+        return raw_mod._brand_ranks(raw_mod._latest_run_rows('shoes'))
 
 
 def test_latest_brand_ranks_returns_empty_when_query_returns_no_items(raw_mod):

@@ -5,8 +5,8 @@ Tests for shared.scope_params — the report scope every KPI endpoint accepts.
 - group and id scopes resolve to active keyword texts through the shared resolver
 - keyword_ids is capped at 100 and parsed as a comma-separated list
 - the handler plumbing around it: the shared ``@validate`` rules, the
-  Keywords table name, the scope-or-400 helper, the per-keyword partition
-  read and the sibling-function loader the report aggregators use
+  Keywords table name, the scope-or-400 helper and the sibling-function
+  loader the report aggregators use
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from shared.scope_params import (
     load_sibling_function,
     map_scope_keywords,
     parse_scope_params,
-    query_keyword_rows,
     scope_from_request,
     scope_keywords_from_request,
     scoped_dynamodb_resource,
@@ -372,40 +371,6 @@ class TestScopeKeywordsFromRequest:
 
         assert keywords is None
         assert _rejection(rejected)[0] == 400
-
-
-class TestQueryKeywordRows:
-    def test_concatenates_every_page_of_the_partition(self):
-        table = MagicMock()
-        table.query.side_effect = [
-            {'Items': [{'provider': 'openai'}], 'LastEvaluatedKey': {'keyword': 'k', 'timestamp_provider': 'x'}},
-            {'Items': [{'provider': 'gemini'}]},
-        ]
-
-        rows = query_keyword_rows(table, 'k', '#ts, provider')
-
-        assert rows == [{'provider': 'openai'}, {'provider': 'gemini'}]
-        assert table.query.call_args_list[1].kwargs['ExclusiveStartKey'] == {'keyword': 'k', 'timestamp_provider': 'x'}
-
-    def test_reads_only_the_projection_with_the_timestamp_alias(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
-
-        query_keyword_rows(table, 'hotel coruna spa', '#ts, provider, brands')
-
-        kwargs = table.query.call_args.kwargs
-        assert kwargs['ProjectionExpression'] == '#ts, provider, brands'
-        assert kwargs['ExpressionAttributeNames'] == {'#ts': 'timestamp'}
-        condition = kwargs['KeyConditionExpression'].get_expression()
-        assert (condition['values'][0].name, condition['operator'], condition['values'][1]) == ('keyword', '=', 'hotel coruna spa')
-
-    def test_stops_after_a_single_page_when_nothing_is_left(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
-
-        assert query_keyword_rows(table, 'k', '#ts, provider') == []
-        assert table.query.call_count == 1
-        assert 'ExclusiveStartKey' not in table.query.call_args.kwargs
 
 
 @pytest.fixture

@@ -178,15 +178,24 @@ export function decodeContentIdeasResponse(payload: unknown): ContentIdea[] {
 
 export interface DecodedContentHistory {
   history: ContentStudioHistory[];
+  /** Continues the history (older items); `null` on the last page. */
+  nextToken: string | null;
   unviewedCount: number;
+  /** The API stops counting at its cap: show the count as "N+". */
+  unviewedCountCapped: boolean;
 }
 
 export function decodeContentHistoryResponse(payload: unknown): DecodedContentHistory {
   if (!isRecord(payload) || !Array.isArray(payload.history)) throw invalid('history response');
   decodeInteger(payload.total_count, 'history count');
+  if (payload.next_token !== undefined && payload.next_token !== null && typeof payload.next_token !== 'string') {
+    throw invalid('history next_token');
+  }
   return {
     history: payload.history.map(decodeContentHistoryItem),
+    nextToken: typeof payload.next_token === 'string' ? payload.next_token : null,
     unviewedCount: decodeInteger(payload.unviewed_count, 'unviewed count'),
+    unviewedCountCapped: payload.unviewed_count_capped === true,
   };
 }
 

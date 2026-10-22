@@ -528,7 +528,9 @@ def _crawl_video(target: _CrawlTarget, video_id: str) -> dict[str, Any]:
     try:
         video = fetch_video_metadata(video_id)
     except VideoMetadataError as exc:
-        logger.warning("YouTube video details unavailable: %s", exc)
+        # An expected outcome (private, removed or not embeddable), recorded
+        # like a failed navigation, which is logged at the same level.
+        logger.info("YouTube video details unavailable: %s", exc)
         return _error_result(target, str(exc), page_load_time_ms=int((time.monotonic() - start_time) * 1000))
 
     content = video.content(target.url)

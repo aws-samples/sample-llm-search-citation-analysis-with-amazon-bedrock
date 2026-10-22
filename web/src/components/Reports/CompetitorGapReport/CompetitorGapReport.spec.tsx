@@ -40,7 +40,8 @@ const POPULATED_DATA = {
         providers: ['openai', 'perplexity'],
       }),
     ],
-    exclusive_sources: [ADIDAS_EXCLUSIVE_SOURCE],
+    exclusive_source_count: 1,
+    high_priority_source_count: 1,
     outreach_targets: [ADIDAS_EXCLUSIVE_SOURCE],
   }),
   keywordsAnalyzed: 4,
@@ -122,6 +123,26 @@ describe('CompetitorGapReport', () => {
     renderAt('/reports/competitor', []);
     const matches = screen.getAllByText(/no competitors configured/i);
     expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('loads the first configured competitor instead of one the brand config does not list', () => {
+    renderAt(`/reports/competitor/${encodeURIComponent('Sky Airline')}`);
+
+    expect(vi.mocked(useCompetitorGap).mock.calls.map(([competitor]) => competitor)).not.toContain('Sky Airline');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Competitor Gap — Adidas');
+  });
+
+  it('loads nothing before the brand config lists any competitor', () => {
+    mockBrand.mockReturnValue(buildTrackedBrandsHookResult(['Nike'], []));
+    render(
+      <MemoryRouter initialEntries={['/reports/competitor/Adidas']}>
+        <Routes>
+          <Route path="/reports/competitor/:competitor" element={<CompetitorGapReport />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(mockGap).toHaveBeenCalledWith(null);
   });
 
   it('renders loading placeholders when the rollup is loading', () => {
