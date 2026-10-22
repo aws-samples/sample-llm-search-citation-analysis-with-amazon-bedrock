@@ -9,6 +9,14 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.41.1] - 2026-10-22
+
+### Security
+
+- **Vitest 4.1.12** (root and `web/`, was 4.1.11): fixes GHSA-qxg6-89mg-rqv8 (code injection through unauthenticated
+  manual-mock registration) and GHSA-xp26-3454-mjgp (Windows backslash traversal of the `@vitest/mocker` redirect
+  allowlist), both in `@vitest/mocker`. Test toolchain only; nothing ships to the dashboard or the Lambdas.
+
 ## [2.41.0] - 2026-10-21
 
 A customer's dashboard failed to load with a bare 502: `GET /api/citations` built a response larger than AWS Lambda's
