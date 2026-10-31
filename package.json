@@ -37,7 +37,7 @@
   "license": "MIT-0",
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.7.1",
-    "@nx/eslint-plugin": "^23.3.0",
+    "@nx/eslint-plugin": "^24.0.3",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^20.17.0",
     "@vitest/eslint-plugin": "^1.6.13",
