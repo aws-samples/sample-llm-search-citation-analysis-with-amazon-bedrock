@@ -12,6 +12,17 @@ Routes (all under the consolidated KeywordMgmt function):
     DELETE /api/keyword-groups/{id}            delete a group and detach its keywords
     PUT    /api/keyword-groups/{id}/keywords   add/remove keyword memberships in bulk
 
+Membership writes run ``MEMBERSHIP_WRITE_WORKERS`` at a time and stop at the
+request's deadline (``shared.request_deadline``): a write not started by then
+is answered as pending instead of running into API Gateway's 29 s. A DELETE
+removes the group row first (the group disappears at once), then detaches its
+members; when the deadline (or a failed write) leaves some keywords still
+listing the group it answers 202 with ``pending_members`` and
+``truncated: true``, and the same DELETE sent again finishes the detach: a
+DELETE of a group id that no row holds any more still detaches the keywords
+that list it, and is a 404 only when none does. Every detach is a set
+``DELETE``, so repeating one is harmless.
+
 Like the keyword routes themselves, these are open to every authenticated
 user: organising keywords is content-team work, not an admin action.
 """
@@ -21,6 +32,7 @@ import sys
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any
 
@@ -34,7 +46,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view
 from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
-from shared.dynamodb_batch import collect_all_items
+from shared.dynamodb_batch import collect_all_items, collect_capped_items
 from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
@@ -48,6 +60,7 @@ from shared.keyword_groups import (
     serialize_keyword_item,
     validate_id_list,
 )
+from shared.request_deadline import current_deadline
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -71,19 +84,50 @@ MEMBERSHIP_WRITE_WORKERS = 10
 # Keywords GSI: partition `status`, sort `keyword`, ALL projection; sparse
 # (rows without a status are absent).
 STATUS_INDEX = 'StatusIndex'
+# Pages of the Keywords scan that finds a deleted group's members (a 1 MB page
+# of projected ids holds thousands of rows); the request's deadline stops it sooner.
+MEMBER_SCAN_MAX_PAGES = 100
 
 _Route = Callable[..., dict[str, Any]]
 
 
-def _map_membership_writes[ResultT](write: Callable[[str], ResultT], keyword_ids: Sequence[str]) -> list[ResultT]:
+@dataclass(frozen=True)
+class _Writes[ResultT]:
+    """The result of every write that ran, by keyword id in request order, and the ids never started."""
+
+    written: dict[str, ResultT]
+    pending: list[str]
+
+
+def _map_membership_writes[ResultT](write: Callable[[str], ResultT], keyword_ids: Sequence[str]) -> _Writes[ResultT]:
     """``write(keyword_id)`` for every id, ``MEMBERSHIP_WRITE_WORKERS`` at a time, in ``keyword_ids`` order.
 
-    The first write that raises propagates once the in-flight writes finish.
+    An id not started when the request's deadline is spent is not written and
+    is returned as pending. The first write that raises propagates once the
+    in-flight writes finish.
     """
+    deadline = current_deadline()
+
+    # No annotations naming ResultT on the inner function: CodeQL's Python
+    # extractor does not scope PEP 695 type parameters into nested definitions.
+    # It answers ``(result,)`` for a write that ran and ``None`` for one never started.
+    def guarded(keyword_id: str):
+        if deadline.stop_reading('keyword group membership writes'):
+            return None
+        return (write(keyword_id),)
+
     if not keyword_ids:
-        return []
+        return _Writes({}, [])
     with ThreadPoolExecutor(max_workers=min(MEMBERSHIP_WRITE_WORKERS, len(keyword_ids))) as pool:
-        return list(pool.map(write, keyword_ids))
+        outcomes = list(pool.map(guarded, keyword_ids))
+    written: dict[str, ResultT] = {}
+    pending: list[str] = []
+    for keyword_id, outcome in zip(keyword_ids, outcomes, strict=True):
+        if outcome is None:
+            pending.append(keyword_id)
+        else:
+            written[keyword_id] = outcome[0]
+    return _Writes(written, pending)
 
 
 class _InvalidGroupName(ValueError):
@@ -246,26 +290,59 @@ def update_group(event: dict[str, Any], context: Any, body: dict, name: Any, des
     return success_response(_serialize_group(response['Attributes'], counts.get(id, 0)), event)
 
 
-@_for_existing_group
-def delete_group(event: dict[str, Any], context: Any, id: str, **_: Any) -> dict[str, Any]:
-    """DELETE /api/keyword-groups/{id} — also detaches the group from every keyword."""
-    members = collect_all_items(
+def _member_ids(group_id: str) -> tuple[list[str], bool]:
+    """``(ids, complete)`` of the keywords (any status) listing ``group_id``, from a capped, projected scan."""
+    members, truncated = collect_capped_items(
         keywords_table.scan,
+        MEMBER_SCAN_MAX_PAGES,
         ProjectionExpression='id',
         FilterExpression='contains(group_ids, :gid)',
-        ExpressionAttributeValues={':gid': id},
+        ExpressionAttributeValues={':gid': group_id},
     )
-    _map_membership_writes(partial(_detach_keyword, group_id=id), [member['id'] for member in members])
-    groups_table.delete_item(Key={'id': id})
-    return success_response({'message': 'Keyword group deleted', 'detached_keywords': len(members)}, event)
+    return [str(member['id']) for member in members if member.get('id')], not truncated
 
 
-def _detach_keyword(keyword_id: str, *, group_id: str) -> None:
-    keywords_table.update_item(
-        Key={'id': keyword_id},
-        UpdateExpression='DELETE group_ids :gids',
-        ExpressionAttributeValues={':gids': {group_id}},
-    )
+def delete_group(event: dict[str, Any], context: Any, id: str = '', **_: Any) -> dict[str, Any]:
+    """DELETE /api/keyword-groups/{id} — removes the group row, then detaches the group from every keyword.
+
+    200 when every member is detached; 202 with ``pending_members`` (and
+    ``truncated: true``) when the deadline or a failed write left some, which
+    the same DELETE sent again detaches; 404 when no row and no keyword holds the id.
+    """
+    if not id:
+        return validation_error('Group ID is required', event, 'id')
+    group_exists = bool(groups_table.get_item(Key={'id': id}).get('Item'))
+    if group_exists:
+        groups_table.delete_item(Key={'id': id})
+    member_ids, scan_complete = _member_ids(id)
+    if not group_exists and not member_ids and scan_complete:
+        return not_found_response(resource='Keyword group', event=event)
+
+    writes = _map_membership_writes(partial(_detach_keyword, group_id=id), member_ids)
+    detached = sum(1 for done in writes.written.values() if done)
+    pending = len(member_ids) - detached
+    if not pending and scan_complete:
+        return success_response({'message': 'Keyword group deleted', 'detached_keywords': detached}, event)
+    return success_response({
+        'message': 'Keyword group deleted; some keywords still list it. Send the same DELETE again to finish.',
+        'detached_keywords': detached,
+        'pending_members': pending,
+        'truncated': True,
+    }, event, 202)
+
+
+def _detach_keyword(keyword_id: str, *, group_id: str) -> bool:
+    """Remove ``group_id`` from one keyword; ``False`` when the write failed (a repeated DELETE retries it)."""
+    try:
+        keywords_table.update_item(
+            Key={'id': keyword_id},
+            UpdateExpression='DELETE group_ids :gids',
+            ExpressionAttributeValues={':gids': {group_id}},
+        )
+    except ClientError:
+        logger.exception('Could not detach keyword %s from deleted group %s', keyword_id, group_id)
+        return False
+    return True
 
 
 def _apply_membership(keyword_id: str, group_id: str, *, add: bool) -> dict[str, Any] | None:
@@ -306,10 +383,12 @@ def update_memberships(event: dict[str, Any], context: Any, body: dict, id: str,
     added: list[str] = []
     removed: list[str] = []
     missing: list[str] = []
+    pending: list[str] = []
     updated: dict[str, dict[str, Any]] = {}
     for applied_ids, keyword_ids, add in ((added, add_ids, True), (removed, remove_ids, False)):
-        items = _map_membership_writes(partial(_apply_membership, group_id=id, add=add), keyword_ids)
-        for keyword_id, item in zip(keyword_ids, items, strict=True):
+        writes = _map_membership_writes(partial(_apply_membership, group_id=id, add=add), keyword_ids)
+        pending.extend(writes.pending)
+        for keyword_id, item in writes.written.items():
             (applied_ids if item else missing).append(keyword_id)
             if item:
                 updated[keyword_id] = item
@@ -319,6 +398,9 @@ def update_memberships(event: dict[str, Any], context: Any, body: dict, id: str,
         'added': added,
         'removed': removed,
         'missing': missing,
+        # Ids the request's deadline left unwritten: send them again.
+        'pending': pending,
+        'truncated': bool(pending),
         'keywords': [serialize_keyword_item(item) for item in updated.values()],
     }, event)
 

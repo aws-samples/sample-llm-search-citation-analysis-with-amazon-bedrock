@@ -6,6 +6,7 @@ when a group is deleted, and the bulk membership route, all against mocked
 DynamoDB tables.
 """
 
+import itertools
 import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.events import api_gateway_event, parse_response
 from testing.keyword_groups_fixtures import (
@@ -237,15 +239,54 @@ class TestDeleteGroup:
         assert mock_keywords_table.update_item.call_count == member_count
 
     @pytest.mark.usefixtures('coruna_exists')
-    def test_keeps_the_group_when_detaching_a_member_fails(self):
+    def test_removes_the_group_row_before_detaching_its_members(self):
         _store_members({'id': 'k1'})
-        mock_keywords_table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}}, 'UpdateItem'
-        )
+        calls = MagicMock()
+        calls.attach_mock(mock_groups_table.delete_item, 'delete_group_row')
+        calls.attach_mock(mock_keywords_table.update_item, 'detach')
 
-        status, _ = _request('DELETE', None, 'g1')
+        _request('DELETE', None, 'g1')
 
-        assert status == 500
+        assert [name for name, _args, _kwargs in calls.mock_calls] == ['delete_group_row', 'detach']
+
+    @pytest.mark.usefixtures('coruna_exists')
+    def test_answers_202_with_the_member_pending_when_its_detach_write_fails(self):
+        _store_members({'id': 'k1'}, {'id': 'k2'})
+        mock_keywords_table.update_item.side_effect = [
+            {},
+            ClientError({'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}}, 'UpdateItem'),
+        ]
+
+        with patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
+            status, body = _request('DELETE', None, 'g1')
+
+        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 1, 1, True)
+
+    @pytest.mark.usefixtures('coruna_exists')
+    def test_answers_202_with_the_unstarted_members_pending_when_the_deadline_cuts_the_detach(self):
+        _store_members(*({'id': f'k{index}'} for index in range(25)))
+        ticks = itertools.count()
+
+        with patch.object(_mod, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
+            status, body = _request('DELETE', None, 'g1')
+
+        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 2, 23, True)
+
+    @pytest.mark.usefixtures('coruna_exists')
+    def test_answers_202_when_the_deadline_cuts_the_member_scan(self):
+        mock_keywords_table.scan.return_value = {'Items': [{'id': 'k1'}], 'LastEvaluatedKey': {'id': 'k1'}}
+
+        with patch('shared.dynamodb_batch.current_deadline', return_value=Deadline(0, lambda: 1.0)):
+            status, body = _request('DELETE', None, 'g1')
+
+        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 1, 0, True)
+
+    def test_finishes_detaching_when_the_delete_is_sent_again_after_the_group_row_is_gone(self):
+        _store_members({'id': 'k3'})
+
+        status, body = _request('DELETE', None, 'g1')
+
+        assert (status, body) == (200, {'message': 'Keyword group deleted', 'detached_keywords': 1})
         mock_groups_table.delete_item.assert_not_called()
 
 
@@ -328,6 +369,23 @@ class TestUpdateMemberships:
             _change_members({'add': [f'k{index}' for index in range(_mod.MAX_MEMBERSHIP_CHANGES)]})
 
         assert executor.call_args.kwargs == {'max_workers': 10}
+
+    def test_answers_200_with_no_pending_ids_when_every_write_runs(self):
+        mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k1', 'keyword': 'a'}}
+
+        _status, body = _change_members({'add': ['k1']})
+
+        assert (body['pending'], body['truncated']) == ([], False)
+
+    def test_answers_200_with_the_unwritten_ids_pending_when_the_deadline_is_spent(self):
+        mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
+        ticks = itertools.count()
+
+        with patch.object(_mod, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))), \
+                patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
+            status, body = _change_members({'add': ['k1', 'k2'], 'remove': ['k3']})
+
+        assert (status, body['added'], body['pending'], body['truncated']) == (200, ['k1', 'k2'], ['k3'], True)
 
     def test_rejects_more_than_500_additions_in_one_request(self):
         status, body = _change_members({'add': [f'k{index}' for index in range(501)]})
