@@ -58,7 +58,8 @@ logger = logging.getLogger(__name__)
 
 POINTER_TTL_SECONDS = 30.0
 REBUILD_DEBOUNCE_SECONDS = 300.0
-_ENTRIES_CACHE_SIZE = 2
+#: Entries files kept per container: the table scope at 10x (270k URLs) is about 215 MB of Python objects.
+_ENTRIES_CACHE_SIZE = 1
 _SMALL_CACHE_SIZE = 64
 
 #: Errors of a rollup read; the handler answers from the live read instead.
