@@ -245,14 +245,12 @@ class TestLlmTimeBudget:
 
         assert (body['llm'], [rec['title'] for rec in body['llm_enhanced']]) == ('ok', ['From the model'])
 
-    def test_reports_llm_failed_when_the_model_answers_no_json(self, recommendations):
+    @pytest.mark.parametrize(('query', 'outcome'), [
+        pytest.param({'group_id': 'marino', 'use_llm': 'true'}, 'failed', id='model-answers-no-json'),
+        pytest.param({'group_id': 'marino'}, None, id='pass-not-asked-for'),
+    ])
+    def test_reports_the_llm_outcome_of_the_request(self, recommendations, query, outcome):
         with action_center(recommendations) as report, patch.object(recommendations, 'invoke_bedrock', return_value='Sorry.'):
-            body = report.body({'group_id': 'marino', 'use_llm': 'true'})
+            body = report.body(query)
 
-        assert body['llm'] == 'failed'
-
-    def test_reports_no_llm_outcome_when_the_pass_was_not_asked_for(self, recommendations):
-        with action_center(recommendations) as report:
-            body = report.body({'group_id': 'marino'})
-
-        assert body['llm'] is None
+        assert body['llm'] == outcome

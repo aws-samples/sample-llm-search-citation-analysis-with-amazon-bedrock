@@ -54,6 +54,13 @@ class Call:
         return self.brand_config.put_item.call_args.kwargs['Item']
 
 
+def _drop_chile(module, *pages: dict, deadline: Deadline | None = None) -> tuple[Call, MagicMock]:
+    """PUT the stored list without Chile, the Keywords scan answering ``pages`` in turn; the call and the scan."""
+    keywords = fake_table()
+    keywords.scan.side_effect = list(pages)
+    return Call(module, 'PUT', {'markets': [BRAZIL]}, keywords=keywords, deadline=deadline), keywords.scan
+
+
 class TestGetMarkets:
     def test_answers_the_market_list_and_its_save_time(self, markets_module):
         call = Call(markets_module, 'GET', groups='Users', stored=markets_item(BRAZIL))
@@ -133,12 +140,9 @@ class TestPutMarkets:
         assert (call.status, call.keywords.scan.call_count) == (200, 0)
 
     def test_stops_scanning_once_every_dropped_market_is_found_in_use(self, markets_module):
-        keywords = fake_table()
-        keywords.scan.side_effect = [{'Items': [{'market_id': 'cl-es'}], 'LastEvaluatedKey': {'id': 'k1'}}]
+        call, scan = _drop_chile(markets_module, {'Items': [{'market_id': 'cl-es'}], 'LastEvaluatedKey': {'id': 'k1'}})
 
-        call = Call(markets_module, 'PUT', {'markets': [BRAZIL]}, keywords=keywords)
-
-        assert (call.status, call.body['market_ids'], keywords.scan.call_count) == (409, ['cl-es'], 1)
+        assert (call.status, call.body['market_ids'], scan.call_count) == (409, ['cl-es'], 1)
 
     def test_checks_a_stored_market_that_no_longer_validates(self, markets_module):
         call = Call(markets_module, 'PUT', {'markets': [BRAZIL]}, stored=markets_item(BRAZIL, {'market_id': 'broken'}),
@@ -147,10 +151,7 @@ class TestPutMarkets:
         assert (call.status, call.body['market_ids']) == (409, ['broken'])
 
     def test_answers_503_without_saving_when_the_check_runs_out_of_time(self, markets_module):
-        keywords = fake_table()
-        keywords.scan.side_effect = [{'Items': [], 'LastEvaluatedKey': {'id': 'k1'}}]
-
-        call = Call(markets_module, 'PUT', {'markets': [BRAZIL]}, keywords=keywords, deadline=Deadline(0, lambda: 1.0))
+        call, _ = _drop_chile(markets_module, {'Items': [], 'LastEvaluatedKey': {'id': 'k1'}}, deadline=Deadline(0, lambda: 1.0))
 
         assert (call.status, call.body['error']) == (
             503, 'Could not check in time whether keywords still use the removed markets; nothing was saved, try again',
@@ -158,12 +159,9 @@ class TestPutMarkets:
         call.brand_config.put_item.assert_not_called()
 
     def test_reads_the_next_page_while_the_budget_lasts(self, markets_module):
-        keywords = fake_table()
-        keywords.scan.side_effect = [{'Items': [], 'LastEvaluatedKey': {'id': 'k1'}}, {'Items': [{'market_id': 'cl-es'}]}]
+        call, scan = _drop_chile(markets_module, {'Items': [], 'LastEvaluatedKey': {'id': 'k1'}}, {'Items': [{'market_id': 'cl-es'}]})
 
-        call = Call(markets_module, 'PUT', {'markets': [BRAZIL]}, keywords=keywords)
-
-        assert (call.status, keywords.scan.call_args.kwargs['ExclusiveStartKey']) == (409, {'id': 'k1'})
+        assert (call.status, scan.call_args.kwargs['ExclusiveStartKey']) == (409, {'id': 'k1'})
 
     @pytest.mark.parametrize('method', ['PUT', 'POST'])
     def test_rejects_a_non_object_body(self, markets_module, method):
@@ -215,12 +213,6 @@ class TestSuggestKeywords:
 
         assert call.suggest.call_args.kwargs == {'deadline': deadline}
 
-    def test_answers_503_try_again_when_the_model_runs_out_of_time(self, markets_module):
-        call = Call(markets_module, 'POST', {'keyword': 'cheap flights', 'market_ids': ['cl-es']},
-                    suggest=MagicMock(side_effect=BedrockDeadlineError('slow')))
-
-        assert (call.status, call.body) == (503, {'error': 'The AI model did not answer in time; try again'})
-
 
 class TestProposeMarket:
     def test_answers_the_proposed_market_and_whether_its_id_is_taken(self, markets_module):
@@ -263,17 +255,22 @@ class TestProposeMarket:
 
         assert call.propose.call_args.kwargs == {'deadline': deadline}
 
-    def test_answers_503_try_again_when_the_proposal_runs_out_of_time(self, markets_module):
-        call = Call(markets_module, 'POST', {'propose': {'country': 'PE', 'language': 'es'}},
-                    propose=MagicMock(side_effect=BedrockDeadlineError('slow')))
-
-        assert (call.status, call.body) == (503, {'error': 'The AI model did not answer in time; try again'})
-
     def test_a_body_without_propose_still_suggests_keywords(self, markets_module):
         call = Call(markets_module, 'POST', {'keyword': 'cheap flights', 'market_ids': ['cl-es']})
 
         assert (call.status, 'suggestions' in call.body) == (200, True)
         call.propose.assert_not_called()
+
+
+class TestModelTimeBudget:
+    @pytest.mark.parametrize(('body', 'model_call'), [
+        pytest.param({'keyword': 'cheap flights', 'market_ids': ['cl-es']}, 'suggest', id='keyword-suggestions'),
+        pytest.param({'propose': {'country': 'PE', 'language': 'es'}}, 'propose', id='market-proposal'),
+    ])
+    def test_answers_503_try_again_when_the_model_runs_out_of_time(self, markets_module, body, model_call):
+        call = Call(markets_module, 'POST', body, **{model_call: MagicMock(side_effect=BedrockDeadlineError('slow'))})
+
+        assert (call.status, call.body) == (503, {'error': 'The AI model did not answer in time; try again'})
 
 
 class TestAdminGate:

@@ -25,13 +25,14 @@ from testing.env import SELF_REFLECTION_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _NOW = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 _REQUEST = {'keyword': 'hotel con spa', 'brand': 'Hotel Sol', 'query_prompt_id': 'familia'}
 _MARKER_KEY = {'keyword_brand': 'hotel con spa#hotel sol', 'persona_timestamp': 'familia#~job'}
 _REFLECTION = {'explanation': 'Sol is cited for its pool.', 'recommendations': []}
 
-reflection = handler_fixture(_API_DIR, 'self-reflection.py', 'self_reflection_jobs_under_test', env=SELF_REFLECTION_ENV)
+reflection = handler_fixture(
+    os.path.dirname(os.path.abspath(__file__)), 'self-reflection.py', 'self_reflection_jobs_under_test', env=SELF_REFLECTION_ENV,
+)
 
 
 def _prompt(module: Any) -> Any:

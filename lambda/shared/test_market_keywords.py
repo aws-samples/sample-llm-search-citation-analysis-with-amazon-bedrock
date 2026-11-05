@@ -88,7 +88,7 @@ class TestSuggestLocalKeywords:
 
     def test_bounds_the_model_call_by_the_callers_deadline(self):
         deadline = Deadline(20)
-        bedrock = MagicMock(return_value=json.dumps(_answer({'market_id': 'cl-es', 'keyword': 'pasajes'})))
+        bedrock = MagicMock(return_value='{"suggestions": []}')
 
         with patch.object(market_keywords, 'invoke_bedrock', bedrock):
             suggest_local_keywords('cheap flights', MARKETS, deadline=deadline)
