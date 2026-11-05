@@ -21,8 +21,15 @@ from shared.brand_visibility import (
     load_recent_search_results,
     tracked_brand_names,
 )
+from shared.request_deadline import Deadline, activate_deadline, clear_request_deadline
 
 FIRST_PARTY = ['marriott']
+
+
+@pytest.fixture(autouse=True)
+def _no_active_deadline():
+    yield
+    clear_request_deadline()
 COMPETITORS = ['hilton', 'hyatt']
 
 
@@ -82,6 +89,19 @@ def _keyword_rows(*keywords):
     return _table_response([{'keyword': keyword} for keyword in keywords])
 
 
+def _answers_by_keyword(answers):
+    """A ``query`` side effect answering ``answers[keyword]`` (a page, or an exception to raise) per partition.
+
+    The partitions are read in parallel, so a list of side effects would be consumed in an arbitrary order.
+    """
+    def query(**kwargs):
+        answer = answers[kwargs['KeyConditionExpression'].get_expression()['values'][1]]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return query
+
+
 @pytest.fixture
 def dynamodb():
     """A DynamoDB resource stub whose ``Table(name)`` returns one mock per name."""
@@ -120,7 +140,7 @@ def keywords_table(dynamodb, monkeypatch):
 @pytest.mark.usefixtures('no_keywords_table')
 class TestLoadRecentSearchResultsWithoutKeywordsTable:
     def test_queries_each_explicit_keyword_for_its_most_recent_rows(self, load_recent, search):
-        search.query.side_effect = [_keyword_rows('a'), _keyword_rows('b')]
+        search.query.side_effect = _answers_by_keyword({'a': _keyword_rows('a'), 'b': _keyword_rows('b')})
 
         items = load_recent(max_keywords=20, keywords=['a', 'b'])
 
@@ -136,7 +156,7 @@ class TestLoadRecentSearchResultsWithoutKeywordsTable:
         assert search.query.call_count == 2
 
     def test_skips_a_keyword_whose_query_fails_and_keeps_the_rest(self, load_recent, search):
-        search.query.side_effect = [RuntimeError('throttled'), _keyword_rows('b')]
+        search.query.side_effect = _answers_by_keyword({'a': RuntimeError('throttled'), 'b': _keyword_rows('b')})
 
         items = load_recent(max_keywords=20, keywords=['a', 'b'])
 
@@ -150,6 +170,25 @@ class TestLoadRecentSearchResultsWithoutKeywordsTable:
         assert items == [{'keyword': 'anything'}]
         search.scan.assert_called_once_with(Limit=500)
         search.query.assert_not_called()
+
+
+@pytest.mark.usefixtures('no_keywords_table')
+class TestLoadRecentSearchResultsTimeBudget:
+    def test_skips_the_keywords_not_started_and_marks_the_deadline_cut_when_it_is_spent(self, load_recent, search):
+        search.query.side_effect = _answers_by_keyword({'a': _keyword_rows('a'), 'b': _keyword_rows('b')})
+        deadline = activate_deadline(Deadline(0, lambda: 1.0))
+
+        items = load_recent(max_keywords=20, keywords=['a', 'b'])
+
+        assert (items, deadline.cut) == ([], True)
+
+    def test_leaves_the_deadline_uncut_when_every_keyword_is_read(self, load_recent, search):
+        search.query.side_effect = _answers_by_keyword({'a': _keyword_rows('a')})
+        deadline = activate_deadline(Deadline(60))
+
+        load_recent(max_keywords=20, keywords=['a'])
+
+        assert deadline.cut is False
 
 
 class TestLoadRecentSearchResultsWithKeywordsTable:
@@ -191,17 +230,13 @@ class TestLoadRecentSearchResultsWithKeywordsTable:
 
         keywords_table.scan.assert_not_called()
 
-    def test_queries_every_discovered_keyword_in_index_order(self, load_recent, search, keywords_table):
+    def test_returns_the_rows_of_every_discovered_keyword_in_index_order(self, load_recent, search, keywords_table):
         keywords_table.query.return_value = _keyword_rows('alpha', 'beta', 'gamma')
-        search.query.return_value = _keyword_rows()
+        search.query.side_effect = _answers_by_keyword({text: _keyword_rows(text) for text in ('alpha', 'beta', 'gamma')})
 
-        load_recent(max_keywords=3)
+        items = load_recent(max_keywords=3)
 
-        assert [call.kwargs['KeyConditionExpression'] for call in search.query.call_args_list] == [
-            Key('keyword').eq('alpha'),
-            Key('keyword').eq('beta'),
-            Key('keyword').eq('gamma'),
-        ]
+        assert items == [{'keyword': 'alpha'}, {'keyword': 'beta'}, {'keyword': 'gamma'}]
 
     def test_skips_discovery_and_falls_back_when_max_keywords_is_zero(self, load_recent, search, keywords_table):
         search.scan.return_value = _keyword_rows()

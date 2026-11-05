@@ -15,6 +15,7 @@ answers each keyword's `query` with the rows a test stages for it.
 
 from __future__ import annotations
 
+import itertools
 import os
 from collections.abc import Collection
 from decimal import Decimal
@@ -25,6 +26,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from boto3.dynamodb.conditions import Key
 
+from shared.request_deadline import Deadline
 from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
@@ -185,11 +187,15 @@ def _get_insights(
 
 
 def _search_queries(module: ModuleType, keywords: list[str]) -> list[Any]:
-    """The SearchResults queries an analysis over a Keywords table listing `keywords` (and no rows) sends."""
+    """The SearchResults queries an analysis over a Keywords table listing `keywords` (and no rows) sends.
+
+    The partitions are read in parallel, so the queries come back sorted by keyword.
+    """
     resource = _dynamodb(module, keywords, {})
     with patch.object(module, 'dynamodb', resource):
         module.analyze_prompt_brand_correlation(_CONFIG)
-    return resource.Table(module.SEARCH_RESULTS_TABLE).query.call_args_list
+    queries = resource.Table(module.SEARCH_RESULTS_TABLE).query.call_args_list
+    return sorted(queries, key=lambda query: _queried_keyword(**query.kwargs))
 
 
 def _winning_first_party(module: ModuleType, results_by_keyword: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
@@ -528,7 +534,9 @@ class TestHandler:
         status, body = _get_insights(insights_module, _mixed_results())
 
         assert status == 200
-        assert sorted(body) == ['losing_prompts', 'opportunity_prompts', 'summary', 'total_prompts_analyzed', 'winning_prompts']
+        assert sorted(body) == [
+            'losing_prompts', 'opportunity_prompts', 'summary', 'total_prompts_analyzed', 'truncated', 'winning_prompts',
+        ]
 
     @pytest.mark.parametrize(('type_param', 'bucket', 'keyword'), [
         ('winning', 'winning_prompts', 'best running shoes'),
@@ -541,8 +549,25 @@ class TestHandler:
         status, body = _get_insights(insights_module, _mixed_results(), query={'type': type_param})
 
         assert status == 200
-        assert sorted(body) == sorted([bucket, 'summary'])
+        assert sorted(body) == sorted([bucket, 'summary', 'truncated'])
         assert [prompt['keyword'] for prompt in body[bucket]] == [keyword]
+
+    def test_reports_a_complete_answer_as_not_truncated(self, insights_module):
+        _, body = _get_insights(insights_module, _mixed_results())
+
+        assert body['truncated'] is False
+
+    def test_answers_200_with_the_keywords_read_and_truncated_when_the_deadline_expires_mid_read(self, insights_module):
+        results: dict[str, list[dict[str, Any]]] = {}
+        for index in range(6):
+            results |= _run(f'losing prompt {index:02d}', _brand('first_party', 7))
+        ticks = itertools.count()
+
+        with patch('shared.request_deadline.Deadline', lambda _seconds: Deadline(3, lambda: next(ticks))), \
+                patch('shared.scope_params.SCOPE_MAX_WORKERS', 1):
+            status, body = _get_insights(insights_module, results)
+
+        assert (status, body['total_prompts_analyzed'], body['truncated']) == (200, 2, True)
 
     @pytest.fixture
     def limited_body(self, insights_module) -> dict[str, Any]:

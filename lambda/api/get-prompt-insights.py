@@ -34,6 +34,7 @@ from shared.brand_visibility import load_recent_search_results, tracked_brand_na
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.kpi_engine import percent
+from shared.request_deadline import current_deadline
 from shared.scope_params import SCOPE_QUERY_PARAMS
 from shared.scoped_reports import optional_scope_keywords
 from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
@@ -278,4 +279,5 @@ def handler(
     if list_key is not None:
         insights = {list_key: insights[list_key], 'summary': insights['summary']}
 
-    return success_response(insights, event)
+    # The keyword reads stop at the request's deadline; the prompts of the keywords not read are missing.
+    return success_response({**insights, 'truncated': current_deadline().cut}, event)
