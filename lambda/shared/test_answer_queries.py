@@ -21,6 +21,7 @@ from shared.answer_queries import (
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
 from testing.dynamodb_stubs import fake_table
 from testing.search_results_fixtures import sort_condition
+from testing.window_budget_fixtures import expired_deadline, ticking_deadline
 from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
@@ -276,3 +277,29 @@ class TestCappedWindowRows:
         query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 6)
 
         assert [call.kwargs['Limit'] for call in table.query.call_args_list] == [7]
+
+    def test_keeps_the_newest_runs_when_the_deadline_stops_the_read_after_a_page(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5)
+
+        capped = query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100, deadline=expired_deadline())
+
+        assert (sorted({row['timestamp'] for row in capped.rows}), capped.cut, capped.stopped) == ([run_timestamp(2)], run_timestamp(1), True)
+
+    def test_reads_one_page_only_when_the_deadline_is_spent(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5)
+
+        query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100, deadline=expired_deadline())
+
+        assert table.query.call_count == 1
+
+    def test_reads_on_while_the_deadline_has_time_left(self):
+        table = paged_search_results_table({self.KEYWORD: self.ROWS}, page_size=5)
+
+        capped = query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100, deadline=ticking_deadline(2))
+
+        assert (len(capped.rows), capped.cut, capped.stopped) == (8, run_timestamp(0), True)
+
+    def test_is_not_stopped_when_the_last_page_ends_the_window(self, table):
+        capped = query_keyword_rows_capped(table, self.KEYWORD, WINDOW_START, 100, deadline=expired_deadline())
+
+        assert (len(capped.rows), capped.cut, capped.stopped) == (12, None, False)

@@ -21,7 +21,14 @@ from shared.response_budget import LAMBDA_RESPONSE_LIMIT_BYTES, json_bytes
 from testing.events import parse_response
 from testing.paging import follow_next_token
 from testing.response_size import assert_within_page_budget
-from testing.window_rows_fixtures import load_window_report, report_event, run_timestamp, volume_group, windowed_report
+from testing.window_rows_fixtures import (
+    largest_window_cap,
+    load_window_report,
+    report_event,
+    run_timestamp,
+    volume_group,
+    windowed_report,
+)
 
 _mod = load_window_report('get-group-kpi-history.py', 'get_group_kpi_history_volume_under_test')
 
@@ -32,9 +39,13 @@ OWNED = ['hotel-coruna-mar.es']
 
 
 def _call(params: dict[str, str], rows_read: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """The response to a group-kpis request; the SearchResults rows it read are added to ``rows_read``."""
+    """The response to a group-kpis request; the SearchResults rows it read are added to ``rows_read``.
+
+    The window (38,400 rows) is read under the largest container's cap: these
+    tests are about response size, not the row cap.
+    """
     resource, read = GROUP.resource()
-    with windowed_report(_mod, resource, brand_config={'first_party_domains': OWNED}):
+    with largest_window_cap(), windowed_report(_mod, resource, brand_config={'first_party_domains': OWNED}):
         response = _mod.handler(report_event('/api/reports/group-kpis', {'group_id': 'coruna', **params}), None)
     (rows_read if rows_read is not None else []).extend(read)
     return response

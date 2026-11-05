@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.scoped_reports import MAX_WINDOW_ROWS
 from testing.module_loader import API_DIR, load_handler_module
 from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import long_text
@@ -193,12 +194,24 @@ def windowed_report(
 WindowRead = tuple[dict[str, Any], list[dict[str, Any]]]
 
 
+@contextmanager
+def largest_window_cap() -> Generator[None, None, None]:
+    """Windowed reads inside the block share ``MAX_WINDOW_ROWS``, the cap of the largest container, not the default one."""
+    with patch('shared.scoped_reports.WINDOW_ROWS_CAP', MAX_WINDOW_ROWS):
+        yield
+
+
 def whole_read_fixture(call: Callable[[], WindowRead]):
-    """A module fixture holding one ``call`` as is: the response and the rows it read (assign it to ``whole_read``)."""
+    """A module fixture holding one ``call`` as is: the response and the rows it read (assign it to ``whole_read``).
+
+    The window cap is the largest a container gets (``largest_window_cap``), so
+    a window under it is read whole however small the default container is.
+    """
 
     @pytest.fixture(scope='module')
     def whole_read() -> WindowRead:
-        return call()
+        with largest_window_cap():
+            return call()
 
     return whole_read
 
