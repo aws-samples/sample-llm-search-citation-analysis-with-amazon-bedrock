@@ -4,8 +4,8 @@ import {
   beforeAll, describe, expect, it
 } from 'vitest';
 import {
-  BUILT_SHARED_DIR, bytecodeTags, compiledAssetKey, listFiles, pycFlags, synthesizePythonAssets,
-  writeHandlerDirectory, writePycHeader, type SynthesizedPythonAssets
+  BUILT_SHARED_DIR, assetHashesAroundEdit, bytecodeTags, listFiles, pycFlags, synthesizePythonAssets,
+  writePycHeader, type SynthesizedPythonAssets
 } from './python-bytecode-fixtures';
 import { bytecodePath, bytecodeProblem, pythonSourceHash } from './python-bytecode';
 import { bytecodeProblems } from './python-layer';
@@ -108,23 +108,17 @@ describe('synthesized Python assets', () => {
 
 describe('compiledPythonCode asset hash', () => {
   it('stays the same when a file the asset does not ship changes', () => {
-    const dir = writeHandlerDirectory();
-    const before = compiledAssetKey(dir, ['handler.py']);
-    fs.writeFileSync(path.join(dir, 'other.py'), 'VALUE = 2\n');
-    expect(compiledAssetKey(dir, ['handler.py'])).toBe(before);
+    const { before, after } = assetHashesAroundEdit('other.py', 'VALUE = 2\n', ['handler.py']);
+    expect(after).toBe(before);
   });
 
   it('changes when a shipped file changes', () => {
-    const dir = writeHandlerDirectory();
-    const before = compiledAssetKey(dir, ['handler.py']);
-    fs.writeFileSync(path.join(dir, 'handler.py'), 'def handler(event, context):\n    return 2\n');
-    expect(compiledAssetKey(dir, ['handler.py'])).not.toBe(before);
+    const { before, after } = assetHashesAroundEdit('handler.py', 'def handler(event, context):\n    return 2\n', ['handler.py']);
+    expect(after).not.toBe(before);
   });
 
   it('ignores test files of a directory asset', () => {
-    const dir = writeHandlerDirectory();
-    const before = compiledAssetKey(dir);
-    fs.writeFileSync(path.join(dir, 'test_handler.py'), 'def test_other():\n    assert True\n');
-    expect(compiledAssetKey(dir)).toBe(before);
+    const { before, after } = assetHashesAroundEdit('test_handler.py', 'def test_other():\n    assert True\n');
+    expect(after).toBe(before);
   });
 });

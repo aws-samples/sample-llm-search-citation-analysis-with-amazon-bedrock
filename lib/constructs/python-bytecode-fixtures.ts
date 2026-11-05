@@ -74,7 +74,7 @@ export function synthesizePythonAssets(): SynthesizedPythonAssets {
 }
 
 /** A temp handler directory with `handler.py`, a sibling `other.py` and a test file. */
-export function writeHandlerDirectory(): string {
+function writeHandlerDirectory(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-handler-'));
   fs.writeFileSync(path.join(dir, 'handler.py'), 'def handler(event, context):\n    return 1\n');
   fs.writeFileSync(path.join(dir, 'other.py'), 'VALUE = 1\n');
@@ -83,6 +83,14 @@ export function writeHandlerDirectory(): string {
 }
 
 /** The asset hash CDK gives `compiledPythonCode(dir, files)`. */
-export function compiledAssetKey(dir: string, files?: string[]): string {
+function compiledAssetHash(dir: string, files?: string[]): string {
   return assetHash(compiledPythonCode(dir, files), new cdk.Stack(new cdk.App(), 'HashStack'));
+}
+
+/** The asset hash of a fresh handler directory before and after `file` is rewritten with `content`. */
+export function assetHashesAroundEdit(file: string, content: string, files?: string[]): { before: string; after: string } {
+  const dir = writeHandlerDirectory();
+  const before = compiledAssetHash(dir, files);
+  fs.writeFileSync(path.join(dir, file), content);
+  return { before, after: compiledAssetHash(dir, files) };
 }
