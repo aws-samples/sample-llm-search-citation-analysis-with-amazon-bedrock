@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 config = LambdaConfig()
+
+#: Seconds of the invocation kept after the browser session's own timeout: storing the failure and returning.
+SESSION_END_MARGIN_SECONDS = 20
+#: The shortest session AgentCore is asked for (``BROWSER_SESSION_TIMEOUT_SECONDS``' own floor).
+MIN_SESSION_TIMEOUT_SECONDS = 60
 dynamodb: Any = boto3.resource('dynamodb', region_name=config.region)
 SCREENSHOTS_BUCKET = os.environ['SCREENSHOTS_BUCKET']
 
@@ -554,11 +559,30 @@ def _crawl_video(target: _CrawlTarget, video_id: str) -> dict[str, Any]:
     }
 
 
-def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
+def session_timeout_for(context: Any) -> int:
+    """The AgentCore session timeout of this invocation: the configured one, cut to end before the Lambda does.
+
+    ``BROWSER_SESSION_TIMEOUT_SECONDS`` (330 s) outlasts the crawler's 300 s
+    timeout, so a Lambda killed mid-crawl, whose ``finally`` never runs, left
+    its session billing until AgentCore's timeout. A session that ends
+    ``SESSION_END_MARGIN_SECONDS`` before the invocation does is stopped by
+    AgentCore even then, and a crawl that outlasts it fails inside the
+    invocation, whose cleanup and failure record still run.
+    """
+    remaining_ms = getattr(context, 'get_remaining_time_in_millis', None)
+    remaining = remaining_ms() if callable(remaining_ms) else None
+    if not isinstance(remaining, (int, float)):
+        return config.browser_session_timeout
+    fitted = int(remaining // 1000) - SESSION_END_MARGIN_SECONDS
+    return max(MIN_SESSION_TIMEOUT_SECONDS, min(config.browser_session_timeout, fitted))
+
+
+def crawl_citation(citation: dict[str, Any], session_timeout: int | None = None) -> dict[str, Any]:
     """Return a cached verdict or crawl and persist one citation URL.
 
     A YouTube video is read through oEmbed (``_crawl_video``); every other
-    page through an AgentCore browser session.
+    page through an AgentCore browser session of ``session_timeout`` seconds
+    (default ``config.browser_session_timeout``).
     """
     target = _crawl_target(citation)
     browser_tools: SimpleBrowserTools | None = None
@@ -579,7 +603,8 @@ def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
         if video_id is not None:
             return _crawl_video(target, video_id)
 
-        browser_tools = SimpleBrowserTools(config)
+        session_config = config if session_timeout is None else replace(config, browser_session_timeout=session_timeout)
+        browser_tools = SimpleBrowserTools(session_config)
         capture = _capture_page(browser_tools, target.url)
 
         # Freeze the captured page before any external write or model work.
@@ -618,7 +643,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise error
 
     try:
-        result = crawl_citation(citation)
+        result = crawl_citation(citation, session_timeout_for(context))
     except Exception as exc:
         log_error(exc, f"crawling URL {url}", event)
         raise

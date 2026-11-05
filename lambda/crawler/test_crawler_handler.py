@@ -501,3 +501,37 @@ def test_crawls_a_youtube_channel_page_in_the_browser(uncached_runtime, citation
 
     reader.assert_not_called()
     uncached_runtime.browser_factory.assert_called_once_with(uncached_runtime.module.config)
+
+
+# --- The browser session ends before the Lambda does (2.42.0) -------------------------
+
+
+def _lambda_context(remaining_seconds: int) -> MagicMock:
+    context = MagicMock()
+    context.get_remaining_time_in_millis.return_value = remaining_seconds * 1000
+    return context
+
+
+@pytest.mark.parametrize(('remaining', 'expected'), [
+    pytest.param(300, 280, id='fresh-300s-invocation'),
+    pytest.param(400, 330, id='configured-timeout-already-fits'),
+    pytest.param(30, 60, id='never-under-agentcore-floor'),
+])
+def test_fits_the_session_timeout_inside_the_invocation(crawler_runtime, remaining, expected) -> None:
+    assert crawler_runtime.module.session_timeout_for(_lambda_context(remaining)) == expected
+
+
+def test_keeps_the_configured_session_timeout_without_a_lambda_context(crawler_runtime) -> None:
+    assert crawler_runtime.module.session_timeout_for(None) == 330
+
+
+def test_starts_the_browser_with_the_invocations_session_timeout(crawler_runtime, citation) -> None:
+    crawler_runtime.module.handler({'citation': citation}, _lambda_context(300))
+
+    assert crawler_runtime.browser_factory.call_args.args[0].browser_session_timeout == 280
+
+
+def test_leaves_the_module_config_unchanged_for_the_next_invocation(crawler_runtime, citation) -> None:
+    crawler_runtime.module.handler({'citation': citation}, _lambda_context(300))
+
+    assert crawler_runtime.module.config.browser_session_timeout == 330
