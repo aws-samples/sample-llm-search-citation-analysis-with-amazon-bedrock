@@ -34,3 +34,10 @@ class SteppedClock(JumpClock):
     def __call__(self) -> float:
         self.now += self.step
         return self.now
+
+
+class SleepClock(JumpClock):
+    """A clock that moves only when ``sleep`` (patched in for ``time.sleep``) is called."""
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds

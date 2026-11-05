@@ -19,7 +19,6 @@ and the registry replaces keyword-research's drifted simplified copies
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +34,7 @@ from shared.ai_clients import (
     run_web_search,
 )
 from shared.request_deadline import Deadline, activate_deadline, clear_request_deadline
+from testing.clocks import SleepClock
 from testing.env import cleared_env
 from testing.provider_response_fixtures import PERPLEXITY_AGENT_RESPONSE, PERPLEXITY_AGENT_TEXT
 
@@ -337,95 +337,66 @@ class TestClientBehavior:
         assert (wait, uniform.call_args.args) == (8.0, (0, 6.0))
 
 
-class _FakeClock:
-    """A clock that only moves when ``sleep`` is called, so a test decides when the budget runs out."""
+def _perplexity_within(seconds: float | None, responses: list | Exception | MagicMock) -> SimpleNamespace:
+    """Perplexity asked once inside an active ``seconds`` deadline (none when ``None``) whose clock moves only with the retry waits.
 
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-
-
-@pytest.fixture
-def clock() -> Iterator[_FakeClock]:
-    """A fake clock; the test activates a deadline on it, cleared afterwards."""
-    yield _FakeClock()
-    clear_request_deadline()
+    ``responses`` is what each POST answers in turn (a list), raises (an
+    exception) or always answers (a response). Returns ``result`` or the raised
+    ``error``, the ``post`` mock and the ``waits`` slept, in order.
+    """
+    clock = SleepClock()
+    if seconds is not None:
+        activate_deadline(Deadline(seconds, clock))
+    outcome = SimpleNamespace(result=None, error=None)
+    post_answers = {'side_effect': responses} if isinstance(responses, list | Exception) else {'return_value': responses}
+    try:
+        with (
+            patch.object(ai_clients.requests, 'post', **post_answers) as post,
+            patch.object(ai_clients.time, 'sleep', side_effect=clock.sleep) as sleep,
+            patch.object(ai_clients.random, 'uniform', return_value=0.0),
+        ):
+            try:
+                outcome.result = PerplexityClient('sk-test').agent_response('q')
+            except ai_clients.requests.exceptions.RequestException as error:
+                outcome.error = error
+    finally:
+        clear_request_deadline()
+    return SimpleNamespace(**vars(outcome), post=post, waits=[c.args[0] for c in sleep.call_args_list])
 
 
 class TestRetryWaitsHonourTheActiveDeadline:
     """A retry wait never runs past the invocation's deadline (less the margin); the call fails as if its retries were spent."""
 
-    def test_raises_the_throttle_error_without_waiting_when_the_wait_passes_the_deadline(self, clock):
-        activate_deadline(Deadline(5, clock))
+    def test_raises_the_throttle_error_without_waiting_when_the_wait_passes_the_deadline(self):
         rate_limited = _http_error_response(429, 'slow down', '429 Client Error')
         rate_limited.headers = {'Retry-After': '10'}
 
-        with (
-            patch.object(ai_clients.requests, 'post', return_value=rate_limited) as post,
-            patch.object(ai_clients.time, 'sleep', side_effect=clock.sleep) as sleep,
-            pytest.raises(ai_clients.requests.exceptions.HTTPError, match='429 Client Error'),
-        ):
-            PerplexityClient('sk-test').agent_response('q')
+        called = _perplexity_within(5, rate_limited)
 
-        assert (post.call_count, sleep.call_count) == (1, 0)
+        assert (str(called.error), called.post.call_count, called.waits) == ('429 Client Error | slow down', 1, [])
 
-    def test_stops_retrying_once_the_next_throttle_wait_would_pass_the_deadline(self, clock):
-        activate_deadline(Deadline(6, clock))
-        rate_limited = _http_error_response(429, 'slow down', '429 Client Error')
-
-        with (
-            patch.object(ai_clients.requests, 'post', return_value=rate_limited) as post,
-            patch.object(ai_clients.time, 'sleep', side_effect=clock.sleep) as sleep,
-            patch.object(ai_clients.random, 'uniform', return_value=0.0),
-            pytest.raises(ai_clients.requests.exceptions.HTTPError, match='429 Client Error'),
-        ):
-            PerplexityClient('sk-test').agent_response('q')
+    def test_stops_retrying_once_the_next_throttle_wait_would_pass_the_deadline(self):
+        called = _perplexity_within(6, _http_error_response(429, 'slow down', '429 Client Error'))
 
         # Waits 1.0 (4 s left after the margin) and 2.5 (3 s left) fit; 5.0 (0.5 s left) does not.
-        assert ([c.args[0] for c in sleep.call_args_list], post.call_count) == ([1.0, 2.5], 3)
+        assert (called.waits, called.post.call_count) == ([1.0, 2.5], 3)
 
-    def test_reraises_a_timeout_without_waiting_when_the_backoff_passes_the_deadline(self, clock):
-        activate_deadline(Deadline(2.5, clock))
-        timeout = ai_clients.requests.exceptions.Timeout('read timed out')
+    def test_reraises_a_timeout_without_waiting_when_the_backoff_passes_the_deadline(self):
+        called = _perplexity_within(2.5, ai_clients.requests.exceptions.Timeout('read timed out'))
 
-        with (
-            patch.object(ai_clients.requests, 'post', side_effect=timeout) as post,
-            patch.object(ai_clients.time, 'sleep', side_effect=clock.sleep) as sleep,
-            pytest.raises(ai_clients.requests.exceptions.Timeout, match='read timed out'),
-        ):
-            PerplexityClient('sk-test').agent_response('q')
+        assert (type(called.error).__name__, called.post.call_count, called.waits) == ('Timeout', 1, [])
 
-        assert (post.call_count, sleep.call_count) == (1, 0)
+    def test_waits_and_answers_when_the_wait_fits_the_deadline(self):
+        called = _perplexity_within(60, [MagicMock(status_code=429, text='slow down', headers={}), _ok_answer()])
 
-    def test_waits_and_answers_when_the_wait_fits_the_deadline(self, clock):
-        activate_deadline(Deadline(60, clock))
-        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
-
-        with (
-            patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, _ok_answer()]),
-            patch.object(ai_clients.time, 'sleep', side_effect=clock.sleep) as sleep,
-            patch.object(ai_clients.random, 'uniform', return_value=0.0),
-        ):
-            result = PerplexityClient('sk-test').agent_response('q')
-
-        assert (result, [c.args[0] for c in sleep.call_args_list]) == (_ANSWER, [1.0])
+        assert (called.result, called.waits) == (_ANSWER, [1.0])
 
     def test_waits_as_long_as_the_provider_asks_when_no_deadline_is_active(self):
         rate_limited = MagicMock(status_code=429, text='slow down', headers={'Retry-After': '100'})
 
-        with (
-            patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, _ok_answer()]),
-            patch.object(ai_clients.time, 'sleep') as sleep,
-            patch.object(ai_clients.random, 'uniform', return_value=0.0),
-        ):
-            PerplexityClient('sk-test').agent_response('q')
+        called = _perplexity_within(None, [rate_limited, _ok_answer()])
 
-        sleep.assert_called_once_with(100.0)
+        assert (called.result, called.waits) == (_ANSWER, [100.0])
 
 
 class TestThrottleExtraAttempts:
