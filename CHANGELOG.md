@@ -117,7 +117,7 @@ panel on its own.
   ReportInsights (512 MB / 120 s → 300 s), KpiAlerts (512). 1,024 MB: API-KeywordMgmt, API-ConfigMgmt,
   API-ExecutionMgmt (were 256). GenerateSummary: 1,024 MB / 300 s → 3,008 MB / 900 s for the rollup build.
   Pay-per-use cost stays about flat for CPU-bound work, which finishes proportionally sooner.
-- **`apiGet` retries once** 300–800 ms (random jitter) after a 502, 503, 429 or network error. It never retries a
+- **`apiGet` retries once** 300–811 ms (random jitter) after a 502, 503, 429 or network error. It never retries a
   504, a request after abort, or a POST; callers can opt out with `retry: false` (Content Studio status polling does).
   Each group KPI export page goes through it, and a failed export names the part, e.g. "Excel export failed: Keyword
   runs, page 3: Request timed out".

@@ -47,8 +47,6 @@ from botocore.exceptions import ClientError
 from shared.citation_pages import EntryView, TopUrl, url_domain
 from shared.scope_params import ReportScope
 
-ROLLUP_BUCKET_ENV = 'CITATION_ROLLUP_BUCKET'
-ROLLUP_FUNCTION_ENV = 'CITATION_ROLLUP_FUNCTION_NAME'
 BUILD_ACTION = 'build_citation_rollup'
 """The GenerateSummary event ``action`` that builds the rollup."""
 

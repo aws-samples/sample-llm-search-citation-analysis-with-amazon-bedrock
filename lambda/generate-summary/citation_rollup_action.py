@@ -24,7 +24,6 @@ from typing import Any
 import boto3
 from botocore.config import Config
 
-from shared.citation_rollup import ROLLUP_BUCKET_ENV
 from shared.citation_rollup_build import WRITE_WORKERS, RollupSources, build_rollup
 from shared.request_deadline import Deadline, activate_deadline, budget_from_context, clear_request_deadline
 from shared.scope_params import keywords_table_name, scoped_dynamodb_resource
@@ -40,22 +39,29 @@ class RollupConfigurationError(RuntimeError):
     """The Lambda has no bucket or Citations table to build the rollup with."""
 
 
-def _required_env(*names: str) -> str:
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    raise RollupConfigurationError(f"Set {' or '.join(names)} to build the citation rollup")
+def _rollup_bucket() -> str:
+    """The rollup's bucket: ``CITATION_ROLLUP_BUCKET``, else the summaries' ``SUMMARY_BUCKET`` (the same bucket)."""
+    bucket = os.environ.get('CITATION_ROLLUP_BUCKET') or os.environ.get('SUMMARY_BUCKET')
+    if not bucket:
+        raise RollupConfigurationError('Set CITATION_ROLLUP_BUCKET or SUMMARY_BUCKET to build the citation rollup')
+    return bucket
+
+
+def _citations_table_name() -> str:
+    name = os.environ.get('DYNAMODB_TABLE_CITATIONS')
+    if not name:
+        raise RollupConfigurationError('Set DYNAMODB_TABLE_CITATIONS to build the citation rollup')
+    return name
 
 
 def rollup_sources() -> RollupSources:
     """The tables and bucket from the environment, with connection pools sized for the parallel reads and writes."""
     dynamodb = scoped_dynamodb_resource()
     return RollupSources(
-        citations_table=dynamodb.Table(_required_env('DYNAMODB_TABLE_CITATIONS')),
+        citations_table=dynamodb.Table(_citations_table_name()),
         keywords_table=dynamodb.Table(keywords_table_name()),
         s3=boto3.client('s3', config=Config(max_pool_connections=WRITE_WORKERS)),
-        bucket=_required_env(ROLLUP_BUCKET_ENV, 'SUMMARY_BUCKET'),
+        bucket=_rollup_bucket(),
         brand_config=get_brand_config(os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')),
     )
 

@@ -133,15 +133,18 @@ export function validateApiConfig(): void {
  */
 const RETRYABLE_GET_STATUSES: ReadonlySet<number> = new Set([429, 502, 503]);
 
-/** The retry waits a random 300–800 ms so a burst of failed panels does not retry in lockstep. */
+/**
+ * The retry waits a random 300–811 ms so a burst of failed panels does not
+ * retry in lockstep: 300 ms plus 9 random bits (masking a power-of-two range
+ * keeps every wait equally likely, which dividing or rounding would not).
+ */
 export const GET_RETRY_DELAY_MIN_MS = 300;
-export const GET_RETRY_DELAY_MAX_MS = 800;
-
-const UINT32_RANGE = 2 ** 32;
+const GET_RETRY_JITTER_BITS = 9;
+export const GET_RETRY_DELAY_MAX_MS = GET_RETRY_DELAY_MIN_MS + (1 << GET_RETRY_JITTER_BITS) - 1;
 
 function retryDelayMs(): number {
-  const [draw = 0] = crypto.getRandomValues(new Uint32Array(1));
-  return Math.round(GET_RETRY_DELAY_MIN_MS + (draw / UINT32_RANGE) * (GET_RETRY_DELAY_MAX_MS - GET_RETRY_DELAY_MIN_MS));
+  const [draw = 0] = crypto.getRandomValues(new Uint16Array(1));
+  return GET_RETRY_DELAY_MIN_MS + (draw & ((1 << GET_RETRY_JITTER_BITS) - 1));
 }
 
 /** A transport failure (`fetch` rejects with a TypeError) or a retryable status. */
@@ -179,7 +182,7 @@ function waitBeforeRetry(ms: number, signal: AbortSignal | undefined): Promise<v
  * Makes an authenticated GET request to the API.
  *
  * A GET is idempotent, so a 502, 503, 429 or network failure is retried once
- * after a jittered 300–800 ms wait. A 504 and every other status fail at once,
+ * after a jittered 300–811 ms wait. A 504 and every other status fail at once,
  * and an aborted request is never retried.
  * @param endpoint - API endpoint (without base URL)
  * @param options - Optional request options

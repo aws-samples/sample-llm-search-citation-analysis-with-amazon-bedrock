@@ -38,7 +38,7 @@ from shared.citation_pages import (
     list_entry,
     tracked_brand_terms,
 )
-from shared.citation_rollup import ROLLUP_BUCKET_ENV, ROLLUP_FUNCTION_ENV, keyword_fingerprint, scope_key
+from shared.citation_rollup import keyword_fingerprint, scope_key
 from shared.citation_rollup_serve import ROLLUP_READ_ERRORS, PageRequest, RollupReader
 from shared.citation_rollup_source import (
     query_keyword_citations,
@@ -71,8 +71,8 @@ KEYWORDS_TABLE = keywords_table_name()
 BRAND_CONFIG_TABLE = os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
 
 # Optional: the citation rollup (``shared.citation_rollup``); without a bucket every page is read live.
-ROLLUP_BUCKET = os.environ.get(ROLLUP_BUCKET_ENV)
-ROLLUP_FUNCTION = os.environ.get(ROLLUP_FUNCTION_ENV)
+ROLLUP_BUCKET = os.environ.get('CITATION_ROLLUP_BUCKET')
+ROLLUP_FUNCTION = os.environ.get('CITATION_ROLLUP_FUNCTION_NAME')
 _ROLLUP_S3_CONFIG = Config(connect_timeout=2, read_timeout=5, retries={'max_attempts': 2, 'mode': 'standard'})
 rollup_reader = RollupReader(
     boto3.client('s3', config=_ROLLUP_S3_CONFIG), ROLLUP_BUCKET,

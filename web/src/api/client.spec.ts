@@ -203,7 +203,7 @@ const recoveredBody = { searches: ['recovered'] };
 /** Pins the retry jitter: every `crypto.getRandomValues` call fills its array with `draw`. */
 function stubRandomDraw(draw: number): void {
   vi.spyOn(crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
-    if (array instanceof Uint32Array) array.fill(draw);
+    if (array instanceof Uint16Array) array.fill(draw);
     return array;
   });
 }
@@ -297,7 +297,7 @@ describe('apiGet transient-failure retry', () => {
       delay: GET_RETRY_DELAY_MIN_MS,
     },
     {
-      draw: 0xFFFF_FFFF,
+      draw: 0xFFFF,
       delay: GET_RETRY_DELAY_MAX_MS,
     },
   ])('sends the retry $delay ms after the failure when the jitter draws $draw', async ({

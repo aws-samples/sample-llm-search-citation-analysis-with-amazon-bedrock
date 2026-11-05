@@ -1369,7 +1369,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       // CPU-bound, so 1 vCPU. It also stops starting groups 30 s before the
       // timeout and lists the rest instead of timing out with nothing written.
       timeout: cdk.Duration.seconds(300),
-      memorySize: 1769,
+      memorySize: ONE_VCPU_MEMORY_MB,
       description: 'Record complete KPI snapshots and evaluate post-run alerts',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1406,14 +1406,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-ReportInsights',
       code: lambdaSourceCode('report-insights'),
       layers: [sharedLayer],
+      description: 'Write, validate and store the narrative of each fully covered keyword group',
       // One group per invocation (the GenerateInsights Map): its history
       // window read (CPU-bound deserialization, row cap sized by memory) stops
       // 75 s before the timeout, leaving the Bedrock call and the write their
       // time. 120 s / 512 MB ran every group in one call and lost them all on
       // a timeout.
+      memorySize: ONE_VCPU_MEMORY_MB,
       timeout: cdk.Duration.seconds(300),
-      memorySize: 1769,
-      description: 'Write, validate and store the narrative of each fully covered keyword group',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
