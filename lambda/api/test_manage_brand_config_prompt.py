@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 import pytest
 from test_manage_brand_config_fixtures import capture_prompts, load_brand_config_module
 
+from shared.models import BedrockDeadlineError
+from shared.request_deadline import Deadline
 from testing.events import api_gateway_event, parse_response
 
 _mod = load_brand_config_module('manage_brand_config_under_test')
@@ -64,6 +66,41 @@ class TestErrorDefaults:
             'duplicates_found': [],
             'error': 'throttled',
         }
+
+
+class TestTimeBudget:
+    def test_find_competitors_answers_the_defaults_and_try_again_when_the_model_runs_out_of_time(self, monkeypatch) -> None:
+        def run_out_of_time(*_args, **_kwargs):
+            raise BedrockDeadlineError('no answer within 19 s')
+
+        monkeypatch.setattr(_mod, 'invoke_bedrock', run_out_of_time)
+
+        result = _mod.find_competitors(['Barceló'], 'hotels', [])
+
+        assert result == {
+            'first_party_brands': ['Barceló'],
+            'competitors': [],
+            'error': 'The AI model did not answer in time; try again',
+            'timed_out': True,
+        }
+
+    def test_bounds_the_call_by_the_request_deadline_without_thinking(self, monkeypatch) -> None:
+        deadline = Deadline(20)
+        model = MagicMock(return_value='{"suggestions": []}')
+        monkeypatch.setattr(_mod, 'invoke_bedrock', model)
+        monkeypatch.setattr(_mod, 'current_deadline', lambda: deadline)
+
+        _mod.expand_brands(['Barceló'], 'hotels', 'first_party')
+
+        assert (model.call_args.kwargs['thinking'], model.call_args.kwargs['deadline']) == (False, deadline)
+
+    def test_lists_at_most_the_capped_number_of_brands_in_the_prompt(self, monkeypatch) -> None:
+        prompts = capture_prompts(monkeypatch, _mod)
+        brands = [f'Brand {index:03d}' for index in range(150)]
+
+        _mod.expand_brands(brands, 'hotels', 'first_party')
+
+        assert ('Brand 099' in prompts[0], 'Brand 100' in prompts[0]) == (True, False)
 
 
 class TestSuccessShaping:
