@@ -8,7 +8,9 @@ import {
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 import { useDashboardData } from './useDashboardData';
-import { DASHBOARD_PANEL_PATHS } from './dashboardPanels';
+import {
+  DASHBOARD_PANEL_PATHS, type DashboardPanel
+} from './dashboardPanels';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
@@ -142,9 +144,37 @@ export async function renderReconciledDashboard(overrides: MockFetchOverrides = 
 export function startPendingKeywordReconciliation(
   result: { current: ReturnType<typeof useDashboardData> }
 ): AbortSignal | undefined {
+  return startPendingDashboardRead(result, (dashboard) => dashboard.reconcileKeywords());
+}
+
+/** `startPendingKeywordReconciliation` for a retry of one panel. */
+export function startPendingPanelRetry(
+  result: { current: ReturnType<typeof useDashboardData> },
+  panel: DashboardPanel
+): AbortSignal | undefined {
+  return startPendingDashboardRead(result, (dashboard) => dashboard.retryPanel(panel));
+}
+
+function startPendingDashboardRead(
+  result: { current: ReturnType<typeof useDashboardData> },
+  read: (dashboard: ReturnType<typeof useDashboardData>) => Promise<void>
+): AbortSignal | undefined {
   stallAuthenticatedFetch();
   act(() => {
-    void result.current.reconcileKeywords();
+    void read(result.current);
   });
   return mockAuthenticatedFetch.mock.lastCall?.[1]?.signal ?? undefined;
+}
+
+/**
+ * Renders the dashboard with `overrides` (a failing panel), then retries
+ * `panel` against a healthy API, with the request log cleared before the
+ * retry so it holds only the retry's requests.
+ */
+export async function renderRetriedDashboard(overrides: MockFetchOverrides, panel: DashboardPanel) {
+  const rendered = await renderLoadedDashboard(overrides);
+  mockAuthenticatedFetch.mockClear();
+  mockAuthenticatedFetch.mockImplementation(createMockFetch());
+  await act(() => rendered.result.current.retryPanel(panel));
+  return rendered;
 }

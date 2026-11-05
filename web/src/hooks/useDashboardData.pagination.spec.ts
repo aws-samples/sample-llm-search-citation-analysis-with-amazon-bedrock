@@ -29,6 +29,7 @@ import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const olderKeyword = buildKeyword('older', '2026-01-01T00:00:00Z');
 const newerKeyword = buildKeyword('newer', '2026-02-01T00:00:00Z');
+const OLDER_FIRST_PAGE = buildKeywordsPage([olderKeyword], 'page-2');
 const reconciledPage = buildKeywordsPage(createMockKeywords(1, 'reconciled'), 'page-2');
 
 describe('useDashboardData keyword pagination', () => {
@@ -38,7 +39,7 @@ describe('useDashboardData keyword pagination', () => {
 
   it('assembles every ordinary keyword page newest first on mount', async () => {
     const { result } = await renderLoadedDashboard({
-      keywordsPage: buildKeywordsPage([olderKeyword], 'page-2'),
+      keywordsPage: OLDER_FIRST_PAGE,
       extraPayloads: { [MOCK_KEYWORDS_SECOND_PAGE_URL]: buildKeywordsPage([newerKeyword]) },
     });
 
@@ -47,7 +48,7 @@ describe('useDashboardData keyword pagination', () => {
 
   it('reports a keywords panel error without a partial keyword list when a later page fails', async () => {
     const { result } = await renderLoadedDashboard({
-      keywordsPage: buildKeywordsPage([olderKeyword], 'page-2'),
+      keywordsPage: OLDER_FIRST_PAGE,
       failingUrls: [MOCK_KEYWORDS_SECOND_PAGE_URL],
     });
 

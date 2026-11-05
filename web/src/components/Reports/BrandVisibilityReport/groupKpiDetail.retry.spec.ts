@@ -1,51 +1,36 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 import { createMockJsonResponse } from '../../../test/fetchResponses';
-import { GET_RETRY_DELAY_MAX_MS } from '../../../api/client';
 import { fetchAllKeywordRuns } from './groupKpiDetail';
-import { KEYWORD_HISTORIES } from './groupKpiHistory-fixtures';
+import {
+  FIRST_KEYWORD_RUNS_PAGE, KEYWORD_HISTORIES, LAST_KEYWORD_RUNS_PAGE
+} from './groupKpiHistory-fixtures';
 import { HOTEL_SOL_SCOPE } from './GroupKpiReport-fixtures';
 
+// The real `apiGet` over a stubbed network, so each page gets the client's retry.
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
-const TARGET = {
+const GROUP_TARGET = {
   scope: HOTEL_SOL_SCOPE,
   marketId: null,
 };
 
-describe('fetchAllKeywordRuns page retry', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
+describe('fetchAllKeywordRuns over the real client', () => {
   it('collects every keyword page when one page answers 503 once and then succeeds', async () => {
     mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse({
-        keywords: [KEYWORD_HISTORIES[0]],
-        next_token: 'page-2',
-      }))
+      .mockResolvedValueOnce(createMockJsonResponse(FIRST_KEYWORD_RUNS_PAGE))
       .mockResolvedValueOnce(createMockJsonResponse({}, 503, 'Service Unavailable'))
-      .mockResolvedValueOnce(createMockJsonResponse({
-        keywords: [KEYWORD_HISTORIES[1]],
-        next_token: null,
-      }));
+      .mockResolvedValueOnce(createMockJsonResponse(LAST_KEYWORD_RUNS_PAGE));
 
-    const pending = fetchAllKeywordRuns(TARGET, 90);
-    await vi.advanceTimersByTimeAsync(GET_RETRY_DELAY_MAX_MS);
-
-    await expect(pending).resolves.toStrictEqual(KEYWORD_HISTORIES);
+    await expect(fetchAllKeywordRuns(GROUP_TARGET, 90)).resolves.toStrictEqual(KEYWORD_HISTORIES);
   });
 
   it('names the page and sends no second request when a keyword page answers 504', async () => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, 504, 'Gateway Timeout'));
 
-    await expect(fetchAllKeywordRuns(TARGET, 90)).rejects.toThrow('Keyword runs, page 1: Request timed out');
+    await expect(fetchAllKeywordRuns(GROUP_TARGET, 90)).rejects.toThrow('Keyword runs, page 1: Request timed out');
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
   });
 });

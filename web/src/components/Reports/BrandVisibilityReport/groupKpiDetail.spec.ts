@@ -12,7 +12,7 @@ import {
   slices,
 } from './groupKpiDetail';
 import {
-  buildRunDrivers, KEYWORD_HISTORIES
+  buildRunDrivers, FIRST_KEYWORD_RUNS_PAGE, KEYWORD_HISTORIES, LAST_KEYWORD_RUNS_PAGE
 } from './groupKpiHistory-fixtures';
 import {
   comparedRunSeries, dailyRun
@@ -30,14 +30,8 @@ const TARGET = {
 describe('fetchAllKeywordRuns', () => {
   beforeEach(() => {
     vi.mocked(apiGet)
-      .mockResolvedValueOnce({
-        keywords: [KEYWORD_HISTORIES[0]],
-        next_token: 'page-2' 
-      })
-      .mockResolvedValueOnce({
-        keywords: [KEYWORD_HISTORIES[1]],
-        next_token: null 
-      });
+      .mockResolvedValueOnce(FIRST_KEYWORD_RUNS_PAGE)
+      .mockResolvedValueOnce(LAST_KEYWORD_RUNS_PAGE);
   });
 
   it('collects every page of keyword runs in order', async () => {
@@ -73,10 +67,7 @@ describe('fetchAllKeywordRuns', () => {
 describe('fetchAllKeywordRuns failures', () => {
   it('names the keyword page that timed out when a later page answers 504', async () => {
     vi.mocked(apiGet)
-      .mockResolvedValueOnce({
-        keywords: [KEYWORD_HISTORIES[0]],
-        next_token: 'page-2',
-      })
+      .mockResolvedValueOnce(FIRST_KEYWORD_RUNS_PAGE)
       .mockRejectedValueOnce(new ApiRequestError('HTTP 504: Gateway Timeout', 504));
 
     await expect(fetchAllKeywordRuns(TARGET, 90)).rejects.toThrow('Keyword runs, page 2: Request timed out');

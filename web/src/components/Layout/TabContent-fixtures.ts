@@ -48,6 +48,15 @@ export const CITATIONS_TIMED_OUT_PANELS: DashboardPanelStates = {
   },
 };
 
+/** The same timeout while its Retry is in flight. */
+export const CITATIONS_RETRYING_PANELS: DashboardPanelStates = {
+  ...IDLE_PANEL_STATES,
+  citations: {
+    error: 'Request timed out',
+    retrying: true,
+  },
+};
+
 /** The dashboard read after `/searches` answered 503 twice (the retry failed too). */
 export const SEARCHES_FAILED_PANELS: DashboardPanelStates = {
   ...IDLE_PANEL_STATES,

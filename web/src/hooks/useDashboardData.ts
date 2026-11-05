@@ -48,10 +48,10 @@ export const useDashboardData = () => {
   const [searches, setSearches] = useState<Search[]>([]);
   const [searchesNextToken, setSearchesNextToken] = useState<string | null>(null);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
-  const [panels, setPanels] = useState<DashboardPanelStates>(IDLE_PANEL_STATES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [panels, setPanels] = useState<DashboardPanelStates>(IDLE_PANEL_STATES);
   const dashboardControllerRef = useRef<AbortController | null>(null);
   const keywordControllerRef = useRef<AbortController | null>(null);
   const panelControllersRef = useRef<PanelControllers>({});

@@ -263,6 +263,16 @@ export const KEYWORD_HISTORIES: KeywordRunHistory[] = [
   buildKeywordHistory('hotel sol spa', [buildKeywordRun(), LOST_KEYWORD_RUN]),
 ];
 
+/** `KEYWORD_HISTORIES` as two `view=keywords` pages. */
+export const FIRST_KEYWORD_RUNS_PAGE = {
+  keywords: [KEYWORD_HISTORIES[0]],
+  next_token: 'page-2',
+};
+export const LAST_KEYWORD_RUNS_PAGE = {
+  keywords: [KEYWORD_HISTORIES[1]],
+  next_token: null,
+};
+
 /** What the export and the on-demand sections read besides `buildHistory()`: its keyword runs and its run's drivers. */
 export function buildDetail(overrides: Partial<GroupKpiDetail> = {}): GroupKpiDetail {
   return {
