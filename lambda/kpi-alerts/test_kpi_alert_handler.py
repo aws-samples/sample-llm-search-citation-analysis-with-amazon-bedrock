@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, deterministic_alert_id
 from shared.kpi_engine import Answer, answers_from_rows
+from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
 from testing.map_run_fixtures import RESULTS_BUCKET, fake_s3_objects
@@ -291,7 +292,7 @@ class TestCompleteSnapshotEvaluation:
         ):
             result = worker_module.handler(_event(), None)
 
-        assert load_answers.call_args.args == (['shared keyword'], _RUN_TIMESTAMP)
+        assert [call.args[:2] for call in load_answers.call_args_list] == [(['shared keyword'], _RUN_TIMESTAMP)]
         assert snapshots.put_item.call_count == 2
         assert result['snapshots_recorded'] == 2
         assert result['skipped_partial'] == 0
@@ -741,3 +742,118 @@ class TestAlertsPerMarket:
         message = worker_module._message([{'severity': 'warning', 'message': 'Mention rate fell.', 'market_id': market_id}], 'exec-1')
 
         assert message.splitlines()[1] == line
+
+
+# --- Time budget (2.42.0): complete pairs first, the rest named instead of a timeout ---
+
+_SMALL_AND_BIG_GROUPS = [
+    {'id': 'k-small', 'keyword': 'small keyword', 'group_ids': {'group-small'}},
+    {'id': 'k-big-1', 'keyword': 'big keyword one', 'group_ids': {'group-big'}},
+    {'id': 'k-big-2', 'keyword': 'big keyword two', 'group_ids': {'group-big'}},
+]
+
+
+def _two_group_event() -> dict:
+    event = _event()
+    event['report']['run_metadata']['processed_keywords'] = [
+        {'keyword': item['keyword'], 'timestamp': _RUN_TIMESTAMP} for item in _SMALL_AND_BIG_GROUPS
+    ]
+    return event
+
+
+class _ClockSpentByFirstRead:
+    """A clock at 0 until the run's answers are first read, an hour later from then on."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.reads: list[list[str]] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def deadline(self, seconds: float) -> Deadline:
+        return Deadline(seconds, self)
+
+    def load(self, keywords: list[str], _timestamp: str, _deadline=None) -> dict:
+        self.reads.append(list(keywords))
+        self.now = 3600.0
+        return {keyword: _answers() for keyword in keywords}
+
+
+@contextmanager
+def _two_group_run(worker_module, load, **patches) -> Generator[MagicMock, None, None]:
+    """The worker over a one-keyword and a two-keyword group, both complete; yields the snapshots table."""
+    snapshots, _alerts, resource = _single_group_tables()
+    with (
+        patch.multiple(
+            worker_module,
+            query_active_keywords=MagicMock(return_value=_SMALL_AND_BIG_GROUPS),
+            _load_groups=MagicMock(return_value=[{'id': 'group-small'}, {'id': 'group-big'}]),
+            _settings=MagicMock(return_value=_ALERTS_DISABLED),
+            get_brand_config=MagicMock(return_value=_HOTEL_BRAND_CONFIG),
+            _load_run_answers=load,
+            _previous_snapshot=MagicMock(return_value=None),
+            _notify=MagicMock(return_value={'status': 'not_sent'}),
+            dynamodb=resource,
+            **patches,
+        ),
+    ):
+        yield snapshots
+
+
+class TestTimeBudget:
+    def test_records_no_snapshot_and_names_every_pair_when_no_time_is_left(self, worker_module) -> None:
+        load = MagicMock()
+        with _two_group_run(worker_module, load, budget_from_context=MagicMock(return_value=0.0)):
+            result = worker_module.handler(_two_group_event(), None)
+
+        assert (result['status'], result['snapshots_recorded'], result['skipped_time_budget']) == ('completed', 0, 2)
+        assert load.call_count == 0
+
+    def test_snapshots_the_smallest_group_first_when_the_budget_runs_out(self, worker_module) -> None:
+        clock = _ClockSpentByFirstRead()
+        with _two_group_run(
+            worker_module, MagicMock(side_effect=clock.load),
+            budget_from_context=MagicMock(return_value=60.0), Deadline=MagicMock(side_effect=clock.deadline),
+        ):
+            result = worker_module.handler(_two_group_event(), None)
+
+        assert result['snapshot_group_ids'] == ['group-small']
+
+    def test_names_the_pairs_left_for_the_time_budget(self, worker_module) -> None:
+        clock = _ClockSpentByFirstRead()
+        with _two_group_run(
+            worker_module, MagicMock(side_effect=clock.load),
+            budget_from_context=MagicMock(return_value=60.0), Deadline=MagicMock(side_effect=clock.deadline),
+        ):
+            result = worker_module.handler(_two_group_event(), None)
+
+        assert (result['time_budget_scopes'], result['skipped_time_budget'], result['skipped_partial']) == (
+            [{'group_id': 'group-big', 'market_id': 'global'}], 1, 0,
+        )
+
+    def test_snapshots_every_pair_when_the_budget_lasts(self, worker_module) -> None:
+        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _answers() for keyword in keywords})
+        with _two_group_run(worker_module, load) as snapshots:
+            result = worker_module.handler(_two_group_event(), None)
+
+        assert (result['snapshot_group_ids'], result['skipped_time_budget'], snapshots.put_item.call_count) == (
+            ['group-big', 'group-small'], 0, 2,
+        )
+
+    def test_keeps_the_reserve_out_of_the_read_budget(self, worker_module) -> None:
+        context = MagicMock()
+        context.get_remaining_time_in_millis.return_value = 300_000
+        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _answers() for keyword in keywords})
+        with _two_group_run(worker_module, load):
+            worker_module.handler(_two_group_event(), context)
+
+        assert load.call_args.args[2].remaining() == pytest.approx(300 - worker_module.KPI_ALERTS_RESERVE_SECONDS, abs=1)
+
+    def test_reads_no_keyword_once_the_deadline_is_spent(self, worker_module) -> None:
+        search = MagicMock()
+        worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
+
+        answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP, Deadline(0))
+
+        assert (answers, search.query.call_count) == ({'shared keyword': None}, 0)
