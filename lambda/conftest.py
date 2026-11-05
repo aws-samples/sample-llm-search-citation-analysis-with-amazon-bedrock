@@ -10,10 +10,17 @@ loadable through ``importlib`` exactly as before.
 Before this file each test carried its own copy of this path shim; the
 source tree now wins over a stale layer build in every test, not just the
 ones that happened to import first.
+
+Handlers build boto3 clients at import time, which needs a region. Lambda
+always sets ``AWS_REGION``; a developer machine may not (no default profile
+region), and collection then fails with ``NoRegionError``. Tests never reach
+AWS, so a fixed placeholder region keeps them hermetic.
 """
 
 import os
 import sys
+
+os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
 _LAMBDA_DIR = os.path.dirname(os.path.abspath(__file__))
 _LAYER_PYTHON_DIR = os.path.join(_LAMBDA_DIR, 'layer', 'python')

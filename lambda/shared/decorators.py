@@ -48,6 +48,7 @@ from typing import Any
 
 from shared.api_response import cors_json_headers, error_response, validation_error
 from shared.constants import MAX_KEYWORD_LENGTH
+from shared.request_deadline import request_deadline_scope
 from shared.router import path_contains_segment
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,8 @@ def api_handler(func: Callable) -> Callable:
     - Catches all exceptions
     - Logs errors with handler name and details
     - Returns sanitized error_response
+    - Starts the request's time budget (``shared.request_deadline``) from
+      ``context`` and clears it when the handler returns
 
     Usage:
         @api_handler
@@ -85,11 +88,12 @@ def api_handler(func: Callable) -> Callable:
     """
     @wraps(func)
     def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
-        try:
-            return func(event, context, *args, **kwargs)
-        except Exception as e:
-            logger.exception('Error in %s', func.__name__)
-            return error_response(e, event)
+        with request_deadline_scope(context):
+            try:
+                return func(event, context, *args, **kwargs)
+            except Exception as e:
+                logger.exception('Error in %s', func.__name__)
+                return error_response(e, event)
     return wrapper
 
 

@@ -40,6 +40,8 @@ from typing import Any
 
 from boto3.dynamodb.conditions import Key
 
+from shared.request_deadline import current_deadline
+
 logger = logging.getLogger(__name__)
 
 # Default concurrency. Keep well under DynamoDB's per-partition limits
@@ -100,11 +102,15 @@ def batch_get_items(
 def _collect_pages(
     operation: Callable[..., Mapping[str, Any]], max_pages: int | None, params: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], bool]:
-    """The items of up to ``max_pages`` pages (every page when ``None``) and whether the cap cut the read short.
+    """The items of up to ``max_pages`` pages (every page when ``None``) and whether the read stopped early.
 
     DynamoDB pages at 1 MB: each page's ``LastEvaluatedKey`` becomes the next
-    call's ``ExclusiveStartKey`` until a page arrives without one.
+    call's ``ExclusiveStartKey`` until a page arrives without one. A capped
+    read (``max_pages`` given) also stops when the request's time budget
+    (``shared.request_deadline``) is spent; the first page is always read. An
+    uncapped read means "every item" and never stops early.
     """
+    deadline = current_deadline() if max_pages is not None else None
     items: list[dict[str, Any]] = []
     pages_read = 0
     while max_pages is None or pages_read < max_pages:
@@ -115,6 +121,8 @@ def _collect_pages(
         if not last_key:
             return items, False
         params["ExclusiveStartKey"] = last_key
+        if deadline is not None and deadline.stop_reading("a capped DynamoDB read"):
+            return items, True
     return items, True
 
 
