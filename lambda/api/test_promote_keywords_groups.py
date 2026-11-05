@@ -1,9 +1,12 @@
 """Focused tests for destination-group behavior during keyword promotion."""
 
-from unittest.mock import MagicMock
+import itertools
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared import bounded_writes
+from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.keyword_groups_fixtures import load_with_groups_table, membership_update, reset_with_no_keywords
 from testing.keyword_promotion_fixtures import invoke_promotion
@@ -34,6 +37,8 @@ _HOTEL_CORUNA_ALREADY_STORED = {
     'created_keywords': [],
     'skipped_keywords': [{'keyword': 'Hotel Coruña', 'reason': 'duplicate'}],
     'grouped_keywords': [],
+    'pending_keywords': [],
+    'truncated': False,
 }
 
 
@@ -112,3 +117,33 @@ def test_accepts_more_than_fifty_destination_groups_when_keyword_is_created():
     written = mock_keywords_table.put_item.call_args.kwargs['Item']
     assert status == 200
     assert written['group_ids'] == set(destination_groups)
+
+
+def test_answers_200_with_the_unwritten_keywords_pending_when_the_deadline_is_spent():
+    ticks = itertools.count()
+
+    with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
+        status, body = _invoke([{'keyword': f'hotel {index}'} for index in range(4)])
+
+    assert (status, body['created'], len(body['pending_keywords']), body['truncated']) == (200, 2, 2, True)
+
+
+def test_reports_as_pending_exactly_the_keywords_neither_created_nor_skipped_when_the_deadline_cuts():
+    ticks = itertools.count()
+    texts = [f'hotel {index}' for index in range(4)]
+
+    with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
+        _status, body = _invoke([{'keyword': text} for text in texts])
+
+    created = [item['keyword'] for item in body['created_keywords']]
+    assert sorted(created + body['pending_keywords']) == texts
+
+
+def test_reports_a_stored_duplicate_left_ungrouped_by_the_deadline_as_pending():
+    _store_hotel_coruna({'existing-group'})
+
+    with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
+        status, body = _invoke([{'keyword': 'Hotel Coruña'}], ['destination-group'])
+
+    assert (status, body['pending_keywords'], body['truncated']) == (200, ['Hotel Coruña'], True)
+    mock_keywords_table.update_item.assert_not_called()
