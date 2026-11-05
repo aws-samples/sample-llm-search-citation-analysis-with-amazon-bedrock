@@ -44,7 +44,10 @@ Query params
   keyword_limit (int, 1-100, default 50) — the active keywords analysed, in
                                             keyword order
                                             (``keywords_truncated`` when
-                                            more exist).
+                                            more exist, or when the request's
+                                            time budget left some unread;
+                                            ``keywords_analyzed`` counts the
+                                            ones read).
 """
 
 from __future__ import annotations
@@ -67,9 +70,9 @@ from shared.scope_params import (
     all_active_scope,
     keywords_table_name,
     load_sibling_function,
-    map_scope_keywords,
     scoped_dynamodb_resource,
 )
+from shared.scoped_reports import ScopeRead, read_scope_keywords
 from shared.search_results import query_latest_run, search_results_table_name
 from shared.utils import get_brand_config, get_timestamp
 
@@ -190,9 +193,9 @@ def _keyword_evidence(keyword: str, config: dict[str, Any]) -> KeywordEvidence:
     return KeywordEvidence(keyword, _brand_ranks(rows), gaps)
 
 
-def _collect_evidence(keywords: list[str], config: dict[str, Any]) -> list[KeywordEvidence]:
-    """Every keyword's evidence, read in parallel; a keyword whose read fails has none."""
-    return map_scope_keywords(
+def _collect_evidence(keywords: list[str], config: dict[str, Any]) -> ScopeRead[KeywordEvidence]:
+    """Every keyword's evidence, read in parallel; a keyword whose read fails has none, one the time budget left unread is skipped."""
+    return read_scope_keywords(
         keywords,
         lambda keyword: _keyword_evidence(keyword, config),
         KeywordEvidence,
@@ -318,11 +321,12 @@ def build_competitor_rollups(
         }
 
     keywords, active_count = _list_tracked_keywords(keyword_limit)
-    evidence = _collect_evidence(keywords, config)
+    read = _collect_evidence(keywords, config)
+    evidence = list(read.values.values())
     header = {
         'generated_at': get_timestamp(),
-        'keywords_analyzed': len(keywords),
-        'keywords_truncated': active_count > len(keywords),
+        'keywords_analyzed': len(evidence),
+        'keywords_truncated': active_count > len(keywords) or bool(read.skipped),
     }
 
     if competitor:

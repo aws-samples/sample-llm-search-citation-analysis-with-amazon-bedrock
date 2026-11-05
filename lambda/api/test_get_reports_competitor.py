@@ -15,6 +15,7 @@ import pytest
 from shared.scope_params import ReportScope
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
+from testing.window_budget_fixtures import spent_request_budget
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 # The tables the module resolves at import (both always set on the StatsInsights Lambda).
@@ -166,13 +167,13 @@ def test_outreach_lift_handles_zero_citations_without_blowing_up(mod):
 @pytest.fixture
 def running_shoes_rollup(mod):
     """Adidas's rollup over the one keyword where it outranks the first party."""
-    return mod._build_competitor_rollup('Adidas', mod._collect_evidence(['best running shoes'], CONFIG), CONFIG)
+    return mod._build_competitor_rollup('Adidas', list(mod._collect_evidence(['best running shoes'], CONFIG).values.values()), CONFIG)
 
 
 @pytest.fixture
 def two_keyword_rollup(mod):
     """Adidas's rollup over a keyword it outranks us on and one where we already win."""
-    evidence = mod._collect_evidence(['best running shoes', 'best hiking boots'], CONFIG)
+    evidence = list(mod._collect_evidence(['best running shoes', 'best hiking boots'], CONFIG).values.values())
     return mod._build_competitor_rollup('Adidas', evidence, CONFIG)
 
 
@@ -591,3 +592,22 @@ def test_latest_brand_ranks_keeps_default_classification_when_missing(raw_mod):
     result = _latest_ranks(raw_mod, items)
 
     assert result['mystery']['classification'] == 'other'
+
+
+# --- time budget ---------------------------------------------------------
+
+
+def test_handler_answers_200_without_the_unread_keywords_when_the_budget_is_spent(mod):
+    with spent_request_budget():
+        response = _get_competitor_report(mod, competitor='Adidas')
+    body = json.loads(response['body'])
+
+    assert (response['statusCode'], body['keywords_analyzed'], body['keywords_truncated'], body['rollup']['outranked_keywords']) == (
+        200, 0, True, [],
+    )
+
+
+def test_handler_reads_every_keyword_within_the_budget(mod):
+    body = json.loads(_get_competitor_report(mod, competitor='Adidas', keyword_limit=3)['body'])
+
+    assert (body['keywords_analyzed'], body['keywords_truncated']) == (3, False)

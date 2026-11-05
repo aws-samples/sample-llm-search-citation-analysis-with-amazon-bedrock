@@ -38,6 +38,13 @@ def spent_request_budget() -> Generator[None]:
 
 
 @contextmanager
+def request_deadline_of(make: Callable[[], Deadline]) -> Generator[None]:
+    """Every request ``@api_handler`` starts inside the block runs against ``make()``'s deadline (a ``ticking_deadline``)."""
+    with patch.object(request_deadline, 'start_request_deadline', side_effect=lambda _context: request_deadline.activate_deadline(make())):
+        yield
+
+
+@contextmanager
 def window_read_budget(make: Callable[[], Deadline]) -> Generator[None]:
     """Every window read of ``shared.scoped_reports`` inside the block stops at ``make()``'s deadline."""
     with patch('shared.scoped_reports.window_read_deadline', side_effect=make):
