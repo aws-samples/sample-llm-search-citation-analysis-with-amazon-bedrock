@@ -24,6 +24,8 @@ from auth import Caller, authorize_tool
 from botocore.exceptions import BotoCoreError, ClientError
 from catalogue import CONFIRMATION_ARGUMENT, JsonObject, Route, Tool
 from invoke import (
+    Unanswered,
+    UpstreamTimeoutError,
     answer_result,
     audit,
     checked_route,
@@ -31,11 +33,11 @@ from invoke import (
     refusal_result,
     replay,
     tool_result,
-    unreachable_result,
 )
 
 from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN
 from shared.markets import keyword_market_id
+from shared.request_deadline import current_deadline
 from shared.research_agent import AGENT_DEFAULT_ROUNDS, AGENT_MAX_QUERIES_PER_ROUND
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,9 @@ def _ask(caller: Caller, route: Route) -> tuple[int, Any]:
     """``invoke_route``, with an unreachable API read as a ``502``."""
     try:
         return invoke_route(route, caller)
+    except UpstreamTimeoutError:
+        logger.warning('Reading %s for a spend estimate ran out of time', route.path)
+        return 504, {'error': 'upstream_timeout', 'details': 'The API did not answer in time'}
     except (BotoCoreError, ClientError, ValueError):
         logger.exception('Reading %s for a spend estimate failed', route.path)
         return 502, {'error': 'The API could not be reached'}
@@ -88,34 +93,52 @@ def _read(caller: Caller, router: str, path: str, query: dict[str, str] | None =
     return body
 
 
-def _keyword_pages(caller: Caller, group_id: str | None) -> tuple[list[dict[str, Any]], bool]:
-    """Active keywords (optionally of one group) and whether every page was read."""
+def _count_pages(
+    caller: Caller, group_id: str | None, matches: Callable[[dict[str, Any]], bool], stop_above: int,
+) -> tuple[int, bool]:
+    """``(matching active keywords, decisive)`` of one group (or all), read page by page.
+
+    Paging stops once more than ``stop_above`` keywords matched (the count is
+    then a lower bound, which already decides the cap), after
+    ``MAX_KEYWORD_PAGES``, or when the request's deadline is spent; only a
+    count read to the end or past ``stop_above`` is decisive.
+    """
     query: dict[str, str] = {'status': 'active', 'limit': '1000'}
     if group_id:
         query['group_id'] = group_id
-    keywords: list[dict[str, Any]] = []
-    for _page in range(MAX_KEYWORD_PAGES):
+    count = 0
+    for page in range(MAX_KEYWORD_PAGES):
+        if page and current_deadline().stop_reading('the spend estimate keyword count'):
+            return count, False
         body = _read(caller, 'keyword-mgmt', '/api/keywords', query)
-        keywords.extend(item for item in body.get('keywords', []) if isinstance(item, dict))
+        count += sum(1 for item in body.get('keywords', []) if isinstance(item, dict) and matches(item))
         token = body.get('next_token')
-        if not token:
-            return keywords, True
+        if not token or count > stop_above:
+            return count, True
         query['next_token'] = token
-    return keywords, False
+    return count, False
+
+
+def _scope_filter(scope: JsonObject) -> Callable[[dict[str, Any]], bool]:
+    """Whether a keyword of the listed group (or of all) is in ``scope``: its keyword ids and markets."""
+    wanted = set(scope.get('keyword_ids') or []) if scope.get('mode') == 'keywords' else None
+    market_ids = scope.get('market_ids')
+    markets = set(market_ids) if isinstance(market_ids, list) else None
+
+    def matches(item: dict[str, Any]) -> bool:
+        return (wanted is None or item.get('id') in wanted) and (markets is None or keyword_market_id(item) in markets)
+
+    return matches
 
 
 def count_scope_keywords(caller: Caller, scope: JsonObject) -> tuple[int, bool]:
-    """``(active keywords in scope, complete)``; ``scope`` is the run's ``{"mode": ...}`` descriptor."""
+    """``(active keywords in scope, decisive)``; ``scope`` is the run's ``{"mode": ...}`` descriptor.
+
+    Counting stops once the count passes ``max_run_keywords``: one page
+    usually decides the MCP cap, however many keywords the table holds.
+    """
     group_ids = scope.get('group_ids') or [None]
-    keywords, complete = _keyword_pages(caller, group_ids[0])
-    if scope.get('mode') == 'keywords':
-        wanted = set(scope.get('keyword_ids') or [])
-        keywords = [item for item in keywords if item.get('id') in wanted]
-    market_ids = scope.get('market_ids')
-    if isinstance(market_ids, list):
-        markets = set(market_ids)
-        keywords = [item for item in keywords if keyword_market_id(item) in markets]
-    return len(keywords), complete
+    return _count_pages(caller, group_ids[0], _scope_filter(scope), state.limits().max_run_keywords)
 
 
 def _providers(caller: Caller) -> list[dict[str, Any]]:
@@ -143,11 +166,11 @@ def _enabled_personas(caller: Caller) -> int:
 def _run_blocker(keywords: int, complete: bool, calls: int) -> str | None:
     cap = state.limits().max_run_keywords
     if not complete:
-        return f'The scope has too many keywords to count; the MCP keyword cap is {cap}'
+        return f'The scope\'s keywords could not all be counted (too many, or the API was slow); the MCP keyword cap is {cap}'
     if keywords == 0:
         return 'No active keywords match the scope'
     if keywords > cap:
-        return f'{keywords} keywords exceed the MCP keyword cap of {cap} per run; narrow the scope'
+        return f'More than {cap} keywords match the scope, over the MCP keyword cap per run; narrow the scope'
     if calls == 0:
         return 'No AI engine or search provider is enabled with a key'
     return None
@@ -302,7 +325,8 @@ def _runs_in_flight(caller: Caller, limit: int) -> list[str]:
     """The execution ARNs of the caller's started runs that still run, up to ``limit`` of them."""
     running: list[str] = []
     for run in state.unfinished_runs(caller.sub):
-        if not _is_running(caller, run):
+        # Out of time, a run is counted as running without asking: the cautious answer.
+        if not current_deadline().expired() and not _is_running(caller, run):
             state.mark_finished(run)
             continue
         running.append(str(run.get('execution_arn') or ''))
@@ -334,9 +358,11 @@ def _spend(call: _Call, route: Route, arguments: JsonObject) -> JsonObject:
     if day is None:
         return call.refuse('limit_reached', _limit_message(call.family))
     answer = replay(call.tool_name, call.operation, route, call.caller, call.started)
-    if answer is None:
-        state.release(call.caller.sub, counter, day)
-        return unreachable_result(call.operation)
+    if isinstance(answer, Unanswered):
+        # A request that may have started keeps today's use: the cautious answer for a spend.
+        if not answer.maybe_ran:
+            state.release(call.caller.sub, counter, day)
+        return answer.result
     status, body = answer
     if not 200 <= status < 300:
         state.release(call.caller.sub, counter, day)

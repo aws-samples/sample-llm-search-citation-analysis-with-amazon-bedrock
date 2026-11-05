@@ -5,12 +5,17 @@ The two-step spend operations over the wire: estimates, confirmation tokens, per
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 import state
+from botocore.exceptions import ClientError, ReadTimeoutError
 from spend import RESEARCH_PROVIDERS
 
+from shared import request_deadline
+from shared.request_deadline import Deadline
 from testing.mcp_result_fixtures import READ_SCOPE, RUN_SCOPE, WRITE_SCOPE, text_block
 from testing.mcp_spend_fixtures import (
     CALLER_SUB,
@@ -182,7 +187,7 @@ class TestEstimateRunBlockers:
 
         data = call('estimate_run', GROUP_SCOPE)['structuredContent']
 
-        assert data['reason'] == '4 keywords exceed the MCP keyword cap of 3 per run; narrow the scope'
+        assert data['reason'] == 'More than 3 keywords match the scope, over the MCP keyword cap per run; narrow the scope'
 
     def test_gives_no_token_without_an_enabled_provider(self, call, routers):
         routers.answer('GET', '/api/providers', 200, {'providers': [provider('openai', 'llm', enabled=False)]})
@@ -433,3 +438,81 @@ class TestResearchAndContentStarts:
         result = spend('generate_content_brief', GROUP_SCOPE, token=token, who=member)
 
         assert structured_error(result) == OTHER_ARGUMENTS
+
+
+# --- Time budget (2.42.0) ---------------------------------------------------------------
+
+
+def _endless_pages(event: dict) -> tuple[int, dict]:
+    """Two keywords a page and always another page."""
+    page = int(event['queryStringParameters'].get('next_token') or 0)
+    return 200, keyword_page(keywords(2, prefix=f'page{page}'), str(page + 1))
+
+
+class _ClockSpentByFirstPage:
+    """A request clock at 0 until the first keyword page is read, and a minute later from then on."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def deadline(self, seconds: float, *_clock: object) -> Deadline:
+        return Deadline(seconds, self)
+
+    def page(self, event: dict) -> tuple[int, dict]:
+        self.now = 60.0
+        return _endless_pages(event)
+
+
+class TestEstimateTimeBudget:
+    def test_stops_paging_keywords_once_the_count_passes_the_cap(self, call, routers, limits):
+        limits(maxRunKeywords=3)
+        routers.answer_with('GET', '/api/keywords', _endless_pages)
+
+        call('estimate_run', {'all': True})
+
+        assert len(routers.requests('GET', '/api/keywords')) == 2
+
+    def test_refuses_a_scope_whose_count_passed_the_cap(self, call, routers, limits):
+        limits(maxRunKeywords=3)
+        routers.answer_with('GET', '/api/keywords', _endless_pages)
+
+        assert call('estimate_run', {'all': True})['structuredContent']['can_start'] is False
+
+    @pytest.fixture
+    def spent_after_first_page(self, routers) -> Iterator[None]:
+        clock = _ClockSpentByFirstPage()
+        routers.answer_with('GET', '/api/keywords', clock.page)
+        with patch.object(request_deadline, 'Deadline', side_effect=clock.deadline):
+            yield
+
+    @pytest.mark.usefixtures('spent_after_first_page')
+    def test_reads_no_further_keyword_page_once_the_request_time_is_spent(self, call, routers):
+        call('estimate_run', {'all': True})
+
+        assert len(routers.requests('GET', '/api/keywords')) == 1
+
+    @pytest.mark.usefixtures('spent_after_first_page')
+    def test_answers_upstream_timeout_when_no_time_is_left_for_the_next_read(self, call, routers):
+        result = call('estimate_run', {'all': True})
+
+        assert (result['isError'], structured_error(result)) == (True, 'upstream_timeout')
+
+
+class TestStartTimeBudget:
+    def test_keeps_todays_run_used_when_the_start_may_have_run(self, spend, routers):
+        routers.answer_with(*TRIGGER, MagicMock(side_effect=ReadTimeoutError(endpoint_url='https://lambda')))
+
+        result = spend('start_run', GROUP_SCOPE)
+
+        assert (structured_error(result), state.used_today(CALLER_SUB, 'runs')) == ('upstream_timeout', 1)
+
+    def test_gives_todays_run_back_when_the_api_was_never_reached(self, spend, routers):
+        unreachable = ClientError({'Error': {'Code': 'ServiceException', 'Message': 'down'}}, 'Invoke')
+        routers.answer_with(*TRIGGER, MagicMock(side_effect=unreachable))
+
+        result = spend('start_run', GROUP_SCOPE)
+
+        assert (structured_error(result), state.used_today(CALLER_SUB, 'runs')) == ('upstream_unavailable', 0)
