@@ -32,7 +32,9 @@ mkdir -p $LAYER_DIR
 # nothing downstream checks the platform, so a wrong one surfaces as an
 # ImportError inside every Lambda. Flags
 # mirror lambda/crawler-layer/build-layer.sh, which already got this right.
+USE_DOCKER=false
 if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+    USE_DOCKER=true
     echo "Using Docker to build for Linux compatibility..."
     
     # Use Amazon Linux 2023 image (matches Lambda Python 3.12 runtime)
@@ -43,7 +45,7 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
         -v "$(pwd)":/var/task \
         -w /var/task \
         public.ecr.aws/lambda/python:3.12 \
-        pip install -r requirements.txt -t python/ --upgrade --no-cache-dir
+        pip install -r requirements.txt -t python/ --upgrade --no-cache-dir --no-compile
     
     echo "Docker build completed"
 else
@@ -58,7 +60,8 @@ else
         --only-binary=:all: \
         --python-version 3.12 \
         --upgrade \
-        --no-cache-dir
+        --no-cache-dir \
+        --no-compile
     echo "Cross-platform build completed"
 fi
 
@@ -69,6 +72,16 @@ find ../shared -maxdepth 1 -name '*.py' ! -name 'test_*' -exec cp {} $LAYER_DIR/
 
 # Create __init__.py files to make it a proper package
 touch $LAYER_DIR/shared/__init__.py
+
+# Ship CPython 3.12 bytecode: /opt is read-only on Lambda, so without it every
+# cold start recompiles each imported module. pip runs with --no-compile above
+# so only this deterministic, version-checked pass writes .pyc files.
+echo "Precompiling bytecode with CPython 3.12..."
+if [ "$USE_DOCKER" = true ]; then
+    bash ../../scripts/compile-python312.sh --docker "$LAYER_DIR" shared
+else
+    bash ../../scripts/compile-python312.sh "$LAYER_DIR" shared
+fi
 
 echo "Lambda Layer built successfully in $LAYER_DIR/"
 echo ""

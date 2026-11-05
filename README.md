@@ -155,11 +155,17 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 ## Prerequisites
 
 - Node.js 20+ and npm
-- Python 3.12 and pip
+- Python 3.12 and pip. The layer builds and `cdk synth` compile every shipped module to CPython 3.12 bytecode (Lambda's read-only `/var/task` and `/opt` would otherwise make each cold start recompile ~430 modules); they use Docker when it is running, else `$PYTHON312`, `python3.12` on `PATH`, or `uv` (`uv python install 3.12`), and fail on any other version
 - AWS CLI with credentials and a default region (`aws configure`, or `AWS_REGION`)
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - An API key for at least one of OpenAI, Perplexity, Google Gemini or Anthropic. Paid keys are needed: free tiers hit rate limits at analysis volume; $5–10 of credit per provider covers regular use.
 - Docker (optional): the layer builds use the Lambda Python image when Docker is running and fall back to cross-platform pip wheels otherwise.
+
+### Python bytecode in the assets
+
+- **Layers:** `build-layer.sh` installs with `pip --no-compile`, copies `shared/`, then runs `scripts/compile-python312.sh`: `unchecked-hash` bytecode for third-party packages, `checked-hash` for `shared/`. Hash-based `.pyc` carry no mtime, so two builds of the same input are byte-identical and the layer's asset hash does not change. Synth fails ("layer is stale") when a shared module has no `cpython-312.pyc` or its embedded source hash no longer matches the `.py`; rerun the layer build.
+- **Handlers:** `apiLambdaCode` and the worker directories are bundled at synth (`lib/constructs/python-bytecode.ts`): only runtime files (no `test_*.py`, `conftest.py` or caches), compiled `checked-hash` by a local 3.12 or, without one, inside the Lambda 3.12 bundling image. The asset hash covers just the shipped files, so editing one API handler redeploys only the Lambdas that bundle it.
+- Every other `.pyc` (pytest's 3.14 caches in the source trees and the built layer) stays out of the assets.
 
 ## Deployment
 

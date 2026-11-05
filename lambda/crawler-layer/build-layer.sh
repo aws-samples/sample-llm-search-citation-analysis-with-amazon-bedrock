@@ -24,7 +24,7 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
         -w /var/task \
         -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
         public.ecr.aws/lambda/python:3.12 \
-        pip install -r requirements.txt -t python/ --upgrade --no-cache-dir
+        pip install -r requirements.txt -t python/ --upgrade --no-cache-dir --no-compile
     echo "Docker build completed"
 else
     echo "Docker not running - using pip with Linux/Python 3.12 wheel constraints"
@@ -39,7 +39,8 @@ else
         --only-binary=:all: \
         --python-version 3.12 \
         --upgrade \
-        --no-cache-dir
+        --no-cache-dir \
+        --no-compile
     echo "Cross-platform build completed"
 fi
 
@@ -48,6 +49,26 @@ echo "Copying shared modules..."
 mkdir -p "$LAYER_DIR/shared"
 find ../shared -maxdepth 1 -name '*.py' ! -name 'test_*' -exec cp {} "$LAYER_DIR/shared/" \;
 touch "$LAYER_DIR/shared/__init__.py"
+
+# Ship CPython 3.12 bytecode for everything, the bundled boto3/botocore and
+# Playwright included: /opt is read-only on Lambda, so without it every cold
+# start recompiles each imported module. pip runs with --no-compile above so
+# only this deterministic, version-checked pass writes .pyc files.
+echo "Precompiling bytecode with CPython 3.12..."
+if [ "$BUILT_WITH_DOCKER" = true ]; then
+    bash ../../scripts/compile-python312.sh --docker "$LAYER_DIR" shared
+else
+    bash ../../scripts/compile-python312.sh "$LAYER_DIR" shared
+fi
+
+# Lambda caps a function's code plus layers at 250 MB unzipped. Checked on the
+# host too, so the no-Docker build cannot pass silently over the limit.
+LAYER_BYTES=$(find "$LAYER_DIR" -type f -exec cat {} + | wc -c | tr -d ' ')
+if [ "$LAYER_BYTES" -ge $((250 * 1024 * 1024)) ]; then
+    echo "Crawler layer is $LAYER_BYTES bytes unzipped; Lambda's limit is 250 MB" >&2
+    exit 1
+fi
+echo "Crawler layer unzipped size: $((LAYER_BYTES / 1024 / 1024)) MB (limit 250 MB)"
 
 # Browser downloads are unnecessary and can push the layer over Lambda's
 # uncompressed-size limit. Fail the build if Playwright ever adds one.
