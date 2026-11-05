@@ -3,15 +3,39 @@ import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
+import {
+  PYTHON_BYTECODE_TAG, bytecodePath, bytecodeProblem, compiledPythonCode
+} from './python-bytecode';
 
-/** Build caches never belong in a Lambda asset: running pytest rewrites them inside the `lambda/` source trees, which would otherwise change every asset hash and redeploy unchanged functions. */
-export const PYTHON_ASSET_EXCLUDES = ['**/__pycache__', '**/*.pyc'];
+/**
+ * What a layer asset leaves out. The layer's CPython 3.12 bytecode is the
+ * point of its build (see `build-layer.sh`) and ships; every other `.pyc`
+ * does not: pytest (3.14 locally) imports the built shared layer and writes
+ * its own caches into it, which would otherwise change the asset hash and
+ * redeploy an unchanged layer.
+ */
+export const PYTHON_ASSET_EXCLUDES = [
+  '**/*.pyc',
+  `!**/__pycache__/*.${PYTHON_BYTECODE_TAG}.pyc`,
+  '**/.pytest_cache',
+  '**/.hypothesis',
+];
 
 /** The `lambda/` directory the Python assets are read from. */
 const LAMBDA_ROOT = path.join(__dirname, '../../lambda');
 
-/** The code asset of `lambda/<directory>`. */
-export function lambdaSourceCode(directory: string): lambda.AssetCode {
+/** The handler code of `lambda/<directory>` (tests and caches left out), with its CPython 3.12 bytecode. */
+export function lambdaSourceCode(directory: string): lambda.Code {
+  return compiledPythonCode(path.join(LAMBDA_ROOT, directory));
+}
+
+/** `lambda/<directory>/<files>` only, with their CPython 3.12 bytecode; the asset hash covers just those files. */
+export function lambdaHandlerFilesCode(directory: string, files: string[]): lambda.Code {
+  return compiledPythonCode(path.join(LAMBDA_ROOT, directory), files);
+}
+
+/** A layer's prebuilt `lambda/<directory>` (its `python/` tree), bytecode included. */
+function layerCode(directory: string): lambda.Code {
   return lambda.Code.fromAsset(path.join(LAMBDA_ROOT, directory), { exclude: PYTHON_ASSET_EXCLUDES });
 }
 
@@ -28,8 +52,31 @@ class LayerNotBuiltError extends Error {
 }
 
 /**
+ * The shared modules whose CPython 3.12 bytecode in the built layer is absent
+ * ("built without precompile", or by another Python) or does not match the
+ * source hash embedded in its header (stale), as report fragments.
+ */
+export function bytecodeProblems(sourceSharedPath: string, builtSharedPath: string, names: string[]): string[] {
+  const byProblem = { missing: [] as string[], stale: [] as string[] };
+  for (const name of names) {
+    const problem = bytecodeProblem(
+      bytecodePath(path.join(builtSharedPath, name)),
+      fs.readFileSync(path.join(sourceSharedPath, name))
+    );
+    if (problem !== undefined) byProblem[problem].push(name);
+  }
+  const named = (names: string[]): string => (
+    names.length > 5 ? `${names.slice(0, 5).join(', ')} and ${names.length - 5} more` : names.join(', ')
+  );
+  return [
+    ...(byProblem.missing.length > 0 ? [`no ${PYTHON_BYTECODE_TAG} bytecode for ${named(byProblem.missing)}`] : []),
+    ...(byProblem.stale.length > 0 ? [`stale bytecode for ${named(byProblem.stale)}`] : []),
+  ];
+}
+
+/**
  * Fail synth when the built layer is missing shared modules that exist in
- * source.
+ * source, or ships no current CPython 3.12 bytecode for them.
  *
  * `lambda/layer/python/` is gitignored build output, and the existence check
  * alone passes against a *stale* build. Every handler imports `shared.*` from
@@ -58,13 +105,13 @@ function assertLayerMatchesSharedModules(
     && !fs.readFileSync(path.join(sourceSharedPath, name))
       .equals(fs.readFileSync(path.join(builtSharedPath, name)))
   ));
-
-  if (missing.length === 0 && stale.length === 0) return;
-
   const problems = [
     ...(missing.length > 0 ? [`missing ${missing.join(', ')}`] : []),
     ...(stale.length > 0 ? [`outdated ${stale.join(', ')}`] : []),
+    ...bytecodeProblems(sourceSharedPath, builtSharedPath, expected.filter((name) => built.includes(name))),
   ].join('; ');
+  if (problems === '') return;
+
   throw new LayerNotBuiltError(
     `${layerName} layer is stale — ${problems}.\n` +
     'Every Lambda imports these files from its deployed layer.\n' +
@@ -106,7 +153,7 @@ export function pythonLayer(scope: Construct, id: string, spec: PythonLayerSpec)
   assertLayerMatchesSharedModules(path.join(pythonPath, 'shared'), spec.label, buildCommand);
   return new lambda.LayerVersion(scope, id, {
     layerVersionName: spec.layerVersionName,
-    code: lambdaSourceCode(spec.directory),
+    code: layerCode(spec.directory),
     compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
     description: spec.description,
     removalPolicy: cdk.RemovalPolicy.DESTROY,

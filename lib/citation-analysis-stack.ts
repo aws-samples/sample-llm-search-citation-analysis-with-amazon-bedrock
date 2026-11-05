@@ -28,7 +28,7 @@ import { ProviderSearch, readProviderConcurrency, readProviderPacing } from './c
 import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion, webSearchPolicyStatement } from './constructs/web-search';
 import type { McpServerInputs } from './constructs/mcp-server';
 import {
-  PYTHON_ASSET_EXCLUDES, lambdaSourceCode, pythonLayer
+  lambdaHandlerFilesCode, lambdaSourceCode, pythonLayer
 } from './constructs/python-layer';
 
 /**
@@ -525,36 +525,13 @@ function provisionBedrockModelAccess(stack: cdk.Stack): void {
  * shared/dynamo_decimal.py) ships via the Lambda layer, which keeps each
  * package small compared to bundling all API handlers together.
  *
- * Uses local bundling (no Docker required) with Docker as fallback.
+ * The files ship with their CPython 3.12 bytecode, compiled at bundling time
+ * by a local 3.12 (Docker as fallback), so a cold start does not recompile
+ * them. The asset hash covers only these files: editing another API handler
+ * no longer redeploys (and cold-starts) every API Lambda.
  */
 function apiLambdaCode(handlerFileNames: string[]): lambda.Code {
-  const apiPath = path.join(__dirname, '../lambda/api');
-  const cpCommands = handlerFileNames.map(f => `cp /asset-input/${f} /asset-output/`).join(' && ');
-  
-  return lambda.Code.fromAsset(apiPath, {
-    exclude: PYTHON_ASSET_EXCLUDES,
-    bundling: {
-      image: lambda.Runtime.PYTHON_3_12.bundlingImage,
-      command: [
-        'bash', '-c',
-        `mkdir -p /asset-output && ${cpCommands}`
-      ],
-      local: {
-        tryBundle(outputDir: string): boolean {
-          try {
-            for (const fileName of handlerFileNames) {
-              const src = path.join(apiPath, fileName);
-              const dest = path.join(outputDir, fileName);
-              fs.copyFileSync(src, dest);
-            }
-            return true;
-          } catch {
-            return false;
-          }
-        },
-      },
-    },
-  });
+  return lambdaHandlerFilesCode('api', handlerFileNames);
 }
 
 /**
