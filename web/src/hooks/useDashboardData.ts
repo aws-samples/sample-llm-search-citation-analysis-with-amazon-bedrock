@@ -3,117 +3,41 @@ import {
 } from 'react';
 import { validateApiConfig } from '../api/client';
 import { fetchAllKeywords } from '../api/keywordPages';
-import { DASHBOARD_CITATIONS_LIMIT } from '../api/citationPages';
-import { isStats } from '../types/domain/statsDecoders';
 import {
-  API_BASE_URL,
-  authenticatedFetch,
   getErrorMessage,
   isAbortError,
-  ApiRequestError,
 } from '../infrastructure';
 import type {
   Stats, Citations, Search, Keyword
 } from '../types';
+import {
+  DASHBOARD_PANELS,
+  IDLE_PANEL,
+  IDLE_PANEL_STATES,
+  loadDashboardPanel,
+  type DashboardPanel,
+  type DashboardPanelState,
+  type DashboardPanelStates,
+  type DashboardPanelValue,
+} from './dashboardPanels';
 
-// The KeywordMgmt Lambda has a 120-second timeout. This second refresh runs
-// after that ceiling so an abandoned browser request cannot remain stale if
-// the Lambda commits after the immediate reconciliation read.
-export const LATE_KEYWORD_RECONCILIATION_MS = 125_000;
+// The KeywordMgmt Lambda stops at API Gateway's 29-second ceiling. This
+// second refresh runs after that ceiling (plus a margin for the commit to
+// become visible) so an abandoned browser request cannot remain stale if the
+// Lambda commits after the immediate reconciliation read.
+export const LATE_KEYWORD_RECONCILIATION_MS = 35_000;
 
-/** The dashboard's first page of recent searches (list rows, no answer text); the view loads older pages on demand. */
-export const DASHBOARD_SEARCHES_LIMIT = 100;
-
-/** The panel requests: small first pages, so the dashboard never pulls a whole scope. */
-export const DASHBOARD_PANEL_PATHS = [
-  '/stats',
-  `/citations?limit=${DASHBOARD_CITATIONS_LIMIT}`,
-  `/searches?limit=${DASHBOARD_SEARCHES_LIMIT}`,
-] as const;
-
-/** @internal Response from the searches API */
-interface SearchesResponse {
-  searches: Search[];
-  next_token?: string | null;
-}
-
-function isCitations(value: unknown): value is Citations {
-  return typeof value === 'object' && value !== null && 'provider_stats' in value;
-}
-
-function isSearchesResponse(value: unknown): value is SearchesResponse {
-  // Array check matters (AUDIT-2026-08-19 2.17): a key-only check let
-  // `{"searches": null}` put null into Search[] state and blank the view.
-  return (
-    typeof value === 'object'
-    && value !== null
-    && 'searches' in value
-    && Array.isArray(value.searches)
-  );
-}
-
-function getEmptyStats(): Stats {
-  return {
-    total_searches: 0,
-    total_citations: 0,
-    total_crawled: 0,
-    unique_keywords: 0,
-  };
-}
-
-function getEmptyCitations(): Citations {
-  return {
-    provider_stats: [],
-    brand_stats: [],
-    top_urls: [],
-  };
-}
-
-function validateResponses(responses: Response[]): void {
-  const allResponsesSucceeded = responses.every(response => response.ok);
-  if (!allResponsesSucceeded) {
-    throw new ApiRequestError('Failed to fetch data from API. Please check your API Gateway URL.');
-  }
-}
-
-/** Stats, citations and searches payloads, in that order. */
-async function fetchPanelPayloads(signal: AbortSignal): Promise<unknown[]> {
-  const responses = await Promise.all(
-    DASHBOARD_PANEL_PATHS.map(async (path) => authenticatedFetch(`${API_BASE_URL}${path}`, { signal }))
-  );
-
-  validateResponses(responses);
-
-  return Promise.all(
-    responses.map(async (response): Promise<unknown> => response.json())
-  );
-}
-
-interface DashboardPayloads {
-  panelPayloads: unknown[];
-  keywordList: Keyword[];
-}
-
-/**
- * Panels and every keyword page, fetched in parallel. A panel failure takes
- * precedence over a keyword failure so the dashboard message stays the
- * panels' one when both fail.
- */
-async function fetchDashboardPayloads(signal: AbortSignal): Promise<DashboardPayloads> {
-  const [panelOutcome, keywordOutcome] = await Promise.allSettled([
-    fetchPanelPayloads(signal),
-    fetchAllKeywords({ signal }),
-  ]);
-  if (panelOutcome.status === 'rejected') throw panelOutcome.reason;
-  if (keywordOutcome.status === 'rejected') throw keywordOutcome.reason;
-  return {
-    panelPayloads: panelOutcome.value,
-    keywordList: keywordOutcome.value,
-  };
-}
+type PanelControllers = Partial<Record<DashboardPanel, AbortController>>;
 
 /**
  * Fetches dashboard data and owns authoritative keyword reconciliation.
+ *
+ * Stats, citations, searches and keywords load independently: each panel
+ * shows up as soon as its request answers, a failed panel keeps what it had
+ * and reports its own error in `panels`, and `retryPanel` reloads just that
+ * one. `error` is reserved for a missing API configuration, the one failure
+ * no panel can recover from.
+ *
  * Both the ordinary load and promotion reconciliation read every
  * `/keywords` page (`fetchAllKeywords`); reconciliation reads them with
  * `authoritative=true`. A failed or malformed page applies no keywords.
@@ -127,42 +51,75 @@ export const useDashboardData = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [panels, setPanels] = useState<DashboardPanelStates>(IDLE_PANEL_STATES);
   const dashboardControllerRef = useRef<AbortController | null>(null);
   const keywordControllerRef = useRef<AbortController | null>(null);
+  const panelControllersRef = useRef<PanelControllers>({});
   const lateReconciliationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dashboardGenerationRef = useRef(0);
   const keywordGenerationRef = useRef(0);
   const ownerMountedRef = useRef(true);
 
-  const applyDashboardResults = useCallback((
-    panelPayloads: unknown[],
-    keywordList: Keyword[],
-    requestKeywordGeneration: number
-  ): void => {
-    const [statsJson, citationsJson, searchesJson] = panelPayloads;
-
-    if (isStats(statsJson)) setStats(statsJson);
-    if (isCitations(citationsJson)) setCitations(citationsJson);
-    if (isSearchesResponse(searchesJson)) {
-      setSearches(searchesJson.searches);
-      setSearchesNextToken(typeof searchesJson.next_token === 'string' ? searchesJson.next_token : null);
-    }
-    if (keywordGenerationRef.current === requestKeywordGeneration) {
-      setKeywords(keywordList);
-    }
-
-    setLastUpdate(new Date());
-    setError(null);
+  const setPanel = useCallback((panel: DashboardPanel, next: (previous: DashboardPanelState) => DashboardPanelState): void => {
+    setPanels((previous) => {
+      const updated = next(previous[panel]);
+      return updated === previous[panel] ? previous : {
+        ...previous,
+        [panel]: updated,
+      };
+    });
   }, []);
 
-  const resetDashboardResults = useCallback((requestKeywordGeneration: number): void => {
-    setStats(getEmptyStats());
-    setCitations(getEmptyCitations());
-    setSearches([]);
-    setSearchesNextToken(null);
-    if (keywordGenerationRef.current === requestKeywordGeneration) {
-      setKeywords([]);
+  const applyPanelValue = useCallback((loaded: DashboardPanelValue): void => {
+    switch (loaded.panel) {
+      case 'stats':
+        if (loaded.value !== null) setStats(loaded.value);
+        break;
+      case 'citations':
+        if (loaded.value !== null) setCitations(loaded.value);
+        break;
+      case 'searches':
+        if (loaded.value !== null) {
+          setSearches(loaded.value.searches);
+          setSearchesNextToken(loaded.value.nextToken);
+        }
+        break;
+      case 'keywords':
+        setKeywords(loaded.value);
+        break;
     }
+  }, []);
+
+  /**
+   * Loads one panel and records its outcome. Never rejects. A keyword result
+   * is dropped when a newer keyword read (reconciliation, retry) started.
+   */
+  const settlePanel = useCallback(async (
+    panel: DashboardPanel,
+    signal: AbortSignal,
+    isCurrent: () => boolean,
+    keywordGeneration: number
+  ): Promise<void> => {
+    const ownsPanel = () => isCurrent()
+      && (panel !== 'keywords' || keywordGenerationRef.current === keywordGeneration);
+    try {
+      const loaded = await loadDashboardPanel(panel, signal);
+      if (!ownsPanel()) return;
+      applyPanelValue(loaded);
+      setPanel(panel, () => IDLE_PANEL);
+    } catch (panelError) {
+      if (isAbortError(panelError) || !ownsPanel()) return;
+      console.error(`[dashboard] Error fetching ${panel}:`, panelError);
+      setPanel(panel, () => ({
+        error: getErrorMessage(panelError),
+        retrying: false,
+      }));
+    }
+  }, [applyPanelValue, setPanel]);
+
+  const abortPanelRetries = useCallback((): void => {
+    Object.values(panelControllersRef.current).forEach((controller) => controller.abort());
+    panelControllersRef.current = {};
   }, []);
 
   const fetchData = useCallback(async (): Promise<void> => {
@@ -176,6 +133,7 @@ export const useDashboardData = () => {
     dashboardControllerRef.current?.abort();
     keywordControllerRef.current?.abort();
     keywordControllerRef.current = null;
+    abortPanelRetries();
 
     const dashboardController = new AbortController();
     dashboardControllerRef.current = dashboardController;
@@ -186,20 +144,16 @@ export const useDashboardData = () => {
     try {
       setLoading(true);
       validateApiConfig();
+      setError(null);
 
-      const {
-        panelPayloads, keywordList
-      } = await fetchDashboardPayloads(signal);
+      await Promise.allSettled(
+        DASHBOARD_PANELS.map(async (panel) => settlePanel(panel, signal, isCurrent, keywordGeneration))
+      );
+      if (isCurrent()) setLastUpdate(new Date());
+    } catch (configError) {
       if (!isCurrent()) return;
-
-      applyDashboardResults(panelPayloads, keywordList, keywordGeneration);
-    } catch (fetchError) {
-      if (isAbortError(fetchError)) return;
-      if (!isCurrent()) return;
-
-      setError(getErrorMessage(fetchError, 'dashboard'));
-      console.error('[dashboard] Error fetching data:', fetchError);
-      resetDashboardResults(keywordGeneration);
+      setError(getErrorMessage(configError, 'dashboard'));
+      console.error('[dashboard] API configuration error:', configError);
     } finally {
       if (dashboardControllerRef.current === dashboardController) {
         dashboardControllerRef.current = null;
@@ -208,7 +162,44 @@ export const useDashboardData = () => {
         setLoading(false);
       }
     }
-  }, [applyDashboardResults, resetDashboardResults]);
+  }, [abortPanelRetries, settlePanel]);
+
+  /** Reloads one failed panel; the other panels keep their data. */
+  const retryPanel = useCallback(async (panel: DashboardPanel): Promise<void> => {
+    if (!ownerMountedRef.current) return;
+
+    if (panel === 'keywords') {
+      keywordGenerationRef.current += 1;
+      keywordControllerRef.current?.abort();
+      keywordControllerRef.current = null;
+    }
+    const dashboardGeneration = dashboardGenerationRef.current;
+    const keywordGeneration = keywordGenerationRef.current;
+
+    panelControllersRef.current[panel]?.abort();
+    const controller = new AbortController();
+    panelControllersRef.current[panel] = controller;
+    const isCurrent = () => ownerMountedRef.current
+      && dashboardGenerationRef.current === dashboardGeneration
+      && panelControllersRef.current[panel] === controller;
+
+    setPanel(panel, (previous) => ({
+      ...previous,
+      retrying: true,
+    }));
+    try {
+      await settlePanel(panel, controller.signal, isCurrent, keywordGeneration);
+    } finally {
+      if (isCurrent()) {
+        delete panelControllersRef.current[panel];
+        // A superseded keyword retry recorded nothing; stop showing it as running.
+        setPanel(panel, (previous) => (previous.retrying ? {
+          ...previous,
+          retrying: false,
+        } : previous));
+      }
+    }
+  }, [setPanel, settlePanel]);
 
   const refreshAuthoritativeKeywords = useCallback(async (): Promise<void> => {
     if (!ownerMountedRef.current) return;
@@ -230,6 +221,7 @@ export const useDashboardData = () => {
       if (!isCurrent()) return;
 
       setKeywords(reconciledKeywords);
+      setPanel('keywords', () => IDLE_PANEL);
     } catch (reconciliationError) {
       if (!isAbortError(reconciliationError) && isCurrent()) {
         console.error('[keywords] Error reconciling active keywords:', reconciliationError);
@@ -239,7 +231,7 @@ export const useDashboardData = () => {
         keywordControllerRef.current = null;
       }
     }
-  }, []);
+  }, [setPanel]);
 
   const reconcileKeywords = useCallback(async (): Promise<void> => {
     if (!ownerMountedRef.current) return;
@@ -271,8 +263,9 @@ export const useDashboardData = () => {
       dashboardControllerRef.current = null;
       keywordControllerRef.current?.abort();
       keywordControllerRef.current = null;
+      abortPanelRetries();
     };
-  }, []);
+  }, [abortPanelRetries]);
 
   useEffect(() => {
     void fetchData();
@@ -286,7 +279,11 @@ export const useDashboardData = () => {
     searchesNextToken,
     keywords,
     setKeywords,
+    /** Per-panel load error and retry state. */
+    panels,
+    retryPanel,
     loading,
+    /** Set only when the API is not configured; panel failures are in `panels`. */
     error,
     lastUpdate,
     refetch: fetchData,

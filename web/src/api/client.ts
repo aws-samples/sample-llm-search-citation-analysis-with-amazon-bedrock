@@ -17,7 +17,14 @@ interface ApiRequestOptions {
   acceptedJsonStatuses?: readonly number[];
 }
 
-interface ApiGetOptions extends ApiRequestOptions { params?: Record<string, string>; }
+interface ApiGetOptions extends ApiRequestOptions {
+  params?: Record<string, string>;
+  /**
+   * `false` turns off the one transient-failure retry, for polling loops that
+   * already retry on their next tick and count consecutive failures.
+   */
+  retry?: boolean;
+}
 
 // Type-safe JSON parsing - response.json() returns Promise<unknown> in strict mode
 async function parseJsonResponse<T>(response: Response): Promise<T> {
@@ -120,7 +127,60 @@ export function validateApiConfig(): void {
 }
 
 /**
+ * Statuses a GET is retried on once: cold-start and throttle blips (502, 503,
+ * 429). 504 is deliberately absent: API Gateway gave up after 29 s, and the
+ * same query would take another 29 s and read the same rows again.
+ */
+const RETRYABLE_GET_STATUSES: ReadonlySet<number> = new Set([429, 502, 503]);
+
+/** The retry waits a random 300–800 ms so a burst of failed panels does not retry in lockstep. */
+export const GET_RETRY_DELAY_MIN_MS = 300;
+export const GET_RETRY_DELAY_MAX_MS = 800;
+
+const UINT32_RANGE = 2 ** 32;
+
+function retryDelayMs(): number {
+  const [draw = 0] = crypto.getRandomValues(new Uint32Array(1));
+  return Math.round(GET_RETRY_DELAY_MIN_MS + (draw / UINT32_RANGE) * (GET_RETRY_DELAY_MAX_MS - GET_RETRY_DELAY_MIN_MS));
+}
+
+/** A transport failure (`fetch` rejects with a TypeError) or a retryable status. */
+function isRetryableGetFailure(error: unknown): boolean {
+  if (error instanceof ApiRequestError) {
+    return error.statusCode !== undefined && RETRYABLE_GET_STATUSES.has(error.statusCode);
+  }
+  return error instanceof TypeError;
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+/** Resolves after `ms`, or rejects with the signal's reason as soon as it aborts. */
+function waitBeforeRetry(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(abortReason(signal));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      if (signal !== undefined) reject(abortReason(signal));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
  * Makes an authenticated GET request to the API.
+ *
+ * A GET is idempotent, so a 502, 503, 429 or network failure is retried once
+ * after a jittered 300–800 ms wait. A 504 and every other status fail at once,
+ * and an aborted request is never retried.
  * @param endpoint - API endpoint (without base URL)
  * @param options - Optional request options
  * @returns Parsed JSON response
@@ -131,13 +191,19 @@ export async function apiGet<T>(
   options: ApiGetOptions = {}
 ): Promise<T> {
   const {
-    params, ...requestOptions
+    params, retry = true, ...requestOptions
   } = options;
 
   const baseUrl = `${API_BASE_URL}${endpoint}`;
   const url = params ? `${baseUrl}?${new URLSearchParams(params)}` : baseUrl;
 
-  return requestJson<T>(url, {}, requestOptions);
+  try {
+    return await requestJson<T>(url, {}, requestOptions);
+  } catch (firstError) {
+    if (!retry || requestOptions.signal?.aborted === true || !isRetryableGetFailure(firstError)) throw firstError;
+    await waitBeforeRetry(retryDelayMs(), requestOptions.signal);
+    return requestJson<T>(url, {}, requestOptions);
+  }
 }
 
 /** An authenticated request with a JSON body, for the verbs that carry one. */
