@@ -224,6 +224,25 @@ class TestResolveScope:
         query_kwargs = table.query.call_args.kwargs
         assert query_kwargs['IndexName'] == 'StatusIndex'
 
+    def test_projects_only_the_id_text_groups_and_market_of_each_active_keyword(self) -> None:
+        table = _table_with_active([_keyword('k1', 'hotel a', groups={'g'})])
+
+        keyword_groups.resolve_scope({'mode': 'all'}, table)
+
+        query_kwargs = table.query.call_args.kwargs
+        assert (query_kwargs['ProjectionExpression'], query_kwargs['ExpressionAttributeNames']) == (
+            '#id, #kw, group_ids, market_id', {'#id': 'id', '#kw': 'keyword'},
+        )
+
+    def test_reads_every_status_index_page_with_the_same_projection(self) -> None:
+        table = _table_with_active([_keyword('k1', 'hotel a'), _keyword('k2', 'hotel b')], pages=2)
+
+        keyword_groups.query_active_keywords(table)
+
+        assert [call.kwargs['ProjectionExpression'] for call in table.query.call_args_list] == [
+            '#id, #kw, group_ids, market_id', '#id, #kw, group_ids, market_id',
+        ]
+
     def test_skips_items_without_keyword_text(self) -> None:
         table = _table_with_active([{'id': 'k1', 'status': 'active'}, _keyword('k2', 'valid')])
 
