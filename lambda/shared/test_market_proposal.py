@@ -17,6 +17,7 @@ from shared.market_proposal import (
     propose_market,
     validate_proposal_request,
 )
+from shared.request_deadline import Deadline
 
 CHILE_REQUEST = {'country': 'CL', 'language': 'es', 'city': 'Santiago'}
 BRAND_CONFIG = {
@@ -129,6 +130,13 @@ class TestProposeMarket:
             market = propose_market(CHILE_REQUEST, BRAND_CONFIG)
 
         assert (bedrock.call_count, bedrock.call_args.args[1].name, market.currency) == (1, 'ANALYSIS', 'CLP')
+
+    def test_asks_without_thinking_under_the_callers_deadline(self):
+        deadline = Deadline(20)
+        with patch.object(market_proposal, 'invoke_bedrock', return_value=json.dumps(MODEL_MARKET)) as bedrock:
+            propose_market(CHILE_REQUEST, BRAND_CONFIG, deadline=deadline)
+
+        assert (bedrock.call_args.kwargs['thinking'], bedrock.call_args.kwargs['deadline']) == (False, deadline)
 
     def test_reads_a_fenced_json_answer(self):
         with patch.object(market_proposal, 'invoke_bedrock', return_value=f'```json\n{json.dumps(MODEL_MARKET)}\n```'):

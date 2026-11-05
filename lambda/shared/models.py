@@ -504,6 +504,10 @@ class BedrockDeadlineError(BedrockInvocationError):
     """
 
 
+#: What an API route answers (with 503) when ``BedrockDeadlineError`` stopped its call.
+MODEL_TIMED_OUT_MESSAGE = 'The AI model did not answer in time; try again'
+
+
 def _converse_once(request: dict[str, Any], deadline: Deadline | None) -> Any:
     """One ``converse`` call; under ``deadline`` it gives up when the budget does."""
     if deadline is None:

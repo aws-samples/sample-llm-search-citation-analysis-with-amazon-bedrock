@@ -15,6 +15,7 @@ from shared.market_keywords import (
     usable_suggestions,
 )
 from shared.markets import markets_from_item
+from shared.request_deadline import Deadline
 from testing.markets_fixtures import BRAZIL, CHILE, markets_item
 
 MARKETS = markets_from_item(markets_item(CHILE, BRAZIL))
@@ -84,6 +85,15 @@ class TestSuggestLocalKeywords:
 
         assert (bedrock.call_count, bedrock.call_args.args[1].value) == (1, 'generation')
         assert suggestions == [{'market_id': 'cl-es', 'keyword': 'pasajes'}]
+
+    def test_bounds_the_model_call_by_the_callers_deadline(self):
+        deadline = Deadline(20)
+        bedrock = MagicMock(return_value=json.dumps(_answer({'market_id': 'cl-es', 'keyword': 'pasajes'})))
+
+        with patch.object(market_keywords, 'invoke_bedrock', bedrock):
+            suggest_local_keywords('cheap flights', MARKETS, deadline=deadline)
+
+        assert bedrock.call_args.kwargs['deadline'] is deadline
 
     def test_raises_when_the_model_answers_no_json(self):
         with patch.object(market_keywords, 'invoke_bedrock', MagicMock(return_value='Sorry.')), \
