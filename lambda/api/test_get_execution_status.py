@@ -588,11 +588,49 @@ class TestTimelineFiltering:
 
 
 class TestErrorMapping:
-    """Failures from the Step Functions client come back as sanitised 500s."""
+    """An unknown or malformed id is a 404; other Step Functions failures come back as sanitised 500s."""
+
+    @pytest.mark.parametrize('code', ['ExecutionDoesNotExist', 'InvalidArn'])
+    def test_returns_404_when_step_functions_does_not_know_the_execution(self, stepfunctions, code):
+        stepfunctions.describe_execution.side_effect = ClientError(
+            {'Error': {'Code': code, 'Message': 'no such execution'}}, 'DescribeExecution'
+        )
+
+        status, body = parse_response(_mod.handler(_execution_event('not-an-arn'), None))
+
+        assert (status, body) == (404, {'error': 'Execution not found'})
+
+    def test_skips_the_history_read_when_the_execution_does_not_exist(self, stepfunctions):
+        stepfunctions.describe_execution.side_effect = ClientError(
+            {'Error': {'Code': 'ExecutionDoesNotExist', 'Message': 'Execution Does Not Exist'}}, 'DescribeExecution'
+        )
+
+        _mod.handler(_execution_event(), None)
+
+        stepfunctions.get_execution_history.assert_not_called()
+
+    @pytest.mark.parametrize('code', ['StateMachineDoesNotExist', 'InvalidArn'])
+    def test_returns_404_when_latest_names_an_unknown_state_machine(self, stepfunctions, code):
+        stepfunctions.list_executions.side_effect = ClientError(
+            {'Error': {'Code': code, 'Message': 'no such state machine'}}, 'ListExecutions'
+        )
+
+        status, body = parse_response(_mod.handler(_execution_event('latest', stateMachineArn='bogus'), None))
+
+        assert (status, body) == (404, {'error': 'Executions not found'})
+
+    def test_returns_a_sanitised_500_when_listing_executions_fails_otherwise(self, stepfunctions):
+        stepfunctions.list_executions.side_effect = ClientError(
+            {'Error': {'Code': 'ThrottlingException', 'Message': 'slow down'}}, 'ListExecutions'
+        )
+
+        status, body = parse_response(_mod.handler(_execution_event('latest', stateMachineArn=_STATE_MACHINE_ARN), None))
+
+        assert (status, body) == (500, {'error': 'Service temporarily unavailable'})
 
     @pytest.mark.parametrize(('failure', 'message'), [
         (
-            ClientError({'Error': {'Code': 'ExecutionDoesNotExist', 'Message': 'Execution Does Not Exist'}}, 'DescribeExecution'),
+            ClientError({'Error': {'Code': 'AccessDeniedException', 'Message': 'not authorized'}}, 'DescribeExecution'),
             'Service temporarily unavailable',
         ),
         (ParamValidationError(report='Invalid type for parameter executionArn, value: None'), 'An unexpected error occurred'),

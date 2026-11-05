@@ -82,6 +82,9 @@ export interface GroupMembershipResponse {
   removed: string[];
   missing: string[];
   keywords: Keyword[];
+  /** Ids the request's time budget left unwritten: send them again (absent before 2.42.0). */
+  pending?: string[];
+  truncated?: boolean;
 }
 
 export function isGroupMembershipResponse(value: unknown): value is GroupMembershipResponse {
@@ -93,6 +96,8 @@ export function isGroupMembershipResponse(value: unknown): value is GroupMembers
     && isStringArray(value.missing)
     && Array.isArray(value.keywords)
     && value.keywords.every(isKeyword)
+    && (value.pending === undefined || isStringArray(value.pending))
+    && (value.truncated === undefined || typeof value.truncated === 'boolean')
   );
 }
 

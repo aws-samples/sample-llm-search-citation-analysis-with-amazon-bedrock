@@ -37,6 +37,7 @@ from shared.markets import (
     perplexity_user_location,
 )
 from shared.provider_models import DEFAULT_PROVIDER_MODELS
+from shared.request_deadline import active_deadline
 from shared.secrets import get_api_key
 
 logger = logging.getLogger(__name__)
@@ -240,6 +241,11 @@ THROTTLE_MAX_PROVIDER_WAIT_SECONDS = 120.0
 # is the pacing mechanism working, not a fault: the first waits are reported
 # at INFO, and a provider that keeps refusing is a WARNING from this attempt on.
 THROTTLE_WARN_FROM_ATTEMPT = 3
+# A retry wait must end at least this long before the invocation's active
+# deadline (``shared.request_deadline``); a longer one is not taken and the call
+# fails as if its retries were spent, so the caller still has time to store
+# what it has and hand the rest to its own retry.
+RETRY_DEADLINE_MARGIN_SECONDS = 2.0
 # ``x-ratelimit-reset`` values above this are epoch seconds (Perplexity sends
 # those); smaller positive values are seconds from now.
 _EPOCH_THRESHOLD = 1e9
@@ -318,6 +324,23 @@ def _throttle_wait_seconds(response: Any, attempt: int) -> float:
     return max(jittered, min(provider_wait, THROTTLE_MAX_PROVIDER_WAIT_SECONDS))
 
 
+def _wait_fits_deadline(provider_name: str, wait_time: float) -> bool:
+    """Whether waiting ``wait_time`` still ends ``RETRY_DEADLINE_MARGIN_SECONDS`` before the active deadline.
+
+    Always true when no deadline is active (a worker Lambda with no budget).
+    """
+    deadline = active_deadline()
+    if deadline is None:
+        return True
+    time_left = deadline.remaining() - RETRY_DEADLINE_MARGIN_SECONDS
+    if wait_time <= time_left:
+        return True
+    logger.warning(
+        '[%s_DEADLINE] Not waiting %.1fs to retry: %.1fs left in the time budget', provider_name, wait_time, max(0.0, time_left)
+    )
+    return False
+
+
 def _retry_log_level(throttled: bool, attempt: int) -> int:
     """INFO for the first throttled waits (the pacing working), WARNING for a provider that keeps refusing or any 5xx."""
     if throttled and attempt + 1 < THROTTLE_WARN_FROM_ATTEMPT:
@@ -349,6 +372,8 @@ def _status_retry_wait(
         )
         return None
     wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
+    if not _wait_fits_deadline(provider_name, wait_time):
+        return None
     logger.log(
         _retry_log_level(throttled, attempt),
         '[%s_RETRY] Status %s | Attempt %s/%s | Waiting %.1fs | Error: %s', provider_name, response.status_code, attempt + 1, budget, wait_time, error_body
@@ -380,6 +405,8 @@ def _request_error_wait(
             )
         return None
     wait_time = _backoff_seconds(attempt)
+    if not _wait_fits_deadline(provider_name, wait_time):
+        return None
     if timed_out:
         logger.warning('[%s_TIMEOUT] Attempt %s/%s | Waiting %ss', provider_name, attempt + 1, max_retries, wait_time)
     else:
@@ -429,7 +456,10 @@ def retry_with_backoff(provider_name: str, timeout: int = 60):
     waits — throttling is fast to fail and cheap to wait out, so it should not
     spend the budget sized for slow failures. ``RETRYABLE_STATUS_CODES`` are
     retried; any other 4xx raises at once. A call may pass ``timeout`` to
-    override the decorator's per-attempt timeout.
+    override the decorator's per-attempt timeout. Inside an invocation with an
+    active deadline (``shared.request_deadline.active_deadline``) no wait runs
+    past it less ``RETRY_DEADLINE_MARGIN_SECONDS``: the call fails at once with
+    the error its spent retries would raise, and no further attempt is sent.
 
     Args:
         provider_name: Name of the provider for logging (e.g., "OPENAI", "PERPLEXITY")

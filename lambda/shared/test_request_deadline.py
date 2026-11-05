@@ -17,6 +17,7 @@ from shared.request_deadline import (
     SAFETY_MARGIN_SECONDS,
     Deadline,
     activate_deadline,
+    active_deadline,
     budget_from_context,
     clear_request_deadline,
     current_deadline,
@@ -98,6 +99,13 @@ class TestActiveDeadline:
 
         handler({}, _lambda_context(20_000))
         assert seen == {'stable': True}
+
+    def test_active_deadline_is_none_outside_an_invocation(self) -> None:
+        assert active_deadline() is None
+
+    def test_active_deadline_is_the_activated_one(self) -> None:
+        activated = activate_deadline(Deadline(5, lambda: 0.0))
+        assert active_deadline() is activated
 
     def test_api_handler_clears_the_deadline_when_the_handler_returns(self) -> None:
         api_handler(lambda event, context: {'statusCode': 200})({}, _lambda_context(20_000))

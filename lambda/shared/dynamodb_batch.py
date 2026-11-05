@@ -64,6 +64,8 @@ def batch_get_items(
     consistent_read: bool = False,
     max_attempts: int = _BATCH_GET_MAX_ATTEMPTS,
     base_delay_seconds: float = _BATCH_GET_BASE_DELAY_SECONDS,
+    projection: str | None = None,
+    attribute_names: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch exact keys and retry only the keys DynamoDB leaves unprocessed.
 
@@ -71,15 +73,24 @@ def batch_get_items(
     stable order must join the returned rows back to their requested keys. A
     response with missing rows is valid; exhausting retries with unprocessed
     keys is not, because those keys are unknown rather than absent.
+
+    ``projection`` (a ``ProjectionExpression``) and its ``attribute_names``
+    (``ExpressionAttributeNames``) limit every row to the attributes named,
+    on the first call and on every retry of the unprocessed keys.
     """
     if not keys:
         return []
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
 
-    request: dict[str, Any] = {"Keys": keys}
+    options: dict[str, Any] = {}
     if consistent_read:
-        request["ConsistentRead"] = True
+        options["ConsistentRead"] = True
+    if projection:
+        options["ProjectionExpression"] = projection
+    if attribute_names:
+        options["ExpressionAttributeNames"] = dict(attribute_names)
+    request: dict[str, Any] = {"Keys": keys, **options}
     items: list[dict[str, Any]] = []
 
     for attempt in range(max_attempts):
@@ -92,9 +103,7 @@ def batch_get_items(
         if attempt + 1 == max_attempts:
             raise BatchGetUnprocessedError(f"{len(unprocessed_keys)} keys remained unprocessed for {table_name}")
         time.sleep(base_delay_seconds * (2**attempt))
-        request = {**unprocessed, "Keys": unprocessed_keys}
-        if consistent_read:
-            request["ConsistentRead"] = True
+        request = {**unprocessed, "Keys": unprocessed_keys, **options}
 
     return items
 
