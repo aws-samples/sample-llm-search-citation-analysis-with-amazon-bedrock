@@ -49,9 +49,11 @@ from enum import StrEnum
 from typing import Any, TypeGuard
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, ConnectTimeoutError, ReadTimeoutError
 
 from shared.env_vars import resolve_table_env
+from shared.request_deadline import Deadline
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +290,15 @@ _learned_styles: dict[str, RequestStyle] = {}
 # inference profiles.
 _bedrock_client = None
 _dynamodb_resource = None
+# Deadline-bound clients by read timeout in whole seconds (``_bounded_client``).
+_bounded_clients: dict[int, Any] = {}
+
+# Under a deadline: seconds kept back from the budget for the caller's own answer.
+DEADLINE_MARGIN_SECONDS = 1.0
+# Under a deadline: the shortest read timeout worth sending a request with.
+MIN_CALL_SECONDS = 3
+# Under a deadline: TCP connect timeout (the default is 60 s).
+BOUNDED_CONNECT_TIMEOUT_SECONDS = 2
 
 
 def _clock() -> float:
@@ -462,32 +473,87 @@ def _get_bedrock_client():
     return _bedrock_client
 
 
+def _bounded_client(read_timeout: int) -> Any:
+    """A ``bedrock-runtime`` client that waits at most ``read_timeout`` s for an answer and never retries.
+
+    Converse is not streamed, so the read timeout bounds the whole call.
+    botocore's own retries are off (``standard`` mode counts the first
+    attempt); throttling is retried by ``_converse_with_backoff``, which knows
+    the deadline. One client per whole second of timeout, created on first use.
+    """
+    client = _bounded_clients.get(read_timeout)
+    if client is None:
+        client = boto3.client("bedrock-runtime", config=Config(
+            connect_timeout=BOUNDED_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=read_timeout,
+            retries={"mode": "standard", "max_attempts": 1},
+        ))
+        _bounded_clients[read_timeout] = client
+    return client
+
+
 class BedrockInvocationError(RuntimeError):
     """Raised when Bedrock invocation fails after all retries."""
 
 
-def _converse_with_backoff(request: dict[str, Any], max_retries: int) -> str:
-    """Send ``request``, retrying throttling with exponential backoff; the answer text."""
-    client = _get_bedrock_client()
+class BedrockDeadlineError(BedrockInvocationError):
+    """The caller's time budget ran out: Bedrock did not answer in time, or there was no time to ask.
+
+    API routes turn it into a "try again" answer instead of letting the
+    gateway's 29 s limit turn the request into a 504.
+    """
+
+
+def _converse_once(request: dict[str, Any], deadline: Deadline | None) -> Any:
+    """One ``converse`` call; under ``deadline`` it gives up when the budget does."""
+    if deadline is None:
+        return _get_bedrock_client().converse(**request)
+    read_timeout = int(deadline.remaining() - DEADLINE_MARGIN_SECONDS)
+    if read_timeout < MIN_CALL_SECONDS:
+        raise BedrockDeadlineError(f"No time left to call Bedrock model {request['modelId']}")
+    try:
+        return _bounded_client(read_timeout).converse(**request)
+    except (ReadTimeoutError, ConnectTimeoutError) as exc:
+        raise BedrockDeadlineError(
+            f"Bedrock model {request['modelId']} did not answer within {read_timeout} s"
+        ) from exc
+
+
+def _is_throttle(exc: Exception) -> bool:
+    error_str = str(exc)
+    return any(name in error_str for name in _THROTTLE_ERRORS)
+
+
+def _sleep_before_retry(delay: float, deadline: Deadline | None, exc: Exception) -> None:
+    """Sleep ``delay`` s, unless that would leave ``deadline`` too little time for the next attempt."""
+    if deadline is not None and deadline.remaining() - delay < MIN_CALL_SECONDS + DEADLINE_MARGIN_SECONDS:
+        raise BedrockDeadlineError("Bedrock is throttling and the time budget has no room for another attempt") from exc
+    time.sleep(delay)
+
+
+def _converse_with_backoff(request: dict[str, Any], max_retries: int, deadline: Deadline | None = None) -> str:
+    """Send ``request``, retrying throttling with exponential backoff; the answer text.
+
+    Under ``deadline`` every attempt's read timeout is what the budget has
+    left, and no backoff sleeps past it (``BedrockDeadlineError`` instead).
+    """
     model_id = request["modelId"]
     for attempt in range(max_retries):
         try:
-            response = client.converse(**request)
+            response = _converse_once(request, deadline)
         except Exception as exc:
-            error_str = str(exc)
-            is_throttle = any(name in error_str for name in _THROTTLE_ERRORS)
-            if is_throttle and attempt < max_retries - 1:
-                delay = (2 ** attempt) + random.uniform(0, 1)
-                logger.warning(
-                    "Bedrock throttled (model=%s attempt=%d/%d), sleeping %.2fs",
-                    model_id,
-                    attempt + 1,
-                    max_retries,
-                    delay,
-                )
-                time.sleep(delay)
-                continue
-            raise
+            if not _is_throttle(exc) or attempt >= max_retries - 1:
+                raise
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Bedrock throttled (model=%s attempt=%d/%d), sleeping %.2fs",
+                model_id,
+                attempt + 1,
+                max_retries,
+                delay,
+            )
+            _sleep_before_retry(delay, deadline, exc)
+            continue
         return first_text_block(response)
 
     raise BedrockInvocationError(
@@ -503,6 +569,7 @@ def invoke_bedrock(
     max_retries: int = 5,
     thinking: bool | None = None,
     system: str | None = None,
+    deadline: Deadline | None = None,
 ) -> str:
     """
     Invoke Bedrock Converse API with exponential backoff on throttling.
@@ -518,12 +585,19 @@ def invoke_bedrock(
                   If False, force off. If None (default), use tier budget.
         system: Optional system prompt, sent as the Converse ``system`` block
                 (the research agent's user-editable instructions).
+        deadline: The caller's time budget. API routes pass
+                  ``current_deadline()``: each attempt then waits at most what
+                  is left (less ``DEADLINE_MARGIN_SECONDS``), botocore does not
+                  retry, and no throttling backoff sleeps past it. ``None``
+                  (workers: crawler, search, research, Content Studio, report
+                  insights) keeps the default client and its 60 s read timeout.
 
     Returns:
         Response text. Empty string if the model returns no text blocks.
 
     Raises:
         BedrockInvocationError: if all retries are exhausted on throttling.
+        BedrockDeadlineError: ``deadline`` ran out before Bedrock answered.
         Exception: non-throttling errors propagate unchanged, except a refusal
             naming the other request style, which is retried once in that style.
     """
@@ -537,12 +611,12 @@ def invoke_bedrock(
         )
 
     try:
-        return _converse_with_backoff(request_in(style), max_retries)
+        return _converse_with_backoff(request_in(style), max_retries, deadline)
     except ClientError as exc:
         corrected = style_correction(str(exc), style)
         if corrected is None:
             raise
-    return _retry_in_style(resolved.model_id, corrected, request_in, max_retries)
+    return _retry_in_style(resolved.model_id, corrected, request_in, max_retries, deadline=deadline)
 
 
 def _retry_in_style(
@@ -550,8 +624,10 @@ def _retry_in_style(
     style: RequestStyle,
     request_in: Callable[[RequestStyle], dict[str, Any]],
     max_retries: int,
+    *,
+    deadline: Deadline | None,
 ) -> str:
     """The single self-correcting retry: remember ``style`` for ``model_id`` and send once more."""
     logger.warning("Bedrock model %s refused the request shape; retrying as %s", model_id, style.value)
     _learned_styles[model_id] = style
-    return _converse_with_backoff(request_in(style), max_retries)
+    return _converse_with_backoff(request_in(style), max_retries, deadline)
