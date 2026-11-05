@@ -5,6 +5,10 @@ import { apiPost } from './client';
 import type {
   Keyword, KeywordExtended, ResearchKeyword
 } from '../types';
+import { keywordSelectionKey } from '../hooks/keywordIdentity';
+import {
+  IncompleteWriteError, MAX_WRITE_ROUNDS
+} from './writeRounds';
 
 export type PromoteKeywordEntry = ResearchKeyword & {
   /** Overrides the request-level status for this keyword only. */
@@ -32,6 +36,9 @@ export interface PromoteKeywordsResponse {
   }[];
   /** Absent on API versions predating grouped-existing promotion. */
   grouped_keywords?: string[];
+  /** Keywords the request's time budget left unwritten: send them again (absent before 2.42.0). */
+  pending_keywords?: string[];
+  truncated?: boolean;
 }
 
 export interface PromotionOutcome {
@@ -43,13 +50,31 @@ export interface PromotionOutcome {
   groupedKeywords: string[];
 }
 
-export async function promoteKeywords(
-  options: PromoteKeywordsOptions
-): Promise<PromotionOutcome> {
+/**
+ * The promotion still had keywords pending after `MAX_WRITE_ROUNDS` requests.
+ * `outcome` is what the requests did write (stored, and safe to show).
+ */
+export class IncompletePromotionError extends IncompleteWriteError {
+  readonly outcome: PromotionOutcome;
+
+  constructor(outcome: PromotionOutcome, pendingCount: number) {
+    super(
+      `${outcome.created} ${outcome.created === 1 ? 'keyword' : 'keywords'} added, but ${pendingCount} could not be added after ${MAX_WRITE_ROUNDS} attempts. Add them again to finish.`,
+      pendingCount
+    );
+    this.name = 'IncompletePromotionError';
+    this.outcome = outcome;
+  }
+}
+
+function postPromotion(
+  options: PromoteKeywordsOptions,
+  keywords: PromoteKeywordEntry[]
+): Promise<PromoteKeywordsResponse> {
   const {
-    keywords, status, priority, groupIds, marketId, signal
+    status, priority, groupIds, marketId, signal
   } = options;
-  const wire = await apiPost<PromoteKeywordsResponse>(
+  return apiPost<PromoteKeywordsResponse>(
     '/keywords/promote',
     {
       keywords,
@@ -63,7 +88,9 @@ export async function promoteKeywords(
       allowStructured4xx: true,
     }
   );
+}
 
+function toOutcome(wire: PromoteKeywordsResponse): PromotionOutcome {
   return {
     created: wire.created,
     skipped: wire.skipped,
@@ -74,4 +101,59 @@ export async function promoteKeywords(
       .map((keyword) => keyword.keyword),
     groupedKeywords: wire.grouped_keywords ?? [],
   };
+}
+
+/** `earlier`'s texts plus the ones of `later` it does not hold yet (by keyword identity). */
+function unionTexts(earlier: string[], later: string[]): string[] {
+  const seen = new Set(earlier.map(keywordSelectionKey));
+  return [...earlier, ...later.filter((text) => !seen.has(keywordSelectionKey(text)))];
+}
+
+/**
+ * One outcome for two rounds of the same promotion. A pending grouping is
+ * re-sent and reported skipped again, so skips and groupings are counted once.
+ */
+function mergeOutcomes(earlier: PromotionOutcome, later: PromotionOutcome): PromotionOutcome {
+  const skippedKeywords = unionTexts(earlier.skippedKeywords, later.skippedKeywords);
+  return {
+    created: earlier.created + later.created,
+    skipped: earlier.skipped + skippedKeywords.length - earlier.skippedKeywords.length,
+    createdKeywords: [...earlier.createdKeywords, ...later.createdKeywords],
+    createdItems: [...earlier.createdItems, ...later.createdItems],
+    skippedKeywords,
+    groupedKeywords: unionTexts(earlier.groupedKeywords, later.groupedKeywords),
+  };
+}
+
+/** The entries of `sent` the answer left pending, matched by keyword identity. */
+function pendingEntries(sent: PromoteKeywordEntry[], wire: PromoteKeywordsResponse): PromoteKeywordEntry[] {
+  const pending = new Set((wire.pending_keywords ?? []).map(keywordSelectionKey));
+  return sent.filter((entry) => pending.has(keywordSelectionKey(entry.keyword)));
+}
+
+async function promoteRound(
+  options: PromoteKeywordsOptions,
+  keywords: PromoteKeywordEntry[],
+  round: number,
+  earlier: PromotionOutcome | null
+): Promise<PromotionOutcome> {
+  const wire = await postPromotion(options, keywords);
+  const outcome = earlier === null ? toOutcome(wire) : mergeOutcomes(earlier, toOutcome(wire));
+  const pending = pendingEntries(keywords, wire);
+  if (pending.length === 0) return outcome;
+  if (round >= MAX_WRITE_ROUNDS) throw new IncompletePromotionError(outcome, pending.length);
+  return promoteRound(options, pending, round + 1, outcome);
+}
+
+/**
+ * Promotes `options.keywords`. The keywords an answer leaves pending (the
+ * server's time budget ran out; every write is idempotent) are sent again, at
+ * most `MAX_WRITE_ROUNDS` requests in all, and the answers merged into one
+ * outcome; after the last round `IncompletePromotionError` carries what was
+ * written. An abort of `options.signal` stops the rounds.
+ */
+export async function promoteKeywords(
+  options: PromoteKeywordsOptions
+): Promise<PromotionOutcome> {
+  return promoteRound(options, options.keywords, 1, null);
 }

@@ -9,10 +9,10 @@ import type { ComponentProps } from 'react';
 import { KeywordExpansion } from './KeywordExpansion';
 import {
   PROMOTION_TIMEOUT_MS,
-  PROMOTION_TIMEOUT_MESSAGE,
   PROMOTION_SUCCESS_MESSAGE_MS,
   promotionSuccessMessage,
 } from '../../hooks/usePromoteKeywords';
+import { PROMOTION_TIMEOUT_MESSAGE } from '../../hooks/promotionFailure';
 import { ApiRequestError } from '../../infrastructure';
 import type {
   Keyword, KeywordExpansionResult

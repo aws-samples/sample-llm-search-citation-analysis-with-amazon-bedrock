@@ -16,14 +16,20 @@ import {
   updateKeywordGroup,
 } from '../api/keywordGroups';
 import type { MembershipChanges } from '../api/keywordGroups';
+import { IncompleteWriteError } from '../api/writeRounds';
 
 export interface MutationOutcome {
   success: boolean;
   message: string;
 }
 
+/** The user-facing reason of a failed mutation; a write left incomplete after every round says what is left. */
+function mutationErrorMessage(failure: unknown): string {
+  return failure instanceof IncompleteWriteError ? failure.message : getErrorMessage(failure, 'keywords');
+}
+
 function partialMembershipMessage(error: PartialMembershipUpdateError): string {
-  const reason = getErrorMessage(error.failure, 'keywords');
+  const reason = mutationErrorMessage(error.failure);
   return `Updated ${error.appliedChanges} of ${error.totalChanges} keyword memberships, then stopped: ${reason}`;
 }
 
@@ -87,9 +93,11 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
           message: partialMembershipMessage(mutationError),
         };
       }
+      // A delete left incomplete removed the group row: the list changed.
+      if (mutationError instanceof IncompleteWriteError) await refresh();
       return {
         success: false,
-        message: getErrorMessage(mutationError, 'keywords')
+        message: mutationErrorMessage(mutationError)
       };
     }
   }, [refresh]);

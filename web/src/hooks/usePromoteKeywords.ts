@@ -8,13 +8,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { promoteKeywords } from '../api/keywords';
+import {
+  IncompletePromotionError, promoteKeywords
+} from '../api/keywords';
+import { describePromotionFailure } from './promotionFailure';
 import type {
   PromoteKeywordEntry, PromotionOutcome
 } from '../api/keywords';
-import {
-  clientRejectionMessage, getErrorMessage, isAbortError, isDefinitiveClientRejection
-} from '../infrastructure';
 import type {
   Keyword, ResearchKeyword
 } from '../types';
@@ -33,8 +33,6 @@ const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to add.';
 const EMPTY_PROPOSAL_MESSAGE = 'No proposal keywords are available to add.';
 const STALE_SELECTION_MESSAGE =
   'The research results changed. Review your selection and try again.';
-export const PROMOTION_TIMEOUT_MESSAGE =
-  'Adding keywords did not return within 30 seconds. The server may still finish; active keywords are being refreshed.';
 
 export type KeywordReconciliation = () => void | Promise<void>;
 
@@ -162,31 +160,6 @@ function selectedResearchKeywords(
     (candidate) => keywordSelectionKey(candidate.keyword) === key
   ));
   return rows.every((row): row is ResearchKeyword => row !== undefined) ? rows : null;
-}
-
-interface PromotionFailure {
-  message: string;
-  /** Whether the server may still have completed the request, so the active keywords must be re-read. */
-  reconcile: boolean;
-}
-
-function describePromotionFailure(requestError: unknown): PromotionFailure {
-  if (isAbortError(requestError)) {
-    return {
-      message: PROMOTION_TIMEOUT_MESSAGE,
-      reconcile: true,
-    };
-  }
-  if (isDefinitiveClientRejection(requestError)) {
-    return {
-      message: clientRejectionMessage(requestError, 'keywords', { includeField: true }),
-      reconcile: false,
-    };
-  }
-  return {
-    message: `Adding keywords failed to return a confirmed result: ${getErrorMessage(requestError, 'keywords')}. The server may still have completed; active keywords are being refreshed.`,
-    reconcile: true,
-  };
 }
 
 /** Which promote button is in flight: the ticked rows, or the whole proposal. */
@@ -393,6 +366,7 @@ export const usePromoteKeywords = (
     } catch (requestError) {
       if (isSuperseded()) return;
 
+      if (requestError instanceof IncompletePromotionError) applyPromotionOutcome(requestError.outcome, action);
       const failure = describePromotionFailure(requestError);
       setError(failure.message);
       if (failure.reconcile) requestKeywordReconciliation();

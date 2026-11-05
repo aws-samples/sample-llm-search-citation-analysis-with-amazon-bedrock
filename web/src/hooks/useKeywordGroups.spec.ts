@@ -13,6 +13,7 @@ import { renderLoadedKeywordGroups } from './useKeywordGroups-fixtures';
 import { deferNextTwoCalls } from '../test/fetchResponses';
 import { TestAbortError } from '../test/abortError';
 import type { KeywordGroup } from '../types';
+import { IncompleteWriteError } from '../api/writeRounds';
 
 vi.mock('../api/keywordGroups', async () => {
   const actual = await vi.importActual<typeof import('../api/keywordGroups')>('../api/keywordGroups');
@@ -220,5 +221,55 @@ describe('useKeywordGroups', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
+  });
+
+  describe('when a delete is still incomplete after every round', () => {
+    const incomplete = new IncompleteWriteError(
+      'Group deleted, but 7 keywords still list it after 10 attempts. Delete the group again to finish.',
+      7
+    );
+
+    beforeEach(() => {
+      mockDelete.mockRejectedValue(incomplete);
+    });
+
+    it('reports how many keywords still list the group', async () => {
+      const { result } = await renderLoadedKeywordGroups();
+
+      const outcome = await act(() => result.current.removeGroup('a'));
+
+      expect(outcome).toStrictEqual({
+        success: false,
+        message: 'Group deleted, but 7 keywords still list it after 10 attempts. Delete the group again to finish.',
+      });
+    });
+
+    it('refreshes the list because the group row is gone', async () => {
+      const { result } = await renderLoadedKeywordGroups();
+
+      await act(() => result.current.removeGroup('a'));
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('names the pending memberships when the rounds ran out', async () => {
+    mockMemberships.mockRejectedValue(new PartialMembershipUpdateError({
+      applied: {
+        group_id: 'a',
+        added: [],
+        removed: [],
+        missing: [],
+        keywords: [],
+      },
+      appliedChanges: 3,
+      totalChanges: 4,
+    }, new IncompleteWriteError('1 keyword membership change was still pending after 10 attempts. Apply the change again to finish.', 1)));
+
+    const outcome = await renderAfterAddingKw1();
+
+    expect(outcome.message).toBe(
+      'Updated 3 of 4 keyword memberships, then stopped: 1 keyword membership change was still pending after 10 attempts. Apply the change again to finish.'
+    );
   });
 });
