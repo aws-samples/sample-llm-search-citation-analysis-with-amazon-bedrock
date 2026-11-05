@@ -39,6 +39,8 @@ from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_
 from shared.scoped_reports import ScopeRead, capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.sentiment_examples import (
+    ANSWER_TEXT_ATTRIBUTE_NAMES,
+    ANSWER_TEXT_PROJECTION,
     DEFAULT_LIMIT,
     EXAMPLE_CLASSIFICATIONS,
     MAX_LIMIT,
@@ -83,7 +85,10 @@ def read_answer_texts(keys: list[RowKey]) -> dict[RowKey, str]:
     """
     if not keys or current_deadline().stop_reading('the example answers'):
         return {}
-    items = batch_get_items(dynamodb, SEARCH_RESULTS_TABLE, [{'keyword': keyword, 'timestamp_provider': sort_key} for keyword, sort_key in keys])
+    items = batch_get_items(
+        dynamodb, SEARCH_RESULTS_TABLE, [{'keyword': keyword, 'timestamp_provider': sort_key} for keyword, sort_key in keys],
+        projection=ANSWER_TEXT_PROJECTION, attribute_names=ANSWER_TEXT_ATTRIBUTE_NAMES,
+    )
     return {
         (str(item.get('keyword')), str(item.get('timestamp_provider'))): response
         for item in items

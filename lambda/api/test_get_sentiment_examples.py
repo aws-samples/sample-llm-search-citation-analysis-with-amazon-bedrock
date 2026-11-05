@@ -147,6 +147,17 @@ class TestReads:
             [[{'keyword': 'hotel sol spa', 'timestamp_provider': SEARCH_ROWS['hotel sol spa'][0]['timestamp_provider']}]], 'Answer one.',
         )
 
+    def test_reads_only_the_row_key_and_the_answer_text_by_key(self, sentiment_handler) -> None:
+        resource = report_dynamodb(projected_search_table(SEARCH_ROWS), active_keywords_table(ACTIVE_KEYWORDS))
+        serve_answer_texts(resource, SEARCH_ROWS)
+        with patch.object(sentiment_handler, 'dynamodb', resource):
+            call(sentiment_handler, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'limit': '1'})
+
+        (request,) = resource.batch_get_item.call_args.kwargs['RequestItems'].values()
+        assert (request['ProjectionExpression'], request['ExpressionAttributeNames']) == (
+            'keyword, timestamp_provider, #rsp', {'#rsp': 'response'},
+        )
+
     def test_reads_no_answer_text_for_a_page_without_examples(self, served) -> None:
         module, asked = served
 

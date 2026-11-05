@@ -135,6 +135,46 @@ class TestBatchGetItems:
         assert resource.batch_get_item.call_count == 2
 
 
+    def test_projects_the_first_request_when_a_projection_is_given(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.return_value = {"Responses": {"table": [{"id": "one"}]}}
+
+        dynamodb_batch.batch_get_items(
+            resource, "table", [{"id": "one"}], projection="#id, #rsp", attribute_names={"#id": "id", "#rsp": "response"},
+        )
+
+        resource.batch_get_item.assert_called_once_with(RequestItems={"table": {
+            "Keys": [{"id": "one"}],
+            "ProjectionExpression": "#id, #rsp",
+            "ExpressionAttributeNames": {"#id": "id", "#rsp": "response"},
+        }})
+
+    def test_projects_every_retry_of_the_unprocessed_keys(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.side_effect = [
+            {"Responses": {"table": [{"id": "one"}]}, "UnprocessedKeys": {"table": {"Keys": [{"id": "two"}]}}},
+            {"Responses": {"table": []}, "UnprocessedKeys": {"table": {"Keys": [{"id": "two"}]}}},
+            {"Responses": {"table": [{"id": "two"}]}},
+        ]
+
+        with patch.object(dynamodb_batch.time, "sleep"):
+            dynamodb_batch.batch_get_items(
+                resource, "table", [{"id": "one"}, {"id": "two"}], consistent_read=True,
+                projection="#id", attribute_names={"#id": "id"},
+            )
+
+        retry = {"Keys": [{"id": "two"}], "ConsistentRead": True, "ProjectionExpression": "#id", "ExpressionAttributeNames": {"#id": "id"}}
+        assert [c.kwargs["RequestItems"]["table"] for c in resource.batch_get_item.call_args_list[1:]] == [retry, retry]
+
+    def test_sends_no_projection_when_none_is_given(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.return_value = {"Responses": {"table": []}}
+
+        dynamodb_batch.batch_get_items(resource, "table", [{"id": "one"}])
+
+        resource.batch_get_item.assert_called_once_with(RequestItems={"table": {"Keys": [{"id": "one"}]}})
+
+
 class TestQueryLatestPerKey:
     def test_returns_empty_dict_when_no_partition_values_are_requested(self) -> None:
         table = MagicMock()
