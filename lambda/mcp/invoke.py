@@ -15,6 +15,14 @@ A router answer over 5 MB arrives as a spill pointer (``shared.response_spill``)
 ``invoke_route`` reads the body from its presigned S3 URL (capped at
 ``MAX_SPILL_BYTES``) before shaping, and any failure there is the generic 502.
 
+Time budget (2.42.0): the MCP Lambda's timeout equals the routers' (29 s),
+so a router is waited for only as long as the MCP request's deadline
+(``shared.request_deadline``, started by ``handler``) allows. The client's
+``read_timeout`` is that remaining time, and it never retries: a retried
+invoke would run a write or spend route twice. A router that does not answer
+in time is the ``upstream_timeout`` tool error, which says a write may still
+complete, instead of API Gateway's 504 with no audit line.
+
 Every call emits exactly one structured audit line
 ``{caller_sub, tool, operation, outcome, ms}`` (plus ``reason`` when the call
 was refused); tokens and bodies are never logged. Calls of write and spend
@@ -28,16 +36,18 @@ import logging
 import math
 import os
 from time import perf_counter
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlparse
 
 import boto3
 import requests
 import state
 from auth import Caller, authorize_tool
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 from catalogue import InvalidArguments, JsonObject, NotFound, Route, Tool, validate_arguments
 
+from shared.request_deadline import current_deadline
 from shared.response_spill import spilled_location
 
 logger = logging.getLogger(__name__)
@@ -52,15 +62,45 @@ _CURSOR_KEY = 'next_token'
 CUT_PAGE_NOTE = 'Items of this page were cut to fit; ask again with a smaller limit before following next_token.'
 _ERROR_FIELDS = ('error', 'details', 'field')
 
-_lambda_client: Any = None
+#: Seconds of the request kept after a router answers: shaping the result, the audit line, the response.
+ROUTER_RESERVE_SECONDS = 1.0
+#: A router is not invoked with less than this left; the call is the ``upstream_timeout`` error at once.
+MIN_ROUTER_SECONDS = 1
+#: Seconds to open the connection to the Lambda API.
+CONNECT_TIMEOUT_SECONDS = 2
+UPSTREAM_TIMEOUT_MESSAGE = (
+    'The API did not answer in time. A write or start may still complete: check its state before retrying.'
+)
+
+_lambda_clients: dict[int, Any] = {}
 
 
-def lambda_client() -> Any:
-    """The Lambda client, created on first use so importing this module needs no AWS region."""
-    global _lambda_client
-    if _lambda_client is None:
-        _lambda_client = boto3.client('lambda')
-    return _lambda_client
+class UpstreamTimeoutError(Exception):
+    """The router did not answer inside the MCP request's time budget (or no time was left to ask it)."""
+
+
+def lambda_client(read_timeout: int) -> Any:
+    """The Lambda client that waits ``read_timeout`` seconds for an answer and never retries.
+
+    One client per timeout, created on first use so importing this module
+    needs no AWS region. No retry, not even on throttling: botocore retries a
+    read timeout too, which would invoke the router a second time.
+    """
+    client = _lambda_clients.get(read_timeout)
+    if client is None:
+        client = boto3.client('lambda', config=Config(
+            read_timeout=read_timeout, connect_timeout=CONNECT_TIMEOUT_SECONDS, retries={'total_max_attempts': 1},
+        ))
+        _lambda_clients[read_timeout] = client
+    return client
+
+
+def router_read_timeout() -> int:
+    """Whole seconds a router may take inside the request's deadline; raises ``UpstreamTimeoutError`` under the minimum."""
+    seconds = math.floor(current_deadline().remaining() - ROUTER_RESERVE_SECONDS)
+    if seconds < MIN_ROUTER_SECONDS:
+        raise UpstreamTimeoutError('No time left in the request to ask the API')
+    return seconds
 
 
 def function_name(router: str) -> str:
@@ -100,11 +140,16 @@ def invoke_route(route: Route, caller: Caller) -> tuple[int, Any]:
 
     A spill pointer (``shared.response_spill``: the router moved a body over
     5 MB to S3) is followed, so the caller sees the original body.
+    A router that does not answer inside the request's deadline raises
+    ``UpstreamTimeoutError``.
     """
-    response = lambda_client().invoke(
-        FunctionName=function_name(route.router),
-        Payload=json.dumps(api_event(route, caller)).encode('utf-8'),
-    )
+    try:
+        response = lambda_client(router_read_timeout()).invoke(
+            FunctionName=function_name(route.router),
+            Payload=json.dumps(api_event(route, caller)).encode('utf-8'),
+        )
+    except ReadTimeoutError as timeout:
+        raise UpstreamTimeoutError(f'Router {route.router} did not answer in time') from timeout
     payload = json.loads(response['Payload'].read())
     if response.get('FunctionError') or not isinstance(payload, dict):
         logger.error('Router %s failed: %s', route.router, response.get('FunctionError') or 'malformed response')
@@ -193,8 +238,9 @@ def fetch_spilled_body(url: str) -> Any:
     headers of the caller and follows no redirect. The URL is never logged.
     """
     host = _spill_host(url)
+    timeout = max(MIN_ROUTER_SECONDS, min(SPILL_TIMEOUT_SECONDS, math.floor(current_deadline().remaining())))
     with spill_session() as session, session.get(
-        url, timeout=SPILL_TIMEOUT_SECONDS, stream=True, allow_redirects=False,
+        url, timeout=timeout, stream=True, allow_redirects=False,
     ) as response:
         if response.status_code != 200:
             raise SpillDownloadError(f'{host} answered {response.status_code}')
@@ -312,18 +358,40 @@ def checked_route(tool_name: str, operation: Tool, arguments: Any, caller: Calle
         raise
 
 
-def replay(tool_name: str, operation: Tool, route: Route, caller: Caller, started: float) -> tuple[int, Any] | None:
-    """``invoke_route`` with the failure audited; ``None`` when the API could not be reached."""
+class Unanswered(NamedTuple):
+    """A replay with no answer: the tool error, and whether the router may have run the request anyway."""
+
+    result: JsonObject
+    maybe_ran: bool
+
+
+def replay(
+    tool_name: str, operation: Tool, route: Route, caller: Caller, started: float,
+) -> tuple[int, Any] | Unanswered:
+    """``invoke_route`` with the failure audited; ``Unanswered`` when the API could not be reached in time."""
     try:
         return invoke_route(route, caller)
+    except UpstreamTimeoutError:
+        # The audit line is the log record: outcome ``upstream_timeout``.
+        audit(caller, tool_name, operation, 'upstream_timeout', started)
+        return Unanswered(timeout_result(operation), maybe_ran=True)
     except (BotoCoreError, ClientError, ValueError):
         logger.exception('Invoking %s for %s failed', route.router, operation.name)
         audit(caller, tool_name, operation, 'invoke_failed', started)
-        return None
+        return Unanswered(unreachable_result(operation), maybe_ran=False)
 
 
 def unreachable_result(operation: Tool) -> JsonObject:
     return tool_result(f'{operation.name} could not reach the API', {'error': 'upstream_unavailable'}, is_error=True)
+
+
+def timeout_result(operation: Tool) -> JsonObject:
+    """The ``upstream_timeout`` tool error: the router did not answer inside the request's time budget."""
+    return tool_result(
+        f'{operation.name}: {UPSTREAM_TIMEOUT_MESSAGE}',
+        {'error': 'upstream_timeout', 'details': UPSTREAM_TIMEOUT_MESSAGE},
+        is_error=True,
+    )
 
 
 def answer_result(operation: Tool, status: int, body: Any, arguments: JsonObject) -> JsonObject:
@@ -350,8 +418,8 @@ def run_operation(tool_name: str, operation: Tool, arguments: Any, caller: Calle
         return refusal_result(refusal)
     valid, route = checked_route(tool_name, operation, arguments, caller, started)
     answer = replay(tool_name, operation, route, caller, started)
-    if answer is None:
-        return unreachable_result(operation)
+    if isinstance(answer, Unanswered):
+        return answer.result
     status, body = answer
     audit(caller, tool_name, operation, f'http_{status}', started)
     return answer_result(operation, status, body, valid)

@@ -35,6 +35,7 @@ from auth import AuthError, DiscoveryDocument, discovery_document, unauthorized_
 from protocol import SUPPORTED_VERSIONS, RequestContext, http_response, respond
 
 from shared.auth import get_caller_claims
+from shared.request_deadline import request_deadline_scope
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -76,6 +77,12 @@ def _unsupported_version(version: str) -> dict[str, Any]:
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
+    """Serve one request inside its time budget (``shared.request_deadline``): router calls wait only that long."""
+    with request_deadline_scope(context):
+        return _serve(event)
+
+
+def _serve(event: dict[str, Any]) -> dict[str, Any]:
     """Serve the metadata routes, refuse non-POST methods, or verify the caller and answer the JSON-RPC body."""
     method = str(event.get('httpMethod') or 'GET').upper()
     path = str(event.get('path') or '')

@@ -36,13 +36,15 @@ from testing.provider_response_fixtures import (
     build_market,
     claude_search_error_response,
 )
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV, nothing_stored_fixture
 
 # handler.py is loaded under its own module name (several Lambdas own a
 # `handler.py`; see test_handler_prompts.py).
 search_handler = handler_fixture(
     os.path.dirname(os.path.abspath(__file__)), 'handler.py', 'search_handler_markets', env=SEARCH_HANDLER_ENV,
 )
+
+nothing_stored_yet = nothing_stored_fixture()
 
 _KEYWORD = 'is altiplano a good airline'
 _TIMESTAMP = '2026-10-08T10:00:00Z'

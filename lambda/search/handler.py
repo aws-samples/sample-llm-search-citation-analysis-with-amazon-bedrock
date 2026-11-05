@@ -5,13 +5,16 @@ Queries multiple AI providers using direct HTTP API calls (no heavy SDKs).
 
 import json
 import logging
+import math
 import os
 import re
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 # Import lightweight API clients
 from api_clients import (
@@ -33,18 +36,30 @@ from search_clients import (
 )
 
 # Import centralized provider constants and error handling
-from shared.ai_clients import perplexity_agent_text
+from shared.ai_clients import (
+    CLAUDE_TIMEOUT_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    GEMINI_TIMEOUT_SECONDS,
+    OPENAI_TIMEOUT_SECONDS,
+    PERPLEXITY_TIMEOUT_SECONDS,
+    perplexity_agent_text,
+)
 from shared.config import Provider
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.dynamodb_batch import collect_all_items
 from shared.markets import GLOBAL_MARKET_ID, Market, brand_config_for_market, market_from_payload
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
 from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
-from shared.provider_pacing import provider_min_interval_seconds, wait_for_send_slot
+from shared.provider_pacing import MAX_WAIT_SECONDS, provider_min_interval_seconds, wait_for_send_slot
+from shared.request_deadline import Deadline, budget_from_context
 from shared.safe_fetch import fetch_following_validated_redirects, host_matches
 from shared.search_results import search_results_table_name
 from shared.secrets import get_api_key
+from shared.serpapi import DEFAULT_DEADLINE_SECONDS as SERPAPI_POLL_DEADLINE_SECONDS
+from shared.serpapi import MAX_REQUEST_ATTEMPTS as SERPAPI_REQUEST_ATTEMPTS
+from shared.serpapi import REQUEST_TIMEOUT_SECONDS as SERPAPI_REQUEST_TIMEOUT_SECONDS
 from shared.step_function_response import log_error
 
 # Configure logging
@@ -633,6 +648,67 @@ PROVIDER_RUNNERS: list[tuple[str, str | None, str, ProviderRunner]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Time budget (2.42.0): one invocation never starts a call it cannot finish
+# ---------------------------------------------------------------------------
+
+#: Seconds kept back from the Lambda's remaining time for the slim results and the resumable error.
+SEARCH_SAFETY_MARGIN_SECONDS = 10.0
+#: Worst case of storing one query prompt's answers: brand extraction (Bedrock), the S3 put and the put_item.
+STORE_RESERVE_SECONDS = 60.0
+#: Backoff between a call's attempts (1 + 2.5 + 5 + 9.5 s over five attempts), rounded up.
+RETRY_BACKOFF_SECONDS = 20.0
+#: Gemini's grounding redirects are resolved one 5 s HEAD at a time; room for 20 of them.
+GEMINI_REDIRECT_RESERVE_SECONDS = 100.0
+
+#: Seconds one provider call may take when every attempt times out (attempts x per-attempt timeout + backoff).
+#: Waiting out 429s is not counted: those answers take milliseconds and the waits are capped by the client.
+PROVIDER_CALL_WORST_CASE_SECONDS: dict[str, float] = {
+    Provider.OPENAI: SLOW_ENGINE_MAX_ATTEMPTS * OPENAI_TIMEOUT_SECONDS + RETRY_BACKOFF_SECONDS,
+    Provider.CLAUDE: SLOW_ENGINE_MAX_ATTEMPTS * CLAUDE_TIMEOUT_SECONDS + RETRY_BACKOFF_SECONDS,
+    Provider.PERPLEXITY: DEFAULT_MAX_RETRIES * PERPLEXITY_TIMEOUT_SECONDS + RETRY_BACKOFF_SECONDS,
+    Provider.GEMINI: DEFAULT_MAX_RETRIES * GEMINI_TIMEOUT_SECONDS + RETRY_BACKOFF_SECONDS + GEMINI_REDIRECT_RESERVE_SECONDS,
+    # The submit's attempts, then the Search Archive polled until its own deadline.
+    Provider.SERPAPI: SERPAPI_REQUEST_ATTEMPTS * SERPAPI_REQUEST_TIMEOUT_SECONDS + SERPAPI_POLL_DEADLINE_SECONDS
+    + RETRY_BACKOFF_SECONDS,
+    **{
+        client.provider_id: DEFAULT_MAX_RETRIES * client.timeout + RETRY_BACKOFF_SECONDS
+        for client in (BraveSearchClient, TavilySearchClient, ExaSearchClient, FirecrawlSearchClient, AgentCoreSearchClient)
+    },
+}
+
+
+class SearchTimeBudgetSpentError(RuntimeError):
+    """Query prompts are left that this invocation had no time to run; a retry resumes after the stored ones.
+
+    Raised only after every answer this invocation got has been stored, so the
+    retry (its own Step Functions retrier) skips them and never asks a
+    provider again for a stored (keyword, run, provider, prompt).
+    """
+
+
+def invocation_deadline(context: Any) -> Deadline:
+    """The invocation's budget: the Lambda's remaining time less ``SEARCH_SAFETY_MARGIN_SECONDS``.
+
+    Without a Lambda context (a script, a test) nothing is bounded.
+    """
+    if not callable(getattr(context, 'get_remaining_time_in_millis', None)):
+        return Deadline(math.inf)
+    return Deadline(budget_from_context(context, SEARCH_SAFETY_MARGIN_SECONDS))
+
+
+def prompt_time_needed(providers: Iterable[str]) -> float:
+    """Seconds one query prompt may take across ``providers`` (asked one after another) and its storage.
+
+    A paced provider (``provider_min_interval_seconds``) may also wait up to
+    ``MAX_WAIT_SECONDS`` for its send slot before each call.
+    """
+    fallback = max(PROVIDER_CALL_WORST_CASE_SECONDS.values())
+    calls = [PROVIDER_CALL_WORST_CASE_SECONDS.get(provider, fallback) for provider in providers]
+    slot_wait = MAX_WAIT_SECONDS * len(calls) if provider_min_interval_seconds() > 0 else 0.0
+    return sum(calls) + slot_wait + STORE_RESERVE_SECONDS
+
+
 def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
     """Persist provider health, and tag the result with the error category.
 
@@ -772,6 +848,8 @@ def _result_item(
         item["metadata"] = convert_floats_to_decimal(metadata)
     if "error" in result:
         item["error"] = result["error"]
+    if "error_category" in result:
+        item["error_category"] = result["error_category"]
     return item
 
 
@@ -891,11 +969,90 @@ def _event_market(event: dict[str, Any]) -> Market | None:
     return market
 
 
-def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
-    """Run every query prompt across the selected providers and store the results."""
+#: The SearchResults attributes a stored answer's slim result is rebuilt from.
+_STORED_SLIM_PROJECTION = '#provider, provider_type, #status, citations, query_prompt_id, #error, error_category'
+_STORED_SLIM_NAMES = {'#provider': 'provider', '#status': 'status', '#error': 'error'}
+
+
+def _run_prompt(
+    keyword: str, prompt: dict[str, Any], providers: list[str], market: Market | None,
+) -> list[dict[str, Any]]:
+    """``prompt``'s answers from ``providers``, tagged with the prompt; none when the fan-out raised."""
+    prompt_id = prompt.get('id', 'default')
+    prompt_name = prompt.get('name', 'Default')
+    logger.info("Running prompt '%s' for keyword '%s'", prompt_name, keyword)
+    try:
+        results = execute_all_providers(keyword, providers=providers, query_template=prompt.get('template'), market=market)
+    except Exception:
+        logger.exception("Error running prompt '%s' for '%s'", prompt_name, keyword)
+        return []
+    for result in results:
+        result['query_prompt_id'] = prompt_id
+        result['query_prompt_name'] = prompt_name
+    return results
+
+
+@dataclass
+class _SearchRun:
+    """One invocation's keyword run: what is stored, what it asked, and when it must stop starting prompts."""
+
+    keyword: str
+    timestamp: str
+    providers: list[str]
+    market: Market | None
+    deadline: Deadline
+    stored: dict[tuple[str, str], dict[str, Any]]
+    prompts_run: int = 0
+    pending: list[str] = field(default_factory=list)
+
+    def missing_providers(self, prompt_id: str) -> list[str]:
+        return [provider for provider in self.providers if (provider, prompt_id) not in self.stored]
+
+    def stored_for(self, prompt_id: str) -> list[dict[str, Any]]:
+        return [self.stored[(provider, prompt_id)] for provider in self.providers if (provider, prompt_id) in self.stored]
+
+    def has_time_for(self, providers: list[str]) -> bool:
+        """Whether a prompt over ``providers`` can finish in time; the first prompt always runs, so a retry progresses."""
+        return self.prompts_run == 0 or self.deadline.remaining() >= prompt_time_needed(providers)
+
+    def answer(self, prompt: dict[str, Any]) -> list[dict[str, Any]]:
+        """``prompt``'s slim results: the stored ones, plus the missing providers' answers asked and stored now."""
+        prompt_id = str(prompt.get('id', 'default'))
+        slims = self.stored_for(prompt_id)
+        missing = self.missing_providers(prompt_id)
+        if not missing:
+            return slims
+        if not self.has_time_for(missing):
+            self.pending.append(prompt_id)
+            return slims
+        self.prompts_run += 1
+        results = _run_prompt(self.keyword, prompt, missing, self.market)
+        # Stored before the next prompt starts: a timeout later in this invocation keeps these answers.
+        if not store_search_results(self.keyword, self.timestamp, results, self.market):
+            logger.warning("Failed to store some results in DynamoDB")
+        return slims + [_slim_result(result) for result in results]
+
+    def finished(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        """The invocation's answer when every prompt is answered; raises ``SearchTimeBudgetSpentError`` when some are left."""
+        if self.pending:
+            logger.warning('Time budget spent: %d query prompt(s) left for the retry', len(self.pending))
+            raise SearchTimeBudgetSpentError(f'{len(self.pending)} query prompt(s) left for the retry')
+        # Only `results` is read: the workflow's resultSelector keeps `$.Payload.results`.
+        return {"results": results}
+
+
+def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> dict[str, Any]:
+    """Run every query prompt across the selected providers, storing each prompt's answers as it finishes.
+
+    Prompts whose answers an earlier attempt of the same run stored are not
+    asked again. When ``deadline`` leaves too little time for the next
+    prompt's worst case, no new prompt starts and ``SearchTimeBudgetSpentError``
+    hands the rest to a retry.
+    """
     keyword = _sanitized_keyword(event)
     market = _event_market(event)
-    timestamp = event.get('timestamp', get_timestamp())
+    resumable = isinstance(event.get('timestamp'), str) and bool(event.get('timestamp'))
+    timestamp = event['timestamp'] if resumable else get_timestamp()
     providers = event['providers']
     # If no query prompts, use a single default (backward compatible)
     query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
@@ -904,40 +1061,45 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
         'Processing keyword: %s, market: %s, prompts: %s, providers: %s',
         keyword, market.market_id if market else GLOBAL_MARKET_ID, len(query_prompts), providers,
     )
+    run = _SearchRun(
+        keyword, timestamp, providers, market, deadline or invocation_deadline(None),
+        stored_slim_results(keyword, timestamp) if resumable else {},
+    )
+    if run.stored:
+        logger.info('Resuming the run: %d answer(s) already stored are not asked again', len(run.stored))
 
     all_results: list[dict[str, Any]] = []
     for prompt in query_prompts:
-        prompt_id = prompt.get('id', 'default')
-        prompt_name = prompt.get('name', 'Default')
-        logger.info("Running prompt '%s' for keyword '%s'", prompt_name, keyword)
-        try:
-            results = execute_all_providers(
-                keyword,
-                providers=providers,
-                query_template=prompt.get('template'),
-                market=market,
-            )
-        except Exception:
-            logger.exception("Error running prompt '%s' for '%s'", prompt_name, keyword)
-            # Continue with remaining prompts
-            continue
-        # Tag each result with the query prompt info
-        for result in results:
-            result['query_prompt_id'] = prompt_id
-            result['query_prompt_name'] = prompt_name
-        all_results.extend(results)
+        all_results.extend(run.answer(prompt))
+    return run.finished(all_results)
 
-    store_success = store_search_results(keyword, timestamp, all_results, market)
-    if not store_success:
-        logger.warning("Failed to store some results in DynamoDB")
 
-    # Only `results` is read: the workflow's resultSelector keeps `$.Payload.results`.
-    return {"results": [_slim_result(result) for result in all_results]}
+def stored_slim_results(keyword: str, timestamp: str) -> dict[tuple[str, str], dict[str, Any]]:
+    """The slim results already stored for ``keyword``'s run ``timestamp``, by (provider, query prompt id).
+
+    A retried invocation (a Lambda timeout, or ``SearchTimeBudgetSpentError``)
+    finds here what an earlier attempt stored and asks no provider again for
+    it. One run of one keyword is at most prompts x providers rows. A read
+    error raises: running blind could pay twice for an answer already stored.
+    """
+    rows = collect_all_items(
+        dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS).query,
+        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').begins_with(f'{timestamp}#'),
+        ProjectionExpression=_STORED_SLIM_PROJECTION,
+        ExpressionAttributeNames=_STORED_SLIM_NAMES,
+    )
+    stored: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        provider = row.get('provider')
+        if isinstance(provider, str) and provider:
+            slim = _slim_result(row)
+            stored[(provider, str(slim['query_prompt_id']))] = slim
+    return stored
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
-    Lambda handler for searching across AI providers.
+    Search one keyword with the selected providers, each query prompt in turn, inside the time budget.
 
     Input:
     {
@@ -960,7 +1122,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _provider_model_cache.clear()
 
     try:
-        return _search_keyword(event)
+        return _search_keyword(event, invocation_deadline(context))
+    except SearchTimeBudgetSpentError:
+        raise
     except Exception as e:
         # !r so a keyword with interior newlines can't forge log records; this
         # path logs the PRE-sanitization keyword straight from the event.

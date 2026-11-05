@@ -15,13 +15,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.handler_fixtures import handler_fixture
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV, nothing_stored_fixture
 from testing.web_search_fixtures import GATEWAY_URL
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Unique module name: see test_handler_prompts.py for why `import handler` is contested.
 search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=SEARCH_HANDLER_ENV)
+
+nothing_stored_yet = nothing_stored_fixture()
 
 _BRAVE_RESULT = {
     'provider': 'brave', 'provider_type': 'search', 'response': '', 'status': 'success',
