@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.request_deadline import active_deadline
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.search_handler_fixtures import search_handler_fixture
 
@@ -138,6 +139,38 @@ class TestTimeBudget:
         run = Run(search_handler, stored={('openai', 'p1'): _STORED_P1}, context=_context(1))
 
         assert (run.asked, run.error) == (['On business, {keyword}'], None)
+
+
+@pytest.mark.usefixtures('unpaced')
+class TestActiveDeadline:
+    """The invocation's deadline is the active one while providers are asked, so their retry waits honour it."""
+
+    def test_providers_are_asked_under_the_invocations_budget(self, search_handler) -> None:
+        seen: list[float] = []
+
+        def ask(_keyword: str, **_options: object) -> list[dict]:
+            deadline = active_deadline()
+            seen.append(-1.0 if deadline is None else round(deadline.remaining()))
+            return _answer('q')
+
+        with (
+            patch.object(search_handler, 'stored_slim_results', return_value={}),
+            patch.object(search_handler, 'execute_all_providers', side_effect=ask),
+            patch.object(search_handler, 'store_search_results', return_value=True),
+        ):
+            search_handler.handler({**_EVENT, 'query_prompts': _PROMPTS[:1]}, _context(900))
+
+        assert seen == [900 - search_handler.SEARCH_SAFETY_MARGIN_SECONDS]
+
+    def test_clears_the_deadline_when_the_invocation_hands_prompts_to_a_retry(self, search_handler) -> None:
+        Run(search_handler, context=_context(60))
+
+        assert active_deadline() is None
+
+    def test_clears_the_deadline_when_the_invocation_finishes(self, search_handler) -> None:
+        Run(search_handler, context=_context(900))
+
+        assert active_deadline() is None
 
 
 class TestWorstCase:

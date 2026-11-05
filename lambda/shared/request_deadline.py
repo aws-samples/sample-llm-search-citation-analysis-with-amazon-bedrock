@@ -114,6 +114,15 @@ def request_deadline_scope(context: Any) -> Generator[Deadline]:
         clear_request_deadline()
 
 
+def active_deadline() -> Deadline | None:
+    """The deadline the invocation activated, or ``None`` when none is (no fresh fallback, unlike ``current_deadline``).
+
+    For code that must stay unbounded outside a budgeted invocation, such as a
+    provider client's retry waits in a worker Lambda that never activated one.
+    """
+    return _ACTIVE.deadline
+
+
 def current_deadline() -> Deadline:
     """The active invocation's deadline.
 

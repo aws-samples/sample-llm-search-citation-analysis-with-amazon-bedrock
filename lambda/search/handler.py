@@ -53,7 +53,7 @@ from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
 from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
 from shared.provider_pacing import MAX_WAIT_SECONDS, provider_min_interval_seconds, wait_for_send_slot
-from shared.request_deadline import Deadline, budget_from_context
+from shared.request_deadline import Deadline, activate_deadline, budget_from_context, clear_request_deadline
 from shared.safe_fetch import fetch_following_validated_redirects, host_matches
 from shared.search_results import search_results_table_name
 from shared.secrets import get_api_key
@@ -1121,8 +1121,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # wait for this warm container to be recycled.
     _provider_model_cache.clear()
 
+    # Active for the invocation, so the provider clients' retry waits
+    # (shared.ai_clients.retry_with_backoff) never sleep past it either.
+    deadline = activate_deadline(invocation_deadline(context))
     try:
-        return _search_keyword(event, invocation_deadline(context))
+        return _search_keyword(event, deadline)
     except SearchTimeBudgetSpentError:
         raise
     except Exception as e:
@@ -1130,3 +1133,5 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # path logs the PRE-sanitization keyword straight from the event.
         log_error(e, f"search handler for keyword {event.get('keyword', 'unknown')!r}", event)
         raise
+    finally:
+        clear_request_deadline()
