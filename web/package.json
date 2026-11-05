@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.41.1",
+  "version": "2.42.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
