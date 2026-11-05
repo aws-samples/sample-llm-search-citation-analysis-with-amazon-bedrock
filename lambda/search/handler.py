@@ -974,29 +974,6 @@ _STORED_SLIM_PROJECTION = '#provider, provider_type, #status, citations, query_p
 _STORED_SLIM_NAMES = {'#provider': 'provider', '#status': 'status', '#error': 'error'}
 
 
-def stored_slim_results(keyword: str, timestamp: str) -> dict[tuple[str, str], dict[str, Any]]:
-    """The slim results already stored for ``keyword``'s run ``timestamp``, by (provider, query prompt id).
-
-    A retried invocation (a Lambda timeout, or ``SearchTimeBudgetSpentError``)
-    finds here what an earlier attempt stored and asks no provider again for
-    it. One run of one keyword is at most prompts x providers rows. A read
-    error raises: running blind could pay twice for an answer already stored.
-    """
-    rows = collect_all_items(
-        dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS).query,
-        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').begins_with(f'{timestamp}#'),
-        ProjectionExpression=_STORED_SLIM_PROJECTION,
-        ExpressionAttributeNames=_STORED_SLIM_NAMES,
-    )
-    stored: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in rows:
-        provider = row.get('provider')
-        if isinstance(provider, str) and provider:
-            slim = _slim_result(row)
-            stored[(provider, str(slim['query_prompt_id']))] = slim
-    return stored
-
-
 def _run_prompt(
     keyword: str, prompt: dict[str, Any], providers: list[str], market: Market | None,
 ) -> list[dict[str, Any]]:
@@ -1055,6 +1032,14 @@ class _SearchRun:
             logger.warning("Failed to store some results in DynamoDB")
         return slims + [_slim_result(result) for result in results]
 
+    def finished(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        """The invocation's answer when every prompt is answered; raises ``SearchTimeBudgetSpentError`` when some are left."""
+        if self.pending:
+            logger.warning('Time budget spent: %d query prompt(s) left for the retry', len(self.pending))
+            raise SearchTimeBudgetSpentError(f'{len(self.pending)} query prompt(s) left for the retry')
+        # Only `results` is read: the workflow's resultSelector keeps `$.Payload.results`.
+        return {"results": results}
+
 
 def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> dict[str, Any]:
     """Run every query prompt across the selected providers, storing each prompt's answers as it finishes.
@@ -1086,17 +1071,35 @@ def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> 
     all_results: list[dict[str, Any]] = []
     for prompt in query_prompts:
         all_results.extend(run.answer(prompt))
+    return run.finished(all_results)
 
-    if run.pending:
-        logger.warning('Time budget spent: %d query prompt(s) left for the retry', len(run.pending))
-        raise SearchTimeBudgetSpentError(f'{len(run.pending)} query prompt(s) left for the retry')
-    # Only `results` is read: the workflow's resultSelector keeps `$.Payload.results`.
-    return {"results": all_results}
+
+def stored_slim_results(keyword: str, timestamp: str) -> dict[tuple[str, str], dict[str, Any]]:
+    """The slim results already stored for ``keyword``'s run ``timestamp``, by (provider, query prompt id).
+
+    A retried invocation (a Lambda timeout, or ``SearchTimeBudgetSpentError``)
+    finds here what an earlier attempt stored and asks no provider again for
+    it. One run of one keyword is at most prompts x providers rows. A read
+    error raises: running blind could pay twice for an answer already stored.
+    """
+    rows = collect_all_items(
+        dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS).query,
+        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').begins_with(f'{timestamp}#'),
+        ProjectionExpression=_STORED_SLIM_PROJECTION,
+        ExpressionAttributeNames=_STORED_SLIM_NAMES,
+    )
+    stored: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        provider = row.get('provider')
+        if isinstance(provider, str) and provider:
+            slim = _slim_result(row)
+            stored[(provider, str(slim['query_prompt_id']))] = slim
+    return stored
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
-    Lambda handler for searching across AI providers.
+    Search one keyword with the selected providers, each query prompt in turn, inside the time budget.
 
     Input:
     {
