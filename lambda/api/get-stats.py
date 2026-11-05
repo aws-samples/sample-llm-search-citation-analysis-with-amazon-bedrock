@@ -20,6 +20,14 @@ text no Keywords row carries any more (a deleted keyword) belongs to no
 market, so it is in the unfiltered totals only. ``last_execution`` is the
 newest run of the market's keywords (any provider) with ``market_id``, and
 the newest run across every market (of ``provider``, when given) without.
+
+A market's ``last_execution`` is read under the counts' time budget and at
+the same time as them, so a market of thousands of keywords answers inside
+the request: when the budget ends before every keyword's newest run is read
+(or a read fails), ``last_execution`` is the newest of those read and
+``last_execution_approximate`` is true. The market's keyword texts come from
+a projected Keywords scan capped at ``MARKET_KEYWORD_SCAN_MAX_PAGES`` pages
+and the request's deadline; a scan cut short makes every total approximate.
 """
 
 import concurrent.futures
@@ -28,6 +36,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -68,6 +77,31 @@ MARKET_PARAM = scope_params.MARKET_PARAM
 
 # A total that could not be read and was never cached: shown as 0, flagged as not exact.
 _UNKNOWN_COUNT = Count(0, approximate=True)
+
+#: Pages of the projected Keywords scan read for one market's keyword texts.
+#: A 1 MB page holds about 2,000 keyword rows, so 50 pages is ~100k keywords;
+#: the request's deadline stops the scan sooner when DynamoDB is slow.
+MARKET_KEYWORD_SCAN_MAX_PAGES = 50
+
+
+@dataclass(frozen=True)
+class MarketKeywords:
+    """The keyword texts of one market, and whether the scan that found them read the whole table."""
+
+    texts: frozenset[str]
+    complete: bool = True
+
+
+@dataclass(frozen=True)
+class LastExecution:
+    """The newest run found, and whether some keyword's newest run was not read (budget spent or a read failed)."""
+
+    timestamp: str | None
+    approximate: bool = False
+
+
+# A last execution that could not be read and was never cached.
+_UNKNOWN_LAST_EXECUTION = LastExecution(None, approximate=True)
 
 
 def _cached_value[ValueT](cache_key: str, label: str, read: Callable[[], ValueT], fallback: ValueT) -> ValueT:
@@ -120,20 +154,26 @@ def _read_once[ValueT](read: Callable[[], ValueT]) -> Callable[[], ValueT]:
     return once
 
 
-def _market_keyword_texts(market_id: str) -> set[str]:
-    """The keyword texts of every Keywords row (any status) of ``market_id``."""
-    items = dynamodb_batch.collect_all_items(
+def _market_keyword_texts(market_id: str) -> MarketKeywords:
+    """The keyword texts of every Keywords row (any status) of ``market_id``, from a capped, projected scan."""
+    items, truncated = dynamodb_batch.collect_capped_items(
         keywords_table.scan,
+        MARKET_KEYWORD_SCAN_MAX_PAGES,
         ProjectionExpression='#kw, market_id',
         ExpressionAttributeNames={'#kw': 'keyword'},
     )
-    return {
+    return MarketKeywords(frozenset(
         item['keyword'] for item in items
         if isinstance(item.get('keyword'), str) and item['keyword'] and markets.keyword_market_id(item) == market_id
-    }
+    ), complete=not truncated)
 
 
-def _market_counts(market_keywords: Callable[[], set[str]], market_id: str, deadline: Deadline) -> dict[str, Count]:
+def _counted(count: Count, keywords: MarketKeywords) -> Count:
+    """``count``, flagged as an estimate when the market's keyword list itself was cut short."""
+    return count if keywords.complete else Count(count.value, approximate=True)
+
+
+def _market_counts(market_keywords: Callable[[], MarketKeywords], market_id: str, deadline: Deadline) -> dict[str, Count]:
     """Every total of the response, counting only ``market_id``'s keywords (cached per market).
 
     ``market_keywords`` reads the market's keywords at most once per request,
@@ -141,13 +181,22 @@ def _market_counts(market_keywords: Callable[[], set[str]], market_id: str, dead
     table's partitions of them, in parallel, until ``deadline``.
     """
     def rows_of(table, index_name: str | None = None) -> Callable[[], Count]:
-        return lambda: bounded_counts.partition_count(table, 'keyword', market_keywords(), deadline, index_name=index_name)
+        def count() -> Count:
+            keywords = market_keywords()
+            total = bounded_counts.partition_count(table, 'keyword', keywords.texts, deadline, index_name=index_name)
+            return _counted(total, keywords)
+
+        return count
+
+    def keyword_total() -> Count:
+        keywords = market_keywords()
+        return _counted(Count(len(keywords.texts)), keywords)
 
     counters: dict[str, tuple[str, Callable[[], Count]]] = {
         'total_searches': (SEARCH_RESULTS_TABLE, rows_of(search_results_table)),
         'total_citations': (CITATIONS_TABLE, rows_of(citations_table)),
         'total_crawled': (CRAWLED_CONTENT_TABLE, rows_of(crawled_table, 'KeywordIndex')),
-        'unique_keywords': (KEYWORDS_TABLE, lambda: Count(len(market_keywords()))),
+        'unique_keywords': (KEYWORDS_TABLE, keyword_total),
     }
     return _in_parallel({
         total: (lambda total=total, label=label, count=count: _cached_count(f'{total}#market#{market_id}', label, count))
@@ -168,17 +217,37 @@ def _all_counts(deadline: Deadline) -> dict[str, Count]:
     })
 
 
-def _market_last_execution(market_keywords: Callable[[], set[str]], market_id: str) -> str | None:
-    """The newest run of any of the market's keywords (one ``Limit=1`` read per keyword, in parallel; cached per market)."""
-    def newest() -> str | None:
-        timestamps = scope_params.map_scope_keywords(
-            sorted(market_keywords()),
-            lambda keyword: answer_queries.latest_run_timestamp(search_results_table, keyword),
-            lambda _keyword: None,
-        )
-        return max((stamp for stamp in timestamps if stamp), default=None)
+def _market_last_execution(
+    market_keywords: Callable[[], MarketKeywords], market_id: str, deadline: Deadline,
+) -> LastExecution:
+    """The newest run of any of the market's keywords (one ``Limit=1`` read per keyword, in parallel; cached per market).
 
-    return _cached_value(f'last_execution#market#{market_id}', SEARCH_RESULTS_TABLE, newest, None)
+    A keyword not started before ``deadline`` is not read, nor is one whose
+    read fails; either makes the answer approximate.
+    """
+    def newest_of(keyword: str) -> tuple[str | None, bool]:
+        if deadline.stop_reading('the market last-execution lookup'):
+            return None, False
+        return answer_queries.latest_run_timestamp(search_results_table, keyword), True
+
+    def newest() -> LastExecution:
+        keywords = market_keywords()
+        reads = scope_params.map_scope_keywords(sorted(keywords.texts), newest_of, lambda _keyword: (None, False))
+        return LastExecution(
+            max((stamp for stamp, _read in reads if stamp), default=None),
+            approximate=not keywords.complete or not all(read for _stamp, read in reads),
+        )
+
+    return _cached_value(f'last_execution#market#{market_id}', SEARCH_RESULTS_TABLE, newest, _UNKNOWN_LAST_EXECUTION)
+
+
+def _market_stats(market_id: str, deadline: Deadline) -> tuple[dict[str, Count], LastExecution]:
+    """The market's totals and its last execution, read at the same time under ``deadline``."""
+    market_keywords = _read_once(lambda: _market_keyword_texts(market_id))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        last_execution = pool.submit(_market_last_execution, market_keywords, market_id, deadline)
+        counts = _market_counts(market_keywords, market_id, deadline)
+        return counts, last_execution.result()
 
 
 def _latest_provider_execution(provider: str | None) -> str | None:
@@ -224,6 +293,8 @@ def handler(event, context, provider=None, market_id=None):
 
     ``counts_approximate`` is true when any total is an estimate (a large
     table's ``DescribeTable`` count, or a count the time budget cut short).
+    With ``market_id``, ``last_execution_approximate`` is true when the time
+    budget (or a failed read) left some keyword's newest run unread.
     """
     market, market_error = scope_params.market_param({MARKET_PARAM: market_id})
     if market_error:
@@ -233,15 +304,16 @@ def handler(event, context, provider=None, market_id=None):
     if market is None:
         counts = _all_counts(deadline)
         last_execution = _latest_provider_execution(provider)
+        market_fields = {}
     else:
-        market_keywords = _read_once(lambda: _market_keyword_texts(market))
-        counts = _market_counts(market_keywords, market, deadline)
-        last_execution = _market_last_execution(market_keywords, market)
+        counts, market_last = _market_stats(market, deadline)
+        last_execution = market_last.timestamp
+        market_fields = {MARKET_PARAM: market, 'last_execution_approximate': market_last.approximate}
 
     return success_response({
         **{total: count.value for total, count in counts.items()},
         'counts_approximate': any(count.approximate for count in counts.values()),
         'last_execution': last_execution,
         'timestamp': get_timestamp(),
-        **({} if market is None else {MARKET_PARAM: market}),
+        **market_fields,
     }, event)
