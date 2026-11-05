@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from shared import bounded_writes
 from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.events import api_gateway_event, parse_response
@@ -232,7 +233,7 @@ class TestDeleteGroup:
     def test_detaches_members_with_bounded_parallel_writes_when_group_is_deleted(self, member_count, expected_workers):
         _store_members(*({'id': f'k{index}'} for index in range(member_count)))
 
-        with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
+        with patch.object(bounded_writes, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
             _request('DELETE', None, 'g1')
 
         assert executor.call_args.kwargs == {'max_workers': expected_workers}
@@ -267,7 +268,7 @@ class TestDeleteGroup:
         _store_members(*({'id': f'k{index}'} for index in range(25)))
         ticks = itertools.count()
 
-        with patch.object(_mod, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
+        with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
             status, body = _request('DELETE', None, 'g1')
 
         assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 2, 23, True)
@@ -365,7 +366,7 @@ class TestUpdateMemberships:
     def test_writes_memberships_with_at_most_ten_threads_when_a_request_changes_many_keywords(self):
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
 
-        with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
+        with patch.object(bounded_writes, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
             _change_members({'add': [f'k{index}' for index in range(_mod.MAX_MEMBERSHIP_CHANGES)]})
 
         assert executor.call_args.kwargs == {'max_workers': 10}
@@ -381,7 +382,7 @@ class TestUpdateMemberships:
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
         ticks = itertools.count()
 
-        with patch.object(_mod, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))), \
+        with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))), \
                 patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
             status, body = _change_members({'add': ['k1', 'k2'], 'remove': ['k3']})
 

@@ -31,8 +31,6 @@ import logging
 import sys
 import uuid
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any
 
@@ -45,6 +43,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view
+from shared.bounded_writes import WRITE_WORKERS, Writes, map_writes
 from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamodb_batch import collect_all_items, collect_capped_items
 from shared.dynamodb_conditions import is_conditional_check_failure
@@ -60,7 +59,6 @@ from shared.keyword_groups import (
     serialize_keyword_item,
     validate_id_list,
 )
-from shared.request_deadline import current_deadline
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -79,8 +77,7 @@ groups_table = dynamodb.Table(GROUPS_TABLE)
 MAX_MEMBERSHIP_CHANGES = 500
 # One update_item per keyword membership, this many at a time: a serial loop over
 # a group of thousands of keywords outlasts API Gateway's 29 s integration limit.
-# Ten also matches botocore's default connection pool, so no thread waits for one.
-MEMBERSHIP_WRITE_WORKERS = 10
+MEMBERSHIP_WRITE_WORKERS = WRITE_WORKERS
 # Keywords GSI: partition `status`, sort `keyword`, ALL projection; sparse
 # (rows without a status are absent).
 STATUS_INDEX = 'StatusIndex'
@@ -91,43 +88,9 @@ MEMBER_SCAN_MAX_PAGES = 100
 _Route = Callable[..., dict[str, Any]]
 
 
-@dataclass(frozen=True)
-class _Writes[ResultT]:
-    """The result of every write that ran, by keyword id in request order, and the ids never started."""
-
-    written: dict[str, ResultT]
-    pending: list[str]
-
-
-def _map_membership_writes[ResultT](write: Callable[[str], ResultT], keyword_ids: Sequence[str]) -> _Writes[ResultT]:
-    """``write(keyword_id)`` for every id, ``MEMBERSHIP_WRITE_WORKERS`` at a time, in ``keyword_ids`` order.
-
-    An id not started when the request's deadline is spent is not written and
-    is returned as pending. The first write that raises propagates once the
-    in-flight writes finish.
-    """
-    deadline = current_deadline()
-
-    # No annotations naming ResultT on the inner function: CodeQL's Python
-    # extractor does not scope PEP 695 type parameters into nested definitions.
-    # It answers ``(result,)`` for a write that ran and ``None`` for one never started.
-    def guarded(keyword_id: str):
-        if deadline.stop_reading('keyword group membership writes'):
-            return None
-        return (write(keyword_id),)
-
-    if not keyword_ids:
-        return _Writes({}, [])
-    with ThreadPoolExecutor(max_workers=min(MEMBERSHIP_WRITE_WORKERS, len(keyword_ids))) as pool:
-        outcomes = list(pool.map(guarded, keyword_ids))
-    written: dict[str, ResultT] = {}
-    pending: list[str] = []
-    for keyword_id, outcome in zip(keyword_ids, outcomes, strict=True):
-        if outcome is None:
-            pending.append(keyword_id)
-        else:
-            written[keyword_id] = outcome[0]
-    return _Writes(written, pending)
+def _map_membership_writes[ResultT](write: Callable[[str], ResultT], keyword_ids: Sequence[str]) -> Writes[str, ResultT]:
+    """``write(keyword_id)`` for every id, ``MEMBERSHIP_WRITE_WORKERS`` at a time, until the request's deadline."""
+    return map_writes(write, keyword_ids, what='keyword group membership writes', max_workers=MEMBERSHIP_WRITE_WORKERS)
 
 
 class _InvalidGroupName(ValueError):
