@@ -129,6 +129,22 @@ describe('Recommendations', () => {
 
       expect(fetchRecommendations).toHaveBeenCalledWith(true);
     });
+
+    it('says the model ran out of time when the AI pass timed out', async () => {
+      renderWithRecommendations({ data: buildRecommendationsResponse({ llm: 'timed_out' }) });
+
+      await userEvent.click(screen.getByRole('checkbox'));
+
+      expect(screen.getByText(/The AI model did not answer in time/)).toBeInTheDocument();
+    });
+
+    it('says no extra recommendations came back when the AI pass answered none', async () => {
+      renderWithRecommendations({ data: buildRecommendationsResponse({ llm: 'ok' }) });
+
+      await userEvent.click(screen.getByRole('checkbox'));
+
+      expect(screen.getByText(/no additional recommendations were generated/)).toBeInTheDocument();
+    });
   });
 
   describeScopeSelection({

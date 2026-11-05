@@ -256,11 +256,16 @@ const LlmEnhancedSection = ({
   </div>
 );
 
-const LlmHint = () => (
+const LLM_HINTS = {
+  empty: 'AI enhancement is enabled but no additional recommendations were generated.',
+  timedOut: 'The AI model did not answer in time, so only the rule-based recommendations are shown. Try again.',
+} as const;
+
+const LlmHint = ({ timedOut }: { readonly timedOut: boolean }) => (
   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-700">
     <div className="flex items-center gap-2">
       <StrokeIcon className="w-4 h-4" paths={INFO_CIRCLE_PATHS} />
-      AI enhancement is enabled but no additional recommendations were generated.
+      {timedOut ? LLM_HINTS.timedOut : LLM_HINTS.empty}
     </div>
   </div>
 );
@@ -355,7 +360,7 @@ const RecommendationsContent = ({
         />
       )}
 
-      {showLlmHint && <LlmHint />}
+      {showLlmHint && <LlmHint timedOut={data.llm === 'timed_out'} />}
       {showEmptyState && <EmptyState />}
     </>
   );
