@@ -8,7 +8,8 @@ the group answer carried every appearance twice (``brands`` plus
 at 49 MB for this data set (a 60-keyword group: 15 MB); now about 0.6 MB
 whatever the group size. A single keyword with eighteen 60,000-character Spanish
 answers (9 engines x 2 personas) was 2.1 MB (grows with answer length); the
-answer text is now cut at 12,000 characters (0.74 MB).
+answer text is now cut at 12,000 characters (0.74 MB). A scope answer reads
+the group's first ``SCOPE_KEYWORDS_CAP`` keywords (``keywords_truncated``).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords, volume_rows
 from testing.paging import follow_next_token
 from testing.report_scope_fixtures import load_scoped_handler, scoped_report
@@ -28,6 +30,8 @@ from testing.response_size import assert_within_page_budget
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GROUP_KEYWORDS = 200
+#: The keywords of the group a scope answer reads: the first SCOPE_KEYWORDS_CAP.
+_READ_KEYWORDS = SCOPE_KEYWORDS_CAP
 _PAGE_KEYWORDS = 3
 
 
@@ -60,9 +64,18 @@ def test_summary_reports_every_brand_when_the_brand_list_is_capped(brand_mention
     with _report(brand_mentions, group_rows, _GROUP_KEYWORDS) as report:
         aggregated = report.body({'group_id': VOLUME_GROUP_ID})['aggregated']
 
-    # 3 tracked brands + 7 brands of their own per keyword.
+    # 3 tracked brands + 7 brands of their own per keyword read.
     assert (aggregated['total_unique_brands'], len(aggregated['brands']), aggregated['brands_truncated']) == (
-        3 + 7 * _GROUP_KEYWORDS, 100, True,
+        3 + 7 * _READ_KEYWORDS, 100, True,
+    )
+
+
+def test_summary_reads_the_first_scope_keywords_of_a_large_group(brand_mentions, group_rows):
+    with _report(brand_mentions, group_rows, _GROUP_KEYWORDS) as report:
+        body = report.body({'group_id': VOLUME_GROUP_ID})
+
+    assert (body['keywords_analyzed'], body['keywords_truncated'], body['scope']['keyword_count']) == (
+        _READ_KEYWORDS, True, _GROUP_KEYWORDS,
     )
 
 
@@ -71,7 +84,7 @@ def test_summary_counts_every_appearance_of_a_capped_preview(brand_mentions, gro
         brand = report.body({'group_id': VOLUME_GROUP_ID})['aggregated']['brands'][0]
 
     assert (brand['name'], brand['appearance_count'], len(brand['appearances'])) == (
-        'Hotel Coruña', _GROUP_KEYWORDS * 9 * 2, 5,
+        'Hotel Coruña', _READ_KEYWORDS * 9 * 2, 5,
     )
 
 
@@ -105,7 +118,7 @@ def test_following_next_token_returns_every_appearance_once_in_order_for_a_large
         total = report.body(params)['total_appearances']
 
     rows = [row for page in pages for row in page]
-    assert len(rows) == total == _GROUP_KEYWORDS * 9 * 2 * 10
+    assert len(rows) == total == _READ_KEYWORDS * 9 * 2 * 10
     assert len({json.dumps(row, sort_keys=True, default=str) for row in rows}) == total
 
 

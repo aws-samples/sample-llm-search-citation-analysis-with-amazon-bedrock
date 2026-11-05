@@ -6,16 +6,19 @@ The scope behaviour shared with the other report routes lives in
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import pytest
 
+from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords
 from testing.report_scope_fixtures import OLD_TS, RUN_TS, load_scoped_handler, scoped_report
 from testing.report_scope_fixtures import brand as _brand
 from testing.report_scope_fixtures import result as _result
 from testing.search_results_fixtures import key_parts
+from testing.window_budget_fixtures import spent_request_budget
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -127,3 +130,49 @@ def test_summary_brands_name_their_appearance_count(brand_mentions):
         brand = report.body({'keyword': 'hotel coruna spa'})['aggregated']['brands'][0]
 
     assert (brand['appearance_count'], brand['provider_ranks']) == (3, {'a': 1, 'b': 1, 'c': 1})
+
+
+class TestTimeBudget:
+    """A spent budget answers 200 with what was read and says it is partial."""
+
+    @pytest.fixture
+    def spent(self, coruna):
+        with spent_request_budget():
+            yield coruna
+
+    def test_group_summary_answers_200_without_the_unread_keywords(self, spent):
+        response = spent.call({'group_id': 'coruna'})
+        body = json.loads(response['body'])
+
+        assert (response['statusCode'], body['keywords_analyzed'], body['keywords_truncated'], body['truncated']) == (200, 0, True, True)
+
+    def test_group_appearances_answer_200_flagged_partial(self, spent):
+        response = spent.call({'group_id': 'coruna', 'view': 'appearances'})
+        body = json.loads(response['body'])
+
+        assert (response['statusCode'], body['appearances'], body['keywords_truncated'], body['truncated']) == (200, [], True, True)
+
+    def test_single_keyword_summary_lists_only_the_latest_run_when_the_budget_is_spent(self, spent):
+        body = spent.body({'keyword': 'hotel coruna spa'})
+
+        assert (body['available_runs'], body['truncated']) == ([RUN_TS], True)
+
+    def test_group_summary_is_whole_within_the_budget(self, coruna):
+        body = coruna.body({'group_id': 'coruna'})
+
+        assert (body['keywords_truncated'], body['truncated']) == (False, False)
+
+    def test_group_summary_reads_at_most_the_scope_keyword_cap(self, brand_mentions):
+        keywords = volume_keywords(SCOPE_KEYWORDS_CAP + 1)
+        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows={}, active=keywords) as report:
+            body = report.body({'group_id': VOLUME_GROUP_ID})
+
+        assert (body['keywords_analyzed'], body['keywords_truncated']) == (SCOPE_KEYWORDS_CAP, True)
+
+    def test_group_appearances_read_at_most_the_scope_keyword_cap(self, brand_mentions):
+        keywords = volume_keywords(SCOPE_KEYWORDS_CAP + 1)
+        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows={}, active=keywords) as report:
+            report.call({'group_id': VOLUME_GROUP_ID, 'view': 'appearances'})
+            partitions = {key_parts(call.kwargs['KeyConditionExpression'])[0] for call in report.tables['search'].query.call_args_list}
+
+        assert len(partitions) == SCOPE_KEYWORDS_CAP
