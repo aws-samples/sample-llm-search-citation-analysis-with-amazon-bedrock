@@ -82,7 +82,11 @@ export async function fetchContentStatus(
 ): Promise<ContentStatus> {
   return decodeContentStatus(await apiGet<unknown>(
     `/content-studio/status/${encodeURIComponent(id)}`,
-    { signal }
+    // The status poll counts consecutive failures and retries on its next tick.
+    {
+      signal,
+      retry: false,
+    }
   ), id);
 }
 
