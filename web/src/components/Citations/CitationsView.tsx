@@ -10,6 +10,7 @@ import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
+import { CitationsAsOf } from './CitationsAsOf';
 import { PaginationHeader } from '../ui/PaginationHeader';
 import { Spinner } from '../ui/Spinner';
 import { pageWindow } from '../ui/pagination';
@@ -216,6 +217,8 @@ export const CitationsView = ({
             This scope has more citations than one request can read: the totals and the list cover part of it. Narrow the scope to a keyword group or market for complete figures.
           </output>
         )}
+
+        <CitationsAsOf totals={view.totals} />
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
