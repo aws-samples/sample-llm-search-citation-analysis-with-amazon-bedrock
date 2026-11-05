@@ -46,6 +46,14 @@ _SCOPE_ID_FIELDS = {'groups': 'group_ids', 'keywords': 'keyword_ids'}
 # a literal in each caller.
 ACTIVE_KEYWORD_STATUS = 'active'
 
+#: The only attributes scope resolution's callers read from a Keywords row:
+#: the id, the text, the group memberships and the market. StatusIndex
+#: projects every attribute, so the projection does not lower the read
+#: capacity, but it cuts what DynamoDB sends and boto3 deserializes (notes,
+#: timestamps, sources...) on every scoped request.
+ACTIVE_KEYWORD_PROJECTION = '#id, #kw, group_ids, market_id'
+_ACTIVE_KEYWORD_NAMES = {'#id': 'id', '#kw': 'keyword'}
+
 
 def open_keyword_tables(dynamodb: Any) -> tuple[Any, Any | None]:
     """The Keywords table and the KeywordGroups table, ``None`` for the latter when it is not configured.
@@ -189,11 +197,18 @@ def load_existing_group_ids(groups_table: Any, group_ids: list[str]) -> set[str]
 
 
 def query_active_keywords(keywords_table: Any) -> list[dict[str, Any]]:
-    """Return every active keyword item, following StatusIndex pagination."""
+    """Every active keyword, following StatusIndex pagination: ``id``, ``keyword``, ``group_ids``, ``market_id`` only.
+
+    A caller that needs another attribute reads the row by id; adding it to
+    ``ACTIVE_KEYWORD_PROJECTION`` makes every scoped request pay for it.
+    """
     return collect_all_items(
         keywords_table.query,
         IndexName='StatusIndex',
         KeyConditionExpression=Key('status').eq(ACTIVE_KEYWORD_STATUS),
+        ProjectionExpression=ACTIVE_KEYWORD_PROJECTION,
+        # A fresh dict: boto3 adds the key condition's placeholders to the one it is given.
+        ExpressionAttributeNames=dict(_ACTIVE_KEYWORD_NAMES),
     )
 
 

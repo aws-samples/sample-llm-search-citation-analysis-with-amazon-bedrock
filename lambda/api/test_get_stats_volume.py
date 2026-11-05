@@ -131,3 +131,18 @@ class TestMarketTotals:
             1 for call in tables['search_results_table'].query.call_args_list if call.kwargs.get('Select') == 'COUNT'
         )
         assert count_pages < 2_000
+
+    def test_reads_the_newest_run_of_only_the_keywords_the_time_budget_reaches(self, stats_module):
+        tables = _market_tenant()
+
+        _get(stats_module, tables, {'market_id': 'cl-es'})
+
+        newest_run_reads = sum(
+            1 for call in tables['search_results_table'].query.call_args_list if call.kwargs.get('Limit') == 1
+        )
+        assert newest_run_reads < len(_KEYWORDS)
+
+    def test_flags_a_last_execution_the_time_budget_cut_short_as_approximate(self, stats_module):
+        status, body = parse_response(_get(stats_module, _market_tenant(), {'market_id': 'cl-es'}))
+
+        assert (status, body['last_execution_approximate']) == (200, True)
