@@ -44,6 +44,13 @@ search_handler = handler_fixture(
     os.path.dirname(os.path.abspath(__file__)), 'handler.py', 'search_handler_markets', env=SEARCH_HANDLER_ENV,
 )
 
+
+@pytest.fixture(autouse=True)
+def _nothing_stored_yet(search_handler):
+    """No earlier attempt of the run stored an answer: the resume read is stubbed."""
+    with patch.object(search_handler, 'stored_slim_results', return_value={}):
+        yield
+
 _KEYWORD = 'is altiplano a good airline'
 _TIMESTAMP = '2026-10-08T10:00:00Z'
 _RAW_KEY = 'raw-responses/2026-10-08/is-altiplano-a-good-airline/openai/{prompt}/2026-10-08T10-00-00Z.json'

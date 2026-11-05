@@ -23,6 +23,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # Unique module name: see test_handler_prompts.py for why `import handler` is contested.
 search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=SEARCH_HANDLER_ENV)
 
+
+@pytest.fixture(autouse=True)
+def _nothing_stored_yet(search_handler):
+    """No earlier attempt of the run stored an answer: the resume read is stubbed."""
+    with patch.object(search_handler, 'stored_slim_results', return_value={}):
+        yield
+
 _BRAVE_RESULT = {
     'provider': 'brave', 'provider_type': 'search', 'response': '', 'status': 'success',
     'citations': ['https://hotel.es/riazor'], 'search_results': [{'url': 'https://hotel.es/riazor'}],
