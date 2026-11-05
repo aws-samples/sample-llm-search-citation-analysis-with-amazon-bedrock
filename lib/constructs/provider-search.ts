@@ -346,6 +346,18 @@ export class ProviderSearch extends Construct {
       jitterStrategy: stepfunctions.JitterType.FULL,
       maxAttempts: PROVIDER_SLOT_RETRY_ATTEMPTS,
     });
+    // The invocation ran out of its 900 s before every query prompt was
+    // answered (each prompt's answers are stored as it finishes, and a retry
+    // skips stored prompts, so nothing is asked twice). Re-invoke at once to
+    // continue; one invocation always answers at least one prompt, so ten
+    // attempts cover the ten-prompt cap (MAX_QUERY_PROMPTS_PER_RUN). Must come
+    // before the States.TaskFailed retrier, which would match it too.
+    invoke.addRetry({
+      errors: ['SearchTimeBudgetSpentError'],
+      interval: cdk.Duration.seconds(1),
+      backoffRate: 1,
+      maxAttempts: 10,
+    });
     // Lambda-level failures only: the clients retry their own HTTP errors.
     invoke.addRetry({
       errors: ['States.TaskFailed', 'States.Timeout'],

@@ -1246,7 +1246,7 @@ export function pythonRoleDefaultTierEnv(): Record<string, string> {
   );
 }
 
-/** `RESEARCH_STALE_AFTER_SECONDS` of `lambda/shared/research_jobs.py`, evaluated (`35 * 60` → 2100). */
+/** `RESEARCH_STALE_AFTER_SECONDS` of `lambda/shared/research_jobs.py`, evaluated (`65 * 60` → 3900). */
 export function pythonResearchStaleAfterSeconds(): number {
   const expression = capturedPythonSource(
     'research_jobs.py',
@@ -1575,6 +1575,7 @@ export interface ReportInsightsSnapshot {
     timeToLive: unknown;
   };
   workerTimeoutSeconds: number;
+  workerMemorySize: number;
   workerLayerCount: number;
   workerEnvironmentNames: string[];
   workerTableActions: Record<string, string[]>;
@@ -1600,6 +1601,7 @@ export function extractReportInsightsSnapshot(template: Template): ReportInsight
       timeToLive: extractTableProperty(template, tableName, 'TimeToLiveSpecification'),
     },
     workerTimeoutSeconds: extractFunctionTimeout(template, worker),
+    workerMemorySize: extractFunctionMemorySize(template, worker),
     workerLayerCount: extractLambdaLayerRefs(template, worker).length,
     workerEnvironmentNames: Object.keys(extractLambdaEnvVars(template, worker)).sort((left, right) => left.localeCompare(right)),
     workerTableActions: functionTableActions(template, worker),

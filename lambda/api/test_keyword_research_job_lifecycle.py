@@ -38,7 +38,7 @@ from testing.keyword_research_fixtures import (
 _mod = load_keyword_research('keyword_research_lifecycle_under_test')
 
 # Well above the 30-minute state machine timeout.
-STATE_MACHINE_TIMEOUT_SECONDS = 30 * 60
+STATE_MACHINE_TIMEOUT_SECONDS = 60 * 60
 STALE_TIMESTAMP = '2020-01-01T00:00:00Z'
 
 

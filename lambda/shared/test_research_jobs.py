@@ -92,8 +92,8 @@ class TestTtl:
         assert ttl_epoch(now=1_000) == 1_000 + RESEARCH_TTL_SECONDS
         assert RESEARCH_TTL_SECONDS == 90 * 24 * 3600
 
-    def test_stale_threshold_exceeds_the_thirty_minute_state_machine_timeout(self):
-        assert RESEARCH_STALE_AFTER_SECONDS > 30 * 60
+    def test_stale_threshold_exceeds_the_sixty_minute_state_machine_timeout(self):
+        assert RESEARCH_STALE_AFTER_SECONDS > 60 * 60
 
 
 class TestStepIds:

@@ -81,22 +81,37 @@ const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
  * Duration/Errors metrics — instead of only as an opaque gateway 504.
  *
  * One deliberate exception is documented at its definition:
- *   - `selfReflectionFunction` persists its result as the last step of a
- *     synchronous Bedrock call, so a 504 today is still recoverable from the
- *     cache it writes. Capping it at 29s would turn a slow request into
- *     permanent loss.
+ *   - `selfReflectionFunction` also runs its own Bedrock job when it invokes
+ *     itself asynchronously (POST answers 202 at once), and that job needs
+ *     longer than 29 s.
+ *
+ * Inside the 29 s, every API request carries a deadline
+ * (`lambda/shared/request_deadline.py`, started by `@api_handler`) that its
+ * reads, fan-outs and model calls stop at, answering partial data that says
+ * so instead of running into the 504.
  *
  * Functions invoked by streams or Step Functions are not subject to this.
  */
 const API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS = 29;
 
 /**
- * Budget of one keyword research execution. The API's reader-side stale
- * sweep (`shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS`, 35 minutes)
- * must stay ABOVE this so a live job can never be marked failed and then
- * flip back when it finishes.
+ * Lambda memory that buys one full vCPU (CPU is allocated in proportion to
+ * memory). API routers that deserialize thousands of DynamoDB rows per
+ * request are CPU-bound, not memory-bound: at 512 MB (~0.29 vCPU) an
+ * unscoped /citations read used 224 MB and still ran out of time. Pay-per-use
+ * cost is about flat for CPU-bound work, which finishes proportionally sooner.
  */
-const RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES = 30;
+const ONE_VCPU_MEMORY_MB = 1769;
+
+/**
+ * Budget of one keyword research execution. The API's reader-side stale
+ * sweep (`shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS`, 65 minutes)
+ * must stay ABOVE this so a live job can never be marked failed and then
+ * flip back when it finishes. 60 minutes: an agent job runs up to 3 rounds of
+ * plan, steps (two 120 s HTTP calls plus backoff) and evaluate, ~16 minutes
+ * worst case each, which ran into the old 30-minute limit.
+ */
+const RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES = 60;
 
 /**
  * Parallel provider steps per research job. Each step is one web-search LLM
@@ -115,6 +130,14 @@ const WORKFLOW_STATE_MACHINE_NAME = 'CitationAnalysis-Workflow';
  */
 const WORKFLOW_RUNS_PREFIX = 'runs/';
 const WORKFLOW_RUNS_RETENTION_DAYS = 30;
+
+/**
+ * Key prefix of the citation rollup in the keywords bucket
+ * (`shared/citation_rollup.py`): per-scope manifests and pages that
+ * GET /api/citations serves without scanning the Citations table. Written by
+ * GenerateSummary after each run and on request by CitationsContent.
+ */
+const CITATION_ROLLUP_PREFIX = 'citation-rollups/';
 
 /**
  * Keywords-bucket prefix for API responses too large for Lambda's 6 MiB cap
@@ -1138,8 +1161,12 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-ParseKeywords',
       code: lambdaSourceCode('parse-keywords'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
+      // Resolves the run's scope from every active keyword (projected
+      // StatusIndex pages): ~1 MB per 5,000 keywords. 30 s / 256 MB (0.14
+      // vCPU) failed the whole run at tens of thousands of keywords; it sits
+      // behind Step Functions, not API Gateway, so it may take longer.
+      timeout: cdk.Duration.seconds(120),
+      memorySize: 1024,
       description: 'Parse keywords from S3 or direct input',
       environment: {
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
@@ -1285,7 +1312,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         SCREENSHOTS_BUCKET: screenshotsBucket.bucketName,
         BROWSER_ID: crawlerBrowser.attrBrowserId, // Pre-created browser with Web Bot Auth
-        BROWSER_SESSION_TIMEOUT_SECONDS: '330',
+        // Below the 300 s Lambda timeout, so a crawl the Lambda is killed in
+        // the middle of cannot leave its AgentCore session running (the handler
+        // also caps it at its remaining time).
+        BROWSER_SESSION_TIMEOUT_SECONDS: '280',
         CRAWL_FRESHNESS_DAYS: '30',
         CRAWL_BLOCKED_FRESHNESS_DAYS: '3',
         CRAWL_CACHE_INDEX_NAME: 'CacheScopeIndex',
@@ -1303,22 +1333,43 @@ export class CitationAnalysisStack extends cdk.Stack {
       // its input, ~1–3 KB each) and builds the full report in memory: a
       // few-thousand-keyword run is tens of MB of JSON to parse and re-serialize.
       // 256 MB / 60 s was sized for the old inline list of ~30 results.
-      timeout: cdk.Duration.seconds(300),
-      memorySize: 1024,
-      description: 'Generate execution summary and statistics',
+      // It also builds the citation rollup (BuildCitationRollup, and the async
+      // rebuild /api/citations requests): one projected parallel scan of
+      // Citations measured at 74 s CPU and 1.1 GB for 700k rows, hence 3008 MB
+      // (~1.7 vCPU) and the 900 s ceiling; the builder stops 30 s before it.
+      timeout: cdk.Duration.seconds(900),
+      memorySize: 3008,
+      description: 'Generate execution summary and statistics; build the citation rollup',
+      environment: {
+        CITATION_ROLLUP_BUCKET: keywordsBucket.bucketName,
+        DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+      },
     });
 
     // Grant GenerateSummary Lambda write access to keywords bucket (for storing
     // summaries) and read access to the ProcessKeywords ResultWriter output.
     keywordsBucket.grantWrite(generateSummaryFunction);
     keywordsBucket.grantRead(generateSummaryFunction, `${WORKFLOW_RUNS_PREFIX}*`);
+    // The citation rollup: read every Citations row, the active keywords and
+    // the brand config; write, list and prune builds under citation-rollups/.
+    citationsTable.grantReadData(generateSummaryFunction);
+    keywordsTable.grantReadData(generateSummaryFunction);
+    brandConfigTable.grantReadData(generateSummaryFunction);
+    keywordsBucket.grantRead(generateSummaryFunction, `${CITATION_ROLLUP_PREFIX}*`);
+    keywordsBucket.grantDelete(generateSummaryFunction, `${CITATION_ROLLUP_PREFIX}*`);
 
     const kpiAlertsFunction = workerFunction(this, 'KpiAlerts', {
       functionName: 'CitationAnalysis-KpiAlerts',
       code: lambdaSourceCode('kpi-alerts'),
       layers: [sharedLayer],
+      // Deserializes one run's answers for every keyword of every covered
+      // group (hundreds of thousands of rows at 5,000 keywords x personas):
+      // CPU-bound, so 1 vCPU. It also stops starting groups 30 s before the
+      // timeout and lists the rest instead of timing out with nothing written.
       timeout: cdk.Duration.seconds(300),
-      memorySize: 512,
+      memorySize: 1769,
       description: 'Record complete KPI snapshots and evaluate post-run alerts',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1355,8 +1406,13 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-ReportInsights',
       code: lambdaSourceCode('report-insights'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(120),
-      memorySize: 512,
+      // One group per invocation (the GenerateInsights Map): its history
+      // window read (CPU-bound deserialization, row cap sized by memory) stops
+      // 75 s before the timeout, leaving the Bedrock call and the write their
+      // time. 120 s / 512 MB ran every group in one call and lost them all on
+      // a timeout.
+      timeout: cdk.Duration.seconds(300),
+      memorySize: 1769,
       description: 'Write, validate and store the narrative of each fully covered keyword group',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1539,16 +1595,32 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // 11. Write each fully covered group's narrative from KpiAlerts' result
-    // (`snapshot_group_ids`, `run_timestamp`); a failed KpiAlerts step names
-    // no group, so nothing is written. Like KpiAlerts, a failure here keeps
-    // the report.
-    const generateInsightsTask = new tasks.LambdaInvoke(this, 'GenerateInsights', {
+    // (`snapshot_scopes`, `run_timestamp`): one ReportInsights invocation per
+    // (group, market), four at a time, so every group gets the whole Lambda
+    // timeout for its history read and Bedrock call and one slow group cannot
+    // lose the others. A failed KpiAlerts step names no group, so nothing is
+    // written. Like KpiAlerts, a failure here keeps the report.
+    const generateGroupInsightTask = new tasks.LambdaInvoke(this, 'GenerateGroupInsight', {
       lambdaFunction: reportInsightsFunction,
-      payload: stepfunctions.TaskInput.fromObject({ 'alerts.$': '$.alerts' }),
       payloadResponseOnly: true,
-      resultPath: '$.narratives',
       retryOnServiceExceptions: true,
     });
+    generateGroupInsightTask.addCatch(new stepfunctions.Pass(this, 'GenerateGroupInsightFailed', {
+      result: stepfunctions.Result.fromObject({ status: 'failed' }),
+    }), { errors: ['States.ALL'] });
+
+    const generateInsightsMap = new stepfunctions.Map(this, 'GenerateInsights', {
+      itemsPath: '$.alerts.snapshot_scopes',
+      itemSelector: {
+        'group_id.$': '$$.Map.Item.Value.group_id',
+        'market_id.$': '$$.Map.Item.Value.market_id',
+        'run_timestamp.$': '$.alerts.run_timestamp',
+      },
+      maxConcurrency: 4,
+      resultSelector: { status: 'completed', 'groups.$': 'States.ArrayLength($)' },
+      resultPath: '$.narratives',
+    });
+    generateInsightsMap.itemProcessor(generateGroupInsightTask);
 
     const generateInsightsFailed = new stepfunctions.Pass(this, 'GenerateInsightsFailed', {
       result: stepfunctions.Result.fromObject({
@@ -1558,22 +1630,56 @@ export class CitationAnalysisStack extends cdk.Stack {
       resultPath: '$.narratives',
     });
 
-    generateInsightsTask.addCatch(generateInsightsFailed, {
+    generateInsightsMap.addCatch(generateInsightsFailed, {
       errors: ['States.ALL'],
       resultPath: stepfunctions.JsonPath.DISCARD,
     });
 
-    // 12. Define the complete workflow. Both alert branches retain every
+    const noInsightsToGenerate = new stepfunctions.Pass(this, 'NoInsightsToGenerate', {
+      result: stepfunctions.Result.fromObject({ status: 'skipped', reason: 'no_complete_groups', groups: 0 }),
+      resultPath: '$.narratives',
+    });
+    const insightsChoice = new stepfunctions.Choice(this, 'HasCompleteGroups')
+      .when(stepfunctions.Condition.isPresent('$.alerts.snapshot_scopes'), generateInsightsMap)
+      .otherwise(noInsightsToGenerate);
+
+    // 12. Rebuild the citation rollup GET /api/citations serves (per-scope
+    // totals and pages, shared/citation_rollup.py) from the Citations rows
+    // this run wrote. Last, after KpiAlerts read `$` as its report. A failed
+    // build keeps the report and the previous rollup (the API reads live and
+    // asks for a rebuild when a scope is stale).
+    const buildCitationRollupTask = new tasks.LambdaInvoke(this, 'BuildCitationRollup', {
+      lambdaFunction: generateSummaryFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'build_citation_rollup',
+        'execution_id.$': '$$.Execution.Name',
+      }),
+      payloadResponseOnly: true,
+      resultPath: '$.citation_rollup',
+      retryOnServiceExceptions: true,
+    });
+    buildCitationRollupTask.addCatch(new stepfunctions.Pass(this, 'BuildCitationRollupFailed', {
+      result: stepfunctions.Result.fromObject({
+        status: 'failed',
+        message: 'Citation rollup build failed; the analysis report is preserved.',
+      }),
+      resultPath: '$.citation_rollup',
+    }), { errors: ['States.ALL'], resultPath: stepfunctions.JsonPath.DISCARD });
+
+    // 13. Define the complete workflow. Both alert branches retain every
     // GenerateSummary field and add only the top-level alerts block; the
-    // insights step adds only `narratives`.
+    // insights step adds only `narratives`, the rollup step `citation_rollup`.
     const definition = parseKeywordsTask
       .next(processKeywordsMap)
       .next(generateSummaryTask)
       .next(kpiAlertsTask);
-    kpiAlertsFailed.next(generateInsightsTask);
-    kpiAlertsTask.next(generateInsightsTask);
+    kpiAlertsFailed.next(insightsChoice);
+    kpiAlertsTask.next(insightsChoice);
+    generateInsightsMap.next(buildCitationRollupTask);
+    generateInsightsFailed.next(buildCitationRollupTask);
+    noInsightsToGenerate.next(buildCitationRollupTask);
 
-    // 13. Create the State Machine (log group and logging rationale at
+    // 14. Create the State Machine (log group and logging rationale at
     // `loggedStateMachine`).
     const stateMachine = loggedStateMachine(this, 'CitationAnalysisStateMachine', {
       logGroupId: 'StateMachineLogGroup',
@@ -1854,9 +1960,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       // Every route here is read-only bar a millisecond-scale put_item on
       // POST /recommendations/{id}/status, and recommendations are regenerated
       // per call rather than persisted — so nothing is lost by capping at the
-      // gateway ceiling. The slow routes (/reports/competitor, /stats) already
-      // 504 at 29s; the extra 31s only ever burned compute.
-      memorySize: 512,
+      // gateway ceiling. Sized for CPU (see ONE_VCPU_MEMORY_MB): the KPI views
+      // deserialize tens of thousands of answer rows per request, and the
+      // window row cap (shared/scoped_reports.py) scales with this size.
+      memorySize: ONE_VCPU_MEMORY_MB,
       description: 'API: Consolidated stats, visibility, insights, gaps, recommendations, and trends',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1889,9 +1996,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-crawled-content.py',
         'browse-raw-responses.py',
       ],
-      // 7-day CloudWatch REPORT peak on 2026-09-21 was 153 MB (60% of 256 MB),
-      // the highest ratio of any function — doubled for headroom.
-      memorySize: 512,
+      // Sized for CPU, not memory (see ONE_VCPU_MEMORY_MB): at 512 MB an
+      // unscoped /citations Scan of 71k rows used 224 MB and still timed out
+      // at 29 s on CPU (a customer log, 2026-11-04).
+      memorySize: ONE_VCPU_MEMORY_MB,
       description: 'API: Consolidated citations, URL breakdown, searches, crawled content, and raw responses',
       environment: {
         // Audit #12 canonical names.
@@ -1903,14 +2011,23 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
         SCREENSHOTS_BUCKET: screenshotsBucket.bucketName,
+        // /citations serves scope pages from the rollup GenerateSummary builds
+        // and asks that function for a rebuild when a scope is stale.
+        CITATION_ROLLUP_BUCKET: keywordsBucket.bucketName,
+        CITATION_ROLLUP_FUNCTION_NAME: generateSummaryFunction.functionName,
       },
     });
+    keywordsBucket.grantRead(citationsContentFunction, `${CITATION_ROLLUP_PREFIX}*`);
+    keywordsBucket.grantPut(citationsContentFunction, `${CITATION_ROLLUP_PREFIX}rebuild-requested.json`);
+    generateSummaryFunction.grantInvoke(citationsContentFunction);
 
 
     const getBrandMentionsFunction = apiFunction(this, 'GetBrandMentions', sharedLayer, {
       functionName: 'CitationAnalysis-API-GetBrandMentions',
       handlerFiles: ['get-brand-mentions.py'],
-      memorySize: 256,
+      // CPU-bound: up to 100 keywords' latest runs deserialized per request
+      // (see ONE_VCPU_MEMORY_MB); 256 MB (0.14 vCPU) took 5.6 s for 16 keywords.
+      memorySize: ONE_VCPU_MEMORY_MB,
       description: 'API: Get brand mentions from search results',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1945,8 +2062,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       ],
       // Keyword research runs in its own state machine since 2.2.0; this
       // function only starts executions and reads rows, so the gateway
-      // ceiling applies like any other API function.
-      memorySize: 256,
+      // ceiling applies like any other API function. 1024 MB: group deletes,
+      // membership edits and promotions write 10 rows at a time, CPU-bound at
+      // 256 MB (0.14 vCPU, ~5 s cold starts measured live).
+      memorySize: 1024,
       description: 'API: Consolidated keyword get/create/update/delete, keyword groups and keyword research',
       environment: {
         // Audit #12 canonical names.
@@ -1974,7 +2093,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-custom-reports.py',
         'manage-markets.py',
       ],
-      memorySize: 256,
+      // Provider and model checks, market proposals and schedule pages run
+      // under the request deadline; 1024 MB halves their CPU-bound parts and
+      // the 2.8 s cold starts measured live at 256 MB.
+      memorySize: 1024,
       description: 'API: Consolidated query prompts, schedules, providers, KPI alerts, custom reports and markets',
       environment: {
         // Audit #12 canonical names.
@@ -2009,7 +2131,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         'trigger-keyword-analysis.py',
         'get-execution-status.py',
       ],
-      memorySize: 256,
+      // Run triggers resolve their scope from every active keyword.
+      memorySize: 1024,
       description: 'API: Consolidated trigger analysis and execution status',
       environment: {
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
@@ -2156,19 +2279,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       handlerFiles: ['self-reflection.py'],
       // Deliberately ABOVE the 29s gateway ceiling — do not "fix" this to 29.
       //
-      // `post_self_reflection` calls Bedrock synchronously and then persists
-      // the result as its very last step, and that row is what the 24h
-      // `check_cache` reads. So a slow request today degrades gracefully: the
-      // client sees a 504 at 29s, the function runs on, writes the row, and
-      // the next request returns it from cache immediately.
-      //
-      // Capping at 29s would put the SIGKILL before that write every time:
-      // Bedrock billed, nothing stored, and because only a completed run
-      // populates the cache, a slow keyword/brand pair would be broken
-      // permanently rather than intermittently (AUDIT-2026-08-19 §2.9).
-      //
-      // Making this async like Content Studio is the real fix; until then the
-      // 60s is load-bearing.
+      // POST answers at once (200 from cache, or 202 with a pending job row)
+      // and invokes this function asynchronously for the Bedrock job, which
+      // runs under a 56 s budget, stores the result and clears the job row.
+      // That background invocation has no gateway in front of it and needs
+      // the 60 s; the request path itself never waits on Bedrock.
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
       description: 'API: LLM self-reflection analysis for brand rankings',
@@ -2181,11 +2296,9 @@ export class CitationAnalysisStack extends cdk.Stack {
         // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
         // not spread, so ModelRole.ANALYSIS falls through to its hardcoded
         // BALANCED default: Sonnet 5.5 with medium adaptive-thinking effort.
-        // That is the root cause of the latency this function's 60s
-        // timeout accommodates. Moving it to Haiku is a product decision
-        // (analysis quality and cost) — do it by spreading `bedrockTierEnv`
-        // and setting BEDROCK_TIER_ANALYSIS, not by adding an env var nothing
-        // reads.
+        // Moving it to Haiku is a product decision (analysis quality and
+        // cost) — do it by spreading `bedrockTierEnv` and setting
+        // BEDROCK_TIER_ANALYSIS, not by adding an env var nothing reads.
       },
     });
     searchResultsTable.grantReadData(selfReflectionFunction);
@@ -2194,6 +2307,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     selfReflectionTable.grantReadWriteData(selfReflectionFunction);
     selfReflectionFunction.addToRolePolicy(claudeInvokeModelStatement(this));
     allowSavedBedrockModels(selfReflectionFunction, providerConfigTable);
+    // POST /self-reflection runs its Bedrock job by invoking itself
+    // asynchronously. Named by ARN, not `grantInvoke(selfReflectionFunction)`,
+    // which would make the function's role policy depend on the function.
+    allow(selfReflectionFunction, ['lambda:InvokeFunction'], [cdk.Stack.of(this).formatArn({
+      service: 'lambda',
+      resource: 'function',
+      resourceName: 'CitationAnalysis-API-SelfReflection',
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    })]);
 
     brandConfigTable.grantReadWriteData(manageBrandConfigFunction);
     
