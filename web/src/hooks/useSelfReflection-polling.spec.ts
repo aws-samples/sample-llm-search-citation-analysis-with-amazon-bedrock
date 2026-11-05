@@ -15,14 +15,14 @@ import {
   pendingSelfReflection,
   runningSelfReflection,
 } from './useSelfReflection-fixtures';
-import { createMockJsonResponse } from '../test/fetchResponses';
 import {
   advanceFakeTime, runEachTestWithFakeTimers
 } from '../test/fakeTime';
-
-vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
+
+// Hoisted above the imports: the hook reaches the API through the mocked infrastructure.
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 /** Renders the hook and triggers the reflection the fixtures describe, answered by `responses` in order. */
 async function renderTriggered(...responses: unknown[]) {
