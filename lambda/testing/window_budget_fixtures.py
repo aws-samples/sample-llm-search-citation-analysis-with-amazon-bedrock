@@ -42,3 +42,10 @@ def window_read_budget(make: Callable[[], Deadline]) -> Generator[None]:
     """Every window read of ``shared.scoped_reports`` inside the block stops at ``make()``'s deadline."""
     with patch('shared.scoped_reports.window_read_deadline', side_effect=make):
         yield
+
+
+@contextmanager
+def one_scope_worker() -> Generator[None]:
+    """Scoped fan-outs inside the block read one keyword at a time, in order, so a fake clock's checks are deterministic."""
+    with patch('shared.scope_params.SCOPE_MAX_WORKERS', 1):
+        yield

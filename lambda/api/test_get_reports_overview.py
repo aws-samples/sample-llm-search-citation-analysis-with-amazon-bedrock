@@ -36,6 +36,7 @@ CHANGE = {'keywords_compared': 3, 'deltas': {'visibility_score': 0.5}, 'trends':
 
 DEFAULT_FAKE_TRENDS = {
     'scope': {'kind': 'all', 'label': 'All keywords', 'keyword_count': 5},
+    'keywords_truncated': False,
     'keywords_analyzed': 5,
     'keywords_with_data': 5,
     'citations_configured': False,

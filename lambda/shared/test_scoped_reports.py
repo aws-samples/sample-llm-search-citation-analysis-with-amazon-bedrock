@@ -12,7 +12,7 @@ import inspect
 import json
 from collections.abc import Iterator
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -40,7 +40,7 @@ from shared.scoped_reports import (
 )
 from testing.assertions import present
 from testing.search_results_fixtures import PartitionReadFailure, key_parts
-from testing.window_budget_fixtures import expired_deadline, ticking_deadline, window_read_budget
+from testing.window_budget_fixtures import expired_deadline, one_scope_worker, ticking_deadline, window_read_budget
 from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
 _EVENT: dict[str, Any] = {'httpMethod': 'GET', 'path': '/api/x', 'headers': {}}
@@ -261,10 +261,6 @@ class TestLoadWindowAnswers:
         assert (window.answers, window.truncated_before) == ({}, None)
 
 
-#: One worker, so the keywords of a window are read in order and a fake clock's checks are deterministic.
-_ONE_WORKER = patch('shared.scope_params.SCOPE_MAX_WORKERS', 1)
-
-
 class TestLoadWindowAnswersTimeBudget:
     """The window read stops at its deadline: newest runs kept, unread keywords named."""
 
@@ -277,13 +273,13 @@ class TestLoadWindowAnswersTimeBudget:
 
     def test_skips_a_keyword_of_several_the_budget_stops_mid_read(self) -> None:
         # Checks: the short keyword's start (one page), the long keyword's start, after its first page.
-        with _ONE_WORKER, window_read_budget(lambda: ticking_deadline(3)):
+        with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
             window = load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
 
         assert (list(window.answers), window.skipped) == ([_SHORT], (_LONG,))
 
     def test_keeps_the_whole_window_of_the_keywords_read_before_the_budget_ran_out(self) -> None:
-        with _ONE_WORKER, window_read_budget(lambda: ticking_deadline(3)):
+        with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
             window = load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
 
         assert (len(window.answers[_SHORT]), window.truncated_before) == (3, None)
@@ -315,7 +311,7 @@ class TestLoadWindowAnswersTimeBudget:
         assert window.read_keywords([_LONG, _SHORT]) == [_SHORT]
 
     def test_window_histories_cover_only_the_keywords_read(self) -> None:
-        with _ONE_WORKER, window_read_budget(lambda: ticking_deadline(3)):
+        with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
             histories, _truncated_before = load_window_histories(
                 paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START, [],
             )
@@ -348,7 +344,7 @@ class TestReadScopeKeywords:
         # Checks: the start of 'a' passes, the start of 'b' finds the budget spent.
         activate_deadline(ticking_deadline(2))
 
-        with _ONE_WORKER:
+        with one_scope_worker():
             read = read_scope_keywords(['a', 'b'], str.upper, lambda _keyword: '')
 
         assert (read.keywords, read.skipped) == (['a'], ('b',))
