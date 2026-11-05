@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, deterministic_alert_id
 from shared.kpi_engine import Answer, answers_from_rows
 from shared.request_deadline import Deadline
+from testing.clocks import JumpClock
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
 from testing.map_run_fixtures import RESULTS_BUCKET, fake_s3_objects
@@ -761,25 +762,6 @@ def _two_group_event() -> dict:
     return event
 
 
-class _ClockSpentByFirstRead:
-    """A clock at 0 until the run's answers are first read, an hour later from then on."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-        self.reads: list[list[str]] = []
-
-    def __call__(self) -> float:
-        return self.now
-
-    def deadline(self, seconds: float) -> Deadline:
-        return Deadline(seconds, self)
-
-    def load(self, keywords: list[str], _timestamp: str, _deadline=None) -> dict:
-        self.reads.append(list(keywords))
-        self.now = 3600.0
-        return {keyword: _answers() for keyword in keywords}
-
-
 @contextmanager
 def _two_group_run(worker_module, load, **patches) -> Generator[MagicMock, None, None]:
     """The worker over a one-keyword and a two-keyword group, both complete; yields the snapshots table."""
@@ -810,23 +792,26 @@ class TestTimeBudget:
         assert (result['status'], result['snapshots_recorded'], result['skipped_time_budget']) == ('completed', 0, 2)
         assert load.call_count == 0
 
-    def test_snapshots_the_smallest_group_first_when_the_budget_runs_out(self, worker_module) -> None:
-        clock = _ClockSpentByFirstRead()
+    @pytest.fixture
+    def spent_by_first_read(self, worker_module) -> dict:
+        """The worker's result when the budget runs out during the first pair's read."""
+        clock = JumpClock()
+
+        def load(keywords: list[str], *_args: object) -> dict:
+            clock.jump()
+            return {keyword: _answers() for keyword in keywords}
+
         with _two_group_run(
-            worker_module, MagicMock(side_effect=clock.load),
+            worker_module, MagicMock(side_effect=load),
             budget_from_context=MagicMock(return_value=60.0), Deadline=MagicMock(side_effect=clock.deadline),
         ):
-            result = worker_module.handler(_two_group_event(), None)
+            return worker_module.handler(_two_group_event(), None)
 
-        assert result['snapshot_group_ids'] == ['group-small']
+    def test_snapshots_the_smallest_group_first_when_the_budget_runs_out(self, spent_by_first_read) -> None:
+        assert spent_by_first_read['snapshot_group_ids'] == ['group-small']
 
-    def test_names_the_pairs_left_for_the_time_budget(self, worker_module) -> None:
-        clock = _ClockSpentByFirstRead()
-        with _two_group_run(
-            worker_module, MagicMock(side_effect=clock.load),
-            budget_from_context=MagicMock(return_value=60.0), Deadline=MagicMock(side_effect=clock.deadline),
-        ):
-            result = worker_module.handler(_two_group_event(), None)
+    def test_names_the_pairs_left_for_the_time_budget(self, spent_by_first_read) -> None:
+        result = spent_by_first_read
 
         assert (result['time_budget_scopes'], result['skipped_time_budget'], result['skipped_partial']) == (
             [{'group_id': 'group-big', 'market_id': 'global'}], 1, 0,

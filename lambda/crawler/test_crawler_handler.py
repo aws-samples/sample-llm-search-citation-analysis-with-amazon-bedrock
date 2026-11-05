@@ -525,13 +525,16 @@ def test_keeps_the_configured_session_timeout_without_a_lambda_context(crawler_r
     assert crawler_runtime.module.session_timeout_for(None) == 330
 
 
-def test_starts_the_browser_with_the_invocations_session_timeout(crawler_runtime, citation) -> None:
+@pytest.fixture
+def crawled_in_300s(crawler_runtime, citation) -> SimpleNamespace:
+    """The crawler runtime after one uncached crawl in a fresh 300 s invocation."""
     crawler_runtime.module.handler({'citation': citation}, _lambda_context(300))
+    return crawler_runtime
 
-    assert crawler_runtime.browser_factory.call_args.args[0].browser_session_timeout == 280
+
+def test_starts_the_browser_with_the_invocations_session_timeout(crawled_in_300s) -> None:
+    assert crawled_in_300s.browser_factory.call_args.args[0].browser_session_timeout == 280
 
 
-def test_leaves_the_module_config_unchanged_for_the_next_invocation(crawler_runtime, citation) -> None:
-    crawler_runtime.module.handler({'citation': citation}, _lambda_context(300))
-
-    assert crawler_runtime.module.config.browser_session_timeout == 330
+def test_leaves_the_module_config_unchanged_for_the_next_invocation(crawled_in_300s) -> None:
+    assert crawled_in_300s.module.config.browser_session_timeout == 330

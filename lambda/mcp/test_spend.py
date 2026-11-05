@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError, ReadTimeoutError
 from spend import RESEARCH_PROVIDERS
 
 from shared import request_deadline
-from shared.request_deadline import Deadline
+from testing.clocks import JumpClock
 from testing.mcp_result_fixtures import READ_SCOPE, RUN_SCOPE, WRITE_SCOPE, text_block
 from testing.mcp_spend_fixtures import (
     CALLER_SUB,
@@ -449,42 +449,31 @@ def _endless_pages(event: dict) -> tuple[int, dict]:
     return 200, keyword_page(keywords(2, prefix=f'page{page}'), str(page + 1))
 
 
-class _ClockSpentByFirstPage:
-    """A request clock at 0 until the first keyword page is read, and a minute later from then on."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-    def deadline(self, seconds: float, *_clock: object) -> Deadline:
-        return Deadline(seconds, self)
-
-    def page(self, event: dict) -> tuple[int, dict]:
-        self.now = 60.0
-        return _endless_pages(event)
-
-
 class TestEstimateTimeBudget:
-    def test_stops_paging_keywords_once_the_count_passes_the_cap(self, call, routers, limits):
+    @pytest.fixture
+    def endless(self, routers, limits) -> FakeRouters:
+        """Keyword pages that never end, under a cap of 3 keywords per run."""
         limits(maxRunKeywords=3)
         routers.answer_with('GET', '/api/keywords', _endless_pages)
+        return routers
 
+    def test_stops_paging_keywords_once_the_count_passes_the_cap(self, call, endless):
         call('estimate_run', {'all': True})
 
-        assert len(routers.requests('GET', '/api/keywords')) == 2
+        assert len(endless.requests('GET', '/api/keywords')) == 2
 
-    def test_refuses_a_scope_whose_count_passed_the_cap(self, call, routers, limits):
-        limits(maxRunKeywords=3)
-        routers.answer_with('GET', '/api/keywords', _endless_pages)
-
+    def test_refuses_a_scope_whose_count_passed_the_cap(self, call, endless):
         assert call('estimate_run', {'all': True})['structuredContent']['can_start'] is False
 
     @pytest.fixture
     def spent_after_first_page(self, routers) -> Iterator[None]:
-        clock = _ClockSpentByFirstPage()
-        routers.answer_with('GET', '/api/keywords', clock.page)
+        clock = JumpClock(later=60.0)
+
+        def page(event: dict) -> tuple[int, dict]:
+            clock.jump()
+            return _endless_pages(event)
+
+        routers.answer_with('GET', '/api/keywords', page)
         with patch.object(request_deadline, 'Deadline', side_effect=clock.deadline):
             yield
 
@@ -502,17 +491,17 @@ class TestEstimateTimeBudget:
 
 
 class TestStartTimeBudget:
-    def test_keeps_todays_run_used_when_the_start_may_have_run(self, spend, routers):
-        routers.answer_with(*TRIGGER, MagicMock(side_effect=ReadTimeoutError(endpoint_url='https://lambda')))
+    @pytest.mark.parametrize(('failure', 'expected'), [
+        pytest.param(ReadTimeoutError(endpoint_url='https://lambda'), ('upstream_timeout', 1), id='may-have-started'),
+        pytest.param(
+            ClientError({'Error': {'Code': 'ServiceException', 'Message': 'down'}}, 'Invoke'),
+            ('upstream_unavailable', 0),
+            id='never-reached',
+        ),
+    ])
+    def test_keeps_todays_run_used_only_when_the_start_may_have_run(self, spend, routers, failure, expected):
+        routers.answer_with(*TRIGGER, MagicMock(side_effect=failure))
 
         result = spend('start_run', GROUP_SCOPE)
 
-        assert (structured_error(result), state.used_today(CALLER_SUB, 'runs')) == ('upstream_timeout', 1)
-
-    def test_gives_todays_run_back_when_the_api_was_never_reached(self, spend, routers):
-        unreachable = ClientError({'Error': {'Code': 'ServiceException', 'Message': 'down'}}, 'Invoke')
-        routers.answer_with(*TRIGGER, MagicMock(side_effect=unreachable))
-
-        result = spend('start_run', GROUP_SCOPE)
-
-        assert (structured_error(result), state.used_today(CALLER_SUB, 'runs')) == ('upstream_unavailable', 0)
+        assert (structured_error(result), state.used_today(CALLER_SUB, 'runs')) == expected

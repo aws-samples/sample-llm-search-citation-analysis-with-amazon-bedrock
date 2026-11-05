@@ -3,20 +3,16 @@ resumes after them without asking a provider again for a stored (keyword, run, p
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
-from typing import Any
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
-from testing.handler_fixtures import handler_fixture
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.search_handler_fixtures import search_handler_fixture
 
-search_handler = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)), 'handler.py', 'search_handler_resume', env=SEARCH_HANDLER_ENV,
-)
+search_handler = search_handler_fixture('search_handler_resume')
 
 _TIMESTAMP = '2026-11-05T06:00:00Z'
 _PROMPTS = [
@@ -30,7 +26,7 @@ _STORED_P1 = {
 }
 
 
-def _answer(template: str | None) -> list[dict[str, Any]]:
+def _answer(template: str | None) -> list[dict]:
     """OpenAI's one answer to ``template``, citing a page named after it."""
     return [{
         'provider': 'openai', 'provider_type': 'llm', 'status': 'success', 'response': f'answer to {template}',
@@ -47,14 +43,14 @@ def _context(remaining_seconds: float) -> MagicMock:
 class Run:
     """The handler over ``_EVENT`` with ``stored`` already in SearchResults: what it asked, stored and answered."""
 
-    def __init__(self, module: Any, stored: dict | None = None, context: Any = None, event: dict | None = None) -> None:
+    def __init__(self, module: ModuleType, stored: dict | None = None, context: object = None, event: dict | None = None) -> None:
         self.asked: list[str | None] = []
         self.stores_before_ask: list[int] = []
         self.store = MagicMock(return_value=True)
         self.error: Exception | None = None
-        self.response: dict[str, Any] = {}
+        self.response: dict = {}
 
-        def ask(_keyword: str, *, providers: list[str], query_template: str | None, market: Any) -> list[dict[str, Any]]:
+        def ask(_keyword: str, *, providers: list[str], query_template: str | None, market: object) -> list[dict]:
             self.asked.append(query_template)
             self.stores_before_ask.append(self.store.call_count)
             return _answer(query_template)
@@ -76,22 +72,22 @@ def unpaced(search_handler) -> Iterator[None]:
         yield
 
 
+@pytest.fixture
+def resumed(search_handler, unpaced) -> Run:
+    """A retry of the run after an earlier attempt stored p1's OpenAI answer."""
+    return Run(search_handler, stored={('openai', 'p1'): _STORED_P1})
+
+
 @pytest.mark.usefixtures('unpaced')
 class TestResume:
-    def test_asks_only_the_prompts_no_earlier_attempt_stored(self, search_handler) -> None:
-        run = Run(search_handler, stored={('openai', 'p1'): _STORED_P1})
+    def test_asks_only_the_prompts_no_earlier_attempt_stored(self, resumed) -> None:
+        assert resumed.asked == ['On business, {keyword}']
 
-        assert run.asked == ['On business, {keyword}']
+    def test_returns_the_stored_answers_with_the_new_ones_in_prompt_order(self, resumed) -> None:
+        assert [result['query_prompt_id'] for result in resumed.response['results']] == ['p1', 'p2']
 
-    def test_returns_the_stored_answers_with_the_new_ones_in_prompt_order(self, search_handler) -> None:
-        run = Run(search_handler, stored={('openai', 'p1'): _STORED_P1})
-
-        assert [result['query_prompt_id'] for result in run.response['results']] == ['p1', 'p2']
-
-    def test_returns_the_stored_slim_result_unchanged(self, search_handler) -> None:
-        run = Run(search_handler, stored={('openai', 'p1'): _STORED_P1})
-
-        assert run.response['results'][0] == _STORED_P1
+    def test_returns_the_stored_slim_result_unchanged(self, resumed) -> None:
+        assert resumed.response['results'][0] == _STORED_P1
 
     def test_asks_no_provider_when_every_prompt_is_stored(self, search_handler) -> None:
         stored = {('openai', 'p1'): _STORED_P1, ('openai', 'p2'): {**_STORED_P1, 'query_prompt_id': 'p2'}}
