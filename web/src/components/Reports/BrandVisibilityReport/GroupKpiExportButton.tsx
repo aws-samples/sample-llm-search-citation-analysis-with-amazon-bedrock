@@ -6,7 +6,9 @@ import type {
 import { fetchBrandAppearances } from '../../../api/brandMentions';
 import { getErrorMessage } from '../../../infrastructure';
 import { exportGroupKpiReport } from './groupKpiExport';
-import { fetchGroupKpiDetail } from './groupKpiDetail';
+import {
+  fetchGroupKpiDetail, GroupKpiDetailError
+} from './groupKpiDetail';
 import { useExportAction } from '../../ui/useExportAction';
 import { useSelectedMarketId } from '../../Markets/marketSelectionContext';
 
@@ -64,7 +66,8 @@ export function GroupKpiExportButton({
   }, (error) => {
     setNotice({
       tone: 'error',
-      text: `Excel export failed: ${getErrorMessage(error)}`,
+      // A detail error already names the part that failed ("Keyword runs, page 3: Request timed out").
+      text: `Excel export failed: ${error instanceof GroupKpiDetailError ? error.message : getErrorMessage(error)}`,
     });
   });
 

@@ -207,6 +207,14 @@ describe('isAbortError', () => {
     expect(isAbortError(error)).toBe(false);
   });
 
+  it('returns true for the DOMException an aborted fetch rejects with', () => {
+    expect(isAbortError(new DOMException('The operation was aborted.', 'AbortError'))).toBe(true);
+  });
+
+  it('returns false for a DOMException with another name', () => {
+    expect(isAbortError(new DOMException('Quota exceeded', 'QuotaExceededError'))).toBe(false);
+  });
+
   it('returns false for non-Error values', () => {
     expect(isAbortError('string')).toBe(false);
     expect(isAbortError(null)).toBe(false);

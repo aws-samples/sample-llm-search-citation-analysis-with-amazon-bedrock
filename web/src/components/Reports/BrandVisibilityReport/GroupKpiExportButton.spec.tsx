@@ -56,6 +56,14 @@ describe('GroupKpiExportButton', () => {
     expect(exportGroupKpiReport).not.toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, DETAIL, BRAND_MENTIONS_AT_RUN);
   });
 
+  it('names the part that failed when a keyword page timed out', async () => {
+    vi.mocked(fetchGroupKpiDetail).mockRejectedValue(new GroupKpiDetailError('Keyword runs, page 3: Request timed out'));
+
+    await clickExport();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Excel export failed: Keyword runs, page 3: Request timed out');
+  });
+
   it('fetches the brand mentions of the selected run', async () => {
     await clickExport();
 

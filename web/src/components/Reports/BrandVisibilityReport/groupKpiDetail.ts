@@ -10,6 +10,9 @@ import { apiGet } from '../../../api/client';
 import {
   collectCursorPages, withNextToken, type CursorPage
 } from '../../../api/cursorPages';
+import {
+  getErrorMessage, isAbortError
+} from '../../../infrastructure';
 import type { ReportScope } from '../../../types';
 import {
   isGroupKeywordRunsPage, isGroupRunDriversPage, type GroupRun, type GroupRunDrivers, type KeywordRunHistory
@@ -22,12 +25,32 @@ export const DRIVER_RUNS_PER_REQUEST = 10;
 /** `view=drivers` requests in flight at once during an export. */
 export const DRIVER_REQUESTS_IN_PARALLEL = 3;
 
-/** The group KPI API answered with something other than a well-formed page. */
+/** The group KPI API answered with something other than a well-formed page, or one page could not be read. */
 export class GroupKpiDetailError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'GroupKpiDetailError';
   }
+}
+
+/**
+ * `read()`, with a failed request (each page already gets `apiGet`'s one
+ * retry on 502/503/429) reported as the part of the detail it was:
+ * "Keyword runs, page 3: Request timed out". Aborts and decoding errors pass
+ * through unchanged.
+ */
+async function readPart<T>(part: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isAbortError(error) || error instanceof GroupKpiDetailError) throw error;
+    throw new GroupKpiDetailError(`${part}: ${getErrorMessage(error)}`);
+  }
+}
+
+/** `2026-10-01` of a run timestamp, for naming a slice of runs. */
+function runDay(timestamp: string): string {
+  return timestamp.slice(0, 10);
 }
 
 /** The group the detail is read for, in the header's market. */
@@ -85,16 +108,21 @@ async function fetchDriversPage(
 
 /** Every keyword's runs in the last `days` days, in the group's keyword order. */
 export async function fetchAllKeywordRuns(target: GroupKpiDetailTarget, days: number): Promise<KeywordRunHistory[]> {
+  const pagesRead = { count: 0 };
   return collectCursorPages(
-    async (nextToken: string | null) => fetchKeywordRunsPage(target, days, nextToken),
+    async (nextToken: string | null) => {
+      pagesRead.count += 1;
+      return readPart(`Keyword runs, page ${pagesRead.count}`, async () => fetchKeywordRunsPage(target, days, nextToken));
+    },
     () => new GroupKpiDetailError('Group KPI API repeated a continuation token'),
   );
 }
 
 /** The drivers of the compared group runs after `fromRun` (a group run) through `toRun`, oldest first. */
 export async function fetchRunDrivers(target: GroupKpiDetailTarget, fromRun: string, toRun: string): Promise<GroupRunDrivers[]> {
+  const part = `Drivers of the runs ${runDay(fromRun)} to ${runDay(toRun)}`;
   return collectCursorPages(
-    async (nextToken: string | null) => fetchDriversPage(target, fromRun, toRun, nextToken),
+    async (nextToken: string | null) => readPart(part, async () => fetchDriversPage(target, fromRun, toRun, nextToken)),
     () => new GroupKpiDetailError('Group KPI API repeated a continuation token'),
   );
 }
