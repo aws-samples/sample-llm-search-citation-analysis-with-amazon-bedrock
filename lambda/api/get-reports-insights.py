@@ -29,6 +29,7 @@ of the facts and ``keywords_truncated`` is true; a history the budget or the
 row cap shortened says where in ``history_truncated_before``.
 """
 
+import functools
 from collections.abc import Callable
 from typing import Any
 
@@ -86,8 +87,7 @@ def read_per_keyword(keywords: list[str], read: PartitionRead) -> ScopeRead[list
     ``map_scope_keywords``, so the other keywords still make a report; a
     keyword the time budget left unread is ``skipped``.
     """
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    return read_scope_keywords(keywords, lambda keyword: read(table, keyword), lambda _keyword: [])
+    return read_scope_keywords(keywords, functools.partial(read, dynamodb.Table(SEARCH_RESULTS_TABLE)), lambda _keyword: [])
 
 
 def load_latest_answers(keywords: list[str]) -> ScopeRead[list[Answer]]:

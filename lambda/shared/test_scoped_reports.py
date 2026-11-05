@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from shared.request_deadline import Deadline, activate_deadline, clear_request_deadline, current_deadline
+from shared.request_deadline import Deadline, current_deadline
 from shared.scope_params import SCOPE_KEYWORDS_CAP, ReportScope
 from shared.scoped_reports import (
     BASELINE_MEMORY_MB,
@@ -40,17 +39,16 @@ from shared.scoped_reports import (
 )
 from testing.assertions import present
 from testing.search_results_fixtures import PartitionReadFailure, key_parts
-from testing.window_budget_fixtures import expired_deadline, one_scope_worker, ticking_deadline, window_read_budget
+from testing.window_budget_fixtures import (
+    active_deadline,
+    expired_deadline,
+    one_scope_worker,
+    ticking_deadline,
+    window_read_budget,
+)
 from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
 _EVENT: dict[str, Any] = {'httpMethod': 'GET', 'path': '/api/x', 'headers': {}}
-
-
-@pytest.fixture(autouse=True)
-def _no_active_deadline() -> Iterator[None]:
-    clear_request_deadline()
-    yield
-    clear_request_deadline()
 
 
 def _scope(count: int) -> ReportScope:
@@ -195,14 +193,14 @@ class TestWindowRowsCap:
 
 class TestWindowReadDeadline:
     def test_spends_the_read_share_of_what_the_request_has_left(self) -> None:
-        activate_deadline(Deadline(10, lambda: 0.0))
+        with active_deadline(Deadline(10, lambda: 0.0)):
+            remaining = window_read_deadline().remaining()
 
-        assert window_read_deadline().remaining() == pytest.approx(10 * WINDOW_READ_SHARE, abs=0.1)
+        assert remaining == pytest.approx(10 * WINDOW_READ_SHARE, abs=0.1)
 
     def test_is_expired_when_the_request_has_no_time_left(self) -> None:
-        activate_deadline(expired_deadline())
-
-        assert window_read_deadline().expired() is True
+        with active_deadline(expired_deadline()):
+            assert window_read_deadline().expired() is True
 
 
 _LONG = volume_keyword(0)
@@ -271,18 +269,20 @@ class TestLoadWindowAnswersTimeBudget:
 
         assert (_run_timestamps(window, _LONG), window.truncated_before) == ([run_timestamp(2)], run_timestamp(1))
 
-    def test_skips_a_keyword_of_several_the_budget_stops_mid_read(self) -> None:
-        # Checks: the short keyword's start (one page), the long keyword's start, after its first page.
+    @pytest.fixture
+    def stopped_window(self) -> WindowAnswers:
+        """Both keywords' window, the short one read first, the budget spent after the long one's first page.
+
+        Checks: the short keyword's start (one page), the long keyword's start, after its first page.
+        """
         with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
-            window = load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
+            return load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
 
-        assert (list(window.answers), window.skipped) == ([_SHORT], (_LONG,))
+    def test_skips_a_keyword_of_several_the_budget_stops_mid_read(self, stopped_window) -> None:
+        assert (list(stopped_window.answers), stopped_window.skipped) == ([_SHORT], (_LONG,))
 
-    def test_keeps_the_whole_window_of_the_keywords_read_before_the_budget_ran_out(self) -> None:
-        with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
-            window = load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
-
-        assert (len(window.answers[_SHORT]), window.truncated_before) == (3, None)
+    def test_keeps_the_whole_window_of_the_keywords_read_before_the_budget_ran_out(self, stopped_window) -> None:
+        assert (len(stopped_window.answers[_SHORT]), stopped_window.truncated_before) == (3, None)
 
     def test_skips_every_keyword_when_the_budget_is_spent_before_the_read(self) -> None:
         with window_read_budget(expired_deadline):
@@ -291,17 +291,14 @@ class TestLoadWindowAnswersTimeBudget:
         assert (window.answers, set(window.skipped)) == ({}, {_LONG, _SHORT})
 
     def test_marks_the_request_deadline_cut_when_the_window_read_stopped(self) -> None:
-        request = activate_deadline(Deadline(60, lambda: 0.0))
-
-        with window_read_budget(expired_deadline):
+        with active_deadline(Deadline(60, lambda: 0.0)) as request, window_read_budget(expired_deadline):
             load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
 
         assert request.cut is True
 
     def test_leaves_the_request_deadline_uncut_when_the_window_was_read_whole(self) -> None:
-        request = activate_deadline(Deadline(60, lambda: 0.0))
-
-        load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
+        with active_deadline(Deadline(60, lambda: 0.0)) as request:
+            load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
 
         assert request.cut is False
 
@@ -333,21 +330,16 @@ class TestReadScopeKeywords:
 
         assert (read.keywords, read.values['a']) == (['a'], 'none')
 
-    def test_skips_every_keyword_when_the_request_budget_is_spent(self) -> None:
-        activate_deadline(expired_deadline())
-
-        read = read_scope_keywords(['a', 'b'], str.upper, lambda _keyword: '')
-
-        assert (read.values, read.skipped) == ({}, ('a', 'b'))
-
-    def test_skips_the_keywords_left_once_the_budget_runs_out_mid_fan_out(self) -> None:
+    @pytest.mark.parametrize(('deadline', 'expected'), [
+        pytest.param(expired_deadline, ([], ('a', 'b')), id='spent-before-the-fan-out'),
         # Checks: the start of 'a' passes, the start of 'b' finds the budget spent.
-        activate_deadline(ticking_deadline(2))
-
-        with one_scope_worker():
+        pytest.param(lambda: ticking_deadline(2), (['a'], ('b',)), id='spent-after-the-first-keyword'),
+    ])
+    def test_skips_the_keywords_not_started_when_the_budget_runs_out(self, deadline, expected) -> None:
+        with active_deadline(deadline()), one_scope_worker():
             read = read_scope_keywords(['a', 'b'], str.upper, lambda _keyword: '')
 
-        assert (read.keywords, read.skipped) == (['a'], ('b',))
+        assert (read.keywords, read.skipped) == expected
 
 
 class TestScopeReadFields:

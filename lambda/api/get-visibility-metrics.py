@@ -74,8 +74,8 @@ def scope_visibility(
 ) -> dict[str, Any]:
     """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords and the request's time budget.
 
-    Keywords the budget left unread are left out (``keywords_analyzed`` counts
-    the ones read) and ``keywords_truncated`` is true.
+    A keyword the budget stopped is missing from ``keywords`` and from the
+    pooled KPIs; ``keywords_truncated`` then says the view is partial.
     """
     keywords, scope_fields = capped_scope(scope)
     latest, previous, skipped = load_last_two_runs(keywords)

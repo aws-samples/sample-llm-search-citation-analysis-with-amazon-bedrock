@@ -191,6 +191,24 @@ def windowed_report(
         yield
 
 
+@contextmanager
+def overview_with_trends(
+    overview: ModuleType, trends: ModuleType, resource: MagicMock, *, brand_config: Mapping[str, Any], recommendations: list[dict[str, Any]],
+) -> Generator[None, None, None]:
+    """``/reports/overview`` with its real trend view (``trends``) over ``resource`` and stubbed ``recommendations``.
+
+    The recommendations' reads belong to ``get-recommendations.py``.
+    """
+    with (
+        patch.object(overview, 'dynamodb', resource),
+        patch.object(trends, 'dynamodb', resource),
+        patch.object(overview, 'get_brand_config', return_value=brand_config),
+        patch.object(trends, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
+        patch.dict(overview._sibling_cache, {'trends': trends.trends_for_scope, 'recs': lambda _config, **_scope: recommendations}),
+    ):
+        yield
+
+
 WindowRead = tuple[dict[str, Any], list[dict[str, Any]]]
 
 

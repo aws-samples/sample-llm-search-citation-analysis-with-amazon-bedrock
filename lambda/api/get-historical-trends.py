@@ -51,6 +51,9 @@ from shared.visibility_views import trend_view
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+#: Keywords one trend reads at most, scoped or not: the window's rows are shared between them.
+TREND_KEYWORDS_CAP = SCOPE_KEYWORDS_CAP
+
 # One windowed read per keyword, SCOPE_MAX_WORKERS at a time (map_scope_keywords).
 dynamodb = scoped_dynamodb_resource()
 
@@ -71,7 +74,7 @@ def _resolve_scope(scope: ReportScope | None) -> ReportScope:
 
 def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_domains: list[str]) -> dict[str, Any]:
     """The trend view of ``scope`` over the last ``days`` days (also behind ``/reports/overview``)."""
-    keywords, scope_fields = capped_scope(_resolve_scope(scope), SCOPE_KEYWORDS_CAP)
+    keywords, scope_fields = capped_scope(_resolve_scope(scope), TREND_KEYWORDS_CAP)
     since = history_since(days)
     window = load_window_answers(keywords, since)
     read = window.read_keywords(keywords)

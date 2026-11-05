@@ -22,6 +22,7 @@ from testing.search_results_fixtures import active_keywords_table, report_dynamo
 from testing.window_budget_fixtures import one_scope_worker, spent_request_budget, ticking_deadline, window_read_budget
 from testing.window_rows_fixtures import (
     load_window_report,
+    overview_with_trends,
     paged_search_results_table,
     report_event,
     run_timestamp,
@@ -56,14 +57,7 @@ def _call(module: Any, path: str, query: Mapping[str, str], page_size: int = 400
 
 def _overview_call() -> tuple[int, dict[str, Any]]:
     """``(status, body)`` of the group's overview with the real trend view and one stubbed recommendation."""
-    resource = _resource()
-    with (
-        patch.object(_overview, 'dynamodb', resource),
-        patch.object(_trends, 'dynamodb', resource),
-        patch.object(_overview, 'get_brand_config', return_value=BRAND_CONFIG),
-        patch.object(_trends, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
-        patch.dict(_overview._sibling_cache, {'trends': _trends.trends_for_scope, 'recs': lambda _config, keywords=None: [RECOMMENDATION]}),
-    ):
+    with overview_with_trends(_overview, _trends, _resource(), brand_config=BRAND_CONFIG, recommendations=[RECOMMENDATION]):
         return parse_response(_overview.handler(report_event('/api/reports/overview', {'group_id': 'coruna'}), None))
 
 
@@ -73,12 +67,17 @@ def spent() -> Any:
         yield
 
 
+@pytest.mark.parametrize(('module', 'path'), [
+    pytest.param(_trends, '/api/trends', id='trends'),
+    pytest.param(_insights, '/api/reports/insights', id='insights'),
+])
+def test_answers_200_without_the_unread_keywords_when_the_budget_is_spent(spent, module, path) -> None:
+    status, body = _call(module, path, {'group_id': 'coruna'})
+
+    assert (status, body['keywords_truncated'], body['keywords_analyzed']) == (200, True, 0)
+
+
 class TestTrends:
-    def test_answers_200_without_the_unread_keywords_when_the_budget_is_spent(self, spent) -> None:
-        status, body = _call(_trends, '/api/trends', {'group_id': 'coruna'})
-
-        assert (status, body['keywords_truncated'], body['keywords_analyzed']) == (200, True, 0)
-
     def test_keeps_the_newest_runs_of_a_keyword_the_budget_stops_mid_read(self) -> None:
         # Checks: the keyword's start, then after its first page of 5 rows (the newest run and one row of the one before).
         with window_read_budget(lambda: ticking_deadline(2)):
@@ -138,11 +137,6 @@ class TestGroupKpis:
 
 
 class TestInsights:
-    def test_answers_200_without_the_unread_keywords_when_the_budget_is_spent(self, spent) -> None:
-        status, body = _call(_insights, '/api/reports/insights', {'group_id': 'coruna'})
-
-        assert (status, body['keywords_truncated'], body['keywords_analyzed']) == (200, True, 0)
-
     def test_reads_every_keyword_within_the_budget(self) -> None:
         _status, body = _call(_insights, '/api/reports/insights', {'group_id': 'coruna'})
 

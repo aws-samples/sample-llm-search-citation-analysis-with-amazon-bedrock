@@ -9,29 +9,44 @@ test sees where the text came from.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
 from testing.search_results_fixtures import report_dynamodb, search_results_table
 
+StoredRows = Mapping[str, Sequence[Mapping[str, Any]] | Exception]
+"""Each keyword's stored rows, or the exception every read of its partition raises."""
 
-def projected_search_table(rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]] | Exception]) -> MagicMock:
+
+def _projected(stored_query: Callable[..., dict[str, Any]], kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``stored_query``'s answer to ``kwargs`` without ``response`` in its rows unless the projection names ``#rsp``."""
+    response = stored_query(**kwargs)
+    if '#rsp' in kwargs.get('ProjectionExpression', '#rsp'):
+        return response
+    return {**response, 'Items': [{key: value for key, value in row.items() if key != 'response'} for row in response['Items']]}
+
+
+def projected_search_table(rows_by_keyword: StoredRows) -> MagicMock:
     """A SearchResults ``Table`` whose ``query`` drops ``response`` from its rows unless the projection asks for it."""
-    table = search_results_table(rows_by_keyword)
-    answer = table.query.side_effect
-
-    def query(**kwargs: Any) -> dict[str, Any]:
-        response = answer(**kwargs)
-        if '#rsp' in kwargs.get('ProjectionExpression', '#rsp'):
-            return response
-        return {**response, 'Items': [{key: value for key, value in row.items() if key != 'response'} for row in response['Items']]}
-
-    table.query.side_effect = query
+    stored_query = search_results_table(rows_by_keyword).query.side_effect
+    table = MagicMock(name='projected-search-results')
+    table.query.side_effect = lambda **kwargs: _projected(stored_query, kwargs)
     return table
 
 
-def serve_answer_texts(resource: MagicMock, rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]] | Exception]) -> list[list[dict[str, Any]]]:
+def recording_answer_texts(texts: Mapping[tuple[str, str], str]) -> tuple[list[list[tuple[str, str]]], Callable[[list[tuple[str, str]]], dict[tuple[str, str], str]]]:
+    """An ``answer_texts`` reader answering from ``texts``, and the list of the key lists it was asked for."""
+    asked: list[list[tuple[str, str]]] = []
+
+    def read(keys: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        asked.append(keys)
+        return {key: texts[key] for key in keys if key in texts}
+
+    return asked, read
+
+
+def serve_answer_texts(resource: MagicMock, rows_by_keyword: StoredRows) -> list[list[dict[str, Any]]]:
     """Make ``resource.batch_get_item`` answer the stored rows at the keys asked for; returns the list of key lists asked.
 
     A keyword mapped to an exception (a partition that cannot be queried) has no rows to answer.
@@ -54,7 +69,7 @@ def serve_answer_texts(resource: MagicMock, rows_by_keyword: Mapping[str, Sequen
 
 
 def answer_texts_dynamodb(
-    rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]] | Exception],
+    rows_by_keyword: StoredRows,
     keywords_table: MagicMock | None = None,
     search_table: MagicMock | None = None,
 ) -> MagicMock:

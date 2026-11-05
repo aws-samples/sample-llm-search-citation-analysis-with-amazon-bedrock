@@ -14,6 +14,7 @@ from shared.sentiment_examples import (
     SIGHTING_PROJECTION,
     sentiment_examples,
 )
+from testing.answer_text_fixtures import recording_answer_texts
 from testing.sentiment_examples_fixtures import OLDER_RUN, RUN, STORED_ROWS, stored_answer, stored_brand
 
 SOL_NEGATIVE = stored_brand(
@@ -283,18 +284,14 @@ class TestAnswerTexts:
     TEXTS = {(row['keyword'], row['timestamp_provider']): row['response'] for row in ROWS}
 
     def test_reads_the_text_of_the_page_rows_only(self) -> None:
-        asked: list[list[tuple[str, str]]] = []
-
-        def read(keys: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
-            asked.append(keys)
-            return {key: self.TEXTS[key] for key in keys}
+        asked, read = recording_answer_texts(self.TEXTS)
 
         sentiment_examples(self.SIGHTINGS, 'negative', limit=2, offset=1, answer_texts=read)
 
         assert asked == [[('hotel sol spa', self.ROWS[1]['timestamp_provider']), ('hotel sol spa', self.ROWS[2]['timestamp_provider'])]]
 
     def test_carries_the_text_read_by_key(self) -> None:
-        _total, page = sentiment_examples(self.SIGHTINGS, 'negative', limit=2, answer_texts=lambda keys: {key: self.TEXTS[key] for key in keys})
+        _total, page = sentiment_examples(self.SIGHTINGS, 'negative', limit=2, answer_texts=recording_answer_texts(self.TEXTS)[1])
 
         assert [example['answer'] for example in page] == ['Answer 00.', 'Answer 01.']
 
@@ -308,11 +305,7 @@ class TestAnswerTexts:
 
     def test_reads_each_row_once_when_it_holds_several_sightings(self) -> None:
         row = stored_answer('hotel sol spa', 'openai', [stored_brand('Hotel Sol'), stored_brand('Hotel Sol Beach')], response='Both.')
-        asked: list[list[tuple[str, str]]] = []
-
-        def read(keys: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
-            asked.append(keys)
-            return {}
+        asked, read = recording_answer_texts({})
 
         sentiment_examples([row], 'negative', answer_texts=read)
 

@@ -31,6 +31,16 @@ def expired_deadline() -> Deadline:
 
 
 @contextmanager
+def active_deadline(deadline: Deadline) -> Generator[Deadline]:
+    """``deadline`` is the active one for the block (as ``@api_handler`` makes a request's), cleared after it."""
+    request_deadline.activate_deadline(deadline)
+    try:
+        yield deadline
+    finally:
+        request_deadline.clear_request_deadline()
+
+
+@contextmanager
 def spent_request_budget() -> Generator[None]:
     """Every request ``@api_handler`` starts inside the block begins with an expired deadline."""
     with patch.object(request_deadline, 'budget_from_context', return_value=0.0):

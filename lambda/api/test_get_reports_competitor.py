@@ -14,6 +14,7 @@ import pytest
 
 from shared.scope_params import ReportScope
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.events import parse_response
 from testing.module_loader import load_handler_module
 from testing.window_budget_fixtures import spent_request_budget
 
@@ -599,12 +600,9 @@ def test_latest_brand_ranks_keeps_default_classification_when_missing(raw_mod):
 
 def test_handler_answers_200_without_the_unread_keywords_when_the_budget_is_spent(mod):
     with spent_request_budget():
-        response = _get_competitor_report(mod, competitor='Adidas')
-    body = json.loads(response['body'])
+        status, body = parse_response(_get_competitor_report(mod, competitor='Adidas'))
 
-    assert (response['statusCode'], body['keywords_analyzed'], body['keywords_truncated'], body['rollup']['outranked_keywords']) == (
-        200, 0, True, [],
-    )
+    assert (status, body['keywords_analyzed'], body['keywords_truncated'], body['rollup']['outranked_keywords']) == (200, 0, True, [])
 
 
 def test_handler_reads_every_keyword_within_the_budget(mod):

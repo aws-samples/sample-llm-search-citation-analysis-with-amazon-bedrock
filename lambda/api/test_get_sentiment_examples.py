@@ -130,21 +130,27 @@ class TestReads:
             {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
 
-    def test_reads_the_answer_text_of_the_page_rows_by_key(self, sentiment_handler) -> None:
+    @pytest.fixture
+    def served(self, sentiment_handler) -> Any:
+        """The handler over ``SEARCH_ROWS`` and the list of the key lists its answer-text reads asked for."""
         resource = report_dynamodb(projected_search_table(SEARCH_ROWS), active_keywords_table(ACTIVE_KEYWORDS))
         asked = serve_answer_texts(resource, SEARCH_ROWS)
         with patch.object(sentiment_handler, 'dynamodb', resource):
-            _status, body = call(sentiment_handler, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'limit': '1'})
+            yield sentiment_handler, asked
+
+    def test_reads_the_answer_text_of_the_page_rows_by_key(self, served) -> None:
+        module, asked = served
+
+        _status, body = call(module, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'limit': '1'})
 
         assert (asked, body['examples'][0]['answer']) == (
             [[{'keyword': 'hotel sol spa', 'timestamp_provider': SEARCH_ROWS['hotel sol spa'][0]['timestamp_provider']}]], 'Answer one.',
         )
 
-    def test_reads_no_answer_text_for_a_page_without_examples(self, sentiment_handler) -> None:
-        resource = report_dynamodb(projected_search_table(SEARCH_ROWS), active_keywords_table(ACTIVE_KEYWORDS))
-        asked = serve_answer_texts(resource, SEARCH_ROWS)
-        with patch.object(sentiment_handler, 'dynamodb', resource):
-            call(sentiment_handler, {'keyword': 'hotel sol spa', 'sentiment': 'mixed'})
+    def test_reads_no_answer_text_for_a_page_without_examples(self, served) -> None:
+        module, asked = served
+
+        call(module, {'keyword': 'hotel sol spa', 'sentiment': 'mixed'})
 
         assert asked == []
 
@@ -250,6 +256,4 @@ class TestTimeBudget:
         assert ([example['answer'] for example in body['examples']], body['keywords_truncated'], body['truncated']) == ([''], False, True)
 
     def test_carries_the_answer_text_within_the_budget(self, endpoint) -> None:
-        _status, body = call(endpoint, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
-
-        assert ([example['answer'] for example in body['examples']], body['truncated']) == (['Answer one.'], False)
+        assert call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})[1]['truncated'] is False

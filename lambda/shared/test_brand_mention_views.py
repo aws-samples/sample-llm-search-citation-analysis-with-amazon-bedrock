@@ -15,9 +15,8 @@ from shared.brand_mention_views import (
     provider_entry,
     read_run_rows,
 )
-from shared.request_deadline import activate_deadline, clear_request_deadline
 from testing.search_results_fixtures import search_result_row, search_results_table
-from testing.window_budget_fixtures import expired_deadline, ticking_deadline
+from testing.window_budget_fixtures import active_deadline, expired_deadline, ticking_deadline
 
 RUN_1 = '2026-09-01T06:00:00Z'
 RUN_2 = '2026-09-08T06:00:00Z'
@@ -35,15 +34,18 @@ def _row(
 
 
 class TestListRuns:
+    @pytest.fixture
+    def three_runs(self) -> Any:
+        """A keyword with one answer in each of three runs."""
+        return search_results_table({'hotel spa': [_row('openai', [], ts) for ts in (RUN_1, RUN_2, RUN_3)]})
+
     def test_lists_runs_newest_first_from_the_latest(self):
         table = search_results_table({'hotel spa': [_row('openai', [], RUN_1), _row('openai', [], RUN_2), _row('gemini', [], RUN_2)]})
 
         assert list_runs(table, 'hotel spa', RUN_2) == [RUN_2, RUN_1]
 
-    def test_stops_at_max_runs(self):
-        table = search_results_table({'hotel spa': [_row('openai', [], ts) for ts in (RUN_1, RUN_2, RUN_3)]})
-
-        assert list_runs(table, 'hotel spa', RUN_3, 2) == [RUN_3, RUN_2]
+    def test_stops_at_max_runs(self, three_runs):
+        assert list_runs(three_runs, 'hotel spa', RUN_3, 2) == [RUN_3, RUN_2]
 
     def test_lists_nothing_without_a_latest_run(self):
         assert list_runs(search_results_table({}), 'hotel spa', None) == []
@@ -55,28 +57,16 @@ class TestListRuns:
 
         assert {call.kwargs['Limit'] for call in table.query.call_args_list} == {1}
 
-    def test_lists_only_the_latest_run_when_the_time_budget_is_spent(self):
-        table = search_results_table({'hotel spa': [_row('openai', [], ts) for ts in (RUN_1, RUN_2, RUN_3)]})
-        activate_deadline(expired_deadline())
+    def test_lists_only_the_latest_run_when_the_time_budget_is_spent(self, three_runs):
+        with active_deadline(expired_deadline()):
+            runs = list_runs(three_runs, 'hotel spa', RUN_3)
 
-        try:
-            runs = list_runs(table, 'hotel spa', RUN_3)
-        finally:
-            clear_request_deadline()
+        assert (runs, three_runs.query.call_count) == ([RUN_3], 0)
 
-        assert (runs, table.query.call_count) == ([RUN_3], 0)
-
-    def test_lists_runs_until_the_time_budget_runs_out(self):
-        table = search_results_table({'hotel spa': [_row('openai', [], ts) for ts in (RUN_1, RUN_2, RUN_3)]})
+    def test_lists_runs_until_the_time_budget_runs_out(self, three_runs):
         # Checks: after the latest run passes, after the second run finds the budget spent.
-        activate_deadline(ticking_deadline(2))
-
-        try:
-            runs = list_runs(table, 'hotel spa', RUN_3)
-        finally:
-            clear_request_deadline()
-
-        assert runs == [RUN_3, RUN_2]
+        with active_deadline(ticking_deadline(2)):
+            assert list_runs(three_runs, 'hotel spa', RUN_3) == [RUN_3, RUN_2]
 
 
 class TestReadRunRows:
