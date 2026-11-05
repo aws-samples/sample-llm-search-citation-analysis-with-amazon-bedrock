@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.citation_pages import aggregate_citations
 from testing.citations_fixtures import citations_handler
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
@@ -64,10 +65,10 @@ def _get(module: Any, table: Any, query: dict[str, str]) -> tuple[dict[str, Any]
     return response, parse_response(response)
 
 
-def test_old_shape_of_the_data_set_was_past_the_lambda_cap(citations_module):
-    url_data, _, _ = citations_module._aggregate_citations(_ROWS, [])
+def test_old_shape_of_the_data_set_was_past_the_lambda_cap():
+    aggregate = aggregate_citations(_ROWS, [])
 
-    assert response_bytes({'body': {'top_urls': citations_module._top_urls(url_data)}}) > 6 * 1024 * 1024
+    assert response_bytes({'body': {'top_urls': aggregate.top_urls}}) > 6 * 1024 * 1024
 
 
 def test_stays_within_page_budget_when_a_group_has_thirty_thousand_urls(citations_module, citations_table):
@@ -104,9 +105,10 @@ def test_reads_every_keyword_partition_of_the_group(citations_module, citations_
     assert queried == set(_KEYWORDS)
 
 
-def test_reports_a_truncated_read_when_a_keyword_partition_passes_its_share_of_the_cap(citations_module):
+def test_reads_at_most_the_scope_page_cap_across_every_keyword_and_reports_truncated(citations_module):
+    # 100 keywords x 6 pages of 100 rows = 600 pages; the scope may read 100 of them in total.
     table = PagedTable(_ROWS, {None: ('keyword', 'normalized_url')}, max_page_rows=100)
 
     _, (_, body) = _get(citations_module, table, {'limit': '1'})
 
-    assert (body['truncated'], body['total_citations']) == (True, _KEYWORD_COUNT * 100)
+    assert (body['truncated'], body['total_citations']) == (True, citations_module._MAX_SCOPE_PAGES * 100)

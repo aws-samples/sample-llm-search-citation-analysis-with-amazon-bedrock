@@ -16,8 +16,10 @@ from collections.abc import Sequence
 from typing import Any
 
 import boto3
+from citation_rollup_action import build_citation_rollup
 from map_run_results import load_keyword_results
 
+from shared.citation_rollup import BUILD_ACTION
 from shared.dynamo_decimal import positive_int
 from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error
@@ -391,6 +393,9 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     """
     Lambda handler for generating execution summary.
 
+    ``{"action": "build_citation_rollup", ...}`` builds the citation rollup
+    instead (``citation_rollup_action``); every other event is a summary.
+
     Input (as the state machine actually delivers it):
     {
         "execution_id": "abc-123",
@@ -444,6 +449,8 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     }
     """
     logger.info('Received event: %s', json.dumps(event, default=str)[:2000])
+    if isinstance(event, dict) and event.get('action') == BUILD_ACTION:
+        return build_citation_rollup(event, context)
 
     try:
         execution_id, keyword_results, requested_summary_bucket, from_map_run = _event_keyword_results(event, context)
