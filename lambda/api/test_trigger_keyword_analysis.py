@@ -1,6 +1,7 @@
 """
 Tests for trigger-keyword-analysis.py (scope-aware subset runs) and the
-cap-free active-keyword read in trigger-analysis.py.
+active-keyword count in trigger-analysis.py (a COUNT query that stops at the
+request's deadline).
 
 Scope runs start with the scope as their execution input, never the keyword
 texts; only a legacy explicit list travels inline, and it is refused when it
@@ -15,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.request_deadline import Deadline
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.module_loader import load_handler_module
@@ -63,8 +65,8 @@ def _keyword_row(keyword_id: str, keyword: str, *group_ids: str) -> dict[str, An
 
 
 def _stage_active_keywords(*rows: dict[str, Any]) -> None:
-    """What the StatusIndex query answers for the next request."""
-    mock_keywords_table.query.return_value = {'Items': list(rows)}
+    """What the StatusIndex query answers for the next request (the rows, and their count to a COUNT query)."""
+    mock_keywords_table.query.return_value = {'Items': list(rows), 'Count': len(rows)}
 
 
 def _started_input():
@@ -200,16 +202,40 @@ class TestSubsetTriggerLegacyKeywords:
         mock_stepfunctions.start_execution.assert_not_called()
 
 
-class TestFullTriggerReadsEveryPage:
-    def test_includes_active_keywords_from_every_status_index_page(self):
-        first = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100)], 'LastEvaluatedKey': {'id': 'k99'}}
-        second = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100, 130)]}
-        mock_keywords_table.query.side_effect = [first, second]
+class TestFullTriggerCountsEveryPage:
+    def test_counts_active_keywords_from_every_status_index_page(self):
+        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
 
         status, body = invoke(_all, make_event())
 
-        assert status == 200
-        assert body['keywords_count'] == 130
+        assert (status, body['keywords_count'], body['keywords_count_approximate']) == (200, 130, False)
+
+    def test_counts_with_a_count_only_status_index_query_of_rows_with_text(self):
+        _stage_active_keywords(_keyword_row('k1', 'alpha'))
+
+        _all.handler(make_event(), None)
+
+        kwargs = mock_keywords_table.query.call_args.kwargs
+        assert (kwargs['IndexName'], kwargs['Select'], kwargs['FilterExpression']) == (
+            'StatusIndex', 'COUNT', 'attribute_exists(#kw)',
+        )
+
+    def test_starts_the_run_with_a_lower_bound_when_the_deadline_cuts_the_count(self):
+        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
+
+        with patch.object(_all, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
+            status, body = invoke(_all, make_event())
+
+        assert (status, body['keywords_count'], body['keywords_count_approximate']) == (200, 100, True)
+        assert body['message'] == 'Analysis started with at least 100 keywords and 0 query prompts'
+
+    def test_reads_one_count_page_when_the_deadline_is_spent(self):
+        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
+
+        with patch.object(_all, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
+            invoke(_all, make_event())
+
+        assert mock_keywords_table.query.call_count == 1
 
     def test_starts_the_run_with_the_all_keywords_scope(self):
         _stage_active_keywords(_keyword_row('k1', 'alpha'), _keyword_row('k2', 'beta'))
@@ -222,14 +248,15 @@ class TestFullTriggerReadsEveryPage:
         mock_keywords_table.query.side_effect = ClientError(
             {'Error': {'Code': 'ValidationException', 'Message': 'no StatusIndex'}}, 'Query',
         )
-        mock_keywords_table.scan.return_value = {'Items': [_keyword_row('k1', 'alpha')]}
+        mock_keywords_table.scan.return_value = {'Count': 1}
 
         _all.handler(make_event(), None)
 
         assert mock_keywords_table.scan.call_args.kwargs == {
-            'FilterExpression': '#status = :status',
-            'ExpressionAttributeNames': {'#status': 'status'},
+            'FilterExpression': '#status = :status AND attribute_exists(#kw)',
+            'ExpressionAttributeNames': {'#status': 'status', '#kw': 'keyword'},
             'ExpressionAttributeValues': {':status': 'active'},
+            'Select': 'COUNT',
         }
 
     def test_rejects_when_no_keyword_is_active(self):
