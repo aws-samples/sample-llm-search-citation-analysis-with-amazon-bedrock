@@ -11,6 +11,7 @@ import pytest
 
 from shared import scope_params
 from shared.scope_params import SCOPE_KEYWORDS_CAP
+from testing.answer_text_fixtures import answer_texts_dynamodb, projected_search_table, serve_answer_texts
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.module_loader import load_handler_module
@@ -19,7 +20,6 @@ from testing.search_results_fixtures import (
     PartitionReadFailure,
     active_keywords_table,
     report_dynamodb,
-    search_results_table,
 )
 from testing.sentiment_examples_fixtures import (
     OLDER_RUN,
@@ -27,6 +27,7 @@ from testing.sentiment_examples_fixtures import (
     stored_answer,
     stored_brand,
 )
+from testing.window_budget_fixtures import request_deadline_of, spent_request_budget, ticking_deadline
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -55,13 +56,13 @@ SEARCH_ROWS: dict[str, Any] = {
 
 @pytest.fixture
 def search_table() -> MagicMock:
-    return search_results_table(SEARCH_ROWS)
+    return projected_search_table(SEARCH_ROWS)
 
 
 @pytest.fixture
 def endpoint(sentiment_handler, search_table):
-    """The handler reading ``SEARCH_ROWS`` and ``ACTIVE_KEYWORDS``."""
-    with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_table, active_keywords_table(ACTIVE_KEYWORDS))):
+    """The handler reading ``SEARCH_ROWS`` and ``ACTIVE_KEYWORDS``, with the answer texts served by key."""
+    with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb(SEARCH_ROWS, active_keywords_table(ACTIVE_KEYWORDS), search_table)):
         yield sentiment_handler
 
 
@@ -102,7 +103,7 @@ class TestSelection:
 
     def test_returns_twenty_examples_by_default(self, sentiment_handler) -> None:
         rows = {'hotel sol spa': [stored_answer('hotel sol spa', 'openai', [stored_brand(f'Brand {index:02}') for index in range(25)])]}
-        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows))):
+        with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb(rows)):
             _status, body = call(sentiment_handler, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
 
         assert (body['total'], len(body['examples'])) == (25, 20)
@@ -113,20 +114,45 @@ class TestSelection:
 
     def test_answers_no_examples_for_a_keyword_whose_read_fails(self, sentiment_handler) -> None:
         rows = {**SEARCH_ROWS, 'hotel sol spa': PartitionReadFailure('throttled')}
-        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows), active_keywords_table(ACTIVE_KEYWORDS))):
+        with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb(rows, active_keywords_table(ACTIVE_KEYWORDS))):
             status, body = call(sentiment_handler, {'group_id': 'sol', 'sentiment': 'negative'})
 
         assert (status, [example['keyword'] for example in body['examples']]) == (200, ['hotel sol beach'])
 
 
 class TestReads:
-    def test_reads_the_latest_run_with_the_answer_text_and_persona_name(self, endpoint, search_table) -> None:
+    def test_reads_the_latest_run_without_the_answer_text(self, endpoint, search_table) -> None:
         call(endpoint, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
 
         run_read = search_table.query.call_args.kwargs
-        assert (run_read['ProjectionExpression'], run_read['ExpressionAttributeNames']['#rsp']) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, #rsp, query_prompt_name', 'response',
+        assert (run_read['ProjectionExpression'], run_read['ExpressionAttributeNames']) == (
+            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, timestamp_provider, query_prompt_name',
+            {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
+
+    @pytest.fixture
+    def served(self, sentiment_handler) -> Any:
+        """The handler over ``SEARCH_ROWS`` and the list of the key lists its answer-text reads asked for."""
+        resource = report_dynamodb(projected_search_table(SEARCH_ROWS), active_keywords_table(ACTIVE_KEYWORDS))
+        asked = serve_answer_texts(resource, SEARCH_ROWS)
+        with patch.object(sentiment_handler, 'dynamodb', resource):
+            yield sentiment_handler, asked
+
+    def test_reads_the_answer_text_of_the_page_rows_by_key(self, served) -> None:
+        module, asked = served
+
+        _status, body = call(module, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'limit': '1'})
+
+        assert (asked, body['examples'][0]['answer']) == (
+            [[{'keyword': 'hotel sol spa', 'timestamp_provider': SEARCH_ROWS['hotel sol spa'][0]['timestamp_provider']}]], 'Answer one.',
+        )
+
+    def test_reads_no_answer_text_for_a_page_without_examples(self, served) -> None:
+        module, asked = served
+
+        call(module, {'keyword': 'hotel sol spa', 'sentiment': 'mixed'})
+
+        assert asked == []
 
     def test_reads_the_run_through_its_sort_key_prefix(self, endpoint, search_table) -> None:
         call(endpoint, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
@@ -136,8 +162,8 @@ class TestReads:
 
     def test_caps_the_scope_at_the_scope_keyword_cap(self, sentiment_handler) -> None:
         many = [{'id': f'k{index}', 'keyword': f'kw {index:03}', 'status': 'active'} for index in range(SCOPE_KEYWORDS_CAP + 1)]
-        search = search_results_table({})
-        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search, active_keywords_table(many))):
+        search = projected_search_table({})
+        with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb({}, active_keywords_table(many), search)):
             _status, body = call(sentiment_handler, {'scope': 'all', 'sentiment': 'negative'})
 
         assert (body['keywords_truncated'], search.query.call_count) == (True, SCOPE_KEYWORDS_CAP)
@@ -157,7 +183,7 @@ class TestClassification:
         rows = {'hotel sol spa': [stored_answer('hotel sol spa', 'openai', [
             stored_brand('Hotel Sol'), stored_brand('Rival Inn', classification='competitor'),
         ])]}
-        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows))):
+        with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb(rows)):
             yield sentiment_handler
 
     def test_lists_competitor_sightings_when_classification_is_competitor(self, endpoint_with_competitor) -> None:
@@ -207,9 +233,27 @@ class TestValidation:
     def test_answers_a_server_error_when_the_scope_cannot_be_resolved(self, sentiment_handler) -> None:
         keywords_table = MagicMock(name='keywords')
         keywords_table.query.side_effect = KeywordsReadFailure('throttled')
-        resource = report_dynamodb(search_results_table(SEARCH_ROWS))
+        resource = answer_texts_dynamodb(SEARCH_ROWS)
         resource.Table.side_effect = lambda name: keywords_table
         with patch.object(sentiment_handler, 'dynamodb', resource):
             status, _body = call(sentiment_handler, {'group_id': 'sol', 'sentiment': 'negative'})
 
         assert status == 500
+
+
+class TestTimeBudget:
+    def test_answers_200_without_the_unread_keywords_when_the_budget_is_spent(self, endpoint) -> None:
+        with spent_request_budget():
+            status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})
+
+        assert (status, body['examples'], body['keywords_truncated'], body['truncated']) == (200, [], True, True)
+
+    def test_answers_the_page_without_its_text_when_the_budget_runs_out_before_the_text_read(self, endpoint) -> None:
+        # Checks: the keyword's read passes, the answer-text read finds the budget spent.
+        with request_deadline_of(lambda: ticking_deadline(2)):
+            _status, body = call(endpoint, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
+
+        assert ([example['answer'] for example in body['examples']], body['keywords_truncated'], body['truncated']) == ([''], False, True)
+
+    def test_carries_the_answer_text_within_the_budget(self, endpoint) -> None:
+        assert call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})[1]['truncated'] is False

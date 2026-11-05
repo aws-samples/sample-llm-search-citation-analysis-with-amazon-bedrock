@@ -23,14 +23,19 @@ or ``keyword``), ``days`` (1-365, default 90) and ``view``:
   Reads only that slice of the window, so a client asks for one run's drivers
   with ``from_run`` = its ``change.previous_timestamp`` and ``to_run`` = its timestamp.
 
-Every view reads at most ``WINDOW_ROWS_CAP`` rows, newest first
-(``shared.scoped_reports.load_window_answers``); a window the cap shortened
-reports the run it stopped at in ``truncated_before`` (``null`` otherwise).
+Every view reads at most ``WINDOW_ROWS_CAP`` rows, newest first, within the
+request's time budget (``shared.scoped_reports.load_window_answers``); a
+window the cap or the budget shortened reports the run it stopped at in
+``truncated_before`` (``null`` otherwise). Keywords the budget left unread are
+left out: ``keywords_truncated`` is then true (summary, drivers), and a
+keywords page stops before the first of them (``truncated``, ``next_token``
+resumes there).
 """
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import takewhile
 from typing import Any
 
 from shared.answer_queries import history_since
@@ -56,7 +61,13 @@ from shared.group_kpi_history import (
 from shared.kpi_engine import owned_domains_from
 from shared.response_budget import PAGE_BUDGET_BYTES, json_bytes, take_within_budget
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_dynamodb_resource
-from shared.scoped_reports import capped_scope, load_window_answers, required_report_scope, rows_per_keyword
+from shared.scoped_reports import (
+    WindowAnswers,
+    capped_scope,
+    load_window_answers,
+    required_report_scope,
+    rows_per_keyword,
+)
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
@@ -113,10 +124,15 @@ def bounded_keyword_history(entry: dict[str, Any]) -> dict[str, Any]:
     return {'keyword': entry['keyword'], 'runs': runs, 'runs_truncated': truncated}
 
 
+def _unread_fields(window: WindowAnswers) -> dict[str, Any]:
+    """``keywords_truncated: true`` when the time budget left keywords of the window unread (they are left out)."""
+    return {'keywords_truncated': True} if window.skipped else {}
+
+
 def summary_view(request: ViewRequest) -> ViewResult:
     """Every run of the window and each keyword's latest run, with no per-keyword runs and no drivers."""
     window = load_window_answers(search_table(), request.keywords, request.since)
-    history = group_kpi_history_from_answers(request.keywords, window.answers, request.owned_domains)
+    history = group_kpi_history_from_answers(window.read_keywords(request.keywords), window.answers, request.owned_domains)
     keywords = [keyword_summary(entry) for entry in history['keywords']]
     budget = max(PAGE_BUDGET_BYTES // 2, PAGE_BUDGET_BYTES - json_bytes(keywords))
     runs, runs_truncated = newest_within_budget([summary_run(run) for run in history['runs']], budget)
@@ -125,6 +141,7 @@ def summary_view(request: ViewRequest) -> ViewResult:
         'runs_truncated': runs_truncated,
         'keywords': keywords,
         'truncated_before': window.truncated_before,
+        **_unread_fields(window),
     }, None
 
 
@@ -143,7 +160,11 @@ def _keyword_page(request: ViewRequest) -> tuple[list[str], int, dict[str, Any] 
 
 
 def keywords_view(request: ViewRequest) -> ViewResult:
-    """One page of keyword drill-downs, reading only the page's keywords."""
+    """One page of keyword drill-downs, reading only the page's keywords.
+
+    A page stops before the first keyword the time budget left unread, and
+    ``next_token`` resumes there (``truncated`` says the page is short for that reason).
+    """
     page_keywords, offset, rejected = _keyword_page(request)
     if rejected is not None:
         return None, rejected
@@ -151,13 +172,15 @@ def keywords_view(request: ViewRequest) -> ViewResult:
     window = load_window_answers(
         search_table(), page_keywords, request.since, max_rows=rows_per_keyword(len(request.keywords)),
     )
-    histories = [bounded_keyword_history(entry) for entry in keyword_run_histories(page_keywords, window.answers, request.owned_domains)]
+    readable = list(takewhile(lambda keyword: keyword in window.answers, page_keywords))
+    histories = [bounded_keyword_history(entry) for entry in keyword_run_histories(readable, window.answers, request.owned_domains)]
     page, _ = take_within_budget(histories)
     single = request.params.get('detail_keyword') is not None
     return {
         'keywords': page,
         'next_token': None if single else encode_offset_cursor(offset + len(page), len(request.keywords)),
         'truncated_before': window.truncated_before,
+        'truncated': bool(window.skipped),
     }, None
 
 
@@ -183,7 +206,7 @@ def drivers_view(request: ViewRequest) -> ViewResult:
     if rejected is not None:
         return None, rejected
     window = load_window_answers(search_table(), request.keywords, from_run or request.since, until=to_run)
-    history = group_kpi_history_from_answers(request.keywords, window.answers, request.owned_domains)
+    history = group_kpi_history_from_answers(window.read_keywords(request.keywords), window.answers, request.owned_domains)
     changes = [change for change in run_drivers(history['runs']) if from_run is None or change['timestamp'] > from_run]
     page, truncated = take_within_budget(changes)
     return {
@@ -192,6 +215,7 @@ def drivers_view(request: ViewRequest) -> ViewResult:
         'changes': page,
         'next_token': encode_cursor({'from_run': page[-1]['timestamp'], 'to_run': to_run}) if truncated else None,
         'truncated_before': window.truncated_before,
+        **_unread_fields(window),
     }, None
 
 

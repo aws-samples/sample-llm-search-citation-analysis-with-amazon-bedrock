@@ -37,6 +37,7 @@ import boto3
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.kpi_engine import owned_domains_from
+from shared.request_deadline import current_deadline
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -133,12 +134,18 @@ def build_overview(
     before a second period). ``summary`` counts keywords by the trend of their
     visibility score. ``scope`` narrows everything to its keywords; by default
     every active keyword is covered.
+
+    The time budget bounds the read like ``/trends`` (``truncated_before``,
+    ``keywords_truncated``); ``truncated`` is true when it ran out before the
+    recommendations were read, and ``top_recommendations`` is then empty.
     """
     trends = _trends_helper()(scope, period, days, owned_domains_from(config))
     top_improving, top_declining = top_movers(trends['keyword_trends'], top)
     # A scope with no active keyword gets no recommendations: an empty list would
     # read as "discover the active keywords" to the loader and widen the report.
-    if scope is not None and not scope.keywords:
+    # Nor does a request whose time budget the trend read spent (``truncated``).
+    out_of_time = current_deadline().stop_reading('the overview recommendations')
+    if out_of_time or (scope is not None and not scope.keywords):
         recommendations: list[dict[str, Any]] = []
     else:
         recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
@@ -146,9 +153,11 @@ def build_overview(
     return {
         'generated_at': get_timestamp(),
         'scope': trends['scope'],
+        'keywords_truncated': trends['keywords_truncated'],
         'period_type': period,
         'days_analyzed': days,
         'truncated_before': trends.get('truncated_before'),
+        'truncated': out_of_time,
         'keywords_analyzed': trends['keywords_analyzed'],
         'keywords_with_data': trends['keywords_with_data'],
         'citations_configured': trends['citations_configured'],

@@ -23,8 +23,13 @@ Takes the scope every KPI endpoint takes — one of ``group_id``,
 (``HISTORY_WINDOW_PARAMS``), which only a group's stability facts look back
 over. A scope without an active keyword is refused: there is nothing to draw
 an insight from.
+
+Reads stop at the request's time budget: keywords left unread are left out
+of the facts and ``keywords_truncated`` is true; a history the budget or the
+row cap shortened says where in ``history_truncated_before``.
 """
 
+import functools
 from collections.abc import Callable
 from typing import Any
 
@@ -36,8 +41,17 @@ from shared.insights_engine import compute_insights
 from shared.insights_narrative import group_scope_key, load_narrative
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.markets import market_scoped_key
-from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
-from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope, load_window_histories, required_report_scope
+from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_dynamodb_resource
+from shared.scoped_reports import (
+    TREND_WINDOW_PARAMS,
+    ScopeRead,
+    WindowAnswers,
+    capped_scope,
+    read_scope_keywords,
+    required_report_scope,
+    scope_read_fields,
+    window_histories,
+)
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
@@ -66,28 +80,29 @@ def keywords_table() -> Any:
     return dynamodb.Table(KEYWORDS_TABLE)
 
 
-def read_per_keyword(keywords: list[str], read: PartitionRead) -> dict[str, list[dict[str, Any]]]:
+def read_per_keyword(keywords: list[str], read: PartitionRead) -> ScopeRead[list[dict[str, Any]]]:
     """``read(table, keyword)`` over the SearchResults table for every keyword, in parallel.
 
     A partition that cannot be read answers no rows and is logged by
-    ``map_scope_keywords``, so the other keywords still make a report.
+    ``map_scope_keywords``, so the other keywords still make a report; a
+    keyword the time budget left unread is ``skipped``.
     """
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    rows = map_scope_keywords(keywords, lambda keyword: read(table, keyword), lambda _keyword: [])
-    return dict(zip(keywords, rows, strict=True))
+    return read_scope_keywords(keywords, functools.partial(read, dynamodb.Table(SEARCH_RESULTS_TABLE)), lambda _keyword: [])
 
 
-def load_latest_answers(keywords: list[str]) -> dict[str, list[Answer]]:
+def load_latest_answers(keywords: list[str]) -> ScopeRead[list[Answer]]:
     """Each keyword's answers in its latest run: the runs ``GET /api/visibility`` measures."""
-    return {keyword: answers_from_rows(rows) for keyword, rows in read_per_keyword(keywords, query_latest_run_rows).items()}
+    rows = read_per_keyword(keywords, query_latest_run_rows)
+    return ScopeRead({keyword: answers_from_rows(keyword_rows) for keyword, keyword_rows in rows.values.items()}, rows.skipped)
 
 
-def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> tuple[list[dict[str, Any]], str | None]:
+def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> tuple[list[dict[str, Any]], WindowAnswers]:
     """Each keyword's runs of the last ``days`` days with their KPIs, read as ``GET /api/reports/group-kpis`` reads them.
 
-    The second value is the run the read stopped at (``None`` for a window read whole).
+    The second value is the window read: ``truncated_before`` (``None`` for a
+    window read whole) and the keywords the time budget left unread.
     """
-    return load_window_histories(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days), owned_domains)
+    return window_histories(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days), owned_domains)
 
 
 def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, Any] | None:
@@ -113,16 +128,22 @@ def handler(event, context, report_scope, *, days):
     keywords, scope_fields = capped_scope(report_scope)
     brand_config = get_brand_config()
     owned_domains = owned_domains_from(brand_config)
-    latest = load_latest_answers(keywords)
+    latest_read = load_latest_answers(keywords)
+    latest = latest_read.values
+    skipped = set(latest_read.skipped)
+    history, history_truncated_before = None, None
     # Only a keyword group has a run history to compare; elsewhere the stability facts stay empty.
-    history, history_truncated_before = load_history(keywords, days, owned_domains) if report_scope.kind == GROUP_SCOPE else (None, None)
+    if report_scope.kind == GROUP_SCOPE:
+        history, window = load_history(latest_read.keywords, days, owned_domains)
+        history_truncated_before = window.truncated_before
+        skipped.update(window.skipped)
     # The latest-run coverage, computed by the view behind /visibility so both pages say the same.
-    coverage = visibility_view(keywords, latest)
+    coverage = visibility_view(latest_read.keywords, latest)
     insights = compute_insights(
         (answer for answers in latest.values() for answer in answers), owned_domains, history, competitor_domains_from(brand_config),
     )
     return success_response({
-        **scope_fields,
+        **scope_read_fields(scope_fields, sorted(skipped)),
         **{key: coverage[key] for key in COVERAGE_FIELDS},
         'citations_configured': bool(owned_domains),
         **insights,

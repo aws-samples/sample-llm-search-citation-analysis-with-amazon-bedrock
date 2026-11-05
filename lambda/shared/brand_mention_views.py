@@ -27,6 +27,7 @@ from typing import Any
 
 from shared.answer_queries import latest_run_timestamp, previous_run_timestamp, query_keyword_run_rows
 from shared.dynamo_decimal import to_int
+from shared.request_deadline import current_deadline
 
 # Brands in one summary answer, best aggregate score first (the total is reported).
 BRAND_LIMIT = 100
@@ -75,12 +76,17 @@ def list_runs(table: Any, keyword: str, latest: str | None, max_runs: int = RUN_
     """``keyword``'s run timestamps from ``latest`` back, newest first, at most ``max_runs``.
 
     One ``Limit=1`` Query per run (``previous_run_timestamp``), so listing
-    runs never reads the answers they hold.
+    runs never reads the answers they hold, however many a run has. The
+    listing stops early, after ``latest``, when the request's time budget
+    (``shared.request_deadline``) is spent.
     """
+    deadline = current_deadline()
     runs: list[str] = []
     current = latest
     while current is not None and len(runs) < max_runs:
         runs.append(current)
+        if deadline.stop_reading('a run listing'):
+            break
         current = previous_run_timestamp(table, keyword, current)
     return runs
 

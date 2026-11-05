@@ -13,6 +13,12 @@ the sightings with the brand, the quote, the reason and the answer: at most
 ``next_token`` (an offset cursor into the sorted sightings) fetches the next
 page; ``null`` on the last one.
 Selection and ordering live in ``shared.sentiment_examples``.
+
+Reads: each keyword's latest run without the answer text (at most
+``SCOPE_KEYWORDS_CAP`` keywords, in parallel), then one BatchGetItem for the
+text of the page's answers only. Keywords the request's time budget leaves
+unread are left out (``keywords_truncated``); ``truncated`` is true whenever
+the budget cut anything (a page past it carries no answer text).
 """
 
 import logging
@@ -26,16 +32,19 @@ from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response, validation_error
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
 from shared.decorators import api_handler, optional_provider, validate
+from shared.dynamodb_batch import batch_get_items
 from shared.kpi_engine import FIRST_PARTY, SENTIMENT_LABELS
-from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
-from shared.scoped_reports import capped_scope, required_report_scope
+from shared.request_deadline import current_deadline
+from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_dynamodb_resource
+from shared.scoped_reports import ScopeRead, capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.sentiment_examples import (
     DEFAULT_LIMIT,
-    EXAMPLE_ATTRIBUTE_NAMES,
     EXAMPLE_CLASSIFICATIONS,
-    EXAMPLE_PROJECTION,
     MAX_LIMIT,
+    SIGHTING_ATTRIBUTE_NAMES,
+    SIGHTING_PROJECTION,
+    RowKey,
     sentiment_examples,
 )
 
@@ -50,21 +59,36 @@ SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 
-def load_latest_run_rows(keywords: list[str]) -> list[dict[str, Any]]:
-    """The rows of each keyword's latest run, with the answer text, read in parallel.
+def load_latest_run_rows(keywords: list[str]) -> ScopeRead[list[dict[str, Any]]]:
+    """The sightings of each keyword's latest run (rows without the answer text), read in parallel.
 
     A keyword whose read fails has no rows (logged by ``map_scope_keywords``),
-    as in ``/api/visibility``.
+    as in ``/api/visibility``; one the time budget left unread is ``skipped``.
     """
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    runs = map_scope_keywords(
+    return read_scope_keywords(
         keywords,
         lambda keyword: query_latest_run_rows(
-            table, keyword, projection=EXAMPLE_PROJECTION, attribute_names=EXAMPLE_ATTRIBUTE_NAMES,
+            table, keyword, projection=SIGHTING_PROJECTION, attribute_names=SIGHTING_ATTRIBUTE_NAMES,
         ),
         lambda _keyword: [],
     )
-    return [row for rows in runs for row in rows]
+
+
+def read_answer_texts(keys: list[RowKey]) -> dict[RowKey, str]:
+    """The answer text of the rows at ``keys`` (one page's rows, at most ``MAX_LIMIT``), in one BatchGetItem.
+
+    Nothing is read once the request's time budget is spent: the page's
+    examples then carry no answer and the response says ``truncated``.
+    """
+    if not keys or current_deadline().stop_reading('the example answers'):
+        return {}
+    items = batch_get_items(dynamodb, SEARCH_RESULTS_TABLE, [{'keyword': keyword, 'timestamp_provider': sort_key} for keyword, sort_key in keys])
+    return {
+        (str(item.get('keyword')), str(item.get('timestamp_provider'))): response
+        for item in items
+        if isinstance(response := item.get('response'), str)
+    }
 
 
 @api_handler
@@ -83,19 +107,21 @@ def handler(event, _context, report_scope, sentiment, provider, classification, 
     if offset is None:
         return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
     keywords, scope_fields = capped_scope(report_scope)
+    sightings = load_latest_run_rows(keywords)
     total, examples = sentiment_examples(
-        load_latest_run_rows(keywords), sentiment, provider=provider, classification=classification, limit=limit,
-        offset=offset,
+        (row for rows in sightings.values.values() for row in rows), sentiment, provider=provider,
+        classification=classification, limit=limit, offset=offset, answer_texts=read_answer_texts,
     )
     return success_response(
         {
-            **scope_fields,
+            **scope_read_fields(scope_fields, sightings.skipped),
             'sentiment': sentiment,
             'provider': provider,
             'classification': classification,
             'total': total,
             'examples': examples,
             'next_token': encode_offset_cursor(offset + len(examples), total),
+            'truncated': current_deadline().cut,
         },
         event,
     )

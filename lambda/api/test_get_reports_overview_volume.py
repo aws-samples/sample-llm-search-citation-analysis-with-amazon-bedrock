@@ -10,13 +10,12 @@ reads belong to ``get-recommendations.py``.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from testing.response_size import assert_within_page_budget
 from testing.window_rows_fixtures import (
     WindowRead,
     capped_read_fixture,
     load_window_report,
+    overview_with_trends,
     report_event,
     run_timestamp,
     volume_group,
@@ -33,13 +32,7 @@ GROUP = volume_group(100, RUN_COUNT, 24)
 def _call() -> WindowRead:
     """The overview of the group with its real trend view, and the SearchResults rows read for it."""
     resource, rows_read = GROUP.resource()
-    with (
-        patch.object(_overview, 'dynamodb', resource),
-        patch.object(_trends, 'dynamodb', resource),
-        patch.object(_overview, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna-mar.es']}),
-        patch.object(_trends, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
-        patch.dict(_overview._sibling_cache, {'trends': _trends.trends_for_scope, 'recs': lambda _config, keywords=None: []}),
-    ):
+    with overview_with_trends(_overview, _trends, resource, brand_config={'first_party_domains': ['hotel-coruna-mar.es']}, recommendations=[]):
         return _overview.handler(report_event('/api/reports/overview', {'group_id': 'coruna'}), None), rows_read
 
 
