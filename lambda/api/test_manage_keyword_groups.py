@@ -6,7 +6,6 @@ when a group is deleted, and the bulk membership route, all against mocked
 DynamoDB tables.
 """
 
-import itertools
 import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -15,7 +14,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from shared import bounded_writes
-from shared.request_deadline import Deadline
+from testing.deadlines import capped_reads_deadline, deadline_after_checks, spent_deadline, writes_deadline
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.events import api_gateway_event, parse_response
 from testing.keyword_groups_fixtures import (
@@ -208,14 +207,26 @@ class TestUpdateGroup:
         assert body['error'] == 'Provide a name or a description to update'
 
 
+def _deleted(detached: int) -> tuple[int, dict]:
+    """The answer to a DELETE that detached every member: ``(200, body)``."""
+    return 200, {'message': 'Keyword group deleted', 'detached_keywords': detached}
+
+
+def _delete_g1() -> tuple[int, dict]:
+    return _request('DELETE', None, 'g1')
+
+
+def _unfinished(status: int, body: dict) -> tuple[int, int, int, bool]:
+    """``(status, detached_keywords, pending_members, truncated)`` of a DELETE that left members attached."""
+    return status, body['detached_keywords'], body['pending_members'], body['truncated']
+
+
 class TestDeleteGroup:
     @pytest.mark.usefixtures('coruna_exists')
     def test_deletes_the_group_and_detaches_every_member_keyword(self):
         _store_members({'id': 'k1'}, {'id': 'k2'})
 
-        status, body = _request('DELETE', None, 'g1')
-
-        assert (status, body) == (200, {'message': 'Keyword group deleted', 'detached_keywords': 2})
+        assert _delete_g1() == _deleted(2)
         detach_calls = mock_keywords_table.update_item.call_args_list
         assert sorted(call.kwargs['Key']['id'] for call in detach_calls) == ['k1', 'k2']
         assert all(call.kwargs['UpdateExpression'] == 'DELETE group_ids :gids' for call in detach_calls)
@@ -259,35 +270,34 @@ class TestDeleteGroup:
         ]
 
         with patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
-            status, body = _request('DELETE', None, 'g1')
+            outcome = _unfinished(*_delete_g1())
 
-        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 1, 1, True)
+        assert outcome == (202, 1, 1, True)
 
     @pytest.mark.usefixtures('coruna_exists')
     def test_answers_202_with_the_unstarted_members_pending_when_the_deadline_cuts_the_detach(self):
         _store_members(*({'id': f'k{index}'} for index in range(25)))
-        ticks = itertools.count()
 
-        with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))):
-            status, body = _request('DELETE', None, 'g1')
+        with writes_deadline(deadline_after_checks(2)):
+            outcome = _unfinished(*_delete_g1())
 
-        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 2, 23, True)
+        assert outcome == (202, 2, 23, True)
 
     @pytest.mark.usefixtures('coruna_exists')
     def test_answers_202_when_the_deadline_cuts_the_member_scan(self):
         mock_keywords_table.scan.return_value = {'Items': [{'id': 'k1'}], 'LastEvaluatedKey': {'id': 'k1'}}
 
-        with patch('shared.dynamodb_batch.current_deadline', return_value=Deadline(0, lambda: 1.0)):
-            status, body = _request('DELETE', None, 'g1')
+        with capped_reads_deadline(spent_deadline()):
+            outcome = _unfinished(*_delete_g1())
 
-        assert (status, body['detached_keywords'], body['pending_members'], body['truncated']) == (202, 1, 0, True)
+        assert outcome == (202, 1, 0, True)
 
     def test_finishes_detaching_when_the_delete_is_sent_again_after_the_group_row_is_gone(self):
         _store_members({'id': 'k3'})
 
-        status, body = _request('DELETE', None, 'g1')
+        outcome = _delete_g1()
 
-        assert (status, body) == (200, {'message': 'Keyword group deleted', 'detached_keywords': 1})
+        assert outcome == _deleted(1)
         mock_groups_table.delete_item.assert_not_called()
 
 
@@ -380,10 +390,8 @@ class TestUpdateMemberships:
 
     def test_answers_200_with_the_unwritten_ids_pending_when_the_deadline_is_spent(self):
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
-        ticks = itertools.count()
 
-        with patch.object(bounded_writes, 'current_deadline', return_value=Deadline(3, lambda: next(ticks))), \
-                patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
+        with writes_deadline(deadline_after_checks(2)), patch.object(_mod, 'MEMBERSHIP_WRITE_WORKERS', 1):
             status, body = _change_members({'add': ['k1', 'k2'], 'remove': ['k3']})
 
         assert (status, body['added'], body['pending'], body['truncated']) == (200, ['k1', 'k2'], ['k3'], True)

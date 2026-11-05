@@ -16,8 +16,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.request_deadline import Deadline
 from testing.admin_authz_fixtures import caller_event, invoke
+from testing.deadlines import spent_deadline
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.module_loader import load_handler_module
 
@@ -202,9 +202,21 @@ class TestSubsetTriggerLegacyKeywords:
         mock_stepfunctions.start_execution.assert_not_called()
 
 
+# Two StatusIndex COUNT pages: 100 active keywords, then 30 more.
+_TWO_COUNT_PAGES = ({'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30})
+
+
+@pytest.fixture
+def count_cut_short():
+    """``(status, body)`` of a full trigger whose deadline is spent before the second COUNT page."""
+    mock_keywords_table.query.side_effect = list(_TWO_COUNT_PAGES)
+    with patch.object(_all, 'current_deadline', return_value=spent_deadline()):
+        return invoke(_all, make_event())
+
+
 class TestFullTriggerCountsEveryPage:
     def test_counts_active_keywords_from_every_status_index_page(self):
-        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
+        mock_keywords_table.query.side_effect = list(_TWO_COUNT_PAGES)
 
         status, body = invoke(_all, make_event())
 
@@ -220,21 +232,14 @@ class TestFullTriggerCountsEveryPage:
             'StatusIndex', 'COUNT', 'attribute_exists(#kw)',
         )
 
-    def test_starts_the_run_with_a_lower_bound_when_the_deadline_cuts_the_count(self):
-        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
-
-        with patch.object(_all, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
-            status, body = invoke(_all, make_event())
+    def test_starts_the_run_with_a_lower_bound_when_the_deadline_cuts_the_count(self, count_cut_short):
+        status, body = count_cut_short
 
         assert (status, body['keywords_count'], body['keywords_count_approximate']) == (200, 100, True)
         assert body['message'] == 'Analysis started with at least 100 keywords and 0 query prompts'
 
+    @pytest.mark.usefixtures('count_cut_short')
     def test_reads_one_count_page_when_the_deadline_is_spent(self):
-        mock_keywords_table.query.side_effect = [{'Count': 100, 'LastEvaluatedKey': {'id': 'k99'}}, {'Count': 30}]
-
-        with patch.object(_all, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
-            invoke(_all, make_event())
-
         assert mock_keywords_table.query.call_count == 1
 
     def test_starts_the_run_with_the_all_keywords_scope(self):

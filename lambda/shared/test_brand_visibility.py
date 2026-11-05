@@ -22,6 +22,7 @@ from shared.brand_visibility import (
     tracked_brand_names,
 )
 from shared.request_deadline import Deadline, activate_deadline, clear_request_deadline
+from testing.deadlines import spent_deadline
 
 FIRST_PARTY = ['marriott']
 
@@ -156,11 +157,10 @@ class TestLoadRecentSearchResultsWithoutKeywordsTable:
         assert search.query.call_count == 2
 
     def test_skips_a_keyword_whose_query_fails_and_keeps_the_rest(self, load_recent, search):
-        search.query.side_effect = _answers_by_keyword({'a': RuntimeError('throttled'), 'b': _keyword_rows('b')})
+        answers = {'broken': RuntimeError('throttled'), 'healthy': _keyword_rows('healthy')}
+        search.query.side_effect = _answers_by_keyword(answers)
 
-        items = load_recent(max_keywords=20, keywords=['a', 'b'])
-
-        assert items == [{'keyword': 'b'}]
+        assert load_recent(max_keywords=20, keywords=list(answers)) == [{'keyword': 'healthy'}]
 
     def test_falls_back_to_a_bounded_scan_when_no_keyword_is_known(self, load_recent, search):
         search.scan.return_value = _keyword_rows('anything')
@@ -174,21 +174,19 @@ class TestLoadRecentSearchResultsWithoutKeywordsTable:
 
 @pytest.mark.usefixtures('no_keywords_table')
 class TestLoadRecentSearchResultsTimeBudget:
-    def test_skips_the_keywords_not_started_and_marks_the_deadline_cut_when_it_is_spent(self, load_recent, search):
-        search.query.side_effect = _answers_by_keyword({'a': _keyword_rows('a'), 'b': _keyword_rows('b')})
-        deadline = activate_deadline(Deadline(0, lambda: 1.0))
+    @pytest.mark.parametrize(('deadline', 'rows_read', 'cut'), [
+        pytest.param(Deadline(1_000_000), [{'keyword': 'x'}, {'keyword': 'x'}], False, id='budget-lasts'),
+        pytest.param(spent_deadline(), [], True, id='budget-spent'),
+    ])
+    def test_reads_the_keywords_started_before_the_deadline_and_records_whether_it_cut(
+        self, load_recent, search, deadline, rows_read, cut,
+    ):
+        search.query.return_value = _keyword_rows('x')
+        activate_deadline(deadline)
 
-        items = load_recent(max_keywords=20, keywords=['a', 'b'])
+        outcome = load_recent(max_keywords=5, keywords=['x', 'y'])
 
-        assert (items, deadline.cut) == ([], True)
-
-    def test_leaves_the_deadline_uncut_when_every_keyword_is_read(self, load_recent, search):
-        search.query.side_effect = _answers_by_keyword({'a': _keyword_rows('a')})
-        deadline = activate_deadline(Deadline(60))
-
-        load_recent(max_keywords=20, keywords=['a'])
-
-        assert deadline.cut is False
+        assert (outcome, deadline.cut) == (rows_read, cut)
 
 
 class TestLoadRecentSearchResultsWithKeywordsTable:
