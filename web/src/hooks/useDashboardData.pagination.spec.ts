@@ -45,13 +45,13 @@ describe('useDashboardData keyword pagination', () => {
     expect(result.current.keywords).toStrictEqual([newerKeyword, olderKeyword]);
   });
 
-  it('reports the dashboard error without a partial keyword list when a later page fails', async () => {
+  it('reports a keywords panel error without a partial keyword list when a later page fails', async () => {
     const { result } = await renderLoadedDashboard({
       keywordsPage: buildKeywordsPage([olderKeyword], 'page-2'),
       failingUrls: [MOCK_KEYWORDS_SECOND_PAGE_URL],
     });
 
-    expect(result.current.error).toBe('Failed to load dashboard');
+    expect(result.current.panels.keywords.error).toBe('Server error occurred');
     expect(result.current.keywords).toStrictEqual([]);
   });
 

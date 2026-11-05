@@ -7,15 +7,17 @@ import {
 } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
-import {
-  DASHBOARD_PANEL_PATHS, useDashboardData
-} from './useDashboardData';
+import { useDashboardData } from './useDashboardData';
+import { DASHBOARD_PANEL_PATHS } from './dashboardPanels';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
 export const MOCK_AUTHORITATIVE_KEYWORDS_URL = `${MOCK_KEYWORDS_URL}?authoritative=true`;
 export const MOCK_KEYWORDS_SECOND_PAGE_URL = `${MOCK_KEYWORDS_URL}?next_token=page-2`;
 export const MOCK_AUTHORITATIVE_SECOND_PAGE_URL = `${MOCK_AUTHORITATIVE_KEYWORDS_URL}&next_token=page-2`;
+export const MOCK_STATS_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[0]}`;
+export const MOCK_CITATIONS_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[1]}`;
+export const MOCK_SEARCHES_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[2]}`;
 
 export const mockStats = {
   total_searches: 100,
@@ -96,9 +98,9 @@ interface MockFetchOverrides {
 
 export function createMockFetch(overrides: MockFetchOverrides = {}) {
   const payloadsByUrl = new Map<string, unknown>([
-    [`${MOCK_API_BASE_URL}/stats`, overrides.stats ?? mockStats],
-    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[1]}`, overrides.citations ?? mockCitations],
-    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[2]}`, {
+    [MOCK_STATS_URL, overrides.stats ?? mockStats],
+    [MOCK_CITATIONS_URL, overrides.citations ?? mockCitations],
+    [MOCK_SEARCHES_URL, {
       searches: overrides.searches ?? mockSearches,
       next_token: overrides.searchesNextToken ?? null,
     }],

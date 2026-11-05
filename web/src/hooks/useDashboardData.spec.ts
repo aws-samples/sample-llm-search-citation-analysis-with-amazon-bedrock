@@ -84,11 +84,13 @@ describe('useDashboardData', () => {
     expect(result.current.searchesNextToken).toBeNull();
   });
 
-  it('returns the dashboard network message when an API request fails', async () => {
+  it('reports a server error on every panel without blanking the dashboard when every request fails', async () => {
     const { result } = await renderLoadedDashboard({ shouldFail: true });
 
-    expect(result.current.error).toBe('Unable to load dashboard data');
-    expect(result.current.stats?.total_searches).toBe(0);
+    expect(result.current.error).toBeNull();
+    expect(Object.values(result.current.panels).map((panel) => panel.error)).toStrictEqual([
+      'Server error occurred', 'Server error occurred', 'Server error occurred', 'Server error occurred',
+    ]);
   });
 
   it('issues four new API requests when refetch is called', async () => {
@@ -128,10 +130,10 @@ describe('useDashboardData', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('reports the dashboard error when a keyword page has an invalid shape', async () => {
+  it('reports an invalid-request error on the keywords panel when a keyword page has an invalid shape', async () => {
     const { result } = await renderLoadedDashboard({ keywordsPage: { invalid: 'data' } });
 
-    expect(result.current.error).toBe('Invalid dashboard request');
+    expect(result.current.panels.keywords.error).toBe('Invalid request');
   });
 
   it('aborts the active dashboard request when the owner unmounts', () => {
@@ -219,7 +221,7 @@ describe('useDashboardData', () => {
     });
   });
 
-  it('starts the delayed authoritative refresh at exactly 125000 milliseconds', async () => {
+  it('starts the delayed authoritative refresh at exactly 35000 milliseconds', async () => {
     const { result } = await renderLoadedDashboard();
     vi.useFakeTimers();
 
