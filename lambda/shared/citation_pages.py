@@ -80,6 +80,11 @@ class CitationQuery:
     min_citations: int | None = None
     content_type: str = 'all'
 
+    @property
+    def is_base_order(self) -> bool:
+        """Whether the answer is the base order, filtered by content type at most (what rollup chunks hold)."""
+        return self.sort == 'citations' and self.order == 'desc' and not self.url_contains and self.min_citations is None
+
     def matches[EntryT](self, entry: EntryT, view: EntryView[EntryT]) -> bool:
         if self.url_contains and self.url_contains.lower() not in view.url(entry).lower():
             return False
@@ -194,9 +199,9 @@ def aggregate_citations(rows: Iterable[Mapping[str, Any]], tracked_brands: Brand
         keyword = row.get('keyword', '')
         if keyword:
             totals.keywords.add(keyword)
-        providers = row.get('citing_providers') or []
-        totals.provider_counts.update(providers)
-        provider_totals.update(providers)
+        for provider in row.get('citing_providers') or ():
+            totals.provider_counts[provider] += 1
+            provider_totals[provider] += 1
 
     brand_mentions: Counter[str] = Counter()
     for url, totals in by_url.items():

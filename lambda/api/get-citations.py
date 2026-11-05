@@ -11,6 +11,12 @@ cap (the 502 this design fixes). A page now holds at most ``limit`` URLs, cut
 to ``PAGE_BUDGET_BYTES``, without the per-URL keyword texts unless
 ``include_keywords=true`` (the Excel export, which follows every page);
 ``/api/url-breakdown`` serves one URL's keywords.
+
+The table, ``all``, market, group and group x market scopes are served from
+the citation rollup when it is current (``shared.citation_rollup_serve``):
+O(page) for the default order. Otherwise, and for one keyword or
+``keyword_ids``, the rows are read live under caps and the request's time
+budget (``shared.citation_rollup_source``).
 """
 
 import logging
@@ -18,6 +24,7 @@ import os
 from typing import Any
 
 import boto3
+from botocore.config import Config
 
 from shared.api_response import success_response, validation_error
 from shared.citation_pages import (
@@ -31,6 +38,8 @@ from shared.citation_pages import (
     list_entry,
     tracked_brand_terms,
 )
+from shared.citation_rollup import ROLLUP_BUCKET_ENV, ROLLUP_FUNCTION_ENV, keyword_fingerprint, scope_key
+from shared.citation_rollup_serve import ROLLUP_READ_ERRORS, PageRequest, RollupReader
 from shared.citation_rollup_source import (
     query_keyword_citations,
     query_scope_citations,
@@ -60,6 +69,15 @@ KEYWORDS_TABLE = keywords_table_name()
 
 # Optional: Brand config table for dynamic brand detection
 BRAND_CONFIG_TABLE = os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
+
+# Optional: the citation rollup (``shared.citation_rollup``); without a bucket every page is read live.
+ROLLUP_BUCKET = os.environ.get(ROLLUP_BUCKET_ENV)
+ROLLUP_FUNCTION = os.environ.get(ROLLUP_FUNCTION_ENV)
+_ROLLUP_S3_CONFIG = Config(connect_timeout=2, read_timeout=5, retries={'max_attempts': 2, 'mode': 'standard'})
+rollup_reader = RollupReader(
+    boto3.client('s3', config=_ROLLUP_S3_CONFIG), ROLLUP_BUCKET,
+    lambda_client=boto3.client('lambda') if ROLLUP_FUNCTION else None, function_name=ROLLUP_FUNCTION,
+) if ROLLUP_BUCKET else None
 
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
@@ -136,6 +154,53 @@ def _read_scope(report_scope: ReportScope | None) -> tuple[list[dict[str, Any]],
     return items, truncated
 
 
+def _live_page(report_scope: ReportScope | None, brand_config: dict[str, Any], request: PageRequest) -> dict[str, Any]:
+    """One page aggregated from the scope's Citations rows, read now (bounded, ``truncated`` when cut)."""
+    tracked_brands = _get_tracked_brands(brand_config)
+    items, truncated = _read_scope(report_scope)
+    logger.info('Fetched %s citation records from Citations table', len(items))
+
+    aggregate = aggregate_citations(items, tracked_brands)
+    matching = request.query.apply(aggregate.top_urls, DICT_VIEW)
+    window = [list_entry(entry, request.include_keywords) for entry in matching[request.start:request.start + request.limit]]
+    page, _ = take_within_budget(window)
+    return {
+        **aggregate.totals(),
+        'matched_urls': len(matching),
+        'top_urls': page,
+        'next_token': encode_offset_cursor(request.start + len(page), len(matching)),
+        'truncated': truncated or current_deadline().cut,
+    }
+
+
+_LIVE = {'as_of': None, 'source': 'live', 'stale': False}
+
+
+def _rollup_page(
+    report_scope: ReportScope | None, brand_config: dict[str, Any], request: PageRequest,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """The page from the citation rollup, or ``None`` (answer live); plus ``as_of``, ``source`` and ``stale``.
+
+    One keyword and ``keyword_ids`` scopes are not precomputed, nor is a scope
+    without keywords worth a lookup. A build that does not match the scope's
+    keywords or the brand config is ``stale``: the answer is live and a
+    rebuild is requested.
+    """
+    key = scope_key(report_scope)
+    if rollup_reader is None or key is None or (report_scope is not None and not report_scope.keywords):
+        return None, _LIVE
+    fingerprint = None if report_scope is None else keyword_fingerprint(report_scope.keywords)
+    try:
+        lookup = rollup_reader.lookup(key, fingerprint, brand_config.get('updated_at'))
+        if lookup.scope is None:
+            rollup_reader.request_rebuild(f"{'stale' if lookup.stale else 'missing'} {key}")
+            return None, {**_LIVE, 'stale': lookup.stale}
+        return rollup_reader.page(lookup.scope, request), {'as_of': lookup.built_at, 'source': 'rollup', 'stale': False}
+    except ROLLUP_READ_ERRORS:
+        logger.exception('Citation rollup read failed for %s; answering from the live read', key)
+        return None, _LIVE
+
+
 def _page_start(event, offset, next_token) -> tuple[int, dict[str, Any] | None]:
     """Where the page starts: ``next_token`` wins over ``offset``; the 400 for a malformed token."""
     if next_token is None:
@@ -164,7 +229,14 @@ def handler(
     passing the filters). Every page also carries the scope-wide totals,
     whatever the filters: ``total_citations`` (Citations rows),
     ``total_urls``, ``total_citation_count``, ``content_type_counts``,
-    ``provider_stats``, ``brand_stats``, and ``truncated`` (a read cap was hit).
+    ``provider_stats``, ``brand_stats``, and ``truncated`` (a read cap or
+    the time budget cut the live read: the totals cover part of the scope).
+
+    ``source`` says where the page came from: ``rollup`` (the citation
+    rollup, built after the last run; ``as_of`` is its build time) or
+    ``live`` (read now; ``as_of`` is ``null``). ``stale: true`` means a
+    rollup exists but no longer matches the scope's keywords or the brand
+    config, so the page was read live and a rebuild was requested.
     """
     start, rejected = _page_start(event, offset, next_token)
     if rejected:
@@ -173,24 +245,19 @@ def handler(
     if rejected:
         return rejected
 
-    tracked_brands = _get_tracked_brands(_brand_config())
-    items, truncated = _read_scope(report_scope)
-    logger.info('Fetched %s citation records from Citations table', len(items))
-
-    aggregate = aggregate_citations(items, tracked_brands)
-    query = CitationQuery(
-        sort=sort or 'citations', order=order or 'desc', url_contains=url_contains or '',
-        min_citations=min_citations, content_type=content_type or 'all',
+    request = PageRequest(
+        query=CitationQuery(
+            sort=sort or 'citations', order=order or 'desc', url_contains=url_contains or '',
+            min_citations=min_citations, content_type=content_type or 'all',
+        ),
+        start=start, limit=limit, include_keywords=include_keywords,
     )
-    matching = query.apply(aggregate.top_urls, DICT_VIEW)
-    window = [list_entry(entry, include_keywords) for entry in matching[start:start + limit]]
-    page, _ = take_within_budget(window)
-
+    brand_config = _brand_config()
+    page, provenance = _rollup_page(report_scope, brand_config, request)
+    if page is None:
+        page = _live_page(report_scope, brand_config, request)
     return success_response({
         'scope': report_scope.describe() if report_scope is not None else None,
-        **aggregate.totals(),
-        'matched_urls': len(matching),
-        'top_urls': page,
-        'next_token': encode_offset_cursor(start + len(page), len(matching)),
-        'truncated': truncated or current_deadline().cut,
+        **page,
+        **provenance,
     }, event)

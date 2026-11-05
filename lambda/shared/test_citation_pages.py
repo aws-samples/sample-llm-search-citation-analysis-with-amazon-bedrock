@@ -68,3 +68,9 @@ def test_sorts_compact_tuples_exactly_like_dicts():
 
     assert [row[0] for row in query.apply(tuples, _TUPLE_VIEW)] == [e['url'] for e in query.apply(entries, DICT_VIEW)]
 
+
+
+def test_is_base_order_only_for_most_cited_first_without_url_or_count_filters():
+    queries = [CitationQuery(content_type='video'), CitationQuery(order='asc'), CitationQuery(min_citations=2)]
+
+    assert [query.is_base_order for query in queries] == [True, False, False]
