@@ -9,12 +9,13 @@ import invoke
 import pytest
 from botocore.exceptions import ReadTimeoutError
 from catalogue import find_operation
-from invoke import lambda_client as real_lambda_client
-from invoke import run_operation
 
 from shared.request_deadline import Deadline, activate_deadline, clear_request_deadline, current_deadline
 
 _TIMED_OUT = ReadTimeoutError(endpoint_url='https://lambda.eu-west-1.amazonaws.com')
+
+#: The unpatched client factory, kept before any test patches ``invoke.lambda_client``.
+real_lambda_client = invoke.lambda_client
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def budget() -> Iterator[None]:
 
 
 def _list_groups(caller) -> dict:
-    return run_operation('list_keyword_groups', find_operation('list_keyword_groups'), {}, caller)
+    return invoke.run_operation('list_keyword_groups', find_operation('list_keyword_groups'), {}, caller)
 
 
 class TestRouterTimeout:

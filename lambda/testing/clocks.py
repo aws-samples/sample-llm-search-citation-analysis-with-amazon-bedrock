@@ -8,8 +8,8 @@ from shared.request_deadline import Deadline
 class JumpClock:
     """A clock at 0 until ``jump()``, ``later`` seconds on from then: the budget runs out at one chosen moment."""
 
-    def __init__(self, later: float = 3600.0) -> None:
-        self.now = 0.0
+    def __init__(self, later: float = 3600.0, start: float = 0.0) -> None:
+        self.now = start
         self.later = later
 
     def __call__(self) -> float:
@@ -27,9 +27,8 @@ class SteppedClock(JumpClock):
     """A clock that moves ``step`` seconds on every reading, the first reading at 0."""
 
     def __init__(self, step: float) -> None:
-        super().__init__()
+        super().__init__(start=-step)
         self.step = step
-        self.now = -step
 
     def __call__(self) -> float:
         self.now += self.step

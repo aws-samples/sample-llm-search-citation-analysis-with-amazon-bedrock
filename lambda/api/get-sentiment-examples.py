@@ -39,8 +39,6 @@ from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_
 from shared.scoped_reports import ScopeRead, capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.sentiment_examples import (
-    ANSWER_TEXT_ATTRIBUTE_NAMES,
-    ANSWER_TEXT_PROJECTION,
     DEFAULT_LIMIT,
     EXAMPLE_CLASSIFICATIONS,
     MAX_LIMIT,
@@ -52,6 +50,10 @@ from shared.sentiment_examples import (
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+#: What an example's answer text is read from: the row's key (to join it back) and the answer.
+ANSWER_TEXT_PROJECTION = 'keyword, timestamp_provider, #rsp'
+ANSWER_TEXT_ATTRIBUTE_NAMES = {'#rsp': 'response'}
 
 # One latest-run read per keyword, SCOPE_MAX_WORKERS at a time (map_scope_keywords).
 dynamodb = scoped_dynamodb_resource()

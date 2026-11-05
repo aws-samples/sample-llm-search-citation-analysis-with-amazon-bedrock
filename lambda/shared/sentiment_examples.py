@@ -47,10 +47,6 @@ ANSWER_TEXT_CAP = 20_000
 SIGHTING_PROJECTION = f'{ANSWER_PROJECTION}, timestamp_provider, query_prompt_name'
 SIGHTING_ATTRIBUTE_NAMES = dict(ANSWER_ATTRIBUTE_NAMES)
 
-#: What an example's answer text is read from: the row's key (to join it back) and the answer.
-ANSWER_TEXT_PROJECTION = 'keyword, timestamp_provider, #rsp'
-ANSWER_TEXT_ATTRIBUTE_NAMES = {'#rsp': 'response'}
-
 RowKey = tuple[str, str]
 """A SearchResults row's primary key: ``(keyword, timestamp_provider)``."""
 
