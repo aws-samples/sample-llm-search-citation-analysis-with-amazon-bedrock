@@ -17,6 +17,7 @@ from shared.llm_json import parse_llm_json
 from shared.markets import Market
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.request_deadline import Deadline
 
 #: The most markets one suggestion request may name (one Bedrock call answers all of them).
 MAX_SUGGESTION_MARKETS = 10
@@ -76,9 +77,17 @@ def usable_suggestions(parsed: Mapping[str, Any], markets: list[Market]) -> list
     ]
 
 
-def suggest_local_keywords(keyword: str, markets: list[Market]) -> list[dict[str, str]]:
-    """Ask the model once for ``keyword`` in every market; raises when the call fails or answers no JSON."""
-    answer = invoke_bedrock(suggestion_prompt(keyword, markets), ModelRole.GENERATION, max_tokens=SUGGESTION_MAX_TOKENS)
+def suggest_local_keywords(
+    keyword: str, markets: list[Market], *, deadline: Deadline | None = None,
+) -> list[dict[str, str]]:
+    """Ask the model once for ``keyword`` in every market; raises when the call fails or answers no JSON.
+
+    ``deadline`` (the request's) bounds the call: ``BedrockDeadlineError``
+    when the model does not answer in time.
+    """
+    answer = invoke_bedrock(
+        suggestion_prompt(keyword, markets), ModelRole.GENERATION, max_tokens=SUGGESTION_MAX_TOKENS, deadline=deadline,
+    )
     parsed = parse_llm_json(answer)
     if not isinstance(parsed, dict):
         raise UnparseableSuggestionsError('The model returned no JSON object')

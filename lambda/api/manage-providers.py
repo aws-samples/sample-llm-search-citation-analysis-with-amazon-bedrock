@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Any, NamedTuple
@@ -49,6 +50,7 @@ from shared.provider_models import (
     effective_model,
     is_valid_model_id,
 )
+from shared.request_deadline import current_deadline
 from shared.utils import get_timestamp
 from shared.web_search_gateway import (
     WebSearchGatewayError,
@@ -476,6 +478,11 @@ def _claude_result(response: Any) -> dict:
 # provider cannot hold this Lambda for its full duration.
 _LISTING_PROBE_TIMEOUT = 5
 _COMPLETION_PROBE_TIMEOUT = 10
+# Seconds of the request's time budget a provider call leaves for the answer.
+_PROBE_MARGIN_SECONDS = 1.0
+# The shortest timeout worth sending a provider call with.
+_MIN_PROBE_SECONDS = 2.0
+OUT_OF_TIME_MESSAGE = 'The check ran out of time before the provider answered. Try again.'
 
 
 def _openai_request(api_key: str) -> dict[str, Any]:
@@ -574,18 +581,31 @@ _KEY_PROBES: dict[str, _KeyProbe] = {
 }
 
 
-def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict], label: str) -> dict:
+def _out_of_time() -> dict:
+    return {'valid': False, 'error': OUT_OF_TIME_MESSAGE, 'out_of_time': True}
+
+
+def _send(request: dict[str, Any], timeout: float, interpret: Callable[[Any], dict], label: str) -> dict:
     """Send one outbound provider request and read the reply; never raises.
 
     The single ``requests`` import and timeout/error boundary shared by the
-    key probes, the model check and the model listing.
+    key probes, the model check and the model listing. The timeout is the
+    call's own, or what the request's time budget has left when that is less
+    (``requests`` times a socket read, and these replies are one small JSON
+    body). A call the budget cut short, or had no room for, answers
+    ``out_of_time: True``: it says nothing about the provider.
     """
     import requests
 
+    budget = current_deadline().remaining() - _PROBE_MARGIN_SECONDS
+    if budget < _MIN_PROBE_SECONDS:
+        return _out_of_time()
     try:
-        response = requests.request(timeout=timeout, **request)
+        response = requests.request(timeout=min(timeout, budget), **request)
         return interpret(response)
     except requests.Timeout:
+        if budget < timeout:
+            return _out_of_time()
         return {'valid': False, 'error': 'Validation request timed out'}
     except Exception:
         logger.exception('Error during %s', label)
@@ -594,8 +614,11 @@ def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict
 
 def _gateway_check(url: str) -> dict:
     """One real one-result search through the Web Search gateway; never raises."""
+    budget = current_deadline().remaining() - _PROBE_MARGIN_SECONDS
+    if budget < _MIN_PROBE_SECONDS:
+        return _out_of_time()
     try:
-        response = post_signed(url, search_payload('test', 1), _COMPLETION_PROBE_TIMEOUT)
+        response = post_signed(url, search_payload('test', 1), min(_COMPLETION_PROBE_TIMEOUT, int(budget)))
         response.raise_for_status()
         parse_search_reply(response.json())
     except (WebSearchGatewayError, ValueError) as error:
@@ -852,6 +875,11 @@ def _model_fields(provider_id: str, config: Mapping[str, Any]) -> dict[str, Any]
     return fields
 
 
+def _provider_state(provider_id: str) -> tuple[dict, dict]:
+    """``credential_status`` and ``get_provider_config`` of one provider (both fail soft)."""
+    return credential_status(provider_id), get_provider_config(provider_id)
+
+
 def handle_get_providers(event: dict, context: Any) -> dict:
     """GET /providers - Get all providers with their status and health.
 
@@ -862,10 +890,11 @@ def handle_get_providers(event: dict, context: Any) -> dict:
     """
     providers = []
 
-    for provider_id, info in PROVIDERS.items():
-        secret_status = credential_status(provider_id)
-        config = get_provider_config(provider_id)
+    # One worker per provider: each reads its secret and its row (C12: 18 serial calls before).
+    with ThreadPoolExecutor(max_workers=len(PROVIDERS)) as pool:
+        states = list(pool.map(_provider_state, PROVIDERS))
 
+    for (provider_id, info), (secret_status, config) in zip(PROVIDERS.items(), states, strict=True):
         providers.append({
             'auth': info.get('auth', AUTH_API_KEY),
             'id': provider_id,
@@ -907,28 +936,129 @@ def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
     return wrapper
 
 
-def _apply_api_key(provider_id: str, body: dict, event: dict) -> dict | None:
-    """Validate and store ``body['api_key']``; an error response, or ``None`` on success."""
-    if uses_iam(provider_id):
-        return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
-    api_key = body['api_key'].strip()
+@dataclass
+class _ProviderUpdate:
+    """What one PUT /providers/{id} changes, read from the body before anything is proven or written."""
 
-    # Input validation - reasonable key length
-    if len(api_key) > 500:
-        return validation_error('API key too long', event)
+    provider_id: str
+    validate: bool
+    api_key: str | None = None
+    """The new key to store, stripped."""
+    enabled: bool | None = None
+    set_model: bool = False
+    model: str | None = None
+    """The override to store when ``set_model``; ``None`` returns the provider to its default model."""
+    proven: bool = False
+    """A real call answered with the key, so the provider's health record gets a fresh success."""
 
-    # Optionally validate the key first
-    if body.get('validate', True):
-        validation = validate_api_key(provider_id, api_key)
-        if not validation.get('valid'):
-            return api_response(400, {
-                'error': 'Invalid API key',
-                'details': validation['error'],
-            }, event)
 
-    result = update_api_key(PROVIDERS[provider_id]['secret_name'], api_key)
-    if not result.get('success'):
-        return api_response(500, {'error': 'Failed to update API key'}, event)
+def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate | dict:
+    """The update ``body`` asks for, or the 400 for the first malformed field."""
+    update = _ProviderUpdate(provider_id, validate=bool(body.get('validate', True)))
+    if body.get('api_key'):
+        if uses_iam(provider_id):
+            return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
+        api_key = body['api_key'].strip()
+        # Input validation - reasonable key length
+        if len(api_key) > 500:
+            return validation_error('API key too long', event)
+        update.api_key = api_key
+    if 'enabled' in body:
+        update.enabled = bool(body['enabled'])
+    if 'model' in body:
+        if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
+            return validation_error('The model of this provider cannot be changed', event, 'model')
+        well_formed, model = _requested_model(provider_id, body['model'])
+        if not well_formed:
+            return validation_error(
+                'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)'
+                + (', after a vendor prefix such as perplexity/' if provider_id == 'perplexity' else ''),
+                event, 'model',
+            )
+        update.set_model, update.model = True, model
+    return update
+
+
+def _failed_check(check: Mapping[str, Any], error: str, event: dict) -> dict:
+    """The answer to a proving call that did not pass: 503 when it ran out of time, else 400 with its reason."""
+    if check.get('out_of_time'):
+        return api_response(503, {'error': 'The check ran out of time; nothing was saved', 'details': check['error']}, event)
+    return api_response(400, {'error': error, 'details': check['error']}, event)
+
+
+def _prove_key(update: _ProviderUpdate, event: dict) -> dict | None:
+    """Check the new key with the provider (skippable with ``validate: false``)."""
+    if update.api_key is None:
+        return None
+    validation = validate_api_key(update.provider_id, update.api_key)
+    return None if validation.get('valid') else _failed_check(validation, 'Invalid API key', event)
+
+
+def _prove_enabled(update: _ProviderUpdate, event: dict) -> dict | None:
+    """Prove the provider answers before it is switched on.
+
+    Switching a provider on is the administrator saying "I fixed it", so it is
+    proven first (skippable with ``validate: false``, like the key and the
+    model): the probe either records a fresh success, which clears the old
+    failure from the Settings card, or records the fresh failure and leaves
+    the provider off. Before this, re-enabling kept showing the failure that
+    caused the auto-disable, dated weeks back, with no way to tell whether the
+    new credit or key had taken. A probe stopped by the request's time budget
+    says nothing about the provider and records nothing.
+    """
+    if not update.enabled:
+        return None
+    api_key = update.api_key or _key_for_proof(update.provider_id, event, 'enabled', 'enabling this provider')
+    if isinstance(api_key, dict):
+        return api_key
+    probe = _enable_probe(update.provider_id, api_key, get_provider_config(update.provider_id))
+    if not probe.get('valid'):
+        if not probe.get('out_of_time'):
+            record_provider_failure(dynamodb.Table(PROVIDER_CONFIG_TABLE), update.provider_id, probe['error'])
+        return _failed_check(probe, 'Provider check failed', event)
+    update.proven = True
+    return None
+
+
+def _prove_model(update: _ProviderUpdate, event: dict) -> dict | None:
+    """Prove a new model with a real web-search answer (skippable with ``validate: false``, like the key).
+
+    The check was a real answer with the key, so the provider's health record
+    then says so; without this a credit failure from weeks ago stayed on the
+    card after the model was proven to work. Returning to the default needs no check.
+    """
+    if update.model is None:
+        return None
+    api_key = update.api_key or _key_for_proof(update.provider_id, event, 'model', 'choosing a model')
+    if isinstance(api_key, dict):
+        return api_key
+    check = validate_model(update.provider_id, api_key, update.model)
+    if not check.get('valid'):
+        return _failed_check(check, 'Model check failed', event)
+    update.proven = True
+    return None
+
+
+def _save_failure(error: str, saved: list[str], event: dict) -> dict:
+    """The 500 for a failed write, naming what this request had already saved."""
+    return api_response(500, {'error': error, **({'saved': saved} if saved else {})}, event)
+
+
+def _save_update(update: _ProviderUpdate, event: dict) -> dict | None:
+    """Write the proven update: key, then flag, then model; the 500 of the first write that fails."""
+    saved: list[str] = []
+    if update.api_key is not None:
+        if not update_api_key(PROVIDERS[update.provider_id]['secret_name'], update.api_key).get('success'):
+            return _save_failure('Failed to update API key', saved, event)
+        saved.append('api_key')
+    if update.enabled is not None:
+        if not save_provider_enabled(update.provider_id, update.enabled):
+            return _save_failure('Failed to save configuration', saved, event)
+        saved.append('enabled')
+    if update.set_model and not save_provider_model(update.provider_id, update.model):
+        return _save_failure('Failed to save model', saved, event)
+    if update.proven:
+        record_provider_success(dynamodb.Table(PROVIDER_CONFIG_TABLE), update.provider_id)
     return None
 
 
@@ -946,38 +1076,6 @@ def _requested_model(provider_id: str, value: object) -> tuple[bool, str | None]
         return False, None
     model = current_model_id(provider_id, model)
     return True, None if model == default_model(provider_id) else model
-
-
-def _apply_model(provider_id: str, body: dict, event: dict) -> dict | None:
-    """Check and store ``body['model']``; an error response, or ``None`` on success.
-
-    The model is proven with a real web-search answer using the stored key
-    before it is saved (skippable with ``validate: false``, like the key).
-    Blank, ``null`` or the provider's default returns it to the default.
-    """
-    if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
-        return validation_error('The model of this provider cannot be changed', event, 'model')
-    well_formed, model = _requested_model(provider_id, body['model'])
-    if not well_formed:
-        return validation_error(
-            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)'
-            + (', after a vendor prefix such as perplexity/' if provider_id == 'perplexity' else ''),
-            event, 'model',
-        )
-    if model is not None and body.get('validate', True):
-        api_key = _key_for_proof(provider_id, event, 'model', 'choosing a model')
-        if isinstance(api_key, dict):
-            return api_key
-        check = validate_model(provider_id, api_key, model)
-        if not check.get('valid'):
-            return api_response(400, {'error': 'Model check failed', 'details': check['error']}, event)
-        # The check was a real answer with the stored key, so the provider's
-        # health record now says so; without this a credit failure from weeks
-        # ago stayed on the card after the model was proven to work.
-        record_provider_success(dynamodb.Table(PROVIDER_CONFIG_TABLE), provider_id)
-    if not save_provider_model(provider_id, model):
-        return api_response(500, {'error': 'Failed to save model'}, event)
-    return None
 
 
 def _key_for_proof(provider_id: str, event: dict, field: str, action: str) -> str | dict:
@@ -1010,34 +1108,6 @@ def _enable_probe(provider_id: str, api_key: str, config: dict) -> dict:
     return validate_api_key(provider_id, api_key)
 
 
-def _apply_enabled(provider_id: str, body: dict, event: dict) -> dict | None:
-    """Store ``body['enabled']``; an error response, or ``None`` on success.
-
-    Switching a provider on is the administrator saying "I fixed it", so it is
-    proven first (skippable with ``validate: false``, like the key and the
-    model): the probe either records a fresh success, which clears the old
-    failure from the Settings card, or records the fresh failure and leaves
-    the provider off. Before this, re-enabling kept showing the failure that
-    caused the auto-disable, dated weeks back, with no way to tell whether the
-    new credit or key had taken.
-    """
-    enabled = bool(body['enabled'])
-    table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-    if enabled and body.get('validate', True):
-        api_key = _key_for_proof(provider_id, event, 'enabled', 'enabling this provider')
-        if isinstance(api_key, dict):
-            return api_key
-        probe = _enable_probe(provider_id, api_key, get_provider_config(provider_id))
-        if not probe.get('valid'):
-            record_provider_failure(table, provider_id, probe['error'])
-            return api_response(400, {'error': 'Provider check failed', 'details': probe['error']}, event)
-    if not save_provider_enabled(provider_id, enabled):
-        return api_response(500, {'error': 'Failed to save configuration'}, event)
-    if enabled and body.get('validate', True):
-        record_provider_success(table, provider_id)
-    return None
-
-
 @require_group(ADMIN_GROUP)
 @parse_json_body
 @_with_known_provider
@@ -1047,18 +1117,26 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
     Admin-only: this route writes Secrets Manager, and `configMgmtFunction`'s
     role holds prefix-wide read *and* write over every `citation-analysis/*`
     secret. An unprivileged caller could redirect provider billing or capture
-    every prompt the system sends (AUDIT-2026-08-19 §0.3). The key is applied
-    before the model, so one request can set a key and a model checked with it.
+    every prompt the system sends (AUDIT-2026-08-19 §0.3).
+
+    Every proving call runs before anything is written (C6): the key, then
+    enabling and the model, both proven with the key being saved rather than
+    the one it replaces. A key used to be stored before the enable probe, so a
+    probe that failed or ran past the gateway's 29 s left the new key saved
+    and the flag unchanged. Each call is bounded by the request's time budget
+    (``_send``); one that runs out answers 503 and nothing is saved.
     """
     body = body or {}
 
-    # The key is applied first so that enabling in the same request is proven
-    # with the key being saved, not the one it replaces.
-    error = _apply_api_key(provider_id, body, event) if body.get('api_key') else None
-    if error is None and 'enabled' in body:
-        error = _apply_enabled(provider_id, body, event)
-    if error is None and 'model' in body:
-        error = _apply_model(provider_id, body, event)
+    update = _parse_update(provider_id, body, event)
+    if isinstance(update, dict):
+        return update
+    if update.validate:
+        for prove in (_prove_key, _prove_enabled, _prove_model):
+            error = prove(update, event)
+            if error is not None:
+                return error
+    error = _save_update(update, event)
     if error is not None:
         return error
 

@@ -22,7 +22,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import boto3
 
@@ -35,7 +35,8 @@ from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
-from shared.models import ModelRole, invoke_bedrock
+from shared.models import BedrockDeadlineError, ModelRole, invoke_bedrock
+from shared.request_deadline import current_deadline
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     keywords_table_name,
@@ -52,6 +53,18 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = search_results_table_name()
+
+# What the recommendation rules read of a SearchResults row (A-8: whole rows carried the answer text).
+RULE_ROWS_PROJECTION = 'keyword, #ts, provider, brands'
+
+# The most scope keywords the LLM prompt names.
+LLM_PROMPT_KEYWORDS_CAP = 50
+
+# The LLM pass's role: a fast tier (Haiku by default), so the call fits the request.
+LLM_RECOMMENDATIONS_ROLE = ModelRole.GENERATION
+
+# How the LLM pass of a ``use_llm=true`` request went (``llm`` in the response; null when not asked).
+LlmOutcome = Literal['ok', 'timed_out', 'failed']
 
 
 @dataclass(frozen=True)
@@ -254,8 +267,10 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
             'impact': 'Required for all other recommendations'
         }]
 
-    # Limit to 20 keywords for performance
-    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=20, keywords=keywords)
+    # Limit to 20 keywords for performance; only the attributes the rules read (no answer text)
+    items = load_recent_search_results(
+        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=20, keywords=keywords, projection=RULE_ROWS_PROJECTION,
+    )
 
     if not items:
         return [{
@@ -294,18 +309,27 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
 
 def generate_llm_recommendations(
     config: dict[str, Any], context: str, keywords: Sequence[str] | None = None
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], LlmOutcome]:
     """
     Generate recommendations using LLM for more sophisticated analysis.
 
-    ``keywords`` are the texts a scoped request covers; they are named in the
-    prompt so the model recommends for that scope only. Without a scope the
-    prompt is the unscoped one.
+    ``keywords`` are the texts a scoped request covers; the first
+    ``LLM_PROMPT_KEYWORDS_CAP`` are named in the prompt so the model
+    recommends for that scope only (the Action Center defaults to every
+    keyword, 5,000 lines at 10x). Without a scope the prompt is the unscoped one.
+
+    The call runs on a fast-tier role without thinking, bounded by the
+    request's deadline (A-1: the balanced tier with medium thinking took
+    15-45 s inside a 29 s request). Returns the recommendations and how the
+    pass went: ``ok``, ``timed_out`` (the model did not answer in time) or
+    ``failed``; the handler keeps the rule-based list either way.
     """
     try:
         scope_section = ''
         if keywords:
-            listed = '\n'.join(f'- {keyword}' for keyword in keywords)
+            listed = '\n'.join(f'- {keyword}' for keyword in keywords[:LLM_PROMPT_KEYWORDS_CAP])
+            more = len(keywords) - LLM_PROMPT_KEYWORDS_CAP
+            listed += f'\n- … and {more} more keywords' if more > 0 else ''
             scope_section = f'Keywords In Scope (recommend for these only):\n{listed}\n\n'
 
         prompt = f"""Analyze this AI visibility data and provide 3-5 specific, actionable recommendations.
@@ -336,17 +360,22 @@ Focus on:
 3. Content and citation opportunities
 4. Provider-specific optimizations"""
 
-        content = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000)
+        content = invoke_bedrock(
+            prompt, LLM_RECOMMENDATIONS_ROLE, max_tokens=2000, thinking=False, deadline=current_deadline(),
+        )
 
         # Parse JSON array via shared helper; with expect="array" it yields a list or None.
         parsed = parse_llm_json(content, expect="array")
         if isinstance(parsed, list):
-            return parsed
+            return parsed, 'ok'
 
+    except BedrockDeadlineError:
+        logger.warning('LLM recommendations ran out of time; answering the rule-based list')
+        return [], 'timed_out'
     except Exception:
         logger.exception("LLM recommendation error")
 
-    return []
+    return [], 'failed'
 
 
 def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
@@ -417,15 +446,17 @@ def handler(event: dict[str, Any], context: Any, keywords: list[str] | None, use
     _annotate_with_status(recommendations)
 
     # Optionally enhance with LLM
-    llm_recommendations = []
+    llm_recommendations: list[dict[str, Any]] = []
+    llm_outcome: LlmOutcome | None = None
     if use_llm and recommendations:
         context_str = json.dumps(recommendations[:5], indent=2)
-        llm_recommendations = generate_llm_recommendations(config, context_str, keywords)
+        llm_recommendations, llm_outcome = generate_llm_recommendations(config, context_str, keywords)
 
     result = {
         'generated_at': get_timestamp(),
         'recommendations': recommendations,
         'llm_enhanced': llm_recommendations or None,
+        'llm': llm_outcome,
         'total_count': len(recommendations),
         'by_priority': {
             'high': len([r for r in recommendations if r.get('priority') == 'high']),

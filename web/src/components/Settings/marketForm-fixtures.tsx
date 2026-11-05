@@ -21,7 +21,7 @@ type ProposalPostArguments = [path: string, body: { propose: MarketProposalReque
 export function proposalPostArguments(request: MarketProposalRequest): ProposalPostArguments {
   return ['/markets', { propose: request }, {
     signal: expect.any(AbortSignal),
-    acceptedJsonStatuses: [400, 502],
+    acceptedJsonStatuses: [400, 502, 503],
   }];
 }
 

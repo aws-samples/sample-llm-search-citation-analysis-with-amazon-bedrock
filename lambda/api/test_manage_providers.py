@@ -32,6 +32,7 @@ import pytest
 import requests
 from botocore.exceptions import ClientError
 
+from shared.request_deadline import Deadline
 from shared.web_search_gateway import WebSearchGatewayError
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.module_loader import load_handler_module
@@ -498,19 +499,19 @@ class TestUpdateModel:
             status, _ = _put_provider('gemini', {'model': 'gemini-2.5-pro'})
 
         assert status == 200
-        assert mock_table.update_item.call_args_list[-1].kwargs == {
+        assert mock_table.update_item.call_args_list[0].kwargs == {
             'Key': {'provider_id': 'gemini'},
             'UpdateExpression': 'SET model = :model, model_updated_at = :ts, updated_at = :ts',
             'ExpressionAttributeValues': {':model': 'gemini-2.5-pro', ':ts': '2026-09-28T12:00:00Z'},
         }
 
     def test_a_model_that_answered_the_check_records_a_success(self, requests_stub):
-        """The check was a real answer with the stored key: the health record says so."""
+        """The check was a real answer with the stored key: once the model is stored, the health record says so."""
         _store_key()
 
         _put_provider('gemini', {'model': 'gemini-2.5-pro'})
 
-        assert _update_expressions()[0] == (
+        assert _update_expressions()[-1] == (
             'SET last_success_at = :ts, consecutive_failures = :zero '
             'REMOVE last_error, last_error_category'
         )
@@ -1399,3 +1400,69 @@ class TestGatewayCheck:
     def test_reports_a_tool_error(self, gateway_post):
         with patch.object(_module, 'parse_search_reply', side_effect=WebSearchGatewayError('Web Search failed: x')):
             assert _module.validate_api_key('agentcore', GATEWAY_URL) == {'valid': False, 'error': 'Web Search failed: x'}
+
+
+class TestTimeBudget:
+    """C6: every proving call fits the request's time budget, and nothing is saved until every check passed."""
+
+    def test_stores_no_key_when_enabling_with_it_fails_its_check(self, requests_stub):
+        requests_stub.side_effect = [_reply(200, {'data': []}), _reply(401)]
+
+        status, _ = _put_provider('openai', {'api_key': 'sk-new-key-5678', 'enabled': True})
+
+        assert (status, mock_secrets.put_secret_value.call_count) == (400, 0)
+
+    def test_answers_503_and_writes_nothing_when_the_enable_check_runs_out_of_time(self, requests_stub):
+        _store_key()
+        with patch.object(_module, 'current_deadline', return_value=Deadline(0, lambda: 1.0)):
+            status, body = _put_provider('openai', {'enabled': True})
+
+        assert (status, body['error'], mock_table.update_item.call_args_list, requests_stub.call_args_list) == (
+            503, 'The check ran out of time; nothing was saved', [], [],
+        )
+
+    def test_waits_only_what_the_budget_has_left_for_the_model_check(self, requests_stub):
+        with patch.object(_module, 'current_deadline', return_value=Deadline(8.5, lambda: 1.0)):
+            _module.validate_model('openai', 'sk-test-key-1234', 'gpt-5-mini')
+
+        assert requests_stub.call_args.kwargs['timeout'] == 7.5
+
+    def test_reports_a_timeout_the_budget_imposed_as_out_of_time(self, requests_stub):
+        requests_stub.side_effect = ProbeTimeout()
+        with patch.object(_module, 'current_deadline', return_value=Deadline(8.5, lambda: 1.0)):
+            result = _module.validate_model('openai', 'sk-test-key-1234', 'gpt-5-mini')
+
+        assert result == {'valid': False, 'error': _module.OUT_OF_TIME_MESSAGE, 'out_of_time': True}
+
+    def test_skips_the_claude_fallback_check_when_the_budget_is_spent(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported')
+        clock = MagicMock(side_effect=[0.0, 0.0, 100.0])
+        with patch.object(_module, 'current_deadline', return_value=Deadline(20, clock)):
+            status, _ = _put_provider('claude', {'model': 'claude-haiku-4-5'})
+
+        assert (status, requests_stub.call_count) == (503, 1)
+
+    def test_records_no_failure_for_an_enable_check_the_budget_cut(self, requests_stub):
+        _store_key()
+        requests_stub.side_effect = ProbeTimeout()
+        with patch.object(_module, 'current_deadline', return_value=Deadline(8.5, lambda: 1.0)):
+            _put_provider('openai', {'enabled': True})
+
+        assert mock_table.update_item.call_args_list == []
+
+    def test_names_what_was_saved_when_a_later_write_fails(self, requests_stub):
+        mock_table.update_item.side_effect = ClientError({'Error': {'Code': 'InternalServerError'}}, 'UpdateItem')
+
+        status, body = _put_provider('openai', {'api_key': 'sk-new-key-5678', 'enabled': False, 'validate': False})
+
+        assert (status, body) == (500, {'error': 'Failed to save configuration', 'saved': ['api_key']})
+
+
+class TestGetProvidersReadsInParallel:
+    def test_reads_every_providers_secret_and_row_once(self):
+        _get_providers()
+
+        assert (mock_secrets.get_secret_value.call_count, mock_table.get_item.call_count) == (
+            len(_module.PROVIDERS) - 1, len(_module.PROVIDERS),
+        )

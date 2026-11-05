@@ -207,6 +207,8 @@ export interface RecommendationsResponse {
   generated_at: string;
   recommendations: Recommendation[];
   llm_enhanced?: Recommendation[];
+  /** How the `use_llm=true` pass went; `timed_out` when the model did not answer within the request (null when not asked). */
+  llm?: 'ok' | 'timed_out' | 'failed' | null;
   total_count: number;
   by_priority: {
     high: number;

@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.models import BedrockDeadlineError
+from shared.request_deadline import Deadline
 from testing.events import parse_response
 from testing.report_scope_fixtures import (
     REPORT_TABLES_ENV,
@@ -136,7 +138,10 @@ class TestNoScope:
             report.call(None)
             resource = recommendations.dynamodb
 
-        loader.assert_called_once_with(resource, recommendations.SEARCH_RESULTS_TABLE, max_keywords=20, keywords=None)
+        loader.assert_called_once_with(
+            resource, recommendations.SEARCH_RESULTS_TABLE, max_keywords=20, keywords=None,
+            projection='keyword, #ts, provider, brands',
+        )
 
     def test_discovers_the_active_keywords_from_the_keywords_table(self, recommendations):
         with action_center(recommendations) as report:
@@ -149,7 +154,7 @@ class TestNoScope:
         with action_center(recommendations) as report:
             body = report.body(None)
 
-        assert sorted(body) == ['by_priority', 'generated_at', 'llm_enhanced', 'recommendations', 'total_count']
+        assert sorted(body) == ['by_priority', 'generated_at', 'llm', 'llm_enhanced', 'recommendations', 'total_count']
         assert _recommended_keywords(body) == {'hotel coruna spa', 'hotel marino beach'}
 
 
@@ -157,7 +162,7 @@ class TestLlmPass:
     @pytest.fixture
     def llm_call(self, recommendations) -> tuple[MagicMock, dict[str, Any]]:
         """``generate_llm_recommendations`` as the marino group's ``use_llm=true`` request called it, and the body."""
-        llm = MagicMock(return_value=[{'type': 'llm', 'priority': 'high', 'title': 'From the model'}])
+        llm = MagicMock(return_value=([{'type': 'llm', 'priority': 'high', 'title': 'From the model'}], 'ok'))
         with action_center(recommendations) as report, patch.object(recommendations, 'generate_llm_recommendations', llm):
             body = report.body({'group_id': 'marino', 'use_llm': 'true'})
         return llm, body
@@ -174,7 +179,7 @@ class TestLlmPass:
         assert body['llm_enhanced'] == [{'type': 'llm', 'priority': 'high', 'title': 'From the model'}]
 
     def test_passes_no_keywords_to_the_llm_pass_without_a_scope(self, recommendations):
-        llm = MagicMock(return_value=[])
+        llm = MagicMock(return_value=([], 'ok'))
         with action_center(recommendations) as report, patch.object(recommendations, 'generate_llm_recommendations', llm):
             report.call({'use_llm': 'true'})
 
@@ -204,3 +209,48 @@ class TestLlmPrompt:
 
         assert unscoped == scoped.replace('Keywords In Scope (recommend for these only):\n- hotel marino beach\n\n', '')
         assert 'Keywords In Scope' not in unscoped
+
+    def test_names_at_most_fifty_keywords_and_counts_the_rest(self, recommendations):
+        prompt = _llm_prompt(recommendations, [f'keyword {index:02d}' for index in range(60)])
+
+        assert ('- keyword 49\n- … and 10 more keywords\n\n' in prompt, '- keyword 50' in prompt) == (True, False)
+
+
+class TestLlmTimeBudget:
+    def test_asks_a_fast_tier_role_without_thinking_under_the_request_deadline(self, recommendations):
+        deadline = Deadline(20)
+        with (
+            patch.object(recommendations, 'invoke_bedrock', return_value='[]') as bedrock,
+            patch.object(recommendations, 'current_deadline', return_value=deadline),
+        ):
+            recommendations.generate_llm_recommendations(BRAND_CONFIG, '[]', None)
+
+        assert (bedrock.call_args.args[1], bedrock.call_args.kwargs['thinking'], bedrock.call_args.kwargs['deadline']) == (
+            recommendations.ModelRole.GENERATION, False, deadline,
+        )
+
+    def test_answers_200_with_the_rules_and_llm_timed_out_when_the_model_runs_out_of_time(self, recommendations):
+        timed_out = MagicMock(side_effect=BedrockDeadlineError('no answer within 19 s'))
+        with action_center(recommendations) as report, patch.object(recommendations, 'invoke_bedrock', timed_out):
+            status, body = parse_response(report.call({'group_id': 'marino', 'use_llm': 'true'}))
+
+        assert (status, body['llm'], body['llm_enhanced'], _recommended_keywords(body)) == (
+            200, 'timed_out', None, {'hotel marino beach'},
+        )
+
+    def test_reports_llm_ok_with_the_models_recommendations(self, recommendations):
+        answer = '[{"type": "llm", "priority": "high", "title": "From the model"}]'
+        with action_center(recommendations) as report, patch.object(recommendations, 'invoke_bedrock', return_value=answer):
+            body = report.body({'group_id': 'marino', 'use_llm': 'true'})
+
+        assert (body['llm'], [rec['title'] for rec in body['llm_enhanced']]) == ('ok', ['From the model'])
+
+    @pytest.mark.parametrize(('query', 'outcome'), [
+        pytest.param({'group_id': 'marino', 'use_llm': 'true'}, 'failed', id='model-answers-no-json'),
+        pytest.param({'group_id': 'marino'}, None, id='pass-not-asked-for'),
+    ])
+    def test_reports_the_llm_outcome_of_the_request(self, recommendations, query, outcome):
+        with action_center(recommendations) as report, patch.object(recommendations, 'invoke_bedrock', return_value='Sorry.'):
+            body = report.body(query)
+
+        assert body['llm'] == outcome
