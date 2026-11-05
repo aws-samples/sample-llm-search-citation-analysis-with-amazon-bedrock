@@ -131,19 +131,19 @@ export async function fetchMarkets(signal?: AbortSignal): Promise<MarketsListing
   return decodeMarketsListing(await apiGet<unknown>(MARKETS_PATH, { signal }));
 }
 
-/** Replace the whole market list; throws `MarketsInUseError` when keywords still use a dropped market. */
+/** Replace the whole market list; throws `MarketsInUseError` when keywords still use a dropped market, and the 503 "try again" when that check ran out of time. */
 export async function saveMarkets(markets: readonly Market[]): Promise<MarketsListing> {
-  const payload = await apiPut<unknown>(MARKETS_PATH, { markets }, { acceptedJsonStatuses: [400, 409] });
+  const payload = await apiPut<unknown>(MARKETS_PATH, { markets }, { acceptedJsonStatuses: [400, 409, 503] });
   const refused = refusal(payload);
   if (refused !== null) throw refused;
   return decodeMarketsListing(payload);
 }
 
-/** `POST /markets` with `body`, the refusal bodies thrown as errors: 400 names the refused field, 502 says the model could not answer. */
+/** `POST /markets` with `body`, the refusal bodies thrown as errors: 400 names the refused field, 502 says the model could not answer, 503 that it did not answer in time. */
 async function postMarkets(body: object, signal: AbortSignal | undefined): Promise<unknown> {
   const payload = await apiPost<unknown>(MARKETS_PATH, body, {
     signal,
-    acceptedJsonStatuses: [400, 502],
+    acceptedJsonStatuses: [400, 502, 503],
   });
   const refused = refusal(payload);
   if (refused !== null) throw refused;
