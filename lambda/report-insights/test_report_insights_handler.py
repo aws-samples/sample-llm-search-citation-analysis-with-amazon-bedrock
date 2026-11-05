@@ -14,6 +14,7 @@ import pytest
 from shared import scoped_reports
 from shared.markets import markets_from_item
 from shared.models import BedrockInvocationError
+from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
 from testing.markets_fixtures import BRAZIL, CHILE, markets_item
@@ -364,3 +365,116 @@ class TestHistoryWindow:
             worker_module.handler(_workflow_event('group-1'), None)
 
         assert [read['Limit'] for read in _history_reads(search)] == [scoped_reports.rows_per_keyword(2) + 1] * 2
+
+
+# --- One group per invocation (the workflow's Map) and the time budget (2.42.0) -------
+
+_MAP_ITEM = {'group_id': 'group-1', 'market_id': 'global', 'run_timestamp': RUN_TIMESTAMP}
+
+
+class _SteppedClock:
+    """A monotonic clock that moves ``step`` seconds on every reading, from 0."""
+
+    def __init__(self, step: float) -> None:
+        self.step = step
+        self.now = -step
+
+    def __call__(self) -> float:
+        self.now += self.step
+        return self.now
+
+    def deadline(self, seconds: float) -> Deadline:
+        return Deadline(seconds, self)
+
+
+class _ClockAfterFirstRead:
+    """A clock at 0 until SearchResults is first queried, and an hour later from then on."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.now = 0.0
+        self.rows = rows
+
+    def __call__(self) -> float:
+        return self.now
+
+    def query(self, **_kwargs) -> dict:
+        self.now = 3600.0
+        return {'Items': self.rows}
+
+    def deadline(self, seconds: float) -> Deadline:
+        return Deadline(seconds, self)
+
+
+class TestOneGroupPerInvocation:
+    def test_answers_the_map_item_with_the_run_it_names(self, worker_module) -> None:
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT]))):
+            result = worker_module.handler(_MAP_ITEM, None)
+
+        assert (result['groups'], result['generated'], result['run_timestamp']) == (1, 1, RUN_TIMESTAMP)
+
+    def test_stores_the_map_item_narrative_under_the_run_it_names(self, worker_module) -> None:
+        item = _stored(_narratives_written_for(worker_module, _MAP_ITEM))
+
+        assert (item['scope_key'], item['run_timestamp']) == ('group#group-1', RUN_TIMESTAMP)
+
+    def test_reads_only_the_named_run_of_a_map_item(self, worker_module) -> None:
+        search = MagicMock()
+        search.query.return_value = {'Items': _ROWS}
+
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), search=search):
+            worker_module.handler({**_MAP_ITEM, 'group_id': 'group-2'}, None)
+
+        run_reads = [call.kwargs for call in search.query.call_args_list if 'ScanIndexForward' not in call.kwargs]
+        assert len(run_reads) == 1
+
+
+class TestTimeBudget:
+    def test_skips_the_group_for_the_time_budget_when_none_is_left(self, worker_module) -> None:
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT]))) as narratives, \
+                patch.object(worker_module, 'budget_from_context', return_value=0.0):
+            result = worker_module.handler(_MAP_ITEM, None)
+
+        assert (result['skipped'], result['time_budget_skipped'], narratives.put_item.call_count) == (1, 1, 0)
+
+    def test_skips_the_group_for_the_time_budget_when_it_runs_out_reading_the_run(self, worker_module) -> None:
+        clock = _SteppedClock(1.0)
+
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT]))) as narratives, \
+                patch.object(worker_module, 'budget_from_context', return_value=1.5), \
+                patch.object(worker_module, 'Deadline', side_effect=clock.deadline):
+            result = worker_module.handler(_MAP_ITEM, None)
+
+        assert (result['time_budget_skipped'], result['failed'], narratives.put_item.call_count) == (1, 0, 0)
+
+    def test_writes_the_narrative_from_the_history_read_before_the_budget_ran_out(self, worker_module) -> None:
+        clock = _ClockAfterFirstRead(_ROWS)
+        search = MagicMock()
+        search.query.side_effect = clock.query
+
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT])), search=search) as narratives, \
+                patch.object(worker_module, 'budget_from_context', return_value=10.0), \
+                patch.object(worker_module, 'Deadline', side_effect=clock.deadline):
+            result = worker_module.handler({**_MAP_ITEM, 'group_id': 'group-2'}, None)
+
+        assert (result['generated'], result['history_partial'], narratives.put_item.call_count) == (1, 1, 1)
+
+    def test_reports_no_partial_history_when_the_budget_lasts(self, worker_module) -> None:
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT]))):
+            result = worker_module.handler(_MAP_ITEM, None)
+
+        assert (result['history_partial'], result['time_budget_skipped']) == (0, 0)
+
+    def test_keeps_the_narrative_reserve_out_of_the_read_budget(self, worker_module) -> None:
+        context = MagicMock()
+        context.get_remaining_time_in_millis.return_value = 120_000
+        budgets: list[float] = []
+
+        def recorded(seconds: float) -> Deadline:
+            budgets.append(seconds)
+            return Deadline(seconds)
+
+        with _worker(worker_module, _model_reply(model_narrative([_VALID_INSIGHT]))), \
+                patch.object(worker_module, 'Deadline', side_effect=recorded):
+            worker_module.handler(_MAP_ITEM, context)
+
+        assert budgets == [120 - worker_module.NARRATIVE_RESERVE_SECONDS]

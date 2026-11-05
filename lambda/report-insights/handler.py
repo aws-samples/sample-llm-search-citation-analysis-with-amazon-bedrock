@@ -12,7 +12,19 @@ a narrative written from them alone, keeps the items
 
 ``POST /api/reports/insights/regenerate`` invokes it asynchronously with
 ``{"group_id": ...}`` (and an optional ``"market_id"``): the narrative is then
-written again for the group's latest runs.
+written again for the group's latest runs. The workflow fans out the same way
+(2.42.0): a Map over ``alerts.snapshot_scopes`` invokes it once per pair with
+``{"group_id", "market_id", "run_timestamp"}``, so each group has a whole
+invocation's time and memory. The older ``{"alerts": ...}`` event, which
+writes every pair in one invocation, is still answered for executions started
+before the Map.
+
+Every invocation has a time budget (``shared.request_deadline``): the
+Lambda's remaining time minus ``NARRATIVE_RESERVE_SECONDS``, kept for the
+Bedrock call and the write. Reads stop when it is spent; a group whose
+history read stopped is still written from the runs read and reported
+``history_partial``, and a group not reached in time is skipped with
+``reason: time_budget`` instead of timing out the invocation.
 
 Narratives are per (group, market) (2.37.0), like KpiAlerts' snapshots: the
 pairs come from ``alerts.snapshot_scopes`` (older executions name only
@@ -64,6 +76,13 @@ from shared.markets import (
 )
 from shared.models import ModelRole, get_model_id, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.request_deadline import (
+    Deadline,
+    activate_deadline,
+    budget_from_context,
+    clear_request_deadline,
+    current_deadline,
+)
 from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import load_window_histories
 from shared.search_results import search_results_table_name
@@ -77,6 +96,8 @@ GROUP_WORKERS = 4
 #: The window of the stability facts: the 90 days ``GET /api/reports/insights`` defaults to.
 HISTORY_DAYS = 90
 NARRATIVE_MAX_TOKENS = 3000
+#: Seconds of the invocation kept for the narrative's Bedrock call (3,000 tokens of Sonnet), validation and the write.
+NARRATIVE_RESERVE_SECONDS = 75.0
 #: Room for the KPI and insight JSON inside its prompt tag (``prompt_safety`` caps a field at 4000 by default).
 FACTS_MAX_LENGTH = 60000
 
@@ -94,6 +115,10 @@ class UnreadableAnswersError(RuntimeError):
 
 class UnparseableNarrativeError(ValueError):
     """The model's output held no JSON object."""
+
+
+class TimeBudgetSpentError(RuntimeError):
+    """The invocation's time budget ran out before the group's run answers were read."""
 
 
 # ---------------------------------------------------------------------------
@@ -115,14 +140,22 @@ def _scopes_from_alerts(alerts: Mapping[str, Any]) -> list[tuple[str, str]] | No
     return [(str(value), GLOBAL_MARKET_ID) for value in group_ids if value]
 
 
+def _non_empty(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
 def _requests(event: Any) -> tuple[list[tuple[str, str]], str | None]:
-    """The (group, market) pairs to write for and the run to read (``None``: each keyword's latest run)."""
+    """The (group, market) pairs to write for and the run to read (``None``: each keyword's latest run).
+
+    A one-group event (regenerate, or one item of the workflow's Map) names the
+    run with ``run_timestamp``; without it each keyword's latest run is read.
+    """
     if not isinstance(event, Mapping):
         return [], None
-    group_id = event.get('group_id')
-    if isinstance(group_id, str) and group_id:
-        market_id = event.get('market_id')
-        return [(group_id, market_id if isinstance(market_id, str) and market_id else GLOBAL_MARKET_ID)], None
+    group_id = _non_empty(event.get('group_id'))
+    if group_id is not None:
+        market_id = _non_empty(event.get('market_id')) or GLOBAL_MARKET_ID
+        return [(group_id, market_id)], _non_empty(event.get('run_timestamp'))
     alerts = event.get('alerts')
     if not isinstance(alerts, Mapping) or alerts.get('status') != 'completed':
         return [], None
@@ -166,6 +199,8 @@ def _read_all(keywords: list[str], read: Callable[[Any, str], list[dict[str, Any
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
     rows = map_scope_keywords(keywords, lambda keyword: read(table, keyword), lambda _keyword: None)
     if any(entry is None for entry in rows):
+        if current_deadline().cut:
+            raise TimeBudgetSpentError('The time budget ran out before every keyword of the group was read')
         raise UnreadableAnswersError('A keyword of the group could not be read')
     return {keyword: entry or [] for keyword, entry in zip(keywords, rows, strict=True)}
 
@@ -183,6 +218,8 @@ def _history(keywords: list[str], owned_domains: list[str]) -> tuple[list[dict[s
     """The keywords' stability history over ``HISTORY_DAYS``, read and built as ``GET /api/reports/insights`` does.
 
     The second value is the run the read stopped at (``None`` for a window read whole).
+    Keywords not reached before the time budget is spent have no history
+    (``current_deadline().cut`` says so).
     """
     histories, truncated_before = load_window_histories(
         dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(HISTORY_DAYS), owned_domains,
@@ -291,7 +328,9 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
     if not answers:
         return run.outcome(status='skipped', reason='no_answers')
     history, history_truncated_before = _history(keywords, owned_domains)
-    truncation = {} if history_truncated_before is None else {'history_truncated_before': history_truncated_before}
+    truncation: dict[str, Any] = {} if history_truncated_before is None else {'history_truncated_before': history_truncated_before}
+    if current_deadline().cut:
+        truncation['history_partial'] = True
     computed = compute_insights(answers, owned_domains, history, competitor_domains_from(brand_config))
     if not computed['insights']:
         return run.outcome(status='skipped', reason='no_insights', **truncation)
@@ -319,8 +358,14 @@ def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> 
 def _guarded(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
     if not run.keywords:
         return run.outcome(status='skipped', reason='no_active_keywords')
+    if current_deadline().expired():
+        logger.warning('Time budget spent before a group was started; its narrative is not written this run')
+        return run.outcome(status='skipped', reason='time_budget')
     try:
         return generate_group_narrative(run, brand_config)
+    except TimeBudgetSpentError:
+        logger.warning('Time budget spent while reading a group run; its narrative is not written this run')
+        return run.outcome(status='skipped', reason='time_budget')
     except Exception:
         logger.exception('Narrative generation failed for one group')
         return run.outcome(status='failed')
@@ -355,6 +400,10 @@ def _summary(outcomes: list[dict[str, Any]], run_timestamp: str | None) -> dict[
         'dropped': sum(outcome.get('dropped', 0) for outcome in outcomes),
         # Groups whose history read stopped at the window cap, as /api/reports/insights reports it.
         'history_truncated': sum('history_truncated_before' in outcome for outcome in outcomes),
+        # Groups written from part of their history because the time budget ran out.
+        'history_partial': sum(bool(outcome.get('history_partial')) for outcome in outcomes),
+        # Groups left for the next run because the time budget ran out.
+        'time_budget_skipped': sum(outcome.get('reason') == 'time_budget' for outcome in outcomes),
     }
 
 
@@ -363,8 +412,12 @@ def handler(event: Any, context: Any) -> dict[str, Any]:
     requests, run_timestamp = _requests(event)
     if not requests:
         return {'status': 'skipped', 'reason': 'no_complete_groups', 'groups': 0}
-    runs = _group_runs(requests, run_timestamp)
-    brand_config = get_brand_config(BRAND_CONFIG_TABLE)
-    with ThreadPoolExecutor(max_workers=min(GROUP_WORKERS, len(runs))) as pool:
-        outcomes = list(pool.map(lambda run: _guarded(run, brand_config), runs))
+    activate_deadline(Deadline(budget_from_context(context, NARRATIVE_RESERVE_SECONDS)))
+    try:
+        runs = _group_runs(requests, run_timestamp)
+        brand_config = get_brand_config(BRAND_CONFIG_TABLE)
+        with ThreadPoolExecutor(max_workers=min(GROUP_WORKERS, len(runs))) as pool:
+            outcomes = list(pool.map(lambda run: _guarded(run, brand_config), runs))
+    finally:
+        clear_request_deadline()
     return _summary(outcomes, run_timestamp)
