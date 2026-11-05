@@ -144,7 +144,7 @@ export const GET_RETRY_DELAY_MAX_MS = GET_RETRY_DELAY_MIN_MS + (1 << GET_RETRY_J
 
 function retryDelayMs(): number {
   const [draw = 0] = crypto.getRandomValues(new Uint16Array(1));
-  return GET_RETRY_DELAY_MIN_MS + (draw & ((1 << GET_RETRY_JITTER_BITS) - 1));
+  return GET_RETRY_DELAY_MIN_MS + (draw & (GET_RETRY_DELAY_MAX_MS - GET_RETRY_DELAY_MIN_MS));
 }
 
 /** A transport failure (`fetch` rejects with a TypeError) or a retryable status. */
