@@ -7,8 +7,15 @@ import {
 import type { Keyword } from '../../types';
 import { TabContent } from './TabContent';
 import {
-  APPROXIMATE_STATS, buildTabContentProps, FIRST_CITATIONS_PAGE, RECENT_SEARCH
+  APPROXIMATE_STATS,
+  buildTabContentProps,
+  CITATIONS_RETRYING_PANELS,
+  CITATIONS_TIMED_OUT_PANELS,
+  FIRST_CITATIONS_PAGE,
+  RECENT_SEARCH,
+  SEARCHES_FAILED_PANELS,
 } from './TabContent-fixtures';
+import { IDLE_PANEL_STATES } from '../../hooks/dashboardPanels';
 import { APPROXIMATE_COUNT_NOTE } from '../Dashboard/StatCard';
 import { queryLoadOlderSearchesElement } from '../Searches/SearchesView-fixtures';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
@@ -145,5 +152,69 @@ describe('TabContent recent searches', () => {
     await screen.findByText(RECENT_SEARCH.keyword);
 
     expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument();
+  });
+
+  it('shows the searches failure above Recent Searches when /searches failed', async () => {
+    renderSearchesTab({ panels: SEARCHES_FAILED_PANELS });
+
+    expect(await screen.findByText('Recent searches did not load: Server error occurred.')).toBeInTheDocument();
+  });
+});
+
+/** The Dashboard tab with the dashboard read's per-panel outcome `panels`. */
+function renderDashboardPanels(overrides: Parameters<typeof buildTabContentProps>[0] = {}) {
+  return render(<TabContent {...buildTabContentProps({
+    activeTab: 'dashboard',
+    panels: CITATIONS_TIMED_OUT_PANELS,
+    ...overrides,
+  })} />);
+}
+
+describe('TabContent per-panel load errors', () => {
+  it('shows the citations timeout next to the charts when /citations timed out', () => {
+    renderDashboardPanels();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Citation and brand charts did not load: Request timed out.');
+  });
+
+  it('keeps showing the loaded totals when only the citations panel failed', () => {
+    renderDashboardPanels({ stats: APPROXIMATE_STATS });
+
+    expect(screen.getByText('250,000')).toBeInTheDocument();
+  });
+
+  it('retries the citations panel when its Retry button is clicked', () => {
+    const retryPanel = vi.fn();
+    renderDashboardPanels({ retryPanel });
+
+    screen.getByRole('button', { name: 'Retry' }).click();
+
+    expect(retryPanel).toHaveBeenCalledWith('citations');
+  });
+
+  it('disables the button and says Retrying while the citations retry runs', () => {
+    renderDashboardPanels({ panels: CITATIONS_RETRYING_PANELS });
+
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+  });
+
+  it('shows no panel error when every panel loaded', () => {
+    renderDashboardPanels({ panels: IDLE_PANEL_STATES });
+
+    expect(screen.queryByText(/did not load/)).not.toBeInTheDocument();
+  });
+
+  it('hides the combined-view panel errors while a market is picked', async () => {
+    answerChileanPanels();
+    renderWithMarketSelection(
+      <TabContent {...buildTabContentProps({
+        activeTab: 'dashboard',
+        panels: CITATIONS_TIMED_OUT_PANELS,
+      })} />,
+      buildMarketSelectionMock({ selectedMarketId: 'cl-es' }),
+    );
+    await screen.findByText('21');
+
+    expect(screen.queryByText(/did not load/)).not.toBeInTheDocument();
   });
 });

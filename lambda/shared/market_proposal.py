@@ -22,6 +22,7 @@ from shared.llm_json import parse_llm_json
 from shared.markets import GLOBAL_MARKET_ID, Market, validate_market
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.request_deadline import Deadline
 
 PROPOSAL_MAX_TOKENS = 1500
 MAX_CITY_LENGTH = 80
@@ -141,9 +142,20 @@ def market_from_proposal(parsed: Mapping[str, Any], request: Mapping[str, str]) 
     return market
 
 
-def propose_market(request: Mapping[str, str], brand_config: Mapping[str, Any]) -> Market:
-    """Ask the model once for the market of ``request``; raises when the call fails or the answer is unusable."""
-    answer = invoke_bedrock(proposal_prompt(request, brand_config), ModelRole.ANALYSIS, max_tokens=PROPOSAL_MAX_TOKENS)
+def propose_market(
+    request: Mapping[str, str], brand_config: Mapping[str, Any], *, deadline: Deadline | None = None,
+) -> Market:
+    """Ask the model once for the market of ``request``; raises when the call fails or the answer is unusable.
+
+    ``deadline`` (the request's) bounds the call: ``BedrockDeadlineError``
+    when the model does not answer in time. Thinking is off (low effort): the
+    answer is a short list of facts, and medium-effort thinking alone took
+    15-60 s, past the gateway's 29 s.
+    """
+    answer = invoke_bedrock(
+        proposal_prompt(request, brand_config), ModelRole.ANALYSIS,
+        max_tokens=PROPOSAL_MAX_TOKENS, thinking=False, deadline=deadline,
+    )
     parsed = parse_llm_json(answer)
     if not isinstance(parsed, dict):
         raise UnparseableProposalError('The model returned no JSON object')

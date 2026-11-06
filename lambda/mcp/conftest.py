@@ -177,7 +177,7 @@ def api() -> Iterator[FakeApi]:
     client = MagicMock(name='lambda_client')
     fake = FakeApi(client)
     fake.answer(200, {})
-    with patch.object(invoke, '_lambda_client', client):
+    with patch.object(invoke, 'lambda_client', MagicMock(return_value=client)):
         yield fake
 
 

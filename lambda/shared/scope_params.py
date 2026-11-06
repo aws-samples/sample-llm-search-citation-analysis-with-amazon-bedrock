@@ -57,6 +57,7 @@ from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.markets import GLOBAL_MARKET_ID, is_market_filter_id
 from shared.module_files import exec_module_file
+from shared.request_deadline import current_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -247,11 +248,19 @@ def map_scope_keywords[ResultT](
 
     A keyword whose ``compute`` raises is logged and answered with
     ``fallback(keyword)``: one broken partition must not sink a group report.
+    A keyword not yet started when the request's time budget
+    (``shared.request_deadline``) is spent is answered with ``fallback`` too,
+    and the deadline is marked ``cut`` so the handler can say the answer is
+    partial.
     """
+    deadline = current_deadline()
+
     # No return annotation on the inner function: CodeQL's Python extractor does
     # not scope PEP 695 type parameters into nested definitions and would report
     # `ResultT` as an uninitialized local; pyright infers the type from `compute`.
     def guarded(keyword: str):
+        if deadline.stop_reading('a scoped keyword fan-out'):
+            return fallback(keyword)
         try:
             return compute(keyword)
         except Exception:

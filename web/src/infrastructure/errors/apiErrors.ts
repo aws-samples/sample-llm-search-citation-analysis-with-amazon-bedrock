@@ -334,8 +334,13 @@ export function getErrorMessage(
   return responseMessage ?? contextMessage ?? CATEGORY_MESSAGES[category];
 }
 
+/**
+ * An aborted request: fetch rejects with a `DOMException` named `AbortError`
+ * (not an `Error` subclass in every runtime, jsdom included), and some
+ * callers abort with their own `Error` of that name.
+ */
 export function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
+  return (error instanceof Error || error instanceof DOMException) && error.name === 'AbortError';
 }
 
 /**

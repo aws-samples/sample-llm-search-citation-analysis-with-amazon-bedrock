@@ -1,4 +1,18 @@
-"""Promote keyword-research results into the active Keywords table."""
+"""Promote keyword-research results into the active Keywords table.
+
+Up to ``MAX_KEYWORDS`` conditional puts (plus a group ``ADD`` per grouped
+duplicate) run ``shared.bounded_writes.WRITE_WORKERS`` at a time and stop at
+the request's deadline: the keywords not written by then come back in
+``pending_keywords`` with ``truncated: true``. Every write is idempotent (a
+conditional put on the deterministic id, a set ``ADD``), so sending the same
+request again creates exactly the pending ones and reports the rest as
+duplicates.
+
+The stored keywords are read in full first (``load_keyword_identities``), a
+projected consistent scan: rows created before deterministic ids carry random
+ids, so a key lookup alone would miss them and promote a duplicate. At 5,000
+keywords that is about 3 pages, under 2 s.
+"""
 
 import logging
 import sys
@@ -9,6 +23,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import error_response, success_response, validation_error
+from shared.bounded_writes import map_writes
 from shared.decorators import api_handler, json_object_body, route_handler
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
@@ -97,27 +112,29 @@ def _promote_keywords(event, context, body):
     to_create, skipped = partition_keywords(keywords, existing_keys)
     items = create_items(to_create, status, priority, market_id=market_id)
     grouped_keywords = []
+    pending_keywords = []
     if group_ids:
         requested_group_ids = set(group_ids)
         for item in items:
             item['group_ids'] = requested_group_ids
-        grouped_keywords.extend(
-            group_existing_keywords(
-                keywords_table,
-                existing_items or {},
-                skipped,
-                requested_group_ids,
-            )
+        existing_grouped, pending_groupings = group_existing_keywords(
+            keywords_table,
+            existing_items or {},
+            skipped,
+            requested_group_ids,
         )
-        created_items, concurrent_skips, concurrently_grouped = write_grouped_items(
+        grouped_keywords.extend(existing_grouped)
+        created_items, concurrent_skips, concurrently_grouped, pending_items = write_grouped_items(
             keywords_table,
             items,
             requested_group_ids,
         )
         grouped_keywords.extend(concurrently_grouped)
+        pending_keywords.extend(pending_groupings)
     else:
-        created_items, concurrent_skips = write_items(keywords_table, items)
+        created_items, concurrent_skips, pending_items = write_items(keywords_table, items)
     skipped.extend(concurrent_skips)
+    pending_keywords.extend(item['keyword'] for item in pending_items)
 
     return success_response({
         'created': len(created_items),
@@ -127,6 +144,9 @@ def _promote_keywords(event, context, body):
         'created_keywords': [serialize_keyword_item(item) for item in created_items],
         'skipped_keywords': skipped,
         'grouped_keywords': grouped_keywords,
+        # Keywords the request's deadline left unwritten: send the request again to finish.
+        'pending_keywords': pending_keywords,
+        'truncated': bool(pending_keywords),
     }, event)
 
 
@@ -324,68 +344,68 @@ def partition_keywords(keywords, existing_keys):
 
 
 def group_existing_keywords(table, existing_items, skipped, group_ids):
-    """Union groups into distinct stored duplicates and report actual additions."""
-    grouped_keywords = []
-    processed_identities = set()
+    """Union groups into distinct stored duplicates, in parallel until the deadline.
 
+    Returns ``(grouped, pending)``: the texts whose groups actually changed,
+    and the texts the deadline left ungrouped.
+    """
+    texts_by_id = {}
     for entry in skipped:
         if entry['reason'] != REASON_DUPLICATE:
             continue
-        identity = normalize_keyword(entry['keyword'])
-        if identity in processed_identities:
-            continue
-        processed_identities.add(identity)
-        existing_item = existing_items.get(identity)
-        if not existing_item:
-            continue
-        _updated, added_group_ids = add_keyword_groups(
-            table,
-            existing_item['id'],
-            group_ids,
-        )
-        if added_group_ids:
-            grouped_keywords.append(entry['keyword'])
+        existing_item = existing_items.get(normalize_keyword(entry['keyword']))
+        if existing_item:
+            texts_by_id.setdefault(existing_item['id'], entry['keyword'])
 
-    return grouped_keywords
+    writes = map_writes(
+        lambda keyword_id: bool(add_keyword_groups(table, keyword_id, group_ids)[1]),
+        list(texts_by_id),
+        what='keyword promotion group writes',
+    )
+    grouped = [texts_by_id[keyword_id] for keyword_id, added in writes.written.items() if added]
+    return grouped, [texts_by_id[keyword_id] for keyword_id in writes.pending]
+
+
+def _duplicate(item):
+    return {'keyword': item['keyword'], 'reason': REASON_DUPLICATE}
 
 
 def write_items(table, items):
-    """Conditionally create items and report concurrent duplicate writes."""
-    created_items = []
-    skipped = []
+    """Conditionally create items in parallel until the deadline.
 
-    for item in items:
-        if put_keyword_if_absent(table, item):
-            created_items.append(item)
-        else:
-            skipped.append({
-                'keyword': item['keyword'],
-                'reason': REASON_DUPLICATE,
-            })
-
-    return created_items, skipped
+    Returns ``(created, skipped, pending)``: the items written, the
+    concurrent duplicates, and the items the deadline left unwritten, each in
+    ``items`` order.
+    """
+    by_id = {item['id']: item for item in items}
+    writes = map_writes(
+        lambda keyword_id: put_keyword_if_absent(table, by_id[keyword_id]),
+        list(by_id),
+        what='keyword promotion writes',
+    )
+    created = [by_id[keyword_id] for keyword_id, put in writes.written.items() if put]
+    skipped = [_duplicate(by_id[keyword_id]) for keyword_id, put in writes.written.items() if not put]
+    return created, skipped, [by_id[keyword_id] for keyword_id in writes.pending]
 
 
 def write_grouped_items(table, items, group_ids):
-    """Create grouped items and attach groups when a concurrent creator wins."""
-    created_items = []
-    skipped = []
-    grouped_keywords = []
+    """Create grouped items in parallel until the deadline; attach the groups when a concurrent creator won.
 
-    for item in items:
-        if put_keyword_if_absent(table, item):
-            created_items.append(item)
-            continue
+    Returns ``(created, skipped, grouped, pending)`` in ``items`` order.
+    """
+    by_id = {item['id']: item for item in items}
 
-        skipped.append({
-            'keyword': item['keyword'],
-            'reason': REASON_DUPLICATE,
-        })
-        _updated, added_group_ids = add_keyword_groups(table, item['id'], group_ids)
-        if added_group_ids:
-            grouped_keywords.append(item['keyword'])
+    def write(keyword_id):
+        """``(created, grouped)`` of one item."""
+        if put_keyword_if_absent(table, by_id[keyword_id]):
+            return True, False
+        return False, bool(add_keyword_groups(table, keyword_id, group_ids)[1])
 
-    return created_items, skipped, grouped_keywords
+    writes = map_writes(write, list(by_id), what='keyword promotion writes')
+    created = [by_id[keyword_id] for keyword_id, (put, _grouped) in writes.written.items() if put]
+    skipped = [_duplicate(by_id[keyword_id]) for keyword_id, (put, _grouped) in writes.written.items() if not put]
+    grouped = [by_id[keyword_id]['keyword'] for keyword_id, (_put, added) in writes.written.items() if added]
+    return created, skipped, grouped, [by_id[keyword_id] for keyword_id in writes.pending]
 
 
 def create_items(to_create, status, priority, *, market_id=None):

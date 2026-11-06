@@ -8,12 +8,15 @@ competitor or other by the extraction step.
 
 Both views read only the selected run of each keyword partition (the sort key
 starts with the run timestamp), never the keyword's whole history; the size
-rules live in ``shared.brand_mention_views``.
+rules live in ``shared.brand_mention_views``. A multi-keyword scope reads its
+first ``SCOPE_KEYWORDS_CAP`` keywords (``keywords_truncated``), in parallel and
+within the request's time budget: keywords the budget leaves unread are left
+out (``keywords_truncated`` too), and ``truncated`` is true whenever the
+budget cut anything, the ``available_runs`` listing included.
 """
 
 import logging
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,9 +42,10 @@ from shared.brand_mention_views import (
 )
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
 from shared.decorators import api_handler, optional_limit, optional_provider, validate
+from shared.request_deadline import current_deadline
 from shared.response_budget import take_within_budget
 from shared.scope_params import SCOPE_QUERY_PARAMS, ReportScope, keywords_table_name
-from shared.scoped_reports import required_report_scope
+from shared.scoped_reports import ScopeRead, capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
@@ -53,9 +57,6 @@ dynamodb = boto3.resource('dynamodb')
 # Scopes resolve against the Keywords table; every row a report reads comes from SearchResults.
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
-
-# Scope reads fan out one keyword per worker.
-_SCOPE_MAX_WORKERS = 10
 
 VIEWS = ('summary', 'appearances')
 
@@ -85,25 +86,26 @@ def _keyword_run(keyword: str, filters: _RowFilters, run_depth: int) -> tuple[li
     return filter_rows(rows, filters.query_prompt_id, filters.provider), runs
 
 
-def _load_scope(scope: ReportScope, filters: _RowFilters, *, with_runs: bool) -> list[tuple[list[dict[str, Any]], list[str]]]:
-    """``_keyword_run`` for every keyword of ``scope``, in scope order.
+KeywordRun = tuple[list[dict[str, Any]], list[str]]
+"""One keyword's rows of the selected run and its newest runs (``_keyword_run``)."""
+
+
+def _load_scope(keywords: list[str], filters: _RowFilters, *, with_runs: bool) -> ScopeRead[KeywordRun]:
+    """``_keyword_run`` for every keyword (at most ``SCOPE_KEYWORDS_CAP``), in scope order.
 
     With ``with_runs`` the first ``RUN_LISTING_DEEP_KEYWORDS`` keywords list
     up to ``RUN_LISTING_LIMIT`` runs each and the others their latest run.
+    Keywords the request's time budget leaves unread are ``skipped``.
     """
-    keywords = list(scope.keywords)
-    if not keywords:
-        return []
+    deep = set(keywords[:RUN_LISTING_DEEP_KEYWORDS]) if with_runs else set()
 
-    def read(position_keyword: tuple[int, str]) -> tuple[list[dict[str, Any]], list[str]]:
-        position, keyword = position_keyword
+    def read(keyword: str) -> KeywordRun:
         depth = 0
         if with_runs:
-            depth = RUN_LISTING_LIMIT if position < RUN_LISTING_DEEP_KEYWORDS else 1
+            depth = RUN_LISTING_LIMIT if keyword in deep else 1
         return _keyword_run(keyword, filters, depth)
 
-    with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
-        return list(pool.map(read, enumerate(keywords)))
+    return read_scope_keywords(keywords, read, lambda _keyword: ([], []))
 
 
 def _newest(runs: set[str]) -> list[str]:
@@ -114,27 +116,33 @@ def _rows_timestamp(rows: list[dict[str, Any]], timestamp: str | None) -> str | 
     return timestamp or max((row.get('timestamp', '') for row in rows), default=None)
 
 
+def _scope_fields(loaded: ScopeRead[KeywordRun], scope_fields: dict[str, Any]) -> dict[str, Any]:
+    """``scope``, ``keywords_truncated`` (the cap or the time budget left keywords out) and ``truncated`` (the budget cut anything)."""
+    return {**scope_read_fields(scope_fields, loaded.skipped), 'truncated': current_deadline().cut}
+
+
 def get_scope_brand_mentions(
     scope: ReportScope,
     brand_config: dict[str, Any],
     filters: _RowFilters,
     classification: str | None,
 ) -> dict[str, Any]:
-    """The summary of every keyword's selected run in a multi-keyword scope.
+    """The summary of every keyword's selected run in a multi-keyword scope (its first ``SCOPE_KEYWORDS_CAP`` keywords).
 
     With no explicit timestamp each keyword contributes its latest run; with
     one, only rows of that shared run count, so keywords absent from it have
     no data. Engine answers (``by_provider``) are not part of a scope answer.
     """
-    loaded = _load_scope(scope, filters, with_runs=True)
-    rows = [row for keyword_rows, _runs in loaded for row in keyword_rows]
+    keywords, scope_fields = capped_scope(scope)
+    loaded = _load_scope(keywords, filters, with_runs=True)
+    rows = [row for keyword_rows, _runs in loaded.values.values() for row in keyword_rows]
     return {
-        'scope': scope.describe(),
+        **_scope_fields(loaded, scope_fields),
         'keyword': None,
         'timestamp': _rows_timestamp(rows, filters.timestamp),
-        'available_runs': _newest({run for _rows, runs in loaded for run in runs}),
-        'keywords_analyzed': len(scope.keywords),
-        'keywords_with_data': sum(1 for keyword_rows, _runs in loaded if keyword_rows),
+        'available_runs': _newest({run for _rows, runs in loaded.values.values() for run in runs}),
+        'keywords_analyzed': len(loaded.values),
+        'keywords_with_data': sum(1 for keyword_rows, _runs in loaded.values.values() if keyword_rows),
         'config': brand_config,
         'by_provider': [],
         'aggregated': brand_summary(rows, classification),
@@ -159,10 +167,12 @@ def get_keyword_brand_mentions(
     if not rows:
         return None
     rows = filter_rows(rows, filters.query_prompt_id, filters.provider)
+    available_runs = list_runs(table, keyword, latest)
     return {
         'keyword': keyword,
         'timestamp': selected,
-        'available_runs': list_runs(table, keyword, latest),
+        'available_runs': available_runs,
+        'truncated': current_deadline().cut,
         'config': brand_config,
         'by_provider': [provider_entry(row) for row in rows],
         'aggregated': brand_summary(rows, classification, KEYWORD_APPEARANCE_LIMIT),
@@ -176,13 +186,25 @@ def get_appearance_page(
     brand: str | None,
     page: tuple[int, int],
 ) -> dict[str, Any]:
-    """One page of every appearance in the scope's selected runs (``page`` = offset, limit)."""
+    """One page of every appearance in the scope's selected runs (``page`` = offset, limit).
+
+    A multi-keyword scope reads its first ``SCOPE_KEYWORDS_CAP`` keywords; each
+    page reads them again, because the appearances are ordered by brand across
+    the whole scope. Every page is bounded by the cap and the time budget;
+    ``keywords_truncated`` / ``truncated`` say when the scope's totals (and so
+    the offsets of later pages) are partial.
+    """
     offset, limit = page
-    rows = [row for keyword_rows, _runs in _load_scope(scope, filters, with_runs=False) for row in keyword_rows]
+    keywords, scope_fields = capped_scope(scope)
+    loaded = _load_scope(keywords, filters, with_runs=False)
+    rows = [row for keyword_rows, _runs in loaded.values.values() for row in keyword_rows]
     appearances = appearance_rows(rows, classification, brand)
     taken, _more = take_within_budget(appearances[offset:], max_items=limit)
+    fields = _scope_fields(loaded, scope_fields)
+    if scope.is_single_keyword:
+        fields.pop('scope')
     return {
-        **({} if scope.is_single_keyword else {'scope': scope.describe()}),
+        **fields,
         'keyword': scope.keywords[0] if scope.is_single_keyword else None,
         'timestamp': _rows_timestamp(rows, filters.timestamp),
         'brand': brand,
@@ -221,11 +243,12 @@ def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, time
         - brand, limit, next_token: the ``appearances`` page (one brand when
           ``brand`` is given; ``limit`` rows at most, 500 by default)
 
-    ``summary``: ``{keyword, timestamp, available_runs, config, by_provider,
+    ``summary``: ``{keyword, timestamp, available_runs, truncated, config, by_provider,
     aggregated: {brands, total_unique_brands, matching_brands,
-    brands_truncated, summary}}`` (+ ``scope``, ``keywords_analyzed``,
+    brands_truncated, summary}}`` (+ ``scope``, ``keywords_truncated``, ``keywords_analyzed``,
     ``keywords_with_data`` for a scope). ``appearances``: ``{keyword,
-    timestamp, brand, appearances, total_appearances, next_token}``.
+    timestamp, brand, appearances, total_appearances, next_token,
+    keywords_truncated, truncated}`` (+ ``scope`` for a scope).
     """
     filters = _RowFilters(timestamp, query_prompt_id, provider)
     if view == 'appearances':

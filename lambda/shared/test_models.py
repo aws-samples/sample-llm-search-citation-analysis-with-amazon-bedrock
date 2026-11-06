@@ -19,8 +19,9 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ReadTimeoutError
 
+from shared.request_deadline import Deadline
 from testing.bedrock_model_fixtures import (
     HAIKU_4_5,
     HAIKU_5_5,
@@ -503,3 +504,118 @@ class TestInvokeBedrockRetry:
             )
 
         assert client.converse.call_count == 1
+
+
+# =============================================================================
+# invoke_bedrock — under a request deadline
+# =============================================================================
+
+class _Clock:
+    """A clock the test moves by hand (``time.sleep`` advances it when patched to ``advance``)."""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _bounded(models_module, side_effect) -> tuple[MagicMock, MagicMock]:
+    """Patch ``boto3.client`` (the factory of deadline-bound clients); the factory and the client it hands out."""
+    client = runtime_client(side_effect)
+    factory = MagicMock(return_value=client)
+    models_module.boto3 = MagicMock(client=factory)
+    return factory, client
+
+
+def _ask(models_module, seconds: float, clock: _Clock | None = None) -> str:
+    """``invoke_bedrock`` for the analysis role under a ``seconds`` deadline."""
+    deadline = Deadline(seconds, clock or _Clock())
+    return models_module.invoke_bedrock("q", models_module.ModelRole.ANALYSIS, deadline=deadline)
+
+
+class TestInvokeBedrockUnderDeadline:
+    @pytest.mark.parametrize(("setting", "expected"), [
+        pytest.param("read_timeout", 19, id="budget-left-less-the-margin"),
+        pytest.param("connect_timeout", 2, id="short-connect"),
+        pytest.param("retries", {"mode": "standard", "max_attempts": 1}, id="no-botocore-retries"),
+    ])
+    def test_configures_the_client_from_the_budget(self, models_module, setting, expected) -> None:
+        factory, _ = _bounded(models_module, [converse_reply({"text": "ok"})])
+
+        _ask(models_module, 20.5)
+
+        assert getattr(factory.call_args.kwargs["config"], setting) == expected
+
+    def test_returns_the_answer_text_when_bedrock_answers_in_time(self, models_module) -> None:
+        _bounded(models_module, [converse_reply({"text": "fine"})])
+
+        assert _ask(models_module, 20) == "fine"
+
+    def test_reuses_the_client_of_the_same_timeout(self, models_module) -> None:
+        factory, _ = _bounded(models_module, [converse_reply({"text": "a"}), converse_reply({"text": "b"})])
+        clock = _Clock()
+
+        _ask(models_module, 20, clock)
+        _ask(models_module, 20, clock)
+
+        assert factory.call_count == 1
+
+    def test_keeps_the_default_client_without_a_deadline(self, models_module) -> None:
+        factory, _ = _bounded(models_module, [])
+        models_module._bedrock_client = runtime_client([converse_reply({"text": "worker"})])
+
+        answer = models_module.invoke_bedrock("q", models_module.ModelRole.ANALYSIS)
+
+        assert (answer, factory.call_count) == ("worker", 0)
+
+    def test_raises_the_deadline_error_when_bedrock_does_not_answer_in_time(self, models_module) -> None:
+        _bounded(models_module, ReadTimeoutError(endpoint_url="https://bedrock-runtime"))
+
+        with pytest.raises(models_module.BedrockDeadlineError, match="did not answer within 19 s"):
+            _ask(models_module, 20)
+
+    def test_does_not_call_bedrock_when_the_budget_is_nearly_spent(self, models_module) -> None:
+        _, client = _bounded(models_module, [converse_reply({"text": "late"})])
+
+        with pytest.raises(models_module.BedrockDeadlineError, match="No time left"):
+            _ask(models_module, 3.5)
+
+        assert client.converse.call_count == 0
+
+    def test_deadline_error_is_a_bedrock_invocation_error(self, models_module) -> None:
+        assert issubclass(models_module.BedrockDeadlineError, models_module.BedrockInvocationError)
+
+    def test_gives_up_instead_of_sleeping_past_the_budget(self, models_module) -> None:
+        _, client = _bounded(models_module, [bedrock_error("ThrottlingException", "slow"), converse_reply()])
+
+        with (
+            patch.object(models_module.time, "sleep") as sleep,
+            pytest.raises(models_module.BedrockDeadlineError, match="throttling"),
+        ):
+            _ask(models_module, 5)
+
+        assert (client.converse.call_count, sleep.call_count) == (1, 0)
+
+    def test_retries_throttling_after_backoff_while_the_budget_has_room(self, models_module) -> None:
+        _, client = _bounded(models_module, [bedrock_error("ThrottlingException", "slow"), converse_reply({"text": "ok"})])
+
+        with patch.object(models_module.time, "sleep"):
+            answer = _ask(models_module, 20)
+
+        assert (answer, client.converse.call_count) == ("ok", 2)
+
+    def test_second_attempt_waits_only_what_is_left_after_the_backoff(self, models_module) -> None:
+        factory, _ = _bounded(models_module, [bedrock_error("ThrottlingException", "slow"), converse_reply({"text": "ok"})])
+        clock = _Clock()
+
+        with (
+            patch.object(models_module.random, "uniform", return_value=0.0),
+            patch.object(models_module.time, "sleep", side_effect=clock.advance),
+        ):
+            _ask(models_module, 20, clock)
+
+        assert [call.kwargs["config"].read_timeout for call in factory.call_args_list] == [19, 18]

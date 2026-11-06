@@ -8,12 +8,18 @@ previous period, and each keyword's own move. Formulas in
 ``shared.kpi_engine``; views in ``shared.visibility_views``.
 
 Scope: at most one of ``keyword=``, ``group_id=``, ``keyword_ids=`` or
-``scope=all``. Without one, every active keyword (capped at
-``_ALL_KEYWORDS_CAP``, the dashboard's historical breadth).
+``scope=all``. Without one, every active keyword. Either way at most
+``SCOPE_KEYWORDS_CAP`` keywords (``keywords_truncated``): the window's rows
+are shared between them (``shared.scoped_reports.rows_per_keyword``), so a
+broad scope costs no more rows or time than a narrow one, only a shorter
+history per keyword.
 
 The window is read newest first, at most ``shared.scoped_reports.WINDOW_ROWS_CAP``
-rows; when the cap stops it, ``truncated_before`` names the run it stopped at
-and every number covers the runs after it (``null`` for a window read whole).
+rows and within the request's time budget; when the cap or the budget stops
+it, ``truncated_before`` names the run it stopped at and every number covers
+the runs after it (``null`` for a window read whole). Keywords the budget
+left unread are left out (``keywords_analyzed`` counts the ones read) and
+``keywords_truncated`` is true.
 """
 
 import logging
@@ -36,7 +42,7 @@ from shared.scope_params import (
     scope_from_request,
     scoped_dynamodb_resource,
 )
-from shared.scoped_reports import TREND_WINDOW_PARAMS, WindowAnswers, capped_scope
+from shared.scoped_reports import TREND_WINDOW_PARAMS, WindowAnswers, capped_scope, scope_read_fields
 from shared.scoped_reports import load_window_answers as load_scoped_window_answers
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
@@ -45,8 +51,8 @@ from shared.visibility_views import trend_view
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-#: Keywords an unscoped request covers; an explicit scope may cover SCOPE_KEYWORDS_CAP.
-_ALL_KEYWORDS_CAP = 20
+#: Keywords one trend reads at most, scoped or not: the window's rows are shared between them.
+TREND_KEYWORDS_CAP = SCOPE_KEYWORDS_CAP
 
 # One windowed read per keyword, SCOPE_MAX_WORKERS at a time (map_scope_keywords).
 dynamodb = scoped_dynamodb_resource()
@@ -61,27 +67,26 @@ def load_window_answers(keywords: list[str], since: str) -> WindowAnswers:
     return load_scoped_window_answers(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, since)
 
 
-def _resolve_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:
-    """The scope and its keyword cap; no scope is every active keyword."""
-    if scope is None:
-        return all_active_scope(dynamodb.Table(KEYWORDS_TABLE)), _ALL_KEYWORDS_CAP
-    return scope, SCOPE_KEYWORDS_CAP
+def _resolve_scope(scope: ReportScope | None) -> ReportScope:
+    """The scope; no scope is every active keyword."""
+    return all_active_scope(dynamodb.Table(KEYWORDS_TABLE)) if scope is None else scope
 
 
 def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_domains: list[str]) -> dict[str, Any]:
     """The trend view of ``scope`` over the last ``days`` days (also behind ``/reports/overview``)."""
-    keywords, scope_fields = capped_scope(*_resolve_scope(scope))
+    keywords, scope_fields = capped_scope(_resolve_scope(scope), TREND_KEYWORDS_CAP)
     since = history_since(days)
     window = load_window_answers(keywords, since)
+    read = window.read_keywords(keywords)
     return {
-        **scope_fields,
+        **scope_read_fields(scope_fields, window.skipped),
         'period_type': period,
         'days_analyzed': days,
         'since': since,
         'truncated_before': window.truncated_before,
-        'keywords_analyzed': len(keywords),
+        'keywords_analyzed': len(read),
         'citations_configured': bool(owned_domains),
-        **trend_view(keywords, window.answers, period, owned_domains),
+        **trend_view(read, window.answers, period, owned_domains),
     }
 
 

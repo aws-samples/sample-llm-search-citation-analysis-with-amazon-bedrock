@@ -72,6 +72,7 @@ from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.merged_pages import MergedPage, MergeSpec, decode_positions, merged_page, query_reader
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.request_deadline import current_deadline
 from shared.search_results import search_results_table_name
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 from shared.stale_jobs import stale_elapsed_seconds
@@ -495,6 +496,10 @@ def _keyword_ideas(keyword: str, visibility: _KeywordVisibility) -> list[dict[st
     ]
 
 
+# The SearchResults attributes the ideas read: no answer text or search results (10-15 KB a row).
+_IDEA_RESULT_PROJECTION = '#ts, keyword, provider, brands, citations'
+
+
 def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Generate content ideas from recent visibility and citation data."""
     first_party, competitors = tracked_brand_names(config)
@@ -507,7 +512,9 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             )
         ]
 
-    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=30)
+    items = load_recent_search_results(
+        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=30, projection=_IDEA_RESULT_PROJECTION,
+    )
     if not items:
         return [
             _system_idea(
@@ -1644,6 +1651,8 @@ def _get_ideas(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "ideas": ideas,
             "total_count": len(ideas),
             "generated_at": get_timestamp(),
+            # The keyword reads stop at the request's deadline; the keywords not read have no ideas.
+            "truncated": current_deadline().cut,
         },
         event,
     )

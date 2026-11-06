@@ -28,10 +28,9 @@ from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
     keywords_table_name,
-    map_scope_keywords,
     scoped_dynamodb_resource,
 )
-from shared.scoped_reports import capped_scope, required_report_scope
+from shared.scoped_reports import capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
@@ -47,21 +46,22 @@ SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 
-def load_last_two_runs(keywords: list[str]) -> tuple[dict[str, list[Answer]], dict[str, list[Answer]]]:
-    """Each keyword's answers in its latest run and in the run before, read in parallel.
+def load_last_two_runs(keywords: list[str]) -> tuple[dict[str, list[Answer]], dict[str, list[Answer]], tuple[str, ...]]:
+    """Each keyword's answers in its latest run and in the run before, read in parallel, and the keywords left unread.
 
     A keyword whose read fails has no answers (logged by ``map_scope_keywords``):
-    one broken partition must not sink the whole view.
+    one broken partition must not sink the whole view. A keyword the time
+    budget left unread is in neither map.
     """
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    runs = map_scope_keywords(
+    runs = read_scope_keywords(
         keywords,
         lambda keyword: tuple(answers_from_rows(rows) for rows in query_last_two_runs_rows(table, keyword)),
         lambda _keyword: ([], []),
     )
-    latest = {keyword: runs[index][0] for index, keyword in enumerate(keywords)}
-    previous = {keyword: runs[index][1] for index, keyword in enumerate(keywords)}
-    return latest, previous
+    latest = {keyword: answers[0] for keyword, answers in runs.values.items()}
+    previous = {keyword: answers[1] for keyword, answers in runs.values.items()}
+    return latest, previous, runs.skipped
 
 
 def scope_visibility(
@@ -72,15 +72,19 @@ def scope_visibility(
     brand: str | None,
     tracked_brands: list[str] | None = None,
 ) -> dict[str, Any]:
-    """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords."""
+    """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords and the request's time budget.
+
+    A keyword the budget stopped is missing from ``keywords`` and from the
+    pooled KPIs; ``keywords_truncated`` then says the view is partial.
+    """
     keywords, scope_fields = capped_scope(scope)
-    latest, previous = load_last_two_runs(keywords)
+    latest, previous, skipped = load_last_two_runs(keywords)
     view = visibility_view(
-        keywords, latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand,
+        list(latest), latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand,
         tracked_brands=tracked_brands or (),
     )
     return {
-        **scope_fields,
+        **scope_read_fields(scope_fields, skipped),
         'citations_configured': bool(owned_domains),
         **view,
     }

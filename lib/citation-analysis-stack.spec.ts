@@ -117,6 +117,7 @@ interface GatewayResponseSnapshot {
 
 const synthesized: CrawlerInfrastructureSnapshot & {
   definitionRaw: string;
+  resourceCount: number;
   researchDefinitionRaw: string;
   researchStateMachineTimeoutSeconds: number;
   researchWorkerTimeoutSeconds: number;
@@ -185,6 +186,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   contentSecurityPolicy: Record<string, string[]>;
 } = {
   definitionRaw: '',
+  resourceCount: Number.NaN,
   researchDefinitionRaw: '',
   researchStateMachineTimeoutSeconds: Number.NaN,
   researchWorkerTimeoutSeconds: Number.NaN,
@@ -321,6 +323,7 @@ beforeAll(() => {
   const template = Template.fromStack(stack);
 
   synthesized.definitionRaw = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+  synthesized.resourceCount = Object.keys(template.toJSON().Resources ?? {}).length;
   synthesized.researchDefinitionRaw = extractStateMachineDefinition(template, RESEARCH_STATE_MACHINE);
   synthesized.researchStateMachineTimeoutSeconds = extractDefinitionTimeoutSeconds(synthesized.researchDefinitionRaw);
   synthesized.researchWorkerTimeoutSeconds = extractFunctionTimeout(template, RESEARCH_WORKER_FUNCTION_NAME);
@@ -600,6 +603,17 @@ describe('WAF', () => {
 });
 
 /**
+ * CloudFormation refuses a template with more than 500 resources, and the
+ * main stack sits at 499 (2.42.0): new infrastructure goes into another stack
+ * (the MCP server already does). Fails at synth time instead of at deploy.
+ */
+describe('Main stack resource budget', () => {
+  it('stays under the 500-resource CloudFormation limit', () => {
+    expect(synthesized.resourceCount).toBeLessThan(500);
+  });
+});
+
+/**
  * AUDIT-2026-08-19 §0 invariants.
  *
  * The stack builds one `methodOptions` object and applies it verbatim to every
@@ -801,9 +815,9 @@ describe('Keyword-scale analysis workflow', () => {
     expect(extractDefinitionTimeoutSeconds(synthesized.definitionRaw)).toBe(SEVEN_DAYS_IN_MINUTES * 60);
   });
 
-  it('sizes GenerateSummary for thousands of keyword results', () => {
+  it('sizes GenerateSummary for thousands of keyword results and the citation rollup build', () => {
     expect([synthesized.workflowScale.generateSummaryMemorySize, synthesized.workflowScale.generateSummaryTimeoutSeconds])
-      .toStrictEqual([1024, 300]);
+      .toStrictEqual([3008, 900]);
   });
 });
 
@@ -951,11 +965,25 @@ describe('SearchAllProviders parallel search', () => {
       .toStrictEqual(new Set([JSON.stringify({ 'results.$': '$.Payload.results' })]));
   });
 
-  it('checks the slot retrier before States.TaskFailed, which also matches a throttled invoke', () => {
+  it('checks the slot and time-budget retriers before States.TaskFailed, which also matches them', () => {
     const retriers = resolvePath(searchTask('perplexity'), ['Retry']);
 
     expect((Array.isArray(retriers) ? retriers : []).map((retrier) => resolvePath(retrier, ['ErrorEquals'])))
-      .toStrictEqual([LAMBDA_SERVICE_ERRORS, ['Lambda.TooManyRequestsException'], ['States.TaskFailed', 'States.Timeout']]);
+      .toStrictEqual([
+        LAMBDA_SERVICE_ERRORS,
+        ['Lambda.TooManyRequestsException'],
+        ['SearchTimeBudgetSpentError'],
+        ['States.TaskFailed', 'States.Timeout'],
+      ]);
+  });
+
+  it('continues a search whose invocation ran out of time once per remaining query prompt', () => {
+    expect(resolvePath(searchTask('openai'), ['Retry', '2'])).toStrictEqual({
+      ErrorEquals: ['SearchTimeBudgetSpentError'],
+      IntervalSeconds: 1,
+      MaxAttempts: 10,
+      BackoffRate: 1,
+    });
   });
 
   it('waits for a free slot with jittered backoff while a provider is at its cap', () => {
@@ -970,7 +998,7 @@ describe('SearchAllProviders parallel search', () => {
   });
 
   it('retries a failed provider Lambda twice with backoff', () => {
-    expect(resolvePath(searchTask('openai'), ['Retry', '2'])).toStrictEqual({
+    expect(resolvePath(searchTask('openai'), ['Retry', '3'])).toStrictEqual({
       ErrorEquals: ['States.TaskFailed', 'States.Timeout'],
       IntervalSeconds: 10,
       MaxAttempts: 2,
@@ -1144,11 +1172,11 @@ describe('Keyword research state machine', () => {
   it('times out below the API sweep threshold so a live job is never swept', () => {
     /**
      * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` (read from the
-     * Python source) marks jobs failed after 35 minutes. An execution allowed
+     * Python source) marks jobs failed after 65 minutes. An execution allowed
      * to outlive that could finish after being failed and flip the row back —
      * the inversion the sweep exists to avoid.
      */
-    expect(synthesized.researchStateMachineTimeoutSeconds).toBe(30 * 60);
+    expect(synthesized.researchStateMachineTimeoutSeconds).toBe(60 * 60);
     expect(synthesized.researchStateMachineTimeoutSeconds).toBeLessThan(SWEEP_THRESHOLD_SECONDS);
   });
 
@@ -1248,11 +1276,12 @@ describe('Lambda memory headroom (2.5.0 audit)', () => {
   });
 
   /**
-   * 7-day CloudWatch REPORT peaks on 2026-09-21: CitationsContent reached
-   * 153 MB (60% of 256 MB), the highest ratio of any function.
+   * 2.42.0: sized for CPU, not peak memory. An unscoped /citations read on a
+   * customer's 71k-row table used 224 MB of 512 MB and still timed out at
+   * 29 s; CPU is allocated in proportion to memory, 1769 MB = one vCPU.
    */
-  it('gives CitationsContent 512 MB after its peak reached 60% of the previous 256 MB', () => {
-    expect(synthesized.citationsContentMemorySize).toBe(512);
+  it('gives CitationsContent one vCPU because its reads are CPU-bound', () => {
+    expect(synthesized.citationsContentMemorySize).toBe(1769);
   });
 });
 
@@ -1711,7 +1740,7 @@ describe('Crawler Lambda environment and cache permissions', () => {
   it('configures status-specific freshness and a short session backstop', () => {
     expect(synthesized.crawlerEnvVars.CRAWL_FRESHNESS_DAYS).toBe('30');
     expect(synthesized.crawlerEnvVars.CRAWL_BLOCKED_FRESHNESS_DAYS).toBe('3');
-    expect(synthesized.crawlerEnvVars.BROWSER_SESSION_TIMEOUT_SECONDS).toBe('330');
+    expect(synthesized.crawlerEnvVars.BROWSER_SESSION_TIMEOUT_SECONDS).toBe('280');
     expect(synthesized.crawlerEnvVars.CRAWL_CACHE_INDEX_NAME).toBe('CacheScopeIndex');
   });
 
@@ -1884,7 +1913,7 @@ describe('KPI alert backend infrastructure', () => {
 
   it('configures the KPI worker for Python with the shared layer and bounded runtime', () => {
     expect(extractFunctionTimeout(template, 'CitationAnalysis-KpiAlerts')).toBe(300);
-    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(512);
+    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(1769);
     expect(extractLambdaLayerRefs(template, 'CitationAnalysis-KpiAlerts')).toHaveLength(1);
   });
 
@@ -2098,8 +2127,8 @@ describe('Citation Gaps gateway failure visibility', () => {
     expect(JSON.stringify(failureHeaders)).not.toContain("'*'");
   });
 
-  it('keeps StatsInsights at 512 MB when measured memory remains below seventy percent', () => {
-    expect(synthesized.statsInsightsMemorySize).toBe(512);
+  it('gives StatsInsights one vCPU because its KPI views are CPU-bound', () => {
+    expect(synthesized.statsInsightsMemorySize).toBe(1769);
   });
 });
 
@@ -2536,14 +2565,40 @@ describe('Report insights narrative', () => {
   );
   const state = (name: string): unknown => resolvePath(snapshot.states, [name]);
 
-  it('runs GenerateInsights after KpiAlerts on both of its branches', () => {
-    expect(resolvePath(state('KpiAlerts'), ['Next'])).toBe('GenerateInsights');
-    expect(resolvePath(state('KpiAlertsFailed'), ['Next'])).toBe('GenerateInsights');
+  it('decides on GenerateInsights after KpiAlerts on both of its branches', () => {
+    expect(resolvePath(state('KpiAlerts'), ['Next'])).toBe('HasCompleteGroups');
+    expect(resolvePath(state('KpiAlertsFailed'), ['Next'])).toBe('HasCompleteGroups');
   });
 
-  it('hands GenerateInsights only the KpiAlerts result and keeps its own under narratives', () => {
-    expect(resolvePath(state('GenerateInsights'), ['Parameters'])).toStrictEqual({ 'alerts.$': '$.alerts' });
-    expect(resolvePath(state('GenerateInsights'), ['ResultPath'])).toBe('$.narratives');
+  it('runs GenerateInsights only when KpiAlerts named the groups it snapshotted', () => {
+    expect(resolvePath(state('HasCompleteGroups'), ['Choices', '0'])).toStrictEqual({
+      Variable: '$.alerts.snapshot_scopes',
+      IsPresent: true,
+      Next: 'GenerateInsights',
+    });
+    expect(resolvePath(state('HasCompleteGroups'), ['Default'])).toBe('NoInsightsToGenerate');
+  });
+
+  it('writes one group per invocation, four at a time, over the snapshotted scopes', () => {
+    expect([
+      resolvePath(state('GenerateInsights'), ['Type']),
+      resolvePath(state('GenerateInsights'), ['ItemsPath']),
+      resolvePath(state('GenerateInsights'), ['MaxConcurrency']),
+      resolvePath(state('GenerateInsights'), ['ResultPath']),
+    ]).toStrictEqual(['Map', '$.alerts.snapshot_scopes', 4, '$.narratives']);
+  });
+
+  it('hands each group invocation its group, market and the run timestamp', () => {
+    expect(resolvePath(state('GenerateInsights'), ['ItemSelector'])).toStrictEqual({
+      'group_id.$': '$$.Map.Item.Value.group_id',
+      'market_id.$': '$$.Map.Item.Value.market_id',
+      'run_timestamp.$': '$.alerts.run_timestamp',
+    });
+  });
+
+  it('keeps the other groups when one group invocation fails', () => {
+    expect(resolvePath(state('GenerateInsights'), ['ItemProcessor', 'States', 'GenerateGroupInsight', 'Catch']))
+      .toStrictEqual([{ ErrorEquals: ['States.ALL'], Next: 'GenerateGroupInsightFailed' }]);
   });
 
   it('catches every GenerateInsights failure into a Pass that keeps the report', () => {
@@ -2552,7 +2607,27 @@ describe('Report insights narrative', () => {
     ]);
     expect(resolvePath(state('GenerateInsightsFailed'), ['Type'])).toBe('Pass');
     expect(resolvePath(state('GenerateInsightsFailed'), ['ResultPath'])).toBe('$.narratives');
-    expect(resolvePath(state('GenerateInsightsFailed'), ['End'])).toBe(true);
+  });
+
+  it('builds the citation rollup after every insights outcome', () => {
+    expect(['GenerateInsights', 'GenerateInsightsFailed', 'NoInsightsToGenerate']
+      .map((name) => resolvePath(state(name), ['Next'])))
+      .toStrictEqual(['BuildCitationRollup', 'BuildCitationRollup', 'BuildCitationRollup']);
+  });
+
+  it('asks GenerateSummary for the rollup build and keeps its result under citation_rollup', () => {
+    expect(resolvePath(state('BuildCitationRollup'), ['Parameters'])).toStrictEqual({
+      action: 'build_citation_rollup',
+      'execution_id.$': '$$.Execution.Name',
+    });
+    expect(resolvePath(state('BuildCitationRollup'), ['ResultPath'])).toBe('$.citation_rollup');
+  });
+
+  it('keeps the report when the rollup build fails', () => {
+    expect(resolvePath(state('BuildCitationRollup'), ['Catch'])).toStrictEqual([
+      { ErrorEquals: ['States.ALL'], ResultPath: null, Next: 'BuildCitationRollupFailed' },
+    ]);
+    expect(resolvePath(state('BuildCitationRollupFailed'), ['End'])).toBe(true);
   });
 
   it('keys the narrative table by scope and run', () => {
@@ -2567,8 +2642,8 @@ describe('Report insights narrative', () => {
     expect(snapshot.table.timeToLive).toStrictEqual({ AttributeName: 'ttl', Enabled: true });
   });
 
-  it('bounds the worker at 120 seconds on the shared layer', () => {
-    expect(snapshot.workerTimeoutSeconds).toBe(120);
+  it('gives the worker 300 seconds and one vCPU per group on the shared layer', () => {
+    expect([snapshot.workerTimeoutSeconds, snapshot.workerMemorySize]).toStrictEqual([300, 1769]);
     expect(snapshot.workerLayerCount).toBe(1);
   });
 

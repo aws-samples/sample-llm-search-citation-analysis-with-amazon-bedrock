@@ -25,6 +25,7 @@ import pytest
 from shared.bounded_counts import Count
 from shared.config import PROVIDERS
 from testing.client_errors import throttled
+from testing.deadlines import capped_reads_deadline, spent_deadline
 from testing.dynamodb_stubs import described, fake_table
 from testing.env import STATS_ENV
 from testing.events import api_gateway_event, parse_response
@@ -304,6 +305,7 @@ class TestMarketTotals:
             'last_execution': _CHILE_RUN,
             'timestamp': _STAMP,
             'market_id': _CHILE_ID,
+            'last_execution_approximate': False,
         })
 
     def test_global_counts_the_keywords_without_a_market_or_with_an_empty_one(self, stats_module):
@@ -381,6 +383,52 @@ class TestMarketTotals:
         responses = _get_market_stats(stats_module, _market_tables(), market_id)
 
         assert responses[0][1]['last_execution'] == expected
+
+
+class TestMarketTimeBudget:
+    @pytest.fixture
+    def cut_scan(self, stats_module) -> tuple[MagicMock, dict[str, Any]]:
+        """The Keywords table and the Chilean answer when the deadline stops the keyword scan after a page."""
+        tables = _market_tables()
+        tables['keywords_table'].scan.return_value = {'Items': _KEYWORD_ROWS, 'LastEvaluatedKey': {'id': 'more'}}
+        with capped_reads_deadline(spent_deadline()):
+            [(status, body)] = _get_market_stats(stats_module, tables, _CHILE_ID)
+        return tables['keywords_table'], {'status': status, **body}
+
+    def test_flags_every_total_approximate_when_the_deadline_cuts_the_keyword_scan(self, cut_scan):
+        _keywords, body = cut_scan
+
+        assert (body['status'], body['unique_keywords'], body['counts_approximate'], body['last_execution_approximate']) == (
+            200, 2, True, True,
+        )
+
+    def test_reads_the_market_keywords_once_when_the_deadline_cuts_the_scan(self, cut_scan):
+        keywords, _body = cut_scan
+
+        assert keywords.scan.call_count == 1
+
+    def test_answers_200_with_an_approximate_last_execution_when_the_budget_is_spent(self, stats_module):
+        with patch.object(stats_module, 'Deadline', lambda _seconds: spent_deadline()):
+            responses = _get_market_stats(stats_module, _market_tables(), 'global', _CHILE_ID)
+
+        assert [(status, body['last_execution'], body['last_execution_approximate']) for status, body in responses] == [
+            (200, None, True), (200, None, True),
+        ]
+
+    def test_flags_the_last_execution_approximate_when_one_keywords_read_fails(self, stats_module):
+        tables = _market_tables()
+        answers = tables['search_results_table'].query.side_effect
+
+        def query(**kwargs: Any) -> Mapping[str, Any]:
+            if 'Select' not in kwargs and key_parts(kwargs['KeyConditionExpression'])[0] == 'altiplano air equipaje':
+                raise throttled('Query')
+            return answers(**kwargs)
+
+        tables['search_results_table'].query.side_effect = query
+
+        [(status, body)] = _get_market_stats(stats_module, tables, _CHILE_ID)
+
+        assert (status, body['last_execution'], body['last_execution_approximate']) == (200, _CHILE_RUN, True)
 
 
 class TestMarketCountCache:

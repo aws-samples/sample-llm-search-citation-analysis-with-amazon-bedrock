@@ -21,6 +21,10 @@ import {
   marketName, type MarketChoice
 } from '../Markets/marketSelection';
 import { useMarketSelection } from '../Markets/marketSelectionContext';
+import { PanelLoadError } from '../Dashboard/PanelLoadError';
+import type {
+  DashboardPanel, DashboardPanelStates
+} from '../../hooks/dashboardPanels';
 
 const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
 const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(module => ({ default: module.ScheduleManager })));
@@ -55,6 +59,9 @@ interface TabContentProps {
   readonly rawResponsesPath?: string;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
+  /** Per-panel load errors of the dashboard read (`useDashboardData`). */
+  readonly panels: DashboardPanelStates;
+  readonly retryPanel: (panel: DashboardPanel) => Promise<void> | void;
 }
 
 function mergeCreatedKeywords(existing: Keyword[], created: Keyword[]): Keyword[] {
@@ -172,19 +179,30 @@ function QuickActions({
   );
 }
 
+interface DashboardContentProps extends QuickActionsProps {
+  readonly stats: Stats | null;
+  readonly panels: DashboardPanelStates;
+  readonly retryPanel: (panel: DashboardPanel) => Promise<void> | void;
+}
+
 function DashboardContent({
-  stats, citations, keywords, setActiveTab
-}: QuickActionsProps & { readonly stats: Stats | null }) {
+  stats, citations, keywords, setActiveTab, panels, retryPanel
+}: DashboardContentProps) {
   const view = useMarketDashboard({
     stats,
     citations,
   });
+  // A market view reads its own panels (and reports its own error); the
+  // combined view shows the dashboard load's per-panel failures.
+  const combined = view.marketId === null;
   return (
     <ErrorBoundary>
       <section aria-label="Totals and charts" aria-busy={view.loading}>
         <DashboardMarketNote marketId={view.marketId} />
         <ErrorAlert message={view.error} spacingClassName="mb-4 " />
+        {combined && <PanelLoadError panel="stats" panels={panels} onRetry={retryPanel} spacingClassName="mb-4 " />}
         <DashboardStats stats={view.stats} />
+        {combined && <PanelLoadError panel="citations" panels={panels} onRetry={retryPanel} spacingClassName="mb-4 " />}
         <DashboardCharts citations={view.citations} />
       </section>
       <AlertsPanel />
@@ -209,6 +227,8 @@ export function TabContent(props: TabContentProps) {
     rawResponsesPath,
     setActiveTab,
     onNavigateToRawResponses,
+    panels,
+    retryPanel,
   } = props;
 
   const appendKeywords = useCallback((created: Keyword[]) => {
@@ -216,7 +236,7 @@ export function TabContent(props: TabContentProps) {
   }, [setKeywords]);
 
   if (activeTab === 'dashboard') {
-    return <DashboardContent stats={stats} citations={citations} keywords={keywords} setActiveTab={setActiveTab} />;
+    return <DashboardContent stats={stats} citations={citations} keywords={keywords} setActiveTab={setActiveTab} panels={panels} retryPanel={retryPanel} />;
   }
 
   const tabComponents: Partial<Record<TabType, ReactNode>> = {
@@ -230,7 +250,12 @@ export function TabContent(props: TabContentProps) {
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
-    searches: <SearchesView searches={searches} nextToken={searchesNextToken} onNavigateToRawResponses={onNavigateToRawResponses} />,
+    searches: (
+      <>
+        <PanelLoadError panel="searches" panels={panels} onRetry={retryPanel} spacingClassName="mb-4 " />
+        <SearchesView searches={searches} nextToken={searchesNextToken} onNavigateToRawResponses={onNavigateToRawResponses} />
+      </>
+    ),
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
   };

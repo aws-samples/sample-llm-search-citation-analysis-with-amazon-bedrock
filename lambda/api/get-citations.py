@@ -11,55 +11,73 @@ cap (the 502 this design fixes). A page now holds at most ``limit`` URLs, cut
 to ``PAGE_BUDGET_BYTES``, without the per-URL keyword texts unless
 ``include_keywords=true`` (the Excel export, which follows every page);
 ``/api/url-breakdown`` serves one URL's keywords.
+
+The table, ``all``, market, group and group x market scopes are served from
+the citation rollup when it is current (``shared.citation_rollup_serve``):
+O(page) for the default order. Otherwise, and for one keyword or
+``keyword_ids``, the rows are read live under caps and the request's time
+budget (``shared.citation_rollup_source``).
 """
 
 import logging
 import os
-import sys
-from collections import Counter, defaultdict
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
+from botocore.config import Config
 
 from shared.api_response import success_response, validation_error
-from shared.bounded_reads import collect_capped_partition
 from shared.citation_pages import (
     CONTENT_TYPE_FILTERS,
+    DICT_VIEW,
     SORT_COLUMNS,
     SORT_ORDERS,
+    BrandTerms,
     CitationQuery,
-    base_order,
+    aggregate_citations,
     list_entry,
+    tracked_brand_terms,
+)
+from shared.citation_rollup import keyword_fingerprint, scope_key
+from shared.citation_rollup_serve import ROLLUP_READ_ERRORS, PageRequest, RollupReader
+from shared.citation_rollup_source import (
+    query_keyword_citations,
+    query_scope_citations,
+    reading_deadline,
+    scan_citations,
 )
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
 from shared.decorators import api_handler, optional_limit, validate
-from shared.dynamodb_batch import collect_capped_items
+from shared.request_deadline import current_deadline
 from shared.response_budget import take_within_budget
 from shared.scope_params import (
-    SCOPE_MAX_WORKERS,
     SCOPE_QUERY_PARAMS,
+    ReportScope,
     keywords_table_name,
-    map_scope_keywords,
     scope_from_request,
 )
 from shared.utils import get_brand_config
-from shared.youtube import CONTENT_TYPES, stored_content_type
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-dynamodb = boto3.resource('dynamodb')
-
 # Fail-fast: Required environment variables
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
+dynamodb = boto3.resource('dynamodb')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 KEYWORDS_TABLE = keywords_table_name()
 
 # Optional: Brand config table for dynamic brand detection
 BRAND_CONFIG_TABLE = os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
+
+# Optional: the citation rollup (``shared.citation_rollup``); without a bucket every page is read live.
+ROLLUP_BUCKET = os.environ.get('CITATION_ROLLUP_BUCKET')
+ROLLUP_FUNCTION = os.environ.get('CITATION_ROLLUP_FUNCTION_NAME')
+_ROLLUP_S3_CONFIG = Config(connect_timeout=2, read_timeout=5, retries={'max_attempts': 2, 'mode': 'standard'})
+rollup_reader = RollupReader(
+    boto3.client('s3', config=_ROLLUP_S3_CONFIG), ROLLUP_BUCKET,
+    lambda_client=boto3.client('lambda') if ROLLUP_FUNCTION else None, function_name=ROLLUP_FUNCTION,
+) if ROLLUP_BUCKET else None
 
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
@@ -78,163 +96,109 @@ CITATION_QUERY_PARAMS: dict[str, dict[str, Any]] = {
 """The list parameters; ``offset`` is a random-access alternative to ``next_token`` (the dashboard pager)."""
 
 
-def _get_tracked_brands():
-    """Get all tracked brands from config for URL matching."""
-    config = get_brand_config(BRAND_CONFIG_TABLE)
-    tracked_brands = config.get('tracked_brands', {})
-
-    brands = []
-    for category in ['first_party', 'competitors']:
-        for brand in tracked_brands.get(category, []):
-            if isinstance(brand, str):
-                brands.append({'name': brand, 'terms': [brand.lower()]})
-            elif isinstance(brand, dict):
-                name = brand.get('name', '')
-                aliases = brand.get('aliases', [])
-                terms = [name.lower()] + [a.lower() for a in aliases]
-                brands.append({'name': name, 'terms': terms})
-
-    return brands
+def _brand_config() -> dict[str, Any]:
+    """The brand config (``{}`` without a table): its tracked brands and ``updated_at``."""
+    return get_brand_config(BRAND_CONFIG_TABLE)
 
 
-def _detect_brand_in_url(url_lower, tracked_brands):
-    """Detect brand mention in URL using tracked brands config."""
-    for brand in tracked_brands:
-        for term in brand['terms']:
-            if term and term in url_lower:
-                return brand['name']
-    return 'Other'
+def _get_tracked_brands(brand_config: dict[str, Any]) -> BrandTerms:
+    """The tracked brands URLs are matched on."""
+    return tracked_brand_terms(brand_config)
 
 
-# Read caps, to keep the read inside the API's 29 s and the Lambda's memory.
-# At 1 MB per page (DynamoDB limit), a page holds a few thousand deduplicated
-# citations (a few hundred bytes each). One keyword's partition, or the full
-# scan, stops after ``_MAX_SCAN_PAGES``; a multi-keyword scope shares
-# ``_MAX_SCOPE_PAGES`` between its keywords (at least one page each), read
-# ``SCOPE_MAX_WORKERS`` partitions at a time. A capped read is logged and
-# reported as ``truncated: true``.
-_MAX_SCAN_PAGES = 25
+# Read bounds, to keep the read inside the API's 29 s and the Lambda's memory.
+# A 1 MB DynamoDB page holds about 2,800 Citations rows (the limit counts rows
+# before the projection). The table scan reads ``SCAN_SEGMENTS`` segments in
+# parallel, at most ``_MAX_SEGMENT_PAGES`` pages each; one keyword's
+# partition stops after ``_MAX_KEYWORD_PAGES``; a multi-keyword scope shares
+# ONE budget of ``_MAX_SCOPE_PAGES`` pages and ``_MAX_SCOPE_ROWS`` rows across
+# its keywords, read ``SCOPE_MAX_WORKERS`` partitions at a time. Every read
+# also stops ``_AGGREGATE_RESERVE_SECONDS`` before the request's deadline,
+# which leaves that time for aggregating, sorting and serializing the rows.
+# A cut read is logged and reported as ``truncated: true``.
+_MAX_SEGMENT_PAGES = 8
+_MAX_KEYWORD_PAGES = 25
 _MAX_SCOPE_PAGES = 100
+_MAX_SCOPE_ROWS = 200_000
+_AGGREGATE_RESERVE_SECONDS = 6.0
 
 
-def _query_keyword_citations(keyword: str, max_pages: int = _MAX_SCAN_PAGES) -> tuple[list[dict[str, Any]], bool]:
-    """Query the Citations partition of one keyword, bounded by ``max_pages``."""
-    return collect_capped_partition(citations_table, 'keyword', keyword, max_pages)
+def _read_citations(report_scope: ReportScope | None) -> tuple[list[dict[str, Any]], bool]:
+    """The scope's projected Citations rows: ``(rows, truncated)``.
 
-
-def _query_scope_citations(keywords: list[str]) -> tuple[list[dict[str, Any]], bool]:
-    """Every keyword's partition, in parallel, sharing the scope's page cap."""
-    pages_per_keyword = min(_MAX_SCAN_PAGES, max(1, _MAX_SCOPE_PAGES // max(1, len(keywords))))
-    partitions = map_scope_keywords(
-        keywords,
-        lambda keyword: _query_keyword_citations(keyword, pages_per_keyword),
-        lambda _keyword: ([], True),
+    No scope scans the table; one keyword queries its partition; a group,
+    market, id or ``all`` scope queries one partition per keyword.
+    """
+    if report_scope is None:
+        return scan_citations(citations_table, _MAX_SEGMENT_PAGES)
+    if report_scope.is_single_keyword:
+        return query_keyword_citations(citations_table, report_scope.keywords[0], _MAX_KEYWORD_PAGES)
+    return query_scope_citations(
+        citations_table, report_scope.keywords,
+        max_pages=_MAX_SCOPE_PAGES, max_rows=_MAX_SCOPE_ROWS, max_pages_per_keyword=_MAX_KEYWORD_PAGES,
     )
-    items = [item for partition_items, _ in partitions for item in partition_items]
-    return items, any(truncated for _, truncated in partitions)
 
 
-def _scan_all_citations(keyword=None, keywords=None) -> tuple[list[dict[str, Any]], bool]:
-    """
-    Read the deduplicated Citations table: ``(rows, truncated)``.
-
-    ``keyword`` queries one partition; ``keywords`` (a resolved group / id
-    scope) queries one partition per keyword instead of scanning; with
-    neither, a full scan covers every keyword.
-
-    Every path is capped (see ``_MAX_SCOPE_PAGES``) and logs a warning when the
-    cap is hit so the truncation is visible in CloudWatch.
-    """
-    if keyword:
-        items, truncated = _query_keyword_citations(keyword)
-    elif keywords is not None:
-        items, truncated = _query_scope_citations(keywords)
-    else:
-        # Full scan for all keywords
-        items, truncated = collect_capped_items(citations_table.scan, _MAX_SCAN_PAGES)
-
+def _read_scope(report_scope: ReportScope | None) -> tuple[list[dict[str, Any]], bool]:
+    """``_read_citations`` stopping early enough to answer, logged when cut."""
+    with reading_deadline(_AGGREGATE_RESERVE_SECONDS) as deadline:
+        items, truncated = _read_citations(report_scope)
+    truncated = truncated or deadline.cut
     if truncated:
         logger.warning(
-            "Citations read hit its page cap (keyword=%s, keywords=%d, workers=%d, items=%d). "
+            "Citations read stopped at its cap or time budget (scope=%s, keywords=%d, items=%d). "
             "Results are truncated.",
-            keyword or '<scope>', len(keywords or ()), SCOPE_MAX_WORKERS, len(items),
+            report_scope.label if report_scope else '<table>',
+            len(report_scope.keywords) if report_scope else 0, len(items),
         )
-
     return items, truncated
 
 
-def _aggregate_citations(items, tracked_brands):
+def _live_page(report_scope: ReportScope | None, brand_config: dict[str, Any], request: PageRequest) -> dict[str, Any]:
+    """One page aggregated from the scope's Citations rows, read now (bounded, ``truncated`` when cut)."""
+    tracked_brands = _get_tracked_brands(brand_config)
+    items, truncated = _read_scope(report_scope)
+    logger.info('Fetched %s citation records from Citations table', len(items))
+
+    aggregate = aggregate_citations(items, tracked_brands)
+    matching = request.query.apply(aggregate.top_urls, DICT_VIEW)
+    window = [list_entry(entry, request.include_keywords) for entry in matching[request.start:request.start + request.limit]]
+    page, _ = take_within_budget(window)
+    return {
+        **aggregate.totals(),
+        'matched_urls': len(matching),
+        'top_urls': page,
+        'next_token': encode_offset_cursor(request.start + len(page), len(matching)),
+        'truncated': truncated or current_deadline().cut,
+    }
+
+
+_LIVE = {'as_of': None, 'source': 'live', 'stale': False}
+
+
+def _rollup_page(
+    report_scope: ReportScope | None, brand_config: dict[str, Any], request: PageRequest,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """The page from the citation rollup, or ``None`` (answer live); plus ``as_of``, ``source`` and ``stale``.
+
+    One keyword and ``keyword_ids`` scopes are not precomputed, nor is a scope
+    without keywords worth a lookup. A build that does not match the scope's
+    keywords or the brand config is ``stale``: the answer is live and a
+    rebuild is requested.
     """
-    Aggregate citations by normalized_url across all keywords.
-    Each item in the Citations table has: keyword, normalized_url, citation_count,
-    citing_providers, priority, content_type, first_seen, last_updated.
-    Rows stored before ``content_type`` existed carry none; theirs is derived
-    from the URL (``shared.youtube.stored_content_type``).
-    """
-    # Group by normalized_url across keywords
-    url_data = defaultdict(lambda: {
-        'total_count': 0,
-        'keywords': set(),
-        'providers': set(),
-        'provider_counts': Counter(),
-        'content_type': None,
-    })
-
-    provider_totals = Counter()
-    brand_mentions = Counter()
-
-    for item in items:
-        url = item.get('normalized_url', '')
-        if not url:
-            continue
-
-        kw = item.get('keyword', '')
-        count = int(item.get('citation_count', 0))
-        providers = item.get('citing_providers', [])
-
-        entry = url_data[url]
-        entry['total_count'] += count
-        if entry['content_type'] is None:
-            entry['content_type'] = stored_content_type(item.get('content_type'), url)
-        if kw:
-            entry['keywords'].add(kw)
-        for p in providers:
-            entry['providers'].add(p)
-            entry['provider_counts'][p] += 1
-
-        # Provider stats
-        for p in providers:
-            provider_totals[p] += 1
-
-        # Brand detection
-        url_lower = url.lower()
-        detected_brand = _detect_brand_in_url(url_lower, tracked_brands)
-        brand_mentions[detected_brand] += count
-
-    return url_data, provider_totals, brand_mentions
-
-
-def content_type_counts(top_urls: list[dict[str, Any]]) -> dict[str, int]:
-    """Distinct URLs per content type, every type present (``{'video': 2, 'page': 40}``)."""
-    counts: dict[str, int] = dict.fromkeys(CONTENT_TYPES, 0)
-    for top_url in top_urls:
-        counts[top_url['content_type']] += 1
-    return counts
-
-
-def _top_urls(url_data) -> list[dict[str, Any]]:
-    """Every distinct URL of the scope, in the base order (most cited first)."""
-    return base_order([
-        {
-            'url': url,
-            'citation_count': data['total_count'],
-            'by_provider': dict(data['provider_counts']),
-            'keyword_count': len(data['keywords']),
-            'keywords': sorted(data['keywords']),
-            'content_type': data['content_type'],
-        }
-        for url, data in url_data.items()
-    ])
+    key = scope_key(report_scope)
+    if rollup_reader is None or key is None or (report_scope is not None and not report_scope.keywords):
+        return None, _LIVE
+    fingerprint = None if report_scope is None else keyword_fingerprint(report_scope.keywords)
+    try:
+        lookup = rollup_reader.lookup(key, fingerprint, brand_config.get('updated_at'))
+        if lookup.scope is None:
+            rollup_reader.request_rebuild(f"{'stale' if lookup.stale else 'missing'} {key}")
+            return None, {**_LIVE, 'stale': lookup.stale}
+        return rollup_reader.page(lookup.scope, request), {'as_of': lookup.built_at, 'source': 'rollup', 'stale': False}
+    except ROLLUP_READ_ERRORS:
+        logger.exception('Citation rollup read failed for %s; answering from the live read', key)
+        return None, _LIVE
 
 
 def _page_start(event, offset, next_token) -> tuple[int, dict[str, Any] | None]:
@@ -245,14 +209,6 @@ def _page_start(event, offset, next_token) -> tuple[int, dict[str, Any] | None]:
     if start is None:
         return 0, validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
     return start, None
-
-
-def _read_scope(report_scope) -> tuple[list[dict[str, Any]], bool]:
-    if report_scope is None:
-        return _scan_all_citations()
-    if report_scope.is_single_keyword:
-        return _scan_all_citations(keyword=report_scope.keywords[0])
-    return _scan_all_citations(keywords=list(report_scope.keywords))
 
 
 @api_handler
@@ -273,7 +229,14 @@ def handler(
     passing the filters). Every page also carries the scope-wide totals,
     whatever the filters: ``total_citations`` (Citations rows),
     ``total_urls``, ``total_citation_count``, ``content_type_counts``,
-    ``provider_stats``, ``brand_stats``, and ``truncated`` (a read cap was hit).
+    ``provider_stats``, ``brand_stats``, and ``truncated`` (a read cap or
+    the time budget cut the live read: the totals cover part of the scope).
+
+    ``source`` says where the page came from: ``rollup`` (the citation
+    rollup, built after the last run; ``as_of`` is its build time) or
+    ``live`` (read now; ``as_of`` is ``null``). ``stale: true`` means a
+    rollup exists but no longer matches the scope's keywords or the brand
+    config, so the page was read live and a rebuild was requested.
     """
     start, rejected = _page_start(event, offset, next_token)
     if rejected:
@@ -282,30 +245,19 @@ def handler(
     if rejected:
         return rejected
 
-    tracked_brands = _get_tracked_brands()
-    items, truncated = _read_scope(report_scope)
-    logger.info('Fetched %s citation records from Citations table', len(items))
-
-    url_data, provider_totals, brand_mentions = _aggregate_citations(items, tracked_brands)
-    top_urls = _top_urls(url_data)
-    query = CitationQuery(
-        sort=sort or 'citations', order=order or 'desc', url_contains=url_contains or '',
-        min_citations=min_citations, content_type=content_type or 'all',
+    request = PageRequest(
+        query=CitationQuery(
+            sort=sort or 'citations', order=order or 'desc', url_contains=url_contains or '',
+            min_citations=min_citations, content_type=content_type or 'all',
+        ),
+        start=start, limit=limit, include_keywords=include_keywords,
     )
-    matching = query.apply(top_urls)
-    window = [list_entry(entry, include_keywords) for entry in matching[start:start + limit]]
-    page, _ = take_within_budget(window)
-
+    brand_config = _brand_config()
+    page, provenance = _rollup_page(report_scope, brand_config, request)
+    if page is None:
+        page = _live_page(report_scope, brand_config, request)
     return success_response({
         'scope': report_scope.describe() if report_scope is not None else None,
-        'total_citations': len(items),
-        'total_urls': len(top_urls),
-        'total_citation_count': sum(entry['citation_count'] for entry in top_urls),
-        'matched_urls': len(matching),
-        'top_urls': page,
-        'next_token': encode_offset_cursor(start + len(page), len(matching)),
-        'truncated': truncated,
-        'content_type_counts': content_type_counts(top_urls),
-        'provider_stats': [{'provider': p, 'citation_count': c} for p, c in provider_totals.items()],
-        'brand_stats': [{'brand': b, 'mention_count': c} for b, c in brand_mentions.items()],
+        **page,
+        **provenance,
     }, event)

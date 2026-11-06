@@ -3,8 +3,10 @@ import {
 } from 'vitest';
 import { apiPost } from './client';
 import {
-  promoteKeywords, type PromoteKeywordsResponse
+  IncompletePromotionError, promoteKeywords, type PromoteKeywordsResponse
 } from './keywords';
+import { MAX_WRITE_ROUNDS } from './writeRounds';
+import { buildKeyword } from './keywordGroups-fixtures';
 
 import type { ResearchKeyword } from '../types';
 
@@ -120,5 +122,127 @@ describe('promoteKeywords', () => {
     });
 
     expect(mockApiPost).toHaveBeenCalledWith('/keywords/promote', body, expect.anything());
+  });
+});
+
+const spa = {
+  keyword: 'Hotel Coruña Spa',
+  intent: 'commercial',
+  competition: 'low',
+  relevance: 80,
+} satisfies ResearchKeyword;
+const beach = {
+  keyword: 'hotel coruña beach',
+  intent: 'commercial',
+  competition: 'low',
+  relevance: 80,
+} satisfies ResearchKeyword;
+const centre = {
+  keyword: 'hotel coruña centre',
+  intent: 'informational',
+  competition: 'low',
+  relevance: 80,
+} satisfies ResearchKeyword;
+
+const firstRound = {
+  created: 1,
+  skipped: 1,
+  created_keywords: [buildKeyword({
+    id: 'kw-beach',
+    keyword: 'hotel coruña beach',
+  })],
+  skipped_keywords: [{
+    keyword: 'hotel coruña centre',
+    reason: 'duplicate',
+  }],
+  grouped_keywords: [],
+  pending_keywords: ['hotel coruña spa', 'hotel coruña centre'],
+  truncated: true,
+} satisfies PromoteKeywordsResponse;
+
+const secondRound = {
+  created: 1,
+  skipped: 1,
+  created_keywords: [buildKeyword({
+    id: 'kw-spa',
+    keyword: 'Hotel Coruña Spa',
+  })],
+  skipped_keywords: [{
+    keyword: 'hotel coruña centre',
+    reason: 'duplicate',
+  }],
+  grouped_keywords: ['hotel coruña centre'],
+  pending_keywords: [],
+  truncated: false,
+} satisfies PromoteKeywordsResponse;
+
+const stillPending = {
+  ...secondRound,
+  created: 0,
+  created_keywords: [],
+  grouped_keywords: [],
+  pending_keywords: ['hotel coruña spa'],
+  truncated: true,
+} satisfies PromoteKeywordsResponse;
+
+describe('promoteKeywords rounds', () => {
+  beforeEach(() => {
+    mockApiPost.mockReset();
+  });
+
+  it('re-sends only the pending keywords, matched by keyword identity', async () => {
+    mockApiPost.mockResolvedValueOnce(firstRound).mockResolvedValueOnce(secondRound);
+
+    await promoteKeywords({ keywords: [spa, beach, centre] });
+
+    expect(mockApiPost.mock.calls.map(([, body]) => body)).toStrictEqual([
+      { keywords: [spa, beach, centre] },
+      { keywords: [spa, centre] },
+    ]);
+  });
+
+  it('merges the rounds into one outcome counting each skip once', async () => {
+    mockApiPost.mockResolvedValueOnce(firstRound).mockResolvedValueOnce(secondRound);
+
+    const outcome = await promoteKeywords({ keywords: [spa, beach, centre] });
+
+    expect(outcome).toStrictEqual({
+      created: 2,
+      skipped: 1,
+      createdKeywords: ['hotel coruña beach', 'Hotel Coruña Spa'],
+      createdItems: [...firstRound.created_keywords, ...secondRound.created_keywords],
+      skippedKeywords: ['hotel coruña centre'],
+      groupedKeywords: ['hotel coruña centre'],
+    });
+  });
+
+  it('stops after ten requests with the written outcome on the error', async () => {
+    mockApiPost.mockResolvedValueOnce(firstRound).mockResolvedValue(stillPending);
+
+    const failure = await promoteKeywords({ keywords: [spa, beach, centre] }).catch((error: unknown) => error);
+
+    expect(mockApiPost).toHaveBeenCalledTimes(MAX_WRITE_ROUNDS);
+    expect(failure).toBeInstanceOf(IncompletePromotionError);
+    expect(failure).toMatchObject({
+      pendingCount: 1,
+      message: '1 keyword added, but 1 could not be added after 10 attempts. Add them again to finish.',
+      outcome: { createdKeywords: ['hotel coruña beach'] },
+    });
+  });
+
+  it('stops the rounds when the request is aborted', async () => {
+    const abort = new DOMException('The operation was aborted.', 'AbortError');
+    mockApiPost.mockResolvedValueOnce(firstRound).mockRejectedValueOnce(abort);
+
+    await expect(promoteKeywords({ keywords: [spa, beach, centre] })).rejects.toBe(abort);
+    expect(mockApiPost).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends one request when the answer leaves nothing pending', async () => {
+    mockApiPost.mockResolvedValueOnce(secondRound);
+
+    await promoteKeywords({ keywords: [spa] });
+
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
   });
 });

@@ -61,9 +61,9 @@ export async function fetchProviderModels(providerId: string, signal?: AbortSign
   return payload;
 }
 
-/** Store `model` for `providerId`; `null` returns the provider to its default model. */
+/** Store `model` for `providerId`; `null` returns the provider to its default model. A refused check (400) or one that ran out of time (503) throws its reason. */
 export async function saveProviderModel(providerId: string, model: string | null): Promise<void> {
-  const payload = await apiPut<unknown>(providerPath(providerId), { model }, { acceptedJsonStatuses: [400] });
+  const payload = await apiPut<unknown>(providerPath(providerId), { model }, { acceptedJsonStatuses: [400, 503] });
   const refusal = refusalMessage(payload);
   if (refusal !== null) throw new ProviderModelError(refusal);
 }

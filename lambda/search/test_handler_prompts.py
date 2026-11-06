@@ -49,6 +49,13 @@ def _env_vars():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _nothing_stored_yet():
+    """No earlier attempt of the run stored an answer: the resume read is stubbed."""
+    with patch.object(handler, 'stored_slim_results', return_value={}):
+        yield
+
+
 @pytest.fixture
 def mock_dynamodb():
     """Mock DynamoDB resource."""

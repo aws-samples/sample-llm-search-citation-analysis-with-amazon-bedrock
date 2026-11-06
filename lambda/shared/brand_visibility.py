@@ -19,6 +19,7 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 
 from shared.keyword_groups import ACTIVE_KEYWORD_STATUS
+from shared.scope_params import map_scope_keywords
 from shared.utils import brand_names_match
 
 logger = logging.getLogger(__name__)
@@ -107,8 +108,12 @@ def load_recent_search_results(
     function falls back to a bounded scan of the search table.
 
     The first ``max_keywords`` keywords are each queried by partition key
-    for their most recent rows; a failing keyword is logged and skipped so
-    one bad partition cannot sink the whole analysis.
+    for their most recent rows, ``scope_params.SCOPE_MAX_WORKERS`` at a time
+    and in keyword order; a failing keyword is logged and skipped so one bad
+    partition cannot sink the whole analysis. A keyword not started when the
+    request's deadline is spent is skipped too and the deadline is marked
+    ``cut`` (``current_deadline().cut``), so the caller can say the answer is
+    partial.
 
     Args:
         dynamodb: The caller's boto3 DynamoDB resource (tests patch it on the
@@ -135,17 +140,15 @@ def load_recent_search_results(
     projected = {} if projection is None else {
         'ProjectionExpression': projection, 'ExpressionAttributeNames': {'#ts': 'timestamp'},
     }
-    items: list[dict[str, Any]] = []
-    for keyword in keywords[:max_keywords]:
-        try:
-            response = search_table.query(
-                KeyConditionExpression=Key('keyword').eq(keyword),
-                ScanIndexForward=False,
-                Limit=RESULTS_PER_KEYWORD,
-                **projected,
-            )
-            items.extend(response.get('Items', []))
-        except Exception:
-            logger.exception('Error querying keyword %r', keyword)
-            continue
-    return items
+
+    def recent_rows(keyword: str) -> list[dict[str, Any]]:
+        response = search_table.query(
+            KeyConditionExpression=Key('keyword').eq(keyword),
+            ScanIndexForward=False,
+            Limit=RESULTS_PER_KEYWORD,
+            **projected,
+        )
+        return response.get('Items', [])
+
+    rows = map_scope_keywords(keywords[:max_keywords], recent_rows, lambda _keyword: [])
+    return [item for keyword_rows in rows for item in keyword_rows]

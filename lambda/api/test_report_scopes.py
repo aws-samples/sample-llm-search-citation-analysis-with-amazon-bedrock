@@ -494,12 +494,13 @@ class TestTrendsScopeRouting:
 
         assert ([row['keyword'] for row in body['keyword_trends']], body['keywords_with_data']) == (['hotel coruna spa'], 1)
 
-    def test_caps_an_unscoped_request_at_twenty_keywords(self, trends):
-        many = [{'id': f'k{i}', 'keyword': f'kw {i:02}', 'status': 'active'} for i in range(25)]
+    def test_caps_an_unscoped_request_at_the_scope_keyword_cap(self, trends):
+        cap = trends.SCOPE_KEYWORDS_CAP
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active'} for i in range(cap + 5)]
         with scoped_report(trends, {}, active=many) as report:
             body = report.body(None)
 
-        assert (body['keywords_analyzed'], body['keywords_truncated']) == (20, True)
+        assert (body['keywords_analyzed'], body['keywords_truncated']) == (cap, True)
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +646,8 @@ class TestOverviewScope:
             seen['scope'] = report_scope
             seen['owned_domains'] = owned_domains
             return {
-                'scope': report_scope.describe(), 'keywords_analyzed': len(report_scope.keywords), 'keywords_with_data': 0,
+                'scope': report_scope.describe(), 'keywords_truncated': False,
+                'keywords_analyzed': len(report_scope.keywords), 'keywords_with_data': 0,
                 'citations_configured': bool(owned_domains), 'latest': {}, 'latest_brands': [], 'trend_data': [], 'change': None,
                 'keyword_trends': [],
                 'overall': {'improving_count': 0, 'declining_count': 0, 'stable_count': 0},

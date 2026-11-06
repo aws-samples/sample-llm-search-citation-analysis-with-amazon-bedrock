@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.41.1",
+  "version": "2.42.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,17 +15,17 @@
     "validate": "npm run type-check && npm run test && npm run deadcode && npm run deadcode:prod"
   },
   "dependencies": {
-    "@aws-amplify/ui-react": "^6.15.2",
-    "aws-amplify": "^6.16.3",
-    "chart.js": "^4.5.1",
-    "docx": "^9.6.1",
-    "dompurify": "^3.4.16",
+    "@aws-amplify/ui-react": "^6.15.7",
+    "aws-amplify": "^6.22.2",
+    "chart.js": "^4.6.1",
+    "docx": "^9.15.2",
+    "dompurify": "^3.4.17",
     "file-saver": "^2.0.5",
     "react": "^18.3.1",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.18.0",
+    "react-router-dom": "^7.18.5",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "unified": "^11.0.5",
@@ -35,20 +35,20 @@
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/file-saver": "^2.0.7",
     "@types/mdast": "^4.0.4",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^6.0.3",
-    "autoprefixer": "^10.4.27",
+    "@vitejs/plugin-react": "^6.2.1",
+    "autoprefixer": "^10.6.2",
     "jsdom": "^27.4.0",
     "knip": "6.40.0",
-    "postcss": "^8.5.8",
+    "postcss": "^8.5.32",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.7.0",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^4.1.12"
   },
   "overrides": {
@@ -56,9 +56,11 @@
     "picomatch": "^4.0.4",
     "lodash": "^4.18.0",
     "uuid": "^11.1.1",
-    "qs@<=6.15.3": "6.16.0",
     "smol-toml@<1.9.0": "1.9.0",
     "source-map-js@<1.2.2": "1.2.2",
-    "postcss-selector-parser@<7.1.6": "7.1.6"
+    "postcss-selector-parser@<7.1.6": "7.1.6",
+    "qs@<=6.16.0": "6.16.2",
+    "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
+    "zod@<4.6.6": "4.6.7"
   }
 }

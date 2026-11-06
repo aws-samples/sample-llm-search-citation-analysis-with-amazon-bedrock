@@ -8,7 +8,8 @@ Routes (behind the ConfigMgmt router, ``/api/markets``):
 - ``PUT  /api/markets`` (Admin): body ``{"markets": [...]}`` replaces the whole
   list (``shared.markets.validate_markets``). 400 ``{error, field: "markets"}``
   on a validation error; 409 ``{error, market_ids: [...]}`` when the new list
-  drops a market that keywords still use. Answers like ``GET``.
+  drops a market that keywords still use; 503 ``{error}`` (nothing saved) when
+  that check could not finish within the request's time budget. Answers like ``GET``.
 - ``POST /api/markets`` (Admin), two actions told apart by the body:
   - ``{"propose": {"country": "CL", "language": "es", "city": "Santiago"?}}`` →
     ``{"market": Market.to_json(), "market_id_taken": bool}``: Bedrock describes
@@ -23,6 +24,8 @@ Routes (behind the ConfigMgmt router, ``/api/markets``):
     literal translation; ``shared.market_keywords``), in the requested market
     order. A market the model gave no usable keyword for is left out. 502 when
     the model fails or answers no JSON.
+  Both Bedrock calls are bounded by the request's deadline; 503 ``{error}``
+  ("try again") when the model does not answer in time.
 
 The list is one BrandConfig item (``config_id = 'markets'``).
 """
@@ -41,7 +44,6 @@ sys.path.insert(0, '/opt/python')
 from shared import auth
 from shared.api_response import api_response, validation_error
 from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, json_object_body, route_handler
-from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_store import validate_keyword_text
 from shared.market_keywords import MAX_SUGGESTION_MARKETS, suggest_local_keywords
@@ -55,6 +57,8 @@ from shared.markets import (
     markets_item,
     validate_markets,
 )
+from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError
+from shared.request_deadline import current_deadline
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -82,15 +86,46 @@ def _get_markets(event: dict[str, Any], context: Any) -> dict[str, Any]:
 # PUT: replace the list
 # ---------------------------------------------------------------------------
 
-def _market_ids_in_use() -> set[str]:
-    """Every ``market_id`` a Keywords row carries (any status: a paused keyword keeps its market)."""
-    rows = collect_all_items(
-        keywords_table.scan,
-        FilterExpression=Attr('market_id').exists(),
-        ProjectionExpression='#id, market_id',
-        ExpressionAttributeNames={'#id': 'id'},
-    )
-    return {row['market_id'] for row in rows if isinstance(row.get('market_id'), str) and row['market_id']}
+def _markets_still_used(dropped: set[str]) -> tuple[set[str], bool]:
+    """Which of the ``dropped`` market ids a Keywords row still carries, and whether the answer is complete.
+
+    Only a PUT that drops markets reads Keywords at all (C10): editing a
+    market or adding one drops none. The scan filters on the dropped ids and
+    stops as soon as every one of them is found, or when the request's time
+    budget is spent (then ``complete`` is false unless something was found,
+    which is already reason enough to refuse). Any status counts: a paused
+    keyword keeps its market.
+    """
+    if not dropped:
+        return set(), True
+    deadline = current_deadline()
+    found: set[str] = set()
+    params: dict[str, Any] = {
+        'FilterExpression': Attr('market_id').is_in(sorted(dropped)),
+        'ProjectionExpression': 'market_id',
+    }
+    while True:
+        page = keywords_table.scan(**params)
+        found |= {
+            market_id for row in page.get('Items', [])
+            if isinstance(market_id := row.get('market_id'), str) and market_id in dropped
+        }
+        last_key = page.get('LastEvaluatedKey')
+        if found >= dropped or not last_key:
+            return found, True
+        if deadline.stop_reading('the market in-use check'):
+            return found, bool(found)
+        params['ExclusiveStartKey'] = last_key
+
+
+def _stored_market_ids() -> set[str]:
+    """The ids of the saved list, including entries that no longer validate (keywords may still carry them)."""
+    item = brand_config_table.get_item(Key={'config_id': MARKETS_CONFIG_ID}).get('Item') or {}
+    entries = item.get('markets')
+    return {
+        entry['market_id'] for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict) and isinstance(entry.get('market_id'), str) and entry['market_id']
+    }
 
 
 @auth.require_group(auth.ADMIN_GROUP)
@@ -100,11 +135,15 @@ def _put_markets(event: dict[str, Any], context: Any, body: dict[str, Any]) -> d
     if markets is None:
         return validation_error(str(error), event, 'markets')
 
-    still_used = sorted(_market_ids_in_use() - {market.market_id for market in markets})
+    still_used, complete = _markets_still_used(_stored_market_ids() - {market.market_id for market in markets})
     if still_used:
         return api_response(409, {
-            'error': f"Keywords still use market(s) {', '.join(still_used)}; move or delete those keywords first",
-            'market_ids': still_used,
+            'error': f"Keywords still use market(s) {', '.join(sorted(still_used))}; move or delete those keywords first",
+            'market_ids': sorted(still_used),
+        }, event)
+    if not complete:
+        return api_response(503, {
+            'error': 'Could not check in time whether keywords still use the removed markets; nothing was saved, try again',
         }, event)
 
     item = markets_item(markets, get_timestamp())
@@ -150,7 +189,10 @@ def _propose_market(event: dict[str, Any], raw_request: object) -> dict[str, Any
         return validation_error(str(error), event, 'propose')
     brand_config = brand_config_table.get_item(Key={'config_id': 'default'}).get('Item') or {}
     try:
-        market = propose_market(request, brand_config)
+        market = propose_market(request, brand_config, deadline=current_deadline())
+    except BedrockDeadlineError:
+        logger.warning('Market proposal for %s/%s ran out of time', request['country'], request['language'])
+        return api_response(503, {'error': MODEL_TIMED_OUT_MESSAGE}, event)
     except Exception:
         logger.exception('Market proposal failed for %s/%s', request['country'], request['language'])
         return api_response(502, {'error': 'The model could not describe this market; fill the fields in by hand'}, event)
@@ -166,7 +208,10 @@ def _suggest_keywords(event: dict[str, Any], body: dict[str, Any]) -> dict[str, 
     if markets is None:
         return validation_error(str(error), event, 'market_ids')
     try:
-        suggestions = suggest_local_keywords(keyword, markets)
+        suggestions = suggest_local_keywords(keyword, markets, deadline=current_deadline())
+    except BedrockDeadlineError:
+        logger.warning('Keyword suggestions for %d market(s) ran out of time', len(markets))
+        return api_response(503, {'error': MODEL_TIMED_OUT_MESSAGE}, event)
     except Exception:
         logger.exception('Keyword suggestions failed for %d market(s)', len(markets))
         return api_response(502, {'error': 'The model could not suggest keywords; try again'}, event)

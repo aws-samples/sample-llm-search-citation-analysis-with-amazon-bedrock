@@ -12,12 +12,13 @@ import {
   slices,
 } from './groupKpiDetail';
 import {
-  buildRunDrivers, KEYWORD_HISTORIES
+  buildRunDrivers, FIRST_KEYWORD_RUNS_PAGE, KEYWORD_HISTORIES, LAST_KEYWORD_RUNS_PAGE
 } from './groupKpiHistory-fixtures';
 import {
   comparedRunSeries, dailyRun
 } from './groupKpiDetail-fixtures';
 import { HOTEL_SOL_SCOPE } from './GroupKpiReport-fixtures';
+import { ApiRequestError } from '../../../infrastructure';
 
 vi.mock('../../../api/client', () => ({ apiGet: vi.fn() }));
 
@@ -29,14 +30,8 @@ const TARGET = {
 describe('fetchAllKeywordRuns', () => {
   beforeEach(() => {
     vi.mocked(apiGet)
-      .mockResolvedValueOnce({
-        keywords: [KEYWORD_HISTORIES[0]],
-        next_token: 'page-2' 
-      })
-      .mockResolvedValueOnce({
-        keywords: [KEYWORD_HISTORIES[1]],
-        next_token: null 
-      });
+      .mockResolvedValueOnce(FIRST_KEYWORD_RUNS_PAGE)
+      .mockResolvedValueOnce(LAST_KEYWORD_RUNS_PAGE);
   });
 
   it('collects every page of keyword runs in order', async () => {
@@ -70,6 +65,19 @@ describe('fetchAllKeywordRuns', () => {
 });
 
 describe('fetchAllKeywordRuns failures', () => {
+  it('names the keyword page that timed out when a later page answers 504', async () => {
+    vi.mocked(apiGet)
+      .mockResolvedValueOnce(FIRST_KEYWORD_RUNS_PAGE)
+      .mockRejectedValueOnce(new ApiRequestError('HTTP 504: Gateway Timeout', 504));
+
+    await expect(fetchAllKeywordRuns(TARGET, 90)).rejects.toThrow('Keyword runs, page 2: Request timed out');
+  });
+
+  it('passes an abort through unchanged when the caller aborts a keyword page', async () => {
+    vi.mocked(apiGet).mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+
+    await expect(fetchAllKeywordRuns(TARGET, 90)).rejects.toMatchObject({ name: 'AbortError' });
+  });
   it('rejects a malformed page', async () => {
     vi.mocked(apiGet).mockResolvedValue({ keywords: 'none' });
 
@@ -119,6 +127,12 @@ describe('fetchAllRunDrivers', () => {
 
   it('reads nothing without a compared run', async () => {
     expect(await fetchAllRunDrivers(TARGET, comparedRunSeries(0))).toStrictEqual([]);
+  });
+
+  it('names the slice of runs whose drivers failed when a drivers page answers 503', async () => {
+    vi.mocked(apiGet).mockRejectedValue(new ApiRequestError('HTTP 503: Service Unavailable', 503));
+
+    await expect(fetchAllRunDrivers(TARGET, comparedRunSeries(1))).rejects.toThrow('Drivers of the runs 2026-09-01 to 2026-09-02: Server error occurred');
   });
 
   it('rejects a malformed drivers page', async () => {

@@ -22,12 +22,15 @@ tell the reader instead of passing an estimate off as an exact count.
 from __future__ import annotations
 
 import concurrent.futures
-import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
+
+from shared.request_deadline import Deadline
+
+__all__ = ['COUNT_TIME_BUDGET_SECONDS', 'EXACT_COUNT_MAX_BYTES', 'Count', 'Deadline', 'count_pages', 'partition_count', 'table_count']
 
 #: Tables up to this size are counted exactly (about 64 one-MB pages, a few seconds).
 EXACT_COUNT_MAX_BYTES = 64 * 1024 * 1024
@@ -45,17 +48,6 @@ class Count:
 
     value: int
     approximate: bool = False
-
-
-class Deadline:
-    """A point in time after which counting stops reading further pages."""
-
-    def __init__(self, seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
-        self._clock = clock
-        self._ends_at = clock() + seconds
-
-    def expired(self) -> bool:
-        return self._clock() >= self._ends_at
 
 
 def count_pages(operation: Callable[..., Mapping[str, Any]], deadline: Deadline, **params: Any) -> tuple[int, bool]:

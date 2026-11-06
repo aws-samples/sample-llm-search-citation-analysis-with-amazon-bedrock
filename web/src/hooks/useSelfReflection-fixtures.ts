@@ -16,3 +16,45 @@ export const mockSelfReflection: SelfReflectionResult = {
     content_type: 'guide',
   }],
 };
+
+/** `POST /self-reflection` answering 202 for the reflection above. */
+export const pendingSelfReflection = {
+  status: 'pending',
+  keyword: 'hotels in madrid',
+  brand: 'Hotel Sol',
+  query_prompt_id: 'prompt-family',
+};
+
+/** The URL the hook checks a running analysis at. */
+export const SELF_REFLECTION_STATUS_URL = 'https://api.test.com/self-reflection?keyword=hotels+in+madrid&brand=Hotel+Sol&query_prompt_id=prompt-family';
+
+/** `GET /self-reflection` while the analysis runs. */
+export const runningSelfReflection = {
+  keyword: 'hotels in madrid',
+  results: [],
+  count: 0,
+  job: {
+    status: 'pending',
+    started_at: '2026-11-05T12:00:00.000000Z' 
+  },
+};
+
+/** `GET /self-reflection` once the analysis stored its reflection. */
+export const finishedSelfReflection = {
+  keyword: 'hotels in madrid',
+  results: [mockSelfReflection],
+  count: 1,
+  job: null,
+};
+
+/** `GET /self-reflection` after the model ran out of time. */
+export const failedSelfReflection = {
+  keyword: 'hotels in madrid',
+  results: [],
+  count: 0,
+  job: {
+    status: 'failed',
+    started_at: '2026-11-05T12:00:00.000000Z',
+    error: 'The AI model did not answer in time; try again' 
+  },
+};

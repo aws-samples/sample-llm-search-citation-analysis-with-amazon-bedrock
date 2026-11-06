@@ -19,12 +19,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from shared.sentiment_examples import ANSWER_TEXT_CAP
+from testing.answer_text_fixtures import answer_texts_dynamodb
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.response_size import assert_within_page_budget, long_text
-from testing.search_results_fixtures import active_keywords_table, report_dynamodb, search_results_table
+from testing.search_results_fixtures import active_keywords_table
 from testing.sentiment_examples_fixtures import stored_answer, stored_brand
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -53,7 +54,7 @@ def _rows(answer: str) -> dict[str, list[dict[str, Any]]]:
 
 def _endpoint(module: Any, answer: str):
     keywords = active_keywords_table([{'id': f'k{index}', 'keyword': keyword, 'status': 'active'} for index, keyword in enumerate(_KEYWORDS)])
-    return patch.object(module, 'dynamodb', report_dynamodb(search_results_table(_rows(answer)), keywords))
+    return patch.object(module, 'dynamodb', answer_texts_dynamodb(_rows(answer), keywords))
 
 
 def _call(module: Any, query: dict[str, str]) -> dict[str, Any]:

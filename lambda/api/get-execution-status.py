@@ -83,6 +83,9 @@ _MAP_RUN_STATE_NAME = 'ProcessKeywords'
 _MAX_CAUSE_LENGTH = 200
 # The timeline returns at most this many entries (the most recent ones).
 _MAX_TIMELINE_EVENTS = 50
+# Step Functions error codes that mean "no such execution / state machine":
+# an unknown or malformed id is a 404, never a 500.
+_NOT_FOUND_ERROR_CODES = frozenset({'ExecutionDoesNotExist', 'StateMachineDoesNotExist', 'InvalidArn'})
 
 
 @api_handler
@@ -108,10 +111,15 @@ def handler(event: dict[str, Any], context: Any, id: str | None = None, stateMac
         if not stateMachineArn:
             return validation_error('stateMachineArn query parameter required', event, 'stateMachineArn')
 
-        executions = stepfunctions.list_executions(
-            stateMachineArn=stateMachineArn,
-            maxResults=1
-        )
+        try:
+            executions = stepfunctions.list_executions(
+                stateMachineArn=stateMachineArn,
+                maxResults=1
+            )
+        except ClientError as exc:
+            if _error_code(exc) in _NOT_FOUND_ERROR_CODES:
+                return not_found_response('Executions', event)
+            raise
 
         if not executions.get('executions'):
             return not_found_response('Executions', event)
@@ -122,7 +130,12 @@ def handler(event: dict[str, Any], context: Any, id: str | None = None, stateMac
         execution_arn = execution_id
 
     # Get execution details
-    execution = stepfunctions.describe_execution(executionArn=execution_arn)
+    try:
+        execution = stepfunctions.describe_execution(executionArn=execution_arn)
+    except ClientError as exc:
+        if _error_code(exc) in _NOT_FOUND_ERROR_CODES:
+            return not_found_response('Execution', event)
+        raise
 
     # Get execution history
     history = stepfunctions.get_execution_history(
@@ -147,6 +160,11 @@ def handler(event: dict[str, Any], context: Any, id: str | None = None, stateMac
         # A next page means older events (where MapRunStarted lives) were cut off.
         'progress': _keyword_progress(execution_arn, history_events, history_truncated='nextToken' in history),
     }, event)
+
+
+def _error_code(exc: ClientError) -> str:
+    """The Step Functions error code of a ``ClientError`` (empty when absent)."""
+    return str(exc.response.get('Error', {}).get('Code', ''))
 
 
 def _keyword_progress(

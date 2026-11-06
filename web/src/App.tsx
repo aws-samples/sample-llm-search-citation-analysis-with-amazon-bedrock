@@ -1,5 +1,5 @@
 import {
-  useState, useEffect, type ReactNode
+  useState, useEffect
 } from 'react';
 import {
   BrowserRouter, Navigate, Routes, Route, useNavigate, useLocation
@@ -11,12 +11,13 @@ import {
 } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
 import { useDashboardData } from './hooks/useDashboardData';
+import { PanelLoadError } from './components/Dashboard/PanelLoadError';
 import { useExecutionPolling } from './hooks/useExecutionPolling';
 import { usePrintMode } from './hooks/usePrintMode';
 import { KEYWORD_RECONCILIATION_CONTEXT } from './hooks/usePromoteKeywords';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TabContent } from './components/Layout/TabContent';
-import { AppSkeleton } from './components/Layout/AppSkeleton';
+import { DashboardGate } from './components/Layout/DashboardGate';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
@@ -32,7 +33,7 @@ import {
   isSettingsPath, settingsPath
 } from './components/Settings/settingsSections';
 import type {
-  TabType, Schedule, Stats
+  TabType, Schedule
 } from './types';
 
 Amplify.configure({
@@ -159,32 +160,6 @@ async function signOutQuietly() {
   }
 }
 
-interface DashboardGateProps {
-  readonly loading: boolean;
-  readonly stats: Stats | null;
-  readonly error: string | null;
-  readonly children: ReactNode;
-}
-
-/** A full-screen notice until the dashboard data is usable; the app itself afterwards. */
-function DashboardGate({
-  loading, stats, error, children 
-}: DashboardGateProps) {
-  if (loading && !stats) {
-    return <AppSkeleton />;
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div className="text-xl text-red-600 dark:text-red-400">Error: {error}</div>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
-}
-
 interface AppHeaderProps {
   readonly isPrintMode: boolean;
   readonly title: string;
@@ -279,6 +254,8 @@ function MainApp() {
     lastUpdate,
     refetch,
     reconcileKeywords,
+    panels,
+    retryPanel,
   } = useDashboardData();
   const {
     execution, triggerAnalysis, isRunning
@@ -364,6 +341,9 @@ function MainApp() {
                   <ProviderHealthBanner onNavigateToProviders={() => handleNavigateToSettings('providers')} />
                 )}
 
+                {/* Keyword lists feed every tab and report, so their failure shows everywhere. */}
+                <PanelLoadError panel="keywords" panels={panels} onRetry={retryPanel} spacingClassName="mb-4 " />
+
                 <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconcileKeywords}>
                   {isReportRoute ? (
                     <ReportsRouter keywords={keywords} />
@@ -383,6 +363,8 @@ function MainApp() {
                       rawResponsesPath={rawResponsesPath}
                       setActiveTab={setActiveTab}
                       onNavigateToRawResponses={handleNavigateToRawResponses}
+                      panels={panels}
+                      retryPanel={retryPanel}
                     />
                   )}
                 </KEYWORD_RECONCILIATION_CONTEXT.Provider>

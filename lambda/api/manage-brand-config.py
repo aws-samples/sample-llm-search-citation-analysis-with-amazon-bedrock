@@ -46,8 +46,9 @@ from shared.industry_presets import (
 from shared.llm_json import parse_llm_json
 
 # Centralized Bedrock invocation (ModelRole.ANALYSIS -> Sonnet by default)
-from shared.models import ModelRole, invoke_bedrock
+from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError, ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.request_deadline import current_deadline
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 DYNAMODB_TABLE_BRAND_CONFIG = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
+
+# The most brand names one expansion prompt lists.
+MAX_PROMPT_BRANDS = 100
 
 
 def _run_brand_prompt(
@@ -78,9 +82,18 @@ def _run_brand_prompt(
     from the parsed object, which then ends with the model's ``notes`` and the
     ``industry``. Shaping runs inside the try so shaping bugs degrade to the
     same defaults instead of crashing the handler.
+
+    The call is bounded by the request's deadline with thinking off: the
+    answer is a short JSON list, and medium-effort thinking took 15-60 s at
+    256 MB, past the gateway's 29 s. When the model does not answer in time
+    the defaults come back with ``error`` = ``MODEL_TIMED_OUT_MESSAGE`` and
+    ``timed_out: true`` (still 200: the dashboard shows ``error`` as is).
     """
     try:
-        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=max_tokens, temperature=0)
+        response_text = invoke_bedrock(
+            prompt, ModelRole.ANALYSIS, max_tokens=max_tokens, temperature=0,
+            thinking=False, deadline=current_deadline(),
+        )
 
         if not response_text:
             return {**error_defaults, "error": "Empty response"}
@@ -91,6 +104,9 @@ def _run_brand_prompt(
 
         return {**shape(result), "notes": result.get("notes", ""), "industry": industry}
 
+    except BedrockDeadlineError:
+        logger.warning('Ran out of time %s', log_context)
+        return {**error_defaults, "error": MODEL_TIMED_OUT_MESSAGE, "timed_out": True}
     except Exception as e:
         logger.exception('Error %s', log_context)
         return {**error_defaults, "error": str(e)}
@@ -202,14 +218,17 @@ def _expert_preamble(role: str, industry_context: _IndustryContext, *, with_exam
 
 
 def _wrapped_brands(brands: list, *, when_empty: str = "") -> str:
-    """The non-blank ``brands``, comma-separated, each wrapped in ``<brand>`` tags.
+    """The first ``MAX_PROMPT_BRANDS`` non-blank ``brands``, comma-separated, each wrapped in ``<brand>`` tags.
 
     The tags keep a malicious user-supplied name from escaping into the
     surrounding prompt instructions. ``when_empty`` stands in for an empty list.
+    The cap keeps the prompt (and the model's reading time) bounded however
+    long the tracked list grows; suggestions are still filtered against the
+    whole list.
     """
     if not brands:
         return when_empty
-    return ", ".join(wrap_user_input(b, "brand") for b in brands if b)
+    return ", ".join(wrap_user_input(b, "brand") for b in [b for b in brands if b][:MAX_PROMPT_BRANDS])
 
 
 def normalize_brand(name: str) -> str:

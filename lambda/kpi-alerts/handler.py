@@ -19,6 +19,12 @@ as the snapshot key, so its history continues; any other market's key is
 ``<group_id>#<market_id>``. ``snapshot_scopes`` lists every pair snapshotted
 (``{"group_id", "market_id"}``), ``snapshot_group_ids`` their distinct groups.
 A scope with ``market_ids`` evaluates only those markets.
+
+Time budget (2.42.0): the run's answers are read pair by pair, the pairs with
+the fewest keywords first, and no new pair is started once the Lambda's
+remaining time falls under ``KPI_ALERTS_RESERVE_SECONDS``. The pairs left are
+named in ``time_budget_scopes`` (counted in ``skipped_time_budget``) instead
+of the whole step timing out with nothing recorded.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ import logging
 import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 import boto3
@@ -57,6 +64,7 @@ from shared.markets import (
     market_scoped_key,
     markets_by_id,
 )
+from shared.request_deadline import Deadline, budget_from_context
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
@@ -64,6 +72,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _MAX_WORKERS = 10
+#: Seconds kept back from the Lambda's remaining time for the last snapshot writes, the SNS publish and the return.
+KPI_ALERTS_RESERVE_SECONDS = 30.0
+#: Pairs named in ``time_budget_scopes`` at most (the count is always exact); keeps the state small.
+TIME_BUDGET_SCOPES_LISTED = 50
 
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
@@ -271,11 +283,17 @@ def _complete_groups(
 def _load_run_answers(
     keywords: list[str],
     timestamp: str,
+    deadline: Deadline | None = None,
 ) -> dict[str, list[Answer] | None]:
-    """Each keyword's answers in the run stamped ``timestamp``; ``None`` for a keyword that could not be read."""
+    """Each keyword's answers in the run stamped ``timestamp``; ``None`` for a keyword that could not be read.
+
+    A keyword not started before ``deadline`` is spent is ``None`` too.
+    """
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
     def load(keyword: str) -> tuple[str, list[Answer] | None]:
+        if deadline is not None and deadline.stop_reading('the exact-run answers read'):
+            return keyword, None
         try:
             return keyword, answers_from_rows(query_keyword_run_rows(table, keyword, timestamp))
         except Exception:
@@ -300,14 +318,14 @@ def _execution_metadata(
         'run_timestamp': run_timestamp,
         'report_timestamp': report.get('timestamp'),
     }
-    for field in ('triggered_by', 'schedule_id', 'display_name', 'source'):
-        value = execution_input.get(field)
+    for name in ('triggered_by', 'schedule_id', 'display_name', 'source'):
+        value = execution_input.get(name)
         if isinstance(value, str) and value:
-            result[field] = value
-    for field in ('scope', 'requested_scope'):
-        value = execution_input.get(field)
+            result[name] = value
+    for name in ('scope', 'requested_scope'):
+        value = execution_input.get(name)
         if isinstance(value, dict):
-            result[field] = value
+            result[name] = value
     return result
 
 
@@ -470,35 +488,23 @@ def handler(event: object, context: Any) -> dict[str, Any]:
             'skipped_partial': skipped_partial,
             'notification': {'status': 'not_sent', 'reason': 'no_new_alerts'},
         }
-    unique_keywords = sorted({
-        str(item['keyword'])
-        for pair in complete
-        for item in members[pair]
-        if item.get('keyword')
-    }, key=str.casefold)
-
     settings = _settings()
     brand_config = get_brand_config(BRAND_CONFIG_TABLE)
-    owned_domains = owned_domains_from(brand_config)
     # The markets, read once: each (group, market) pair tracks the market's extra competitors.
     markets = markets_by_id(load_markets(dynamodb.Table(BRAND_CONFIG_TABLE)))
-    answers_by_keyword = _load_run_answers(unique_keywords, run_timestamp)
-
-    # The (group, market) pairs snapshotted, in that order: exactly the pairs this run fully covers.
-    snapshotted: list[GroupMarket] = []
-    new_alerts: list[dict[str, Any]] = []
-    for pair in complete:
-        keywords = [str(item['keyword']) for item in members[pair]]
-        group_answers = {keyword: answers for keyword in keywords if (answers := answers_by_keyword[keyword])}
-        # A keyword that could not be read, or that no engine answered, leaves the run incomplete.
-        if len(group_answers) < len(keywords):
-            skipped_partial += 1
-            continue
-        group_name = str(groups_by_id[pair.group_id].get('name') or pair.group_id)
-        metrics = snapshot_metrics(group_answers, owned_domains, _tracked_competitors(brand_config, markets, pair.market_id))
-        snapshot = _snapshot(pair, group_name, execution_id, execution_input, report, run_timestamp, metrics)
-        new_alerts.extend(_record_snapshot(pair, group_name, snapshot, execution_id, run_timestamp, settings))
-        snapshotted.append(pair)
+    evaluation = _Evaluation(
+        run_timestamp=run_timestamp, execution_id=execution_id, execution_input=execution_input, report=report,
+        settings=settings, brand_config=brand_config, markets=markets, groups_by_id=groups_by_id,
+        deadline=Deadline(budget_from_context(context, KPI_ALERTS_RESERVE_SECONDS)),
+    )
+    for pair in sorted(complete, key=lambda pair: len(members[pair])):
+        evaluation.evaluate(pair, [str(item['keyword']) for item in members[pair] if item.get('keyword')])
+    # Reported in the pairs' usual order, whatever order the time budget read them in.
+    snapshotted = [pair for pair in complete if pair in evaluation.snapshotted]
+    new_alerts = evaluation.new_alerts
+    skipped_partial += evaluation.skipped_partial
+    if evaluation.out_of_time:
+        logger.warning('Time budget spent: %d group/market pair(s) left unevaluated', len(evaluation.out_of_time))
 
     notification = _notify(new_alerts, execution_id, settings)
     return {
@@ -510,8 +516,60 @@ def handler(event: object, context: Any) -> dict[str, Any]:
         'snapshot_scopes': [{'group_id': pair.group_id, 'market_id': pair.market_id} for pair in snapshotted],
         'alerts_created': len(new_alerts),
         'skipped_partial': skipped_partial,
+        'skipped_time_budget': len(evaluation.out_of_time),
+        'time_budget_scopes': [
+            {'group_id': pair.group_id, 'market_id': pair.market_id}
+            for pair in evaluation.out_of_time[:TIME_BUDGET_SCOPES_LISTED]
+        ],
         'notification': notification,
     }
+
+
+@dataclass
+class _Evaluation:
+    """The run's (group, market) pairs evaluated one at a time inside the time budget."""
+
+    run_timestamp: str
+    execution_id: str
+    execution_input: dict[str, Any]
+    report: dict[str, Any]
+    settings: dict[str, Any]
+    brand_config: dict[str, Any]
+    markets: dict[str, Market]
+    groups_by_id: dict[str, dict[str, Any]]
+    deadline: Deadline
+    answers: dict[str, list[Answer] | None] = field(default_factory=dict)
+    snapshotted: set[GroupMarket] = field(default_factory=set)
+    new_alerts: list[dict[str, Any]] = field(default_factory=list)
+    out_of_time: list[GroupMarket] = field(default_factory=list)
+    skipped_partial: int = 0
+
+    def evaluate(self, pair: GroupMarket, keywords: list[str]) -> None:
+        """Snapshot ``pair`` when every keyword of it answered; reads only the keywords no earlier pair read."""
+        if self.deadline.expired():
+            self.out_of_time.append(pair)
+            return
+        unread = sorted({keyword for keyword in keywords if keyword not in self.answers}, key=str.casefold)
+        if unread:
+            self.answers.update(_load_run_answers(unread, self.run_timestamp, self.deadline))
+        group_answers = {keyword: answers for keyword in keywords if (answers := self.answers.get(keyword))}
+        # A keyword that could not be read, or that no engine answered, leaves the run incomplete.
+        if len(group_answers) < len(keywords):
+            if self.deadline.expired():
+                self.out_of_time.append(pair)
+            else:
+                self.skipped_partial += 1
+            return
+        group_name = str(self.groups_by_id[pair.group_id].get('name') or pair.group_id)
+        competitors = _tracked_competitors(self.brand_config, self.markets, pair.market_id)
+        metrics = snapshot_metrics(group_answers, owned_domains_from(self.brand_config), competitors)
+        snapshot = _snapshot(
+            pair, group_name, self.execution_id, self.execution_input, self.report, self.run_timestamp, metrics,
+        )
+        self.new_alerts.extend(
+            _record_snapshot(pair, group_name, snapshot, self.execution_id, self.run_timestamp, self.settings),
+        )
+        self.snapshotted.add(pair)
 
 
 def _record_snapshot(

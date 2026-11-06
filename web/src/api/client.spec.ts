@@ -1,10 +1,10 @@
 import {
-  beforeEach, describe, expect, it, vi
+  afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import {
-  apiDelete, apiGet, apiPost, apiPut, validateApiConfig
+  apiDelete, apiGet, apiPost, apiPut, GET_RETRY_DELAY_MAX_MS, GET_RETRY_DELAY_MIN_MS, validateApiConfig
 } from './client';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -195,6 +195,150 @@ describe('API response errors', () => {
 describe('validateApiConfig', () => {
   it('does not throw when API_BASE_URL is valid', () => {
     expect(() => validateApiConfig()).not.toThrow();
+  });
+});
+
+const recoveredBody = { searches: ['recovered'] };
+
+/** Pins the retry jitter: every `crypto.getRandomValues` call fills its array with `draw`. */
+function stubRandomDraw(draw: number): void {
+  vi.spyOn(crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+    if (array instanceof Uint16Array) array.fill(draw);
+    return array;
+  });
+}
+
+describe('apiGet transient-failure retry', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stubRandomDraw(0);
+    mockAuthenticatedFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    {
+      failure: '502',
+      first: async () => createMockJsonResponse({}, 502, 'Bad Gateway'),
+    },
+    {
+      failure: '503',
+      first: async () => createMockJsonResponse({}, 503, 'Service Unavailable'),
+    },
+    {
+      failure: '429',
+      first: async () => createMockJsonResponse({}, 429, 'Too Many Requests'),
+    },
+    {
+      failure: 'a network TypeError',
+      first: async (): Promise<Response> => Promise.reject(new TypeError('Failed to fetch')),
+    },
+  ])('returns the second answer when the first GET fails with $failure', async ({ first }) => {
+    mockAuthenticatedFetch.mockImplementationOnce(first).mockResolvedValueOnce(createMockJsonResponse(recoveredBody));
+
+    const pending = apiGet<unknown>('/searches');
+    await vi.advanceTimersByTimeAsync(GET_RETRY_DELAY_MIN_MS);
+
+    await expect(pending).resolves.toStrictEqual(recoveredBody);
+  });
+
+  it.each([
+    {
+      name: 'a GET times out with 504',
+      status: 504,
+      request: () => apiGet<unknown>('/citations'),
+    },
+    {
+      name: 'a GET answers 500',
+      status: 500,
+      request: () => apiGet<unknown>('/stats'),
+    },
+    {
+      name: 'a GET answers 404',
+      status: 404,
+      request: () => apiGet<unknown>('/stats'),
+    },
+    {
+      name: 'a GET with the retry turned off answers 503',
+      status: 503,
+      request: () => apiGet<unknown>('/content-studio/status/a', { retry: false }),
+    },
+    {
+      name: 'a POST answers 503',
+      status: 503,
+      request: () => apiPost<unknown>('/trigger', {}),
+    },
+  ])('sends one request and fails at once when $name', async ({
+    status, request
+  }) => {
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, status, 'Failed'));
+
+    await expect(request()).rejects.toMatchObject({ statusCode: status });
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects with the retry error when the retried GET fails again', async () => {
+    mockAuthenticatedFetch
+      .mockResolvedValueOnce(createMockJsonResponse({}, 503, 'Service Unavailable'))
+      .mockResolvedValueOnce(createMockJsonResponse({}, 502, 'Bad Gateway'));
+
+    const outcome = expect(apiGet<unknown>('/stats')).rejects.toMatchObject({ statusCode: 502 });
+    await vi.advanceTimersByTimeAsync(GET_RETRY_DELAY_MIN_MS);
+
+    await outcome;
+  });
+
+  it.each([
+    {
+      draw: 0,
+      delay: GET_RETRY_DELAY_MIN_MS,
+    },
+    {
+      draw: 0xFFFF,
+      delay: GET_RETRY_DELAY_MAX_MS,
+    },
+  ])('sends the retry $delay ms after the failure when the jitter draws $draw', async ({
+    draw, delay
+  }) => {
+    stubRandomDraw(draw);
+    mockAuthenticatedFetch
+      .mockResolvedValueOnce(createMockJsonResponse({}, 429, 'Too Many Requests'))
+      .mockResolvedValueOnce(createMockJsonResponse(recoveredBody));
+
+    const pending = apiGet<unknown>('/stats');
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    const callsBeforeDelay = mockAuthenticatedFetch.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+
+    expect([callsBeforeDelay, mockAuthenticatedFetch.mock.calls.length]).toStrictEqual([1, 2]);
+  });
+
+  it('rejects with AbortError and sends no retry when the caller aborts during the wait', async () => {
+    const controller = new AbortController();
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, 503, 'Service Unavailable'));
+
+    const outcome = expect(apiGet<unknown>('/stats', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(GET_RETRY_DELAY_MIN_MS - 100);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(GET_RETRY_DELAY_MAX_MS);
+
+    await outcome;
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows the first error without a retry when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    mockAuthenticatedFetch.mockImplementation(async () => {
+      controller.abort();
+      return createMockJsonResponse({}, 502, 'Bad Gateway');
+    });
+
+    await expect(apiGet<unknown>('/stats', { signal: controller.signal })).rejects.toMatchObject({ statusCode: 502 });
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
   });
 });
 

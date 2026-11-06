@@ -18,6 +18,7 @@ from boto3.dynamodb.conditions import Key
 
 from shared.dynamodb_batch import collect_all_items
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
+from shared.request_deadline import Deadline, current_deadline
 from shared.utils import format_timestamp
 
 
@@ -38,11 +39,13 @@ def query_keyword_rows_since(table: Any, keyword: str, since: str) -> list[dict[
 
 @dataclass(frozen=True)
 class CappedRows:
-    """A keyword's projected rows of a window, oldest first, read newest first up to a row cap."""
+    """A keyword's projected rows of a window, oldest first, read newest first up to a row cap or a time budget."""
 
     rows: list[dict[str, Any]]
     cut: str | None
     """``None`` when the window was read whole; else the run timestamp at and before which no row was kept."""
+    stopped: bool = False
+    """Whether the time budget, not the row cap, stopped the read (``cut`` is then where it stopped)."""
 
 
 def _window_condition(keyword: str, since: str, until: str | None) -> Any:
@@ -60,6 +63,7 @@ def query_keyword_rows_capped(
     max_rows: int,
     *,
     until: str | None = None,
+    deadline: Deadline | None = None,
 ) -> CappedRows:
     """``keyword``'s projected rows from ``since`` on (through the run ``until``), at most ``max_rows`` of the newest.
 
@@ -67,7 +71,12 @@ def query_keyword_rows_capped(
     the latest. The oldest run read may be incomplete when the cap stops the
     read inside it, so all of its rows are dropped and its timestamp becomes
     ``cut``: the rows kept are every row of the runs after ``cut``.
+
+    ``deadline`` (default: the request's, ``shared.request_deadline``) is
+    checked between pages; the first page is always read. When it stops a
+    read with more rows left, the result is cut the same way and ``stopped``.
     """
+    budget = deadline or current_deadline()
     params: dict[str, Any] = {
         'KeyConditionExpression': _window_condition(keyword, since, until),
         'ProjectionExpression': ANSWER_PROJECTION,
@@ -75,6 +84,7 @@ def query_keyword_rows_capped(
         'ScanIndexForward': False,
     }
     rows: list[dict[str, Any]] = []
+    stopped = False
     # One row past the cap tells "exactly max_rows" apart from "more than max_rows".
     while len(rows) <= max_rows:
         response = table.query(**params, Limit=max_rows + 1 - len(rows))
@@ -82,12 +92,15 @@ def query_keyword_rows_capped(
         last_key = response.get('LastEvaluatedKey')
         if not last_key:
             break
+        if budget.stop_reading('a windowed keyword read'):
+            stopped = True
+            break
         params['ExclusiveStartKey'] = last_key
     rows.reverse()
-    if len(rows) <= max_rows:
+    if len(rows) <= max_rows and not stopped:
         return CappedRows(rows, None)
-    cut = str(rows[0].get('timestamp') or '')
-    return CappedRows([row for row in rows if str(row.get('timestamp') or '') > cut], cut)
+    cut = str(rows[0].get('timestamp') or '') if rows else ''
+    return CappedRows([row for row in rows if str(row.get('timestamp') or '') > cut], cut or None, stopped)
 
 
 def query_keyword_run_rows(

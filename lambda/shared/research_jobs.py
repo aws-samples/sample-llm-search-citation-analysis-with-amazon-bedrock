@@ -42,7 +42,7 @@ TYPE_AGENT = 'agent'
 JOB_TYPES = (TYPE_EXPANSION, TYPE_COMPETITOR, TYPE_AGENT)
 
 RESEARCH_TTL_SECONDS = 90 * 24 * 3600
-RESEARCH_STALE_AFTER_SECONDS = 35 * 60
+RESEARCH_STALE_AFTER_SECONDS = 65 * 60
 
 COMPETITOR_CATEGORIES = ('primary_keywords', 'secondary_keywords', 'longtail_keywords', 'content_gaps')
 

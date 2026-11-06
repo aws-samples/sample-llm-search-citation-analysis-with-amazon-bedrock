@@ -4,6 +4,9 @@ import type {
   CitationsPage, Keyword, Search, Stats
 } from '../../types';
 import { TabContent } from './TabContent';
+import {
+  IDLE_PANEL_STATES, type DashboardPanelStates 
+} from '../../hooks/dashboardPanels';
 
 /** The dashboard's first `/citations` page: one URL listed out of the scope's 4,210. */
 export const FIRST_CITATIONS_PAGE: CitationsPage = {
@@ -34,6 +37,33 @@ export const RECENT_SEARCH: Search = {
   keyword: 'vuelos baratos a lima',
   provider: 'openai',
   timestamp: '2026-10-07T06:50:33Z',
+};
+
+/** The dashboard read after `/citations` answered 504 and everything else loaded. */
+export const CITATIONS_TIMED_OUT_PANELS: DashboardPanelStates = {
+  ...IDLE_PANEL_STATES,
+  citations: {
+    error: 'Request timed out',
+    retrying: false,
+  },
+};
+
+/** The same timeout while its Retry is in flight. */
+export const CITATIONS_RETRYING_PANELS: DashboardPanelStates = {
+  ...IDLE_PANEL_STATES,
+  citations: {
+    error: 'Request timed out',
+    retrying: true,
+  },
+};
+
+/** The dashboard read after `/searches` answered 503 twice (the retry failed too). */
+export const SEARCHES_FAILED_PANELS: DashboardPanelStates = {
+  ...IDLE_PANEL_STATES,
+  searches: {
+    error: 'Server error occurred',
+    retrying: false,
+  },
 };
 
 export function buildTabContentKeyword(
@@ -69,6 +99,8 @@ export function buildTabContentProps(
     }),
     setActiveTab: vi.fn(),
     onNavigateToRawResponses: vi.fn(),
+    panels: IDLE_PANEL_STATES,
+    retryPanel: vi.fn(),
     ...overrides,
   };
 }

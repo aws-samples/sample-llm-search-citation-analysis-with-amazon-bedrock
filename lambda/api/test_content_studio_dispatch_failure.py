@@ -10,6 +10,7 @@ import pytest
 from shared.content_brief import CONTENT_OUTPUT_CONTRACT
 from shared.models import BedrockInvocationError, ModelRole
 from shared.prompt_safety import untrusted_input_system_instruction
+from shared.request_deadline import Deadline
 from shared.utils import get_timestamp
 from testing.content_studio_fixtures import (
     load_content_studio_module,
@@ -18,6 +19,7 @@ from testing.content_studio_fixtures import (
 )
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.env import cleared_env
+from testing.events import api_gateway_event, parse_response
 
 _mod = load_content_studio_module('content_studio_dispatch_under_test')
 
@@ -1064,3 +1066,27 @@ class TestGeneratedOutputValidation:
         body = json.loads(response['body'])
         assert body['has_content'] is True
         assert body['content_warning'] == row['content_warning']
+
+
+class TestContentIdeasTimeBudget:
+    def test_reads_only_the_attributes_the_ideas_use(self):
+        load = MagicMock(return_value=[])
+
+        with patch.object(_mod, 'load_recent_search_results', load):
+            _mod.generate_content_ideas(_BRAND_CONFIG)
+
+        assert load.call_args.kwargs == {'max_keywords': 30, 'projection': '#ts, keyword, provider, brands, citations'}
+
+    @pytest.mark.parametrize(('cut', 'truncated'), [(False, False), (True, True)], ids=['complete', 'deadline-cut'])
+    def test_answers_200_flagging_ideas_the_deadline_cut_short_as_truncated(self, cut, truncated):
+        deadline = Deadline(60)
+        deadline.cut = cut
+
+        with (
+            patch.object(_mod, 'current_deadline', return_value=deadline),
+            patch.object(_mod, 'get_brand_config', return_value=_BRAND_CONFIG),
+            patch.object(_mod, 'generate_content_ideas', return_value=[]),
+        ):
+            status, body = parse_response(_mod._get_ideas(api_gateway_event('GET', '/api/content-studio/ideas'), None))
+
+        assert (status, body['truncated']) == (200, truncated)

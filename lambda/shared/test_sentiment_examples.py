@@ -10,10 +10,11 @@ from hypothesis import given
 from shared.kpi_engine import SENTIMENT_LABELS, answers_from_rows, brand_kpis, engine_breakdown
 from shared.sentiment_examples import (
     ANSWER_TEXT_CAP,
-    EXAMPLE_ATTRIBUTE_NAMES,
-    EXAMPLE_PROJECTION,
+    SIGHTING_ATTRIBUTE_NAMES,
+    SIGHTING_PROJECTION,
     sentiment_examples,
 )
+from testing.answer_text_fixtures import recording_answer_texts
 from testing.sentiment_examples_fixtures import OLDER_RUN, RUN, STORED_ROWS, stored_answer, stored_brand
 
 SOL_NEGATIVE = stored_brand(
@@ -265,8 +266,47 @@ class TestLimit:
 
 
 class TestProjection:
-    def test_reads_an_answers_attributes_its_text_and_its_persona_name(self) -> None:
-        assert (EXAMPLE_PROJECTION, EXAMPLE_ATTRIBUTE_NAMES) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, #rsp, query_prompt_name',
-            {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata', '#rsp': 'response'},
+    def test_reads_an_answers_attributes_its_key_and_its_persona_name_without_the_text(self) -> None:
+        assert (SIGHTING_PROJECTION, SIGHTING_ATTRIBUTE_NAMES) == (
+            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, timestamp_provider, query_prompt_name',
+            {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
+
+
+class TestAnswerTexts:
+    """With ``answer_texts`` the rows are sightings without text; only the page's rows are read for it."""
+
+    ROWS = [
+        stored_answer('hotel sol spa', 'openai', [stored_brand(f'Brand {index:02}')], response=f'Answer {index:02}.', query_prompt_id=f'p{index:02}')
+        for index in range(5)
+    ]
+    SIGHTINGS = [{key: value for key, value in row.items() if key != 'response'} for row in ROWS]
+    TEXTS = {(row['keyword'], row['timestamp_provider']): row['response'] for row in ROWS}
+
+    def test_reads_the_text_of_the_page_rows_only(self) -> None:
+        asked, read = recording_answer_texts(self.TEXTS)
+
+        sentiment_examples(self.SIGHTINGS, 'negative', limit=2, offset=1, answer_texts=read)
+
+        assert asked == [[('hotel sol spa', self.ROWS[1]['timestamp_provider']), ('hotel sol spa', self.ROWS[2]['timestamp_provider'])]]
+
+    def test_carries_the_text_read_by_key(self) -> None:
+        _total, page = sentiment_examples(self.SIGHTINGS, 'negative', limit=2, answer_texts=recording_answer_texts(self.TEXTS)[1])
+
+        assert [example['answer'] for example in page] == ['Answer 00.', 'Answer 01.']
+
+    def test_carries_no_text_for_a_row_the_read_did_not_find(self) -> None:
+        _total, page = sentiment_examples(self.SIGHTINGS, 'negative', limit=1, answer_texts=lambda _keys: {})
+
+        assert (page[0]['answer'], page[0]['answer_truncated']) == ('', False)
+
+    def test_counts_every_sighting_whatever_the_page(self) -> None:
+        assert sentiment_examples(self.SIGHTINGS, 'negative', limit=1, answer_texts=lambda _keys: {})[0] == 5
+
+    def test_reads_each_row_once_when_it_holds_several_sightings(self) -> None:
+        row = stored_answer('hotel sol spa', 'openai', [stored_brand('Hotel Sol'), stored_brand('Hotel Sol Beach')], response='Both.')
+        asked, read = recording_answer_texts({})
+
+        sentiment_examples([row], 'negative', answer_texts=read)
+
+        assert asked == [[('hotel sol spa', row['timestamp_provider'])]]

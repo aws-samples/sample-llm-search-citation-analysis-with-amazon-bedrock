@@ -7,15 +7,19 @@ import {
 } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
+import { useDashboardData } from './useDashboardData';
 import {
-  DASHBOARD_PANEL_PATHS, useDashboardData
-} from './useDashboardData';
+  DASHBOARD_PANEL_PATHS, type DashboardPanel
+} from './dashboardPanels';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
 export const MOCK_AUTHORITATIVE_KEYWORDS_URL = `${MOCK_KEYWORDS_URL}?authoritative=true`;
 export const MOCK_KEYWORDS_SECOND_PAGE_URL = `${MOCK_KEYWORDS_URL}?next_token=page-2`;
 export const MOCK_AUTHORITATIVE_SECOND_PAGE_URL = `${MOCK_AUTHORITATIVE_KEYWORDS_URL}&next_token=page-2`;
+export const MOCK_STATS_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[0]}`;
+export const MOCK_CITATIONS_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[1]}`;
+export const MOCK_SEARCHES_URL = `${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[2]}`;
 
 export const mockStats = {
   total_searches: 100,
@@ -96,9 +100,9 @@ interface MockFetchOverrides {
 
 export function createMockFetch(overrides: MockFetchOverrides = {}) {
   const payloadsByUrl = new Map<string, unknown>([
-    [`${MOCK_API_BASE_URL}/stats`, overrides.stats ?? mockStats],
-    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[1]}`, overrides.citations ?? mockCitations],
-    [`${MOCK_API_BASE_URL}${DASHBOARD_PANEL_PATHS[2]}`, {
+    [MOCK_STATS_URL, overrides.stats ?? mockStats],
+    [MOCK_CITATIONS_URL, overrides.citations ?? mockCitations],
+    [MOCK_SEARCHES_URL, {
       searches: overrides.searches ?? mockSearches,
       next_token: overrides.searchesNextToken ?? null,
     }],
@@ -140,9 +144,37 @@ export async function renderReconciledDashboard(overrides: MockFetchOverrides = 
 export function startPendingKeywordReconciliation(
   result: { current: ReturnType<typeof useDashboardData> }
 ): AbortSignal | undefined {
+  return startPendingDashboardRead(result, (dashboard) => dashboard.reconcileKeywords());
+}
+
+/** `startPendingKeywordReconciliation` for a retry of one panel. */
+export function startPendingPanelRetry(
+  result: { current: ReturnType<typeof useDashboardData> },
+  panel: DashboardPanel
+): AbortSignal | undefined {
+  return startPendingDashboardRead(result, (dashboard) => dashboard.retryPanel(panel));
+}
+
+function startPendingDashboardRead(
+  result: { current: ReturnType<typeof useDashboardData> },
+  read: (dashboard: ReturnType<typeof useDashboardData>) => Promise<void>
+): AbortSignal | undefined {
   stallAuthenticatedFetch();
   act(() => {
-    void result.current.reconcileKeywords();
+    void read(result.current);
   });
   return mockAuthenticatedFetch.mock.lastCall?.[1]?.signal ?? undefined;
+}
+
+/**
+ * Renders the dashboard with `overrides` (a failing panel), then retries
+ * `panel` against a healthy API, with the request log cleared before the
+ * retry so it holds only the retry's requests.
+ */
+export async function renderRetriedDashboard(overrides: MockFetchOverrides, panel: DashboardPanel) {
+  const rendered = await renderLoadedDashboard(overrides);
+  mockAuthenticatedFetch.mockClear();
+  mockAuthenticatedFetch.mockImplementation(createMockFetch());
+  await act(() => rendered.result.current.retryPanel(panel));
+  return rendered;
 }

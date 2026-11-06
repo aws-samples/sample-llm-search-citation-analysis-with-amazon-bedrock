@@ -105,12 +105,18 @@ describe('saveMarkets', () => {
     });
   });
 
-  it('keeps the 400 and 409 refusal bodies readable', async () => {
+  it('keeps the 400, 409 and 503 refusal bodies readable', async () => {
     mockApiPut.mockResolvedValue({ markets: [] });
 
     await saveMarkets([]);
 
-    expect(mockApiPut).toHaveBeenCalledWith('/markets', { markets: [] }, { acceptedJsonStatuses: [400, 409] });
+    expect(mockApiPut).toHaveBeenCalledWith('/markets', { markets: [] }, { acceptedJsonStatuses: [400, 409, 503] });
+  });
+
+  it('throws the try-again refusal when the in-use check ran out of time', async () => {
+    mockApiPut.mockResolvedValue({ error: 'Could not check in time whether keywords still use the removed markets; nothing was saved, try again' });
+
+    await expect(saveMarkets([CHILE])).rejects.toThrow('nothing was saved, try again');
   });
 
   it('throws the markets keywords still use when the server answers 409', async () => {
@@ -153,7 +159,7 @@ describe('suggestMarketKeywords', () => {
       market_ids: ['cl-es', 'br-pt'],
     }, {
       signal: undefined,
-      acceptedJsonStatuses: [400, 502],
+      acceptedJsonStatuses: [400, 502, 503],
     });
   });
 
@@ -205,7 +211,7 @@ describe('proposeMarket', () => {
 
     expect(mockApiPost).toHaveBeenCalledWith('/markets', { propose: SANTIAGO_REQUEST }, {
       signal: controller.signal,
-      acceptedJsonStatuses: [400, 502],
+      acceptedJsonStatuses: [400, 502, 503],
     });
   });
 

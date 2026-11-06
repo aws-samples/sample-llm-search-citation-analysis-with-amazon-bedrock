@@ -100,7 +100,7 @@ describe('saveProviderModel', () => {
 
     await saveProviderModel('gemini', 'gemini-2.5-pro');
 
-    expect(mockApiPut).toHaveBeenCalledWith('/providers/gemini', { model: 'gemini-2.5-pro' }, { acceptedJsonStatuses: [400] });
+    expect(mockApiPut).toHaveBeenCalledWith('/providers/gemini', { model: 'gemini-2.5-pro' }, { acceptedJsonStatuses: [400, 503] });
   });
 
   it('sends null to return the provider to its default', async () => {
@@ -108,7 +108,7 @@ describe('saveProviderModel', () => {
 
     await saveProviderModel('openai', null);
 
-    expect(mockApiPut).toHaveBeenCalledWith('/providers/openai', { model: null }, { acceptedJsonStatuses: [400] });
+    expect(mockApiPut).toHaveBeenCalledWith('/providers/openai', { model: null }, { acceptedJsonStatuses: [400, 503] });
   });
 
   it('throws the model-check refusal with the provider reason', async () => {

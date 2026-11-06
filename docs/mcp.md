@@ -134,7 +134,19 @@ Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0`
 | `jobsPerDay` | 20 | Research jobs and content briefs together, per UTC day |
 | `maxRunKeywords` | 50 | Keywords one `start_run` can cover; counted at the estimate and again at the start |
 
-A refusal names the limit and, for the daily ones, when it resets (midnight UTC). A start that the API itself refuses gives the day's use back.
+A refusal names the limit and, for the daily ones, when it resets (midnight UTC). The keyword cap is checked by counting the scope's active keywords page by page; the count stops as soon as it passes `maxRunKeywords`. If it cannot finish inside the request's time budget the start is refused ("The scope's keywords could not all be counted (too many, or the API was slow)"), because a spend is never started on a guess. A start that the API itself refuses gives the day's use back. A start that timed out keeps it, because the run may have started. Runs in flight that cannot be checked in time count as running.
+
+## Time budget and `upstream_timeout`
+
+The MCP Lambda and the API Lambdas share API Gateway's 29 s limit. Each MCP request carries a deadline (`lambda/shared/request_deadline.py`), and a tool call waits for its API Lambda only for the time left minus 1 s. The call is sent once and never retried, so a write is never sent twice. When the API does not answer in time, or too little time is left to ask it (under 2 s), the tool returns an error result (`isError: true`) with:
+
+```json
+{"error": "upstream_timeout", "details": "The API did not answer in time. A write or start may still complete: check its state before retrying."}
+```
+
+For a read, ask again (with a narrower scope or smaller `limit` if it keeps happening). For a write or a start, check its state first (`get_run_status`, the keyword or group, the research job) before you retry. Each timeout writes an audit line with outcome `upstream_timeout`.
+
+API reads that run out of time inside the 29 s answer partial data instead of an error, flagged the way the dashboard sees it (`truncated`, `keywords_truncated`, `truncated_before`); tools pass those flags through.
 
 ## Audit
 

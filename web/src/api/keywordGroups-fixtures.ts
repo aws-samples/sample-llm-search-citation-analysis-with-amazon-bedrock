@@ -2,7 +2,9 @@ import type {
   Keyword, KeywordGroup
 } from '../types';
 import type { GroupMembershipResponse } from '../types/domain/keywordDecoders';
-import { mockApiPut } from './clientMock-fixtures';
+import {
+  mockApiDelete, mockApiPut
+} from './clientMock-fixtures';
 
 export function buildGroup(overrides: Partial<KeywordGroup> = {}): KeywordGroup {
   return {
@@ -68,4 +70,25 @@ export function buildMembershipResponse(
     keywords: [],
     ...overrides,
   };
+}
+
+/** A DELETE /keyword-groups/{id} answer: 202-shaped with `pending` members left, or the finished 200 body. */
+export function buildDeletionResponse(pending?: number): Record<string, unknown> {
+  if (pending === undefined) {
+    return {
+      message: 'Keyword group deleted',
+      detached_keywords: 3,
+    };
+  }
+  return {
+    message: 'Keyword group deleted; some keywords still list it. Send the same DELETE again to finish.',
+    detached_keywords: 1,
+    pending_members: pending,
+    truncated: true,
+  };
+}
+
+/** The options of every mocked `apiDelete` call, in call order. */
+export function sentDeleteOptions(): unknown[] {
+  return mockApiDelete.mock.calls.map(([, options]) => options);
 }

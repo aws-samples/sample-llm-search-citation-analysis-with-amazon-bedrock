@@ -8,8 +8,14 @@ import {
   LATE_KEYWORD_RECONCILIATION_MS, useDashboardData
 } from './useDashboardData';
 import {
+  IDLE_PANEL, IDLE_PANEL_STATES
+} from './dashboardPanels';
+import {
   MOCK_AUTHORITATIVE_KEYWORDS_URL,
+  MOCK_CITATIONS_URL,
   MOCK_KEYWORDS_URL,
+  MOCK_SEARCHES_URL,
+  MOCK_STATS_URL,
   mockStats,
   mockCitations,
   mockSearches,
@@ -19,7 +25,9 @@ import {
   createMockKeywords,
   renderLoadedDashboard,
   renderReconciledDashboard,
+  renderRetriedDashboard,
   startPendingKeywordReconciliation,
+  startPendingPanelRetry,
 } from './useDashboardData-fixtures';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 
@@ -29,6 +37,12 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { spyOnAbortAfterPendingUnmount } from '../test/abortOnUnmount';
+
+/** `/citations` answering API Gateway's 504 while the other reads succeed. */
+const citationsTimeout = {
+  failingUrls: [MOCK_CITATIONS_URL],
+  failStatus: 504,
+};
 
 
 describe('useDashboardData', () => {
@@ -84,11 +98,13 @@ describe('useDashboardData', () => {
     expect(result.current.searchesNextToken).toBeNull();
   });
 
-  it('returns the dashboard network message when an API request fails', async () => {
+  it('reports a server error on every panel without blanking the dashboard when every request fails', async () => {
     const { result } = await renderLoadedDashboard({ shouldFail: true });
 
-    expect(result.current.error).toBe('Unable to load dashboard data');
-    expect(result.current.stats?.total_searches).toBe(0);
+    expect(result.current.error).toBeNull();
+    expect(Object.values(result.current.panels).map((panel) => panel.error)).toStrictEqual([
+      'Server error occurred', 'Server error occurred', 'Server error occurred', 'Server error occurred',
+    ]);
   });
 
   it('issues four new API requests when refetch is called', async () => {
@@ -128,10 +144,10 @@ describe('useDashboardData', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('reports the dashboard error when a keyword page has an invalid shape', async () => {
+  it('reports an invalid-request error on the keywords panel when a keyword page has an invalid shape', async () => {
     const { result } = await renderLoadedDashboard({ keywordsPage: { invalid: 'data' } });
 
-    expect(result.current.error).toBe('Invalid dashboard request');
+    expect(result.current.panels.keywords.error).toBe('Invalid request');
   });
 
   it('aborts the active dashboard request when the owner unmounts', () => {
@@ -219,7 +235,7 @@ describe('useDashboardData', () => {
     });
   });
 
-  it('starts the delayed authoritative refresh at exactly 125000 milliseconds', async () => {
+  it('starts the delayed authoritative refresh at exactly 35000 milliseconds', async () => {
     const { result } = await renderLoadedDashboard();
     vi.useFakeTimers();
 
@@ -372,5 +388,128 @@ describe('useDashboardData', () => {
     });
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(requestsBeforeUnmount);
+  });
+
+  it('keeps stats, searches and keywords when citations times out with 504', async () => {
+    const { result } = await renderLoadedDashboard(citationsTimeout);
+    const {
+      stats, citations, searches, keywords
+    } = result.current;
+
+    expect({
+      stats,
+      citations,
+      searches,
+      keywords,
+    }).toStrictEqual({
+      stats: mockStats,
+      citations: null,
+      searches: mockSearches,
+      keywords: mockKeywords,
+    });
+  });
+
+  it('reports "Request timed out" on the citations panel only when citations answers 504', async () => {
+    const { result } = await renderLoadedDashboard(citationsTimeout);
+
+    expect(result.current.panels).toStrictEqual({
+      ...IDLE_PANEL_STATES,
+      citations: {
+        error: 'Request timed out',
+        retrying: false,
+      },
+    });
+  });
+
+  it('leaves the app-wide error null when a panel times out', async () => {
+    const { result } = await renderLoadedDashboard(citationsTimeout);
+
+    expect(result.current.error).toBeNull();
+  });
+
+  it.each([
+    {
+      panel: 'stats',
+      url: MOCK_STATS_URL,
+    },
+    {
+      panel: 'searches',
+      url: MOCK_SEARCHES_URL,
+    },
+    {
+      panel: 'keywords',
+      url: MOCK_KEYWORDS_URL,
+    },
+  ] as const)('reports a server error on the $panel panel and still loads the citations when $panel answers 500', async ({
+    panel, url
+  }) => {
+    const { result } = await renderLoadedDashboard({ failingUrls: [url] });
+
+    expect([result.current.panels[panel].error, result.current.citations]).toStrictEqual(['Server error occurred', mockCitations]);
+  });
+
+  it('shows stats before a slow citations request answers', async () => {
+    const answered = createMockFetch();
+    mockAuthenticatedFetch.mockImplementation(async (url: string) => (
+      url === MOCK_CITATIONS_URL ? new Promise<Response>(vi.fn()) : answered(url)
+    ));
+
+    const { result } = renderHook(() => useDashboardData());
+
+    await vi.waitFor(() => {
+      expect(result.current.stats).toStrictEqual(mockStats);
+    });
+    expect(result.current.loading).toBe(true);
+  });
+
+  it('loads the citations panel and clears its error when retryPanel succeeds', async () => {
+    const { result } = await renderRetriedDashboard(citationsTimeout, 'citations');
+
+    expect([result.current.citations, result.current.panels.citations]).toStrictEqual([mockCitations, IDLE_PANEL]);
+  });
+
+  it('requests only the retried panel when retryPanel runs', async () => {
+    await renderRetriedDashboard(citationsTimeout, 'citations');
+
+    expect(mockAuthenticatedFetch.mock.calls.map(([url]) => url)).toStrictEqual([MOCK_CITATIONS_URL]);
+  });
+
+  it('keeps the panel error when the retried request times out again', async () => {
+    const { result } = await renderLoadedDashboard(citationsTimeout);
+
+    await act(() => result.current.retryPanel('citations'));
+
+    expect(result.current.panels.citations.error).toBe('Request timed out');
+  });
+
+  it('marks the panel as retrying while its retry is in flight', async () => {
+    const { result } = await renderLoadedDashboard(citationsTimeout);
+
+    startPendingPanelRetry(result, 'citations');
+
+    expect(result.current.panels.citations.retrying).toBe(true);
+  });
+
+  it('aborts an in-flight panel retry when the owner unmounts', async () => {
+    const {
+      result, unmount
+    } = await renderLoadedDashboard(citationsTimeout);
+    const retrySignal = startPendingPanelRetry(result, 'citations');
+
+    unmount();
+
+    expect(retrySignal?.aborted).toBe(true);
+  });
+
+  it('loads the keywords and clears the keywords error when the keywords retry succeeds', async () => {
+    const { result } = await renderRetriedDashboard({ failingUrls: [MOCK_KEYWORDS_URL] }, 'keywords');
+
+    expect([result.current.keywords, result.current.panels.keywords]).toStrictEqual([mockKeywords, IDLE_PANEL]);
+  });
+
+  it('clears the keywords panel error when an authoritative reconciliation succeeds', async () => {
+    const { result } = await renderReconciledDashboard({ failingUrls: [MOCK_KEYWORDS_URL] });
+
+    expect(result.current.panels.keywords.error).toBeNull();
   });
 });

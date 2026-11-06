@@ -252,8 +252,9 @@ class TestPromotionResponseProperty:
             assert entry['created_at'] == entry['updated_at'], (
                 f'Created entry timestamps differ: {entry!r}'
             )
-        written = [put_call.kwargs['Item'] for put_call in table.put_item.call_args_list]
-        assert written == body['created_keywords'], (
+        # The puts run in parallel, so they are compared in id order.
+        written = sorted((put_call.kwargs['Item'] for put_call in table.put_item.call_args_list), key=lambda item: item['id'])
+        assert written == sorted(body['created_keywords'], key=lambda item: item['id']), (
             f'Written items do not match the reported ones: {written}'
         )
 
@@ -314,14 +315,16 @@ class TestPromotionPersistenceProperty:
         ]
         result = promotion_handler.write_items(table, new_items)
 
-        assert result == (new_items, []), f'Unexpected write result {result}'
-        assert table.put_item.call_args_list == [
+        assert result == (new_items, [], []), f'Unexpected write result {result}'
+        # The puts run in parallel, so they are compared in item order.
+        puts = sorted(table.put_item.call_args_list, key=lambda put: put.kwargs['Item']['id'])
+        assert puts == [
             call(
                 Item=item,
                 ConditionExpression='attribute_not_exists(#id)',
                 ExpressionAttributeNames={'#id': 'id'},
             )
-            for item in new_items
+            for item in sorted(new_items, key=lambda item: item['id'])
         ], f'Unexpected puts {table.put_item.call_args_list}'
         table.batch_writer.assert_not_called()
         assert _mutating_calls(table) == [], 'Promotion issued a mutating call'
@@ -369,7 +372,7 @@ class TestPromotionPersistenceUnit:
 
         result = promotion_handler.write_items(table, [])
 
-        assert result == ([], [])
+        assert result == ([], [], [])
         table.put_item.assert_not_called()
         table.batch_writer.assert_not_called()
 
@@ -382,13 +385,19 @@ class TestPromotionPersistenceUnit:
             {'id': 'gamma-id', 'keyword': 'gamma'},
         ]
         conflict = conditional_check_failure('PutItem', message='duplicate')
-        table = _mock_table(put_side_effect=[None, conflict, None])
+
+        def put(**kwargs):
+            if kwargs['Item']['id'] == 'beta-id':
+                raise conflict
+
+        table = _mock_table(put_side_effect=put)
 
         result = promotion_handler.write_items(table, items)
 
         assert result == (
             [items[0], items[2]],
             [{'keyword': 'beta', 'reason': promotion_handler.REASON_DUPLICATE}],
+            [],
         )
         assert table.put_item.call_count == 3
         table.batch_writer.assert_not_called()
@@ -423,18 +432,22 @@ class TestPromotionPersistenceUnit:
 
         assert status_code == 200
         assert [item['status'] for item in body['created_keywords']] == ['active', 'inactive']
-        assert [call_item.kwargs['Item']['status'] for call_item in table.put_item.call_args_list] == [
-            'active', 'inactive',
-        ]
+        # The puts run in parallel, so the written statuses are compared by keyword.
+        assert {
+            call_item.kwargs['Item']['keyword']: call_item.kwargs['Item']['status']
+            for call_item in table.put_item.call_args_list
+        } == {'tracked term': 'active', 'library term': 'inactive'}
 
     def test_reports_actual_write_outcomes_when_a_concurrent_promotion_wins(
         self, promotion_handler
     ):
         conflict = conditional_check_failure('PutItem', message='duplicate')
-        table = _mock_table(
-            scan_pages=_scan_pages([['existing']]),
-            put_side_effect=[None, conflict],
-        )
+
+        def put(**kwargs):
+            if kwargs['Item']['keyword'] == 'beta':
+                raise conflict
+
+        table = _mock_table(scan_pages=_scan_pages([['existing']]), put_side_effect=put)
 
         status_code, body = _invoke(
             promotion_handler,

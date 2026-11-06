@@ -46,10 +46,19 @@ function isNumberField(record: Record<string, unknown>, name: string): boolean {
   return typeof record[name] === 'number';
 }
 
+/** Whether the optional provenance fields (`source`, `as_of`, `stale`) are absent or well-formed. */
+function hasValidProvenance(record: Record<string, unknown>): boolean {
+  const { source } = record;
+  return (source === undefined || source === 'rollup' || source === 'live')
+    && (record.as_of === undefined || record.as_of === null || typeof record.as_of === 'string')
+    && (record.stale === undefined || typeof record.stale === 'boolean');
+}
+
 /** Whether `value` is a `GET /citations` page with its totals. */
 export function isCitationsPage(value: unknown): value is CitationsPage {
   if (!isRecord(value)) return false;
-  return Array.isArray(value.top_urls)
+  return hasValidProvenance(value)
+    && Array.isArray(value.top_urls)
     && Array.isArray(value.provider_stats)
     && Array.isArray(value.brand_stats)
     && ['total_urls', 'total_citation_count', 'matched_urls'].every((name) => isNumberField(value, name))

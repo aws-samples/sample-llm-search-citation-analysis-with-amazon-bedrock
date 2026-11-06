@@ -9,6 +9,183 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.42.0] - 2026-11-05
+
+A customer's dashboard came up blank on every page. `GET /api/citations` without a scope read the whole Citations
+table: 71,172 rows in 24.4 s on a 512 MB Lambda, and API Gateway answered 504 at 29 s. `GET
+/api/brand-mentions?scope=all` also answered 504 (928 keywords at 2–3 queries each, about 105 s of work). The
+dashboard waited for its four startup reads together, so the one failed panel replaced every tab, report and settings
+page with "Unable to load dashboard data". Page and row caps bound how much a request reads, not how long it takes. In
+this release every API request carries a time budget: capped reads, keyword fan-outs and model calls stop before the
+29 s and answer what they have, with the route's truncation flag. Work that grows with table size moves into the
+workflow (the citation rollup), CPU-bound Lambdas are sized for CPU, and the dashboard loads, fails and retries each
+panel on its own.
+
+### Fixed
+
+- **Every API request has a time budget** (`lambda/shared/request_deadline.py`). `@api_handler` starts a `Deadline`
+  per request: the Lambda's remaining time minus 4 s for building the answer (25 s with no Lambda context, never under
+  1 s). Capped reads (`dynamodb_batch._collect_pages`), keyword fan-outs (`scope_params.map_scope_keywords`) and
+  model and provider calls check it between pages, keywords and attempts. A read it stops sets `Deadline.cut`, and the
+  route answers 200 with partial data and its truncation flag (listed below) instead of a 504. Fake-clock tests
+  (`lambda/testing/deadlines.py`) pin the contract: a deadline that expires mid-read must give a 200 with the flag set.
+- **`/api/citations` answers inside the budget at any table size.** Scope pages come from the citation rollup (see
+  Performance). The live read, used when no current rollup exists, reads a small table in one page and a larger one
+  with an 8-segment parallel scan (8 pages per segment, 5 attributes projected) that stops 6 s before the deadline:
+  at most about 25 s, with `truncated: true` when cut. Each scope has one budget of 100 pages and 200,000 rows. New
+  fields: `source` (`"rollup"` or `"live"`), `as_of` (when the figures were built, or `null`) and `stale` (`true`
+  when a rollup exists but the keywords or the brand config changed since, so the page was read live and a rebuild was
+  requested). The Citations view says "Figures as of …".
+- **`/api/brand-mentions` for a group or `scope=all`** reads at most `SCOPE_KEYWORDS_CAP` (100) keywords through the
+  deadline-aware fan-out, and its run listing stops at the budget. The scope answer and `view=appearances` carry
+  `keywords_truncated` and `truncated`; a single keyword carries `truncated`.
+- **History windows stop at the budget** (`shared/scoped_reports.py`, `/api/trends`, `/api/reports/overview`,
+  `/api/reports/group-kpis`, `/api/reports/insights`, `/api/visibility`, `/api/reports/competitor`,
+  `/api/visibility/sentiment-examples`). A window read gets 0.6 of the remaining time, reads newest first and stops
+  between pages and between keywords. One keyword keeps its newest runs and sets `truncated_before`. With several
+  keywords, a keyword not read in full is left out, so no keyword's figures are partial.
+  - `keywords_truncated` now also means "the time budget left keywords unread"; `keywords_analyzed` counts only the
+    keywords read.
+  - `WINDOW_ROWS_CAP` follows the Lambda's memory, from a measured 16.7 KiB per row: 15,902 rows at 512 MB, 72,688 at
+    1,769 MB. The old 120,000 took about 40 s at 512 MB. Each keyword gets `cap // keywords` rows, so a scope over
+    120 keywords can no longer pass the cap (`MIN_ROWS_PER_KEYWORD` removed).
+  - `/api/trends` without a scope reads up to 100 keywords, like `scope=all` (it was 20).
+  - `/api/reports/overview` adds `keywords_truncated` and `truncated` (it skips the recommendations when the budget
+    is spent). The group-kpis `view=keywords` page stops before the first unread keyword and adds `truncated`;
+    `next_token` resumes there.
+  - `/api/visibility/sentiment-examples` reads the sightings without the answer text, then fetches the texts of the
+    page only (at most 50 rows, about 60 MB down to under 1 MB), and adds `truncated` (when set, `answer` may be
+    empty).
+- **Model and provider calls on API paths are bounded.**
+  - `shared/models.invoke_bedrock(..., deadline=)` sets each attempt's read timeout to the time left minus 1 s, turns
+    botocore retries off, never sleeps a throttle backoff past the budget and raises `BedrockDeadlineError` with
+    under 3 s left. Workflow workers do not pass a deadline and behave as before.
+  - `POST /api/self-reflection` answers 200 from the cache, or **202** `{status: "pending", keyword, brand,
+    query_prompt_id}` and runs the Bedrock call in an asynchronous invocation of the same function (56 s budget). That
+    invocation stores the result and never raises, so an async retry cannot pay twice. `GET` reports the `job` and
+    `truncated`; the dashboard polls until the job finishes, fails or two minutes pass.
+  - `/api/recommendations` caps its prompt at 50 keywords, runs on the fast tier without thinking and within the
+    deadline (at most about 24 s), and adds `llm` (`ok`, `timed_out`, `failed` or `null`). On a timeout the rule-based
+    list still comes back, and the Action Center says the AI pass ran out of time.
+  - Brand config expand, expand-all and find-competitors run without thinking, list at most 100 brands in the prompt,
+    and on a timeout answer 200 with `error` and `timed_out: true`.
+  - Market proposals and keyword suggestions answer **503** (try again) when out of time. `PUT /api/markets` reads only
+    the markets being dropped and answers 503 with nothing saved when cut.
+  - `PUT /api/providers/{id}` runs every check (key, enable, model) before any write and answers **503** with nothing
+    saved when out of time; a failed write answers 500 with `saved: [...]`. The dashboard reads the 503 bodies.
+- **Scope reads and writes report what they did not finish.**
+  - `GET /api/stats?market_id=` reads the last execution in parallel with the counts under an 8 s budget and adds
+    `last_execution_approximate`; its keyword scan is capped at 50 pages.
+  - Trigger-analysis counts active keywords with a `Select=COUNT` query (under 1 s at 5,000 keywords) and adds
+    `keywords_count_approximate` when the count was cut; the run still starts.
+  - `DELETE /api/keyword-groups/{id}` deletes the group row first, then detaches members 10 at a time until the
+    deadline. An unfinished delete answers **202** with `pending_members` and `truncated`; sending DELETE again
+    resumes. Membership updates add `pending` and `truncated`. Promoting research keywords writes 10 at a time (500
+    keywords: 12–25 s down to 2–3 s) and adds `pending_keywords` and `truncated`; re-sending is idempotent.
+  - `/api/prompt-insights` and the Content Studio ideas read under the deadline and add `truncated`.
+- **The dashboard no longer blanks on one failed read.** The four startup reads settle independently
+  (`hooks/dashboardPanels.ts`, `components/Layout/DashboardGate.tsx`): each panel shows as soon as it answers, and a
+  failed one keeps its last data with "<Panel> did not load: Request timed out." and a Retry button. Time to a usable
+  app is now bounded by `/api/stats` (0.6–3 s live), not by the slowest read. Errors carry the HTTP status: 504 and
+  408 read "Request timed out", 502 and 503 "Server error occurred".
+- **Workflow steps finish inside their Lambda timeout.**
+  - GenerateInsights is a Map with one ReportInsights invocation per fully covered (group, market), four at a time,
+    behind a `HasCompleteGroups` choice, so one slow group no longer loses the others. Each invocation stops reading 75
+    s before its timeout to keep time for Bedrock and the write. `narratives` adds `history_partial` (written from a
+    partial history) and `time_budget_skipped`.
+  - Search stores each prompt's answers before starting the next and starts a prompt only if its worst case fits the
+    time left. Prompts left over raise `SearchTimeBudgetSpentError`, which Step Functions retries (1 s, 10 attempts);
+    the retry skips the (provider, prompt) pairs already stored, so no stored prompt is asked or paid for twice. Rows
+    carry `error_category`.
+  - KpiAlerts evaluates the smallest pairs first, starts none with under 30 s left, and names the rest in
+    `skipped_time_budget` and `time_budget_scopes` instead of timing out with nothing written.
+  - The crawler's AgentCore session ends 20 s before the invocation (`BROWSER_SESSION_TIMEOUT_SECONDS` 330 → 280),
+    so a killed Lambda never leaves its session running.
+  - ParseKeywords: 30 s / 256 MB → 120 s / 1,024 MB. Keyword research: 30 → 60 minutes per job (three agent rounds
+    can take about 16 minutes each), with the stale sweep at 65 minutes.
+- **The MCP server answers `upstream_timeout` instead of a gateway 504.** A tool call waits for its API Lambda only
+  for the request's time left minus 1 s and is never re-sent, so a write is never sent twice. The error says a write
+  or start may still complete and is audited. A start that timed out keeps the day's use. The run estimate stops
+  counting keywords once it passes the cap or the budget, and a count it could not finish now refuses the start
+  ("The scope's keywords could not all be counted (too many, or the API was slow)"). See `docs/mcp.md`.
+
+### Changed
+
+- **Lambdas are sized for CPU, not peak memory.** Lambda allocates CPU in proportion to memory, and these functions
+  are CPU-bound (deserializing DynamoDB rows): at 512 MB the unscoped citations read used 224 MB and still ran out of
+  time. 1,769 MB (one vCPU): API-CitationsContent, API-StatsInsights, API-GetBrandMentions (was 512/512/256),
+  ReportInsights (512 MB / 120 s → 300 s), KpiAlerts (512). 1,024 MB: API-KeywordMgmt, API-ConfigMgmt,
+  API-ExecutionMgmt (were 256). GenerateSummary: 1,024 MB / 300 s → 3,008 MB / 900 s for the rollup build.
+  Pay-per-use cost stays about flat for CPU-bound work, which finishes proportionally sooner.
+- **`apiGet` retries once** 300–811 ms (random jitter) after a 502, 503, 429 or network error. It never retries a
+  504, a request after abort, or a POST; callers can opt out with `retry: false` (Content Studio status polling does).
+  Each group KPI export page goes through it, and a failed export names the part, e.g. "Excel export failed: Keyword
+  runs, page 3: Request timed out".
+- **The dashboard repeats a keyword-group DELETE that answers 202** and re-sends pending membership and promotion
+  writes.
+- **`GET /api/executions/{id}` answers 404 for an unknown id** (it answered 500 after 2.8 s).
+- **Batch gets can project** (`batch_get_items(projection=, attribute_names=)`, kept on retries of unprocessed keys).
+- **The search clients' 429 waits never sleep past the time budget** (they could reach 6.6 minutes, outside the
+  search worst case).
+- **`cdk synth` and `npm test` need CPython 3.12** (`$PYTHON312`, `python3.12` on `PATH`, or `uv python install
+  3.12`) or a running Docker, because they compile the handler assets (see Performance).
+- **Main-stack resource budget spec** (`lib/citation-analysis-stack.spec.ts`): the stack has 499 of CloudFormation's
+  500 resources and the test fails at 500.
+
+### Performance
+
+- **Citation rollup** (`lambda/shared/citation_rollup*.py`, `lambda/generate-summary/citation_rollup_action.py`).
+  Per-scope totals and pages for all keywords, each market, each group and each group × market, stored under
+  `citation-rollups/` in the keywords bucket.
+  - Built by the new `BuildCitationRollup` state, the workflow's last step (GenerateSummary with `action:
+    build_citation_rollup`), after every run. A failed build keeps the report and the previous rollup.
+  - Rebuilt on request when `/api/citations` finds a scope stale (the keyword fingerprint or the brand config's
+    `updated_at` changed). The route then answers live with `stale: true` and asks GenerateSummary for one
+    asynchronous rebuild, at most every 5 minutes.
+  - A default-order or `content_type` page costs the manifest and one chunk (3–5 ms locally at 10× today's data).
+    Other sorts and filters read an entries file cached per container (4 MB gzipped at 270,000 URLs: about 1.2 s cold,
+    150 ms warm). Rollup pages equal live pages (parametrized test).
+  - At 10× (700,000 rows, 147 scopes) a build takes 74 s CPU and 1.1 GB. It stops 30 s before its timeout without
+    publishing, never replaces a newer build, and deletes old builds except the current, the previous and any under
+    30 minutes old.
+- **CPython 3.12 bytecode ships in the layers and handler assets** (`scripts/compile-python312.sh`,
+  `lib/constructs/python-bytecode.ts`). Lambda's `/var/task` and `/opt` are read-only, so every cold start compiled
+  about 430 modules again. Third-party code is compiled `unchecked-hash`, our code `checked-hash`, so builds are
+  byte-identical. Import time of a router and its first handler, before → after: citations 1,138 → 409 ms, stats 1,063
+  → 373 ms, overview 1,311 → 332 ms, brand mentions 608 → 393 ms, schedules 986 → 398 ms, keywords 1,072 → 345 ms,
+  Content Studio 1,332 → 667 ms (35–75% less; about 1.5–3 s saved per cold start at 256 MB). Handler assets carry only
+  runtime files (no tests or caches), and their asset hash covers only those files, so editing one API handler
+  redeploys only the Lambdas that bundle it. Synth fails when a shared module's bytecode is missing or stale. Layer
+  sizes: shared 3.9 → 6.3 MB, crawler 173.1 → 186.6 MB.
+- Scope resolution projects four attributes from `StatusIndex` (5,000 keywords: 3.9 MB → 1.1 MB). Recent search
+  results (recommendations, ideas) are read in parallel (50 keywords: 3–4 s → under 1 s). `GET /api/providers`
+  reads all nine providers in parallel.
+
+### Security
+
+- **Dependencies** (in-range): aws-cdk 2.1148, aws-cdk-lib 2.275, typescript-eslint 8.72.1, vite 8.3.6, aws-amplify
+  6.22.2, @aws-amplify/ui-react 6.15.7, react-router-dom 7.18.5, chart.js 4.6.1, docx 9.15.2 and others. Overrides
+  raise undici to 7.30.2, zod to 4.6.7, qs to 6.16.2 and fast-uri to 3.1.9. This supersedes Dependabot #191–#193.
+- **npm audit:** root 23 (2 high: undici, zod) → 21 moderate; web 8 (1 critical dompurify, 1 high zod) → 3
+  moderate. **dompurify 3.4.17** sanitizes rendered answers in the dashboard; its critical fix reaches users with the
+  next web deploy.
+- Still open: minimatch GHSA-g3hv-75wg-m249, the one advisory behind all 24 remaining entries (eslint, nx,
+  typescript-eslint, stryker and aws-cdk-lib depend on it). The fix is minimatch 11, which removes `makeRe` that nx and
+  eslint-plugin-import call; aws-cdk-lib bundles its own 10.2.6, which an override cannot reach. Dev-only: glob
+  patterns come from our own config.
+
+### Not changed / known limits
+
+- minimatch stays on 10.x (above). Major upgrades (eslint 10, TypeScript 6/7, vitest 5, React 19, Tailwind 4, jsdom
+  31) are separate releases; @vitest/eslint-plugin 1.6.28 waits for TypeScript 6.
+- Long KPI windows are bounded in time but can be partial (`truncated_before`, `keywords_truncated`). A per
+  keyword-run KPI rollup, which would make them complete, is deferred.
+- The main stack is at 499 of 500 resources: new infrastructure goes into another stack.
+- The Docker branches of the bytecode build (layer compile and handler bundling fallback) were not tested in this
+  release; the local CPython 3.12 path was.
+- A run that fails before `BuildCitationRollup` leaves the previous rollup in place until the next run or a stale
+  read; `as_of` shows its age.
+
 ## [2.41.1] - 2026-10-22
 
 ### Security

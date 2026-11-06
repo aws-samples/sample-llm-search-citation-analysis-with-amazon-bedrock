@@ -46,6 +46,12 @@ export interface CitationsPage extends Citations {
   next_token: string | null;
   /** The server hit a read cap: the totals cover part of the scope. */
   truncated: boolean;
+  /** Where the page came from: the citation rollup built after the last run, or a live read. Absent from older API builds. */
+  source?: 'rollup' | 'live';
+  /** When the rollup that answered was built (ISO 8601); `null` for a live read. */
+  as_of?: string | null;
+  /** A rollup exists but no longer matches the scope or the brand config: this page was read live while it is rebuilt. */
+  stale?: boolean;
 }
 
 export interface Search {
