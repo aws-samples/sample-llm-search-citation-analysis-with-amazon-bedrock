@@ -1,5 +1,5 @@
 import {
-  useId, useState, type FormEvent
+  useId, useState, type SubmitEvent
 } from 'react';
 import { Button } from '../../ui/Button';
 import type {
@@ -66,7 +66,7 @@ function ToggleField({
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="rounded border-gray-300"
+        className="rounded-sm border-gray-300"
       />
       {label}
     </label>
@@ -85,7 +85,7 @@ export function KeywordExplorerForm({
   const [clickstream, setClickstream] = useState(false);
   const keyword = seed.trim();
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (keyword === '' || searching) return;
     onSearch({

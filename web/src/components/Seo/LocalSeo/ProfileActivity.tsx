@@ -60,8 +60,8 @@ function Histogram({ counts }: { readonly counts: StarCounts }) {
         return (
           <li key={star} className="flex items-center gap-2 text-xs text-gray-600">
             <span className="w-6">{star}★</span>
-            <span className="h-2 flex-1 rounded bg-gray-100">
-              <span className="block h-2 rounded bg-amber-400" style={{ width: `${share}%` }} />
+            <span className="h-2 flex-1 rounded-sm bg-gray-100">
+              <span className="block h-2 rounded-sm bg-amber-400" style={{ width: `${share}%` }} />
             </span>
             <span className="w-10 text-right">{counts[star]}</span>
           </li>
@@ -205,8 +205,8 @@ function QuestionsPanel({
       )}
       {state.status === 'success' && state.response.questions.length > 0 && (
         <ul className="divide-y divide-gray-100">
-          {state.response.questions.map((question, position) => (
-            <li key={question.question_id ?? String(position)} className="py-2 text-sm">
+          {state.response.questions.map((question) => (
+            <li key={question.question_id ?? question.question_text} className="py-2 text-sm">
               <p className="font-medium text-gray-900">{question.question_text}</p>
               <p className="text-gray-600">{question.answers[0]?.answer_text ?? 'No answer yet'}</p>
             </li>

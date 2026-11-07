@@ -58,7 +58,7 @@ const VARIANTS: Record<TabBarVariant, VariantStyle> = {
 };
 
 const TAB_BASE = 'inline-flex shrink-0 items-center whitespace-nowrap text-sm font-medium transition-colors '
-  + 'focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500';
+  + 'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500';
 
 /** A tab's element id, derived from the panel (or list) id so `TabPanel` can name its tab without a lookup. */
 const tabElementId = (scope: string, id: string): string => `${scope}-tab-${id}`;

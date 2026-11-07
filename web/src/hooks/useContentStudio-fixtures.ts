@@ -1,6 +1,4 @@
-import {
-  StrictMode, createElement, useEffect, type ReactNode
-} from 'react';
+import { useEffect } from 'react';
 import { renderHook } from '@testing-library/react';
 import { vi } from 'vitest';
 import {
@@ -222,12 +220,6 @@ export function createMockFetch(options: MockFetchOptions = {}) {
   });
 }
 
-interface StrictModeBoundaryProps { readonly children: ReactNode; }
-
-export function contentStudioStrictModeBoundary({ children }: StrictModeBoundaryProps) {
-  return createElement(StrictMode, null, children);
-}
-
 /** Routes `authenticatedFetch` to `fetch`, then renders `useScenario` (in StrictMode when asked). */
 export function renderContentStudioScenario<TResult>(
   useScenario: () => TResult,
@@ -237,7 +229,7 @@ export function renderContentStudioScenario<TResult>(
   mockAuthenticatedFetch.mockImplementation(fetch);
   return renderHook(
     useScenario,
-    mode === 'strict' ? { wrapper: contentStudioStrictModeBoundary } : {}
+    { reactStrictMode: mode === 'strict' }
   );
 }
 

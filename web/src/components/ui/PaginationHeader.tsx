@@ -4,7 +4,7 @@ import {
 
 const DEFAULT_PAGE_SIZES: readonly number[] = [25, 50, 100];
 
-const PAGE_BUTTON_CLASS = 'px-2 py-1 text-gray-500 hover:bg-gray-100 rounded disabled:opacity-50 text-xs sm:text-sm';
+const PAGE_BUTTON_CLASS = 'px-2 py-1 text-gray-500 hover:bg-gray-100 rounded-sm disabled:opacity-50 text-xs sm:text-sm';
 
 export interface PaginationHeaderProps {
   /** One-based current page. */
@@ -69,7 +69,7 @@ export const PaginationHeader = ({
             name={selectId}
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="px-2 sm:px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+            className="px-2 sm:px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
           >
             {pageSizeOptions.map((size) => (
               <option key={size} value={size}>{size}</option>

@@ -1,7 +1,7 @@
 import {
   useId, useState
 } from 'react';
-import type { FormEvent } from 'react';
+import type { SubmitEvent } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { ErrorAlert } from '../ui/ErrorAlert';
@@ -30,7 +30,7 @@ export function InviteModal({
   const [error, setError] = useState<string | null>(null);
   useDialogFocus();
 
-  const handleSubmit = async (event: FormEvent) => {
+  const handleSubmit = async (event: SubmitEvent) => {
     event.preventDefault();
     const address = email.trim();
     if (!address) return;

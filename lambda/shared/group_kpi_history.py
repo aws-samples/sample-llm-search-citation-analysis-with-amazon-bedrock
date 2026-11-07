@@ -19,19 +19,17 @@ compared with each other; every run still appears in the keyword drill-down.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from shared.kpi_engine import (
     KPI_IDS,
-    Answer,
     answers_from_rows,
-    brand_kpis,
     kpi_changes,
     kpi_trends,
     percent,
 )
+from shared.kpi_tally import RunTally, run_tallies, tally_kpis, tally_models
 
 #: Coverage (percent of the group's keywords answered) a run needs to count
 #: as a group run: a scheduled run covers them all, a one-keyword rerun does not.
@@ -39,24 +37,6 @@ GROUP_RUN_MIN_COVERAGE = 50.0
 
 #: The group KPIs each driver's share of the move is reported for.
 DRIVER_IMPACT_KPIS = ('mention_rate', 'visibility_score')
-
-
-def answers_by_run(answers: Iterable[Answer]) -> dict[str, list[Answer]]:
-    """``answers`` grouped by run timestamp; answers without one are dropped."""
-    runs: dict[str, list[Answer]] = defaultdict(list)
-    for answer in answers:
-        if answer.timestamp:
-            runs[answer.timestamp].append(answer)
-    return runs
-
-
-def run_models(answers: Iterable[Answer]) -> dict[str, list[str]]:
-    """The models each engine answered with, so a model change is visible on the chart."""
-    models: dict[str, set[str]] = defaultdict(set)
-    for answer in answers:
-        if answer.model is not None:
-            models[answer.provider].add(answer.model)
-    return {provider: sorted(names) for provider, names in sorted(models.items())}
 
 
 def mention_change(current: Mapping[str, Any], previous: Mapping[str, Any]) -> str | None:
@@ -148,42 +128,42 @@ def build_group_kpi_history(
     drivers against the previous group run. Partial runs carry ``change: None``
     and are never the base of a comparison.
     """
-    answers = {keyword: answers_from_rows(rows_by_keyword.get(keyword, ())) for keyword in keywords}
-    return group_kpi_history_from_answers(keywords, answers, owned_domains)
+    domains = list(owned_domains)
+    runs = {keyword: run_tallies(keyword, answers_from_rows(rows_by_keyword.get(keyword, ())), domains) for keyword in keywords}
+    return group_kpi_history_from_runs(keywords, runs, domains)
 
 
-def _keyword_kpis_by_run(answers: Iterable[Answer], domains: list[str]) -> dict[str, dict[str, Any]]:
-    return {timestamp: brand_kpis(run, domains) for timestamp, run in answers_by_run(answers).items()}
+def _runs_by_timestamp(runs: Iterable[RunTally]) -> dict[str, RunTally]:
+    """A keyword's run tallies with answers, by run timestamp."""
+    return {run.timestamp: run for run in runs if run.timestamp and run.answers}
 
 
-def keyword_run_histories(
-    keywords: list[str],
-    answers_by_keyword: Mapping[str, Iterable[Answer]],
-    owned_domains: Iterable[str] = (),
-) -> list[dict[str, Any]]:
+def _kpis_by_run(runs: Mapping[str, RunTally], domains: list[str]) -> dict[str, dict[str, Any]]:
+    """Each run's KPIs (``brand_kpis`` of its answers), by run timestamp."""
+    return {timestamp: tally_kpis([run], domains) for timestamp, run in runs.items()}
+
+
+def keyword_run_histories(keywords: list[str], runs_by_keyword: Mapping[str, Iterable[RunTally]], owned_domains: Sequence[str]) -> list[dict[str, Any]]:
     """Each keyword's drill-down (``keyword_history``): the ``keywords`` of ``build_group_kpi_history`` without the group runs."""
     domains = list(owned_domains)
-    return [keyword_history(keyword, _keyword_kpis_by_run(answers_by_keyword.get(keyword, ()), domains)) for keyword in keywords]
+    return [keyword_history(keyword, _kpis_by_run(_runs_by_timestamp(runs_by_keyword.get(keyword, ())), domains)) for keyword in keywords]
 
 
-def group_kpi_history_from_answers(
+def group_kpi_history_from_runs(
     keywords: list[str],
-    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    runs_by_keyword: Mapping[str, Iterable[RunTally]],
     owned_domains: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """``build_group_kpi_history`` over answers already read (``shared.kpi_engine.Answer``)."""
+    """``build_group_kpi_history`` over run tallies already read (``shared.kpi_tally``), counted against ``owned_domains``."""
     domains = list(owned_domains)
-    answers = {keyword: answers_by_run(answers_by_keyword.get(keyword, ())) for keyword in keywords}
-    kpis = {
-        keyword: {timestamp: brand_kpis(run, domains) for timestamp, run in runs.items()}
-        for keyword, runs in answers.items()
-    }
+    tallies = {keyword: _runs_by_timestamp(runs_by_keyword.get(keyword, ())) for keyword in keywords}
+    kpis = {keyword: _kpis_by_run(runs, domains) for keyword, runs in tallies.items()}
 
     runs: list[dict[str, Any]] = []
     previous_group_run = None
-    for timestamp in sorted({timestamp for runs in answers.values() for timestamp in runs}):
-        answered = [keyword for keyword in keywords if timestamp in answers[keyword]]
-        run_answers = [answer for keyword in answered for answer in answers[keyword][timestamp]]
+    for timestamp in sorted({timestamp for runs in tallies.values() for timestamp in runs}):
+        answered = [keyword for keyword in keywords if timestamp in tallies[keyword]]
+        run_tallies_of = [tallies[keyword][timestamp] for keyword in answered]
         # A run timestamp exists only when some keyword was answered, so `keywords` is never empty here.
         coverage = percent(len(answered), len(keywords)) or 0.0
         run: dict[str, Any] = {
@@ -192,8 +172,8 @@ def group_kpi_history_from_answers(
             'keywords_total': len(keywords),
             'coverage': coverage,
             'is_group_run': coverage >= GROUP_RUN_MIN_COVERAGE,
-            'kpis': brand_kpis(run_answers, domains),
-            'models': run_models(run_answers),
+            'kpis': tally_kpis(run_tallies_of, domains),
+            'models': tally_models(run_tallies_of),
             'change': None,
             'keyword_kpis': {keyword: kpis[keyword][timestamp] for keyword in answered},
         }
@@ -238,15 +218,13 @@ def run_drivers(runs: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
 __all__ = [
     'DRIVER_IMPACT_KPIS',
     'GROUP_RUN_MIN_COVERAGE',
-    'answers_by_run',
     'build_group_kpi_history',
     'compare_group_runs',
-    'group_kpi_history_from_answers',
+    'group_kpi_history_from_runs',
     'keyword_history',
     'keyword_run_histories',
     'keyword_summary',
     'mention_change',
     'run_drivers',
-    'run_models',
     'summary_run',
 ]

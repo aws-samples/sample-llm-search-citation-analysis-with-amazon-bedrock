@@ -17,12 +17,12 @@ const ProviderCardSkeleton = () => (
         <div>
           <div className="flex h-5 items-center gap-2">
             <Skeleton className="h-3.5 w-24" />
-            <Skeleton className="h-[18px] w-28 rounded" />
+            <Skeleton className="h-[18px] w-28 rounded-sm" />
           </div>
           <div className="mt-1 flex h-4 items-center"><Skeleton className="h-3 w-56" /></div>
           <div className="mt-2 flex items-center gap-2">
-            <Skeleton className="h-6 w-20 rounded" />
-            <Skeleton className="h-6 w-24 rounded" />
+            <Skeleton className="h-6 w-20 rounded-sm" />
+            <Skeleton className="h-6 w-24 rounded-sm" />
           </div>
         </div>
       </div>

@@ -1,6 +1,5 @@
-import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { CitationAnalysisStack } from './citation-analysis-stack';
+import { synthesizeDashboardStacks } from './api-stack-fixtures';
 import {
   type ApiGatewayMethodSnapshot,
   extractApiMethods,
@@ -53,18 +52,17 @@ function preflightCount(template: Template, resourceId: string): number {
     .length;
 }
 
-/** Synthesize the main stack once and read the markets wiring out of it. */
+/** Synthesize the main and API stacks once and read the markets wiring out of them. */
 export function synthesizeMarketsSnapshot(): MarketsSnapshot {
-  const app = new cdk.App();
-  const template = Template.fromStack(new CitationAnalysisStack(app, 'MarketsTestStack'));
+  const { mainTemplate: template, apiTemplate } = synthesizeDashboardStacks('MarketsTest');
   const brandConfigTableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-BrandConfig');
   const keywordsTableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-Keywords');
-  const marketsId = findApiResourceId(template, 'markets');
+  const marketsId = findApiResourceId(apiTemplate, 'markets');
   const resources = resolvePath(template.toJSON(), ['Resources']);
   return {
     resourceCount: Object.keys(typeof resources === 'object' && resources !== null ? resources : {}).length,
-    marketsMethods: extractApiMethods(template, marketsId),
-    marketsPreflightCount: preflightCount(template, marketsId),
+    marketsMethods: extractApiMethods(apiTemplate, marketsId),
+    marketsPreflightCount: preflightCount(apiTemplate, marketsId),
     configMgmtFunctionLogicalId: findLambdaLogicalId(template, CONFIG_MGMT),
     brandConfigTableLogicalId,
     keywordsTableLogicalId,

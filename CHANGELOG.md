@@ -9,6 +9,162 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.44.0] - 2026-11-08
+
+2.42.0 put a time budget on every API request but left three gaps: long KPI windows could come back partial, the main
+stack had 499 of CloudFormation's 500 resources, and the toolchain and web majors were deferred. This release moves
+the dashboard REST API into its own stack, stores one row of KPI counts per keyword run so history windows are
+complete, and takes the majors. It addresses the items 2.42.0 listed under "Not changed / known limits" as follows:
+
+- *minimatch on 10.x, majors deferred:* ESLint 10, TypeScript 6, vitest 5, React 19, Tailwind 4 and jsdom 31 are in
+  this release, and so is @vitest/eslint-plugin 1.6.28. TypeScript 7 and minimatch 11 remain blocked upstream (see
+  Known limits).
+- *Long KPI windows can be partial:* resolved. Trends, overview, group KPIs and insights read per-run KPI rows and
+  return whole 365-day windows (`truncated_before: null`).
+- *Main stack at 499 of 500 resources:* resolved. The main stack has about 188 resources.
+- *Docker branches of the bytecode build untested:* resolved. Both layer builds and the handler bundling fallback were
+  run in Docker and give the same bytes as the local path.
+- *A run that fails before `BuildCitationRollup` keeps the previous citation rollup:* unchanged; `as_of` still shows
+  its age.
+
+### Upgrade notes
+
+Deploying this release changes the dashboard API's URL. Read this before upgrading.
+
+- **The REST API moves to `CitationAnalysisApiStack`** (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`).
+  The main stack goes from 499 to about 188 resources; the API stack has about 315.
+- **Deploy with one `npm run deploy` (or `cdk deploy --all`).** CDK updates `CitationAnalysisStack` first. Its
+  cleanup phase deletes the old API, and only then is `CitationAnalysisApiStack` created. No table, bucket, function,
+  user pool or distribution is replaced.
+- **The dashboard API is unavailable for a few minutes** between those two steps. The new dashboard shows "The API is
+  being updated" and opens by itself once `/config.json` exists. A browser tab still running the old dashboard gets
+  errors and must be reloaded.
+- **The API URL changes.** The new URL is the `ApiGatewayUrl` output of `CitationAnalysisApiStack`, with the same
+  export name, `CitationAnalysis-ApiGatewayUrl`. Update anything outside this repository that pinned the old
+  `execute-api` URL (scripts, bookmarks, monitors).
+- **The dashboard reads the API URL at run time** from `/config.json`, which the API stack writes into the web bucket.
+  `VITE_API_URL` is only used by `npm run dev`. Rebuild `web/dist` with the new `scripts/build-web.sh` before
+  deploying: a `web/dist` built by an older script has the old URL built in.
+- **If another stack imports `CitationAnalysis-ApiGatewayUrl`,** CloudFormation cannot delete the old export, so the
+  main stack update fails and rolls back. Remove the import first, deploy, then import the new export.
+- **The MCP server URL does not change.** The MCP server calls the API Lambdas directly.
+- **Run the KPI backfill once after deploying,** and again after changing the owned domains. Each call stops before
+  its time budget and returns `done` and a `cursor` to resume from:
+
+  ```bash
+  aws lambda invoke --function-name CitationAnalysis-Deduplication --cli-binary-format raw-in-base64-out \
+    --payload '{"action":"backfill_keyword_run_kpis"}' out.json
+  while [ "$(jq -r '.done' out.json)" = "false" ]; do
+    aws lambda invoke --function-name CitationAnalysis-Deduplication --cli-binary-format raw-in-base64-out \
+      --payload "$(jq -c '{action:"backfill_keyword_run_kpis",cursor:.cursor}' out.json)" out.json
+  done
+  ```
+
+  The backfill skips runs whose row is current for the owned domains; add `"rebuild": true` to the first payload to
+  rewrite every row. Until it has run, runs older than a keyword's first row are read from the raw answers as in
+  2.42.0, under the same time budget.
+
+### Changed
+
+- **Dashboard REST API stack.** The 106 routes are unchanged (method, function, authorizer). The API stack imports the
+  fixed-name `CitationAnalysis-API-*` functions by ARN, the user pool, the distribution and the web bucket; the main
+  stack imports nothing from it. Each of the 8 router Lambdas gets one wildcard invoke permission (18 permissions,
+  as before). `cloudWatchRole` is pinned off, which matches what real synths already produced. Stack specs cap the
+  main stack at 350 resources and the API stack at 400.
+- **`/config.json`** (`{"apiUrl": "<stage URL>/api"}`) is written by a BucketDeployment in the API stack: no prune,
+  retained on delete, served no-cache, invalidated on deploy. The dashboard loads it before the app (`main.tsx`
+  imports `App` after `loadRuntimeConfig`), treats CloudFront's `index.html` fallback as missing and retries every
+  15 s. `build-web.sh` no longer builds the URL in; both `s3 sync --delete` calls exclude `config.json`;
+  `deploy.sh` checks the API stack.
+- **KPI rows per keyword run** (table `CitationAnalysis-KeywordRunKpis`, PK `keyword`, SK `run_timestamp`, no TTL,
+  in the main stack). DeduplicateCitations writes one row of additive counts per keyword and run
+  (`shared/kpi_tally.py`, `shared/keyword_run_kpis.py`), about 3 KB each. A failed write logs, emits the EMF metric
+  `KpiRollup/KeywordRunKpisWriteFailure` and never fails the keyword. API-StatsInsights and ReportInsights read the
+  table. The KPI definitions are unchanged: property tests prove the pooled counts equal `brand_kpis` (share of voice,
+  position, visibility, citations), `brand_table` and `run_models`. A row keeps at most 25 brands: every first-party
+  brand, every tracked competitor, then the most visible. Share of voice still divides by every sighting.
+- **Deduplication: 256 MB / 120 s → 1,024 MB / 300 s,** because the rollup and the backfill deserialize whole
+  SearchResults partitions. New environment variables: `DYNAMODB_TABLE_KEYWORD_RUN_KPIS`,
+  `DYNAMODB_TABLE_SEARCH_RESULTS`, `DYNAMODB_TABLE_BRAND_CONFIG`, `DYNAMODB_TABLE_KEYWORDS`.
+- **Root toolchain.** TypeScript 6.0.3 (tsconfig lists `types: ["node"]`, since TS 6 defaults `types` to `[]`; `lib`
+  ES2021). ESLint 10.14 with eslint-plugin-sonarjs 4.2.2, eslint-plugin-unicorn 79, @nx/eslint-plugin 24.0.4,
+  @vitest/eslint-plugin 1.6.28 and @eslint/js 10 (the @nx flat configs require it and ESLint 10 no longer bundles it).
+  vitest 5.1 and @types/node 22: vitest 5 needs Node `^22.12`, unicorn and @vitest/eslint-plugin need Node 22, and
+  the repository's only Node Lambda runtime is `NODEJS_22_X`, so Node 22.12 is the toolchain floor.
+- **ESLint plugin forks.** eslint-plugin-import 2.32.0, eslint-plugin-react 7.37.5 and eslint-plugin-jsx-a11y 6.10.2
+  support ESLint up to 9; the ESLint 10 PRs (jsx-eslint/eslint-plugin-react#4022,
+  jsx-eslint/eslint-plugin-jsx-a11y#1081) are not released. They are replaced by eslint-plugin-import-x 4.17.1,
+  eslint-plugin-react-x 5.28.8 and eslint-plugin-jsx-a11y-x 0.2.0, with the same rule names. A probe file gave the
+  same 8 errors before and after; react-x `no-array-index-key` flags a superset of the original's cases. The custom
+  rules in `.eslint-rules/` use `context.filename`.
+- **New sonarjs 4 and unicorn 79 findings are fixed** (`replaceAll` in `python-bytecode.ts`, a redundant optional in
+  `api/reports.ts`, four spec groups merged into `it.each`, a float compared with `toBeCloseTo`).
+- **Web majors.** TypeScript 6.0.3, React 19.3.1 (`RefObject<X | null>` props, `JSX` from `react`, `SubmitEvent` for
+  form submits; StrictMode specs use RTL's `reactStrictMode`, because a wrapper-level StrictMode no longer replays
+  effects in React 19), vitest 5.1, jsdom 31 and jest-dom 7.
+- **Tailwind CSS 4.3.4** through `@tailwindcss/vite` (postcss, autoprefixer and `tailwind.config.js` removed). The
+  look is preserved: the v3 hex palette and sans font stack are pinned in `web/src/palette.css`, the Amplify UI and
+  custom CSS sit in cascade layers that keep v3's order, v3 `space-y`/`space-x` selectors and preflight details
+  (field background, `td` padding, button cursor, dialog margin) are restored. Computed styles of 2,172 class strings
+  in light and dark mode match the 2.42.0 build except for equivalent notations. One visible change:
+  `dark:contrast-95`, which v3 never generated, now applies as `docs/design-system.md` documents, so dark-mode
+  screenshots have 5% less contrast.
+
+### Fixed
+
+- **History windows are complete.** `shared/scoped_reports.load_window_runs` reads the KPI rows first, reads runs
+  older than a keyword's first row from the raw answers, and recounts a row counted against other owned domains. The
+  2.42.0 deadline rules still apply to the raw reads. API response shapes are unchanged; long windows now answer
+  `truncated_before: null`. KpiAlerts reads only the finished run and is unchanged.
+- **The visibility score adds position weights as exact integers** (`position_points`); float sums depended on the
+  order answers were added in. The weights are the same.
+- **Python bytecode is the same on every host.** Every `.pyc` recorded its build path as `co_filename` (`/tree/...` in
+  Docker, the host path for pip, a temp dir or `/asset-output` for handlers), so no two hosts built the same bytes.
+  Layers now compile with `-d /opt/python` and handlers with `-d /var/task`. pip's console scripts (`python/bin`) are
+  removed. Runtime behavior was not affected.
+- **The Docker build paths are tested.** Shared layer in the Lambda 3.12 image: x86-64 extensions, a current `.pyc`
+  for all 208 modules, identical trees across builds and identical bytecode to the pip branch (only 2 `RECORD` files
+  differ). Crawler layer: 873 modules, 7 x86-64 extensions, 186 of 250 MB. Handler bundling without a local 3.12
+  gives the same 60 files (sha256, mode, uid) as the local path. A read-only import test loads every module from our
+  `.pyc` and attempts no writes.
+- **`scripts/verify-python-artifacts.sh`** runs after every compile in both branches of both layer builds. It fails on
+  a missing or stale `.pyc`, timestamp or other-version bytecode, a recorded build path, or a non-x86-64 `.so`.
+
+### Performance
+
+- **History windows from KPI rows:** with 100 keywords × 365 runs, `/api/trends` and `/api/reports/group-kpis` return
+  the whole window in about 2 s with no SearchResults reads. Worst case (25 brands per row, loaded host): decode
+  2.8 s, trend 1.6 s, group 1.9 s.
+- **Bytecode cold-start saving, measured.** This corrects 2.42.0's estimate of about 1.5–3 s per cold start at
+  256 MB. In the Lambda image, our `.pyc` save 120–150 ms CPU per router under amd64 emulation (about 25%), which is
+  about 80–100 ms per router natively, or about 0.5 s at 256 MB.
+
+### Security
+
+- **npm audit:** root 21 → 28 moderate, web 3 moderate, no high or critical. Every entry is minimatch
+  GHSA-g3hv-75wg-m249; the new root entries are the new ESLint plugins that depend on minimatch.
+- **minimatch 11 is still blocked.** minimatch 11.0.4 exports no `makeRe`. nx 24.0.4 pins minimatch 10.2.5 and calls
+  `minimatch.makeRe`, eslint-plugin-import-x 4.17.1 declares `^9.0.3 || ^10.1.2` and imports `makeRe`, and
+  aws-cdk-lib bundles minimatch 10.2.6, which an override cannot reach. Dev-only: the glob patterns come from our own
+  config.
+
+### Known limits
+
+- **TypeScript 7** is blocked upstream: typescript-eslint 8.72.1 peers `typescript >=4.8.4 <6.1.0`.
+- **minimatch 11** is blocked upstream (nx, eslint-plugin-import-x, aws-cdk-lib; see Security).
+- **The ESLint plugin forks** stay until eslint-plugin-react and eslint-plugin-jsx-a11y release ESLint 10 support
+  (#4022, #1081).
+- **@xstate/react 3.2.2** (through @aws-amplify/ui-react 6.15.7, which declares React 19) peers React ≤18. npm warns;
+  the sign-in page renders identically.
+- **KPI history leaderboards** (`brand_trends`, `latest_brands`) see at most 25 brands per keyword run. There is no
+  per-persona split of the KPI rows.
+- **A missing KPI row** (failed write, or a keyword whose Deduplication step never ran) leaves that run out of history
+  until the backfill runs again; the write-failure metric flags it. After an owned-domain change, windows are read
+  raw, within the time budget, until the backfill runs again.
+- **The `config.json` BucketDeployment role** has CDK's default `s3:DeleteObject*` and `cloudfront:CreateInvalidation`
+  on `*`.
+- A `space-y-N` value not listed in `web/src/index.css` gets Tailwind 4 spacing.
+
 ## [2.43.0] - 2026-11-08
 
 ### Added

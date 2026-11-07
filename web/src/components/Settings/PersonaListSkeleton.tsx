@@ -16,7 +16,7 @@ export const PersonaListSkeleton = () => (
         <div key={id} className="p-4 border border-gray-200 rounded-lg bg-white">
           <div className="flex h-5 items-center gap-2">
             <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-[18px] w-14 rounded" />
+            <Skeleton className="h-[18px] w-14 rounded-sm" />
           </div>
           <div className="mt-1 flex h-4 items-center"><Skeleton className="h-3 w-48" /></div>
           <div className="mt-1 flex h-4 items-center"><Skeleton className="h-3 w-80 max-w-full" /></div>

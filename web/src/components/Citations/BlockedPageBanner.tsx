@@ -22,7 +22,7 @@ interface BlockedPageBannerProps {readonly blockReason?: BlockReason;}
 export const BlockedPageBanner = ({ blockReason }: BlockedPageBannerProps) => (
   <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
     <div className="flex items-start gap-3">
-      <StrokeIcon className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" paths={WARNING_PATHS} strokeWidth={2} />
+      <StrokeIcon className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" paths={WARNING_PATHS} strokeWidth={2} />
       <div>
         <h4 className="text-sm font-semibold text-amber-800">Bot Detection Blocked</h4>
         <p className="text-sm text-amber-700 mt-1">

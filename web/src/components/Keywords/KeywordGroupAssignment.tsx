@@ -49,13 +49,13 @@ export const KeywordGroupMenu = ({
           {groups.map((group) => {
             const member = memberships.has(group.id);
             return (
-              <label key={group.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-white cursor-pointer">
+              <label key={group.id} className="flex items-center gap-2 p-1.5 rounded-sm hover:bg-white cursor-pointer">
                 <input
                   type="checkbox"
                   checked={member}
                   disabled={busy}
                   onChange={() => onToggle(group, member)}
-                  className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                  className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900"
                 />
                 <span className="text-sm text-gray-700 truncate">{group.name}</span>
               </label>

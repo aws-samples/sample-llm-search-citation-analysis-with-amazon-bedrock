@@ -1,8 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Authenticator } from '@aws-amplify/ui-react';
-import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ApiUnavailableScreen } from './infrastructure/config/ApiUnavailableScreen';
+import {
+  API_UNAVAILABLE_RETRY_MS, bootstrapDashboard 
+} from './infrastructure/config/bootstrap';
+import { loadRuntimeConfig } from './infrastructure/config/runtimeConfig';
 import './index.css';
 
 const RootErrorFallback = () => (
@@ -36,13 +40,24 @@ const rootElement = document.getElementById('root');
 if (rootElement === null) {
   document.body.textContent = 'Root element not found';
 } else {
-  ReactDOM.createRoot(rootElement).render(
-    <React.StrictMode>
-      <ErrorBoundary fallback={<RootErrorFallback />}>
-        <Authenticator.Provider>
-          <App />
-        </Authenticator.Provider>
-      </ErrorBoundary>
-    </React.StrictMode>
-  );
+  const root = ReactDOM.createRoot(rootElement);
+  // The app is imported only after the API URL is known: every module that
+  // reads `API_BASE_URL` is evaluated after `loadRuntimeConfig` resolved it.
+  void bootstrapDashboard({
+    loadConfig: () => loadRuntimeConfig(),
+    renderApp: async () => {
+      const { App } = await import('./App');
+      root.render(
+        <React.StrictMode>
+          <ErrorBoundary fallback={<RootErrorFallback />}>
+            <Authenticator.Provider>
+              <App />
+            </Authenticator.Provider>
+          </ErrorBoundary>
+        </React.StrictMode>
+      );
+    },
+    renderUnavailable: (retry) => root.render(<ApiUnavailableScreen onRetry={retry} />),
+    retryDelayMs: API_UNAVAILABLE_RETRY_MS,
+  });
 }

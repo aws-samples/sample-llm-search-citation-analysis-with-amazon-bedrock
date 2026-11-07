@@ -3,11 +3,11 @@ import tseslint from 'typescript-eslint'
 import noGenericNames from './.eslint-rules/no-generic-names.mjs'
 import noLocalTestHelpers from './.eslint-rules/no-local-test-helpers.mjs';
 import eslintComments from '@eslint-community/eslint-plugin-eslint-comments/configs'
-import importPlugin from 'eslint-plugin-import'
+import importX from 'eslint-plugin-import-x'
 import sonarjs from 'eslint-plugin-sonarjs'
 import stylistic from '@stylistic/eslint-plugin'
-import react from 'eslint-plugin-react'
-import jsxA11y from 'eslint-plugin-jsx-a11y'
+import reactX from 'eslint-plugin-react-x'
+import jsxA11y from 'eslint-plugin-jsx-a11y-x'
 import unicorn from 'eslint-plugin-unicorn'
 import vitest from '@vitest/eslint-plugin'
 import unusedImports from 'eslint-plugin-unused-imports'
@@ -20,7 +20,7 @@ const customRules = {
         'no-local-test-helpers': noLocalTestHelpers,
       },
     },
-    import: importPlugin,
+    'import-x': importX,
     'unused-imports': unusedImports,
   },
 };
@@ -66,7 +66,7 @@ export default tseslint.config(
   {
     files: ['**/*.ts', '**/*.tsx'],
     rules: {
-      'import/extensions': [
+      'import-x/extensions': [
         'error',
         'never',
         {
@@ -126,7 +126,7 @@ export default tseslint.config(
       '@typescript-eslint/prefer-includes': 'error',
       '@typescript-eslint/prefer-nullish-coalescing': 'error',
       '@typescript-eslint/prefer-optional-chain': 'error',
-      'import/no-duplicates': 'error',
+      'import-x/no-duplicates': 'error',
 
       // Ban generic folder imports (not lib - that's NX convention)
       'no-restricted-imports': [
@@ -305,13 +305,13 @@ export default tseslint.config(
   {
     files: ['web/src/**/*.tsx'],
     plugins: {
-      react,
-      'jsx-a11y': jsxA11y,
+      'react-x': reactX,
+      'jsx-a11y-x': jsxA11y,
     },
     rules: {
-      'react/no-array-index-key': 'error',
-      'jsx-a11y/prefer-tag-over-role': 'error',
-      'jsx-a11y/anchor-is-valid': 'error',
+      'react-x/no-array-index-key': 'error',
+      'jsx-a11y-x/prefer-tag-over-role': 'error',
+      'jsx-a11y-x/anchor-is-valid': 'error',
     },
   },
   // ErrorBoundary requires conditional rendering - disable function-return-type

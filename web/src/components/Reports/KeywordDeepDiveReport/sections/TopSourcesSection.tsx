@@ -132,7 +132,7 @@ function SourceList({
                   {source.url}
                 </p>
               </div>
-              <div className="text-right flex-shrink-0">
+              <div className="text-right shrink-0">
                 <p className="text-gray-700 dark:text-gray-300">
                   {source.citation_count}× cited
                 </p>

@@ -23,9 +23,9 @@ const AppearanceRow = ({
   appearance: BrandAppearance;
   bestRank: number;
 }) => (
-  <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
+  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-sm">
     <div className="flex items-center gap-3">
-      <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium text-sm">
+      <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-sm font-medium text-sm">
         {appearance.provider.toUpperCase()}
       </span>
       <div>
@@ -107,7 +107,7 @@ const SentimentSummary = ({ brand }: { brand: AggregatedBrand }) => {
           const count = brand.sentiment_counts[sentiment] ?? 0;
           const percentage = brand.appearance_count > 0 ? Math.round((count / brand.appearance_count) * 100) : 0;
           return (
-            <div key={sentiment} className="text-center p-3 bg-gray-50 rounded">
+            <div key={sentiment} className="text-center p-3 bg-gray-50 rounded-sm">
               <div className={`text-xl sm:text-2xl font-bold ${sentimentSummaryColor(sentiment)}`}>
                 {count}
               </div>

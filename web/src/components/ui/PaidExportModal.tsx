@@ -5,7 +5,7 @@
  * requests still to come.
  */
 import {
-  useEffect, useId, useRef, useState, type FormEvent
+  useEffect, useId, useRef, useState, type SubmitEvent
 } from 'react';
 import { seoErrorMessage } from '../../api/seo';
 import {
@@ -143,7 +143,7 @@ function PaidExportDialog<TRow>({
     });
   };
 
-  const download = async (event: FormEvent) => {
+  const download = async (event: SubmitEvent) => {
     event.preventDefault();
     if (rows === null || busy) return;
     const controller = new AbortController();

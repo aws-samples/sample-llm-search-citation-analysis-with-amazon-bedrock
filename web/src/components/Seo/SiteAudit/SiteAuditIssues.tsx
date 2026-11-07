@@ -28,7 +28,7 @@ function IssueCard({
   return (
     <li className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded border px-2 py-0.5 text-xs ${SEVERITY_BADGES[entry.severity]}`}>{SEVERITY_LABELS[entry.severity]}</span>
+        <span className={`rounded-sm border px-2 py-0.5 text-xs ${SEVERITY_BADGES[entry.severity]}`}>{SEVERITY_LABELS[entry.severity]}</span>
         <span className="text-xs text-gray-500">{GROUP_LABELS[entry.group]}</span>
         <h4 className="text-sm font-semibold text-gray-900">{entry.title}</h4>
         <span className="ml-auto text-sm text-gray-600">{entry.pages.toLocaleString()} pages</span>

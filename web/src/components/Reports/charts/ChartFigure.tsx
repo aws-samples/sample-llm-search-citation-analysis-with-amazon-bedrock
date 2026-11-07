@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 
 interface Props {
-  readonly canvasRef: RefObject<HTMLCanvasElement>;
+  readonly canvasRef: RefObject<HTMLCanvasElement | null>;
   /** Whether there is anything to draw; otherwise `emptyText` is shown instead of the chart. */
   readonly hasData: boolean;
   /** The chart's figures in words, for screen readers. */

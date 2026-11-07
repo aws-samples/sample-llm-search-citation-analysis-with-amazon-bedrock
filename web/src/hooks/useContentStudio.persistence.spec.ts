@@ -45,7 +45,6 @@ import {
   buildRunningBatchStatusFor,
   buildRunningBatchStatusResponse,
   buildTerminalBatchStartResponse,
-  contentStudioStrictModeBoundary,
   createMockFetch,
   mockBatchStatusResponse,
   renderContentStudio,
@@ -355,7 +354,7 @@ describe('useContentStudio batch request races', () => {
       result, unmount
     } = renderHook(
       () => useContentStudio(),
-      {wrapper: contentStudioStrictModeBoundary,}
+      {reactStrictMode: true,}
     );
 
     firstStatus.resolve(createMockJsonResponse(mockBatchStatusResponse));

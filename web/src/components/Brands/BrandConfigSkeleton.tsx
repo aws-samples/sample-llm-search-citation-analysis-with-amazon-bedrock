@@ -58,7 +58,7 @@ export const BrandConfigSkeleton = () => (
         <div className="space-y-3">
           {OPTION_IDS.map((id) => (
             <div key={id} className="flex h-[38px] items-center gap-3">
-              <Skeleton className="h-4 w-4 rounded" />
+              <Skeleton className="h-4 w-4 rounded-sm" />
               <Skeleton className="h-3.5 w-48" />
             </div>
           ))}

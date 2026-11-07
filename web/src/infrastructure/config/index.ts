@@ -1,20 +1,23 @@
 /**
  * Application configuration.
- * 
- * VITE_API_URL is set during build by scripts/build-web.sh (fetched from CloudFormation)
- * For local development, set VITE_API_URL in .env.local
+ *
+ * `API_BASE_URL` is read once, when this module is first evaluated: `main.tsx`
+ * awaits `loadRuntimeConfig` (runtimeConfig.ts) before it imports the app, so
+ * by then it holds the URL from `/config.json` (or `VITE_API_URL` on the dev
+ * server; see runtimeConfig.ts).
  */
 
 import { ApiConfigError } from '../errors';
+import { loadedApiUrl } from './runtimeConfig';
 
-const apiUrl = import.meta.env.VITE_API_URL;
+const apiUrl = loadedApiUrl();
 
 // Security: Enforce HTTPS in production
 if (apiUrl && import.meta.env.PROD && !apiUrl.startsWith('https://')) {
   throw new ApiConfigError('API_BASE_URL must use HTTPS in production');
 }
 
-export const API_BASE_URL = apiUrl ?? '';
+export const API_BASE_URL = apiUrl;
 
 /**
  * The SEO stack's API, `/api` included (`SeoApiUrl` output + `/api`, set by

@@ -188,11 +188,11 @@ export function bedrockTierEnvironments(template: Template): Record<string, unkn
     .filter((tierVariables) => Object.keys(tierVariables).length > 0);
 }
 
-/** Map function names to timeouts for every Lambda reachable from API Gateway. */
-export function extractApiBackedFunctionTimeouts(template: Template): Record<string, number> {
+/** Map function names to timeouts for every Lambda reachable from API Gateway (methods in `apiTemplate`, functions in `mainTemplate`). */
+export function extractApiBackedFunctionTimeouts(mainTemplate: Template, apiTemplate: Template): Record<string, number> {
   const byLogicalId = new Map<string, { name: string; timeout: number }>();
   for (const [logicalId, resource] of Object.entries(
-    template.findResources('AWS::Lambda::Function')
+    mainTemplate.findResources('AWS::Lambda::Function')
   )) {
     const name = resolvePath(resource, ['Properties', 'FunctionName']);
     const timeout = resolvePath(resource, ['Properties', 'Timeout']);
@@ -202,14 +202,48 @@ export function extractApiBackedFunctionTimeouts(template: Template): Record<str
   }
 
   const timeouts: Record<string, number> = {};
-  for (const method of Object.values(template.findResources('AWS::ApiGateway::Method'))) {
+  for (const method of Object.values(apiTemplate.findResources('AWS::ApiGateway::Method'))) {
     const uri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
-    for (const logicalId of collectGetAttTargets(uri)) {
+    for (const logicalId of importedLogicalIds(mainTemplate, uri)) {
       const fn = byLogicalId.get(logicalId);
       if (fn) timeouts[fn.name] = fn.timeout;
     }
   }
   return timeouts;
+}
+
+/** Every `Fn::ImportValue` export name in `node`, in order of appearance. */
+export function importedExportNames(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const item of node) importedExportNames(item, found);
+    return found;
+  }
+  if (isRecord(node)) {
+    const name = node['Fn::ImportValue'];
+    if (typeof name === 'string') found.push(name);
+    for (const value of Object.values(node)) importedExportNames(value, found);
+  }
+  return found;
+}
+
+/** The value `template` exports as `exportName`; `undefined` when it exports no such name. */
+function exportedValue(template: Template, exportName: string): unknown {
+  const output = Object.values(template.findOutputs('*')).find(
+    (candidate) => resolvePath(candidate, ['Export', 'Name']) === exportName,
+  );
+  return resolvePath(output, ['Value']);
+}
+
+/**
+ * The main-stack logical ids `node` reaches through imports: each
+ * `Fn::ImportValue` resolved to the `Ref` or `Fn::GetAtt` target of the
+ * main template's export of that name.
+ */
+export function importedLogicalIds(mainTemplate: Template, node: unknown): string[] {
+  return importedExportNames(node).flatMap((name) => {
+    const value = exportedValue(mainTemplate, name);
+    return [...collectGetAttTargets(value), ...collectRefTargets(value)];
+  });
 }
 
 export function extractReservedConcurrency(
@@ -900,9 +934,10 @@ export interface ContentStudioInfrastructureSnapshot {
   eventSource: ContentStudioEventSourceSnapshot;
 }
 
-/** Content Studio storage, permissions, routes, and worker wiring as synthesized. */
+/** Content Studio storage, permissions and worker wiring (main stack) and routes (API stack) as synthesized. */
 export function extractContentStudioInfrastructureSnapshot(
-  template: Template
+  template: Template,
+  apiTemplate: Template
 ): ContentStudioInfrastructureSnapshot {
   const functionName = 'CitationAnalysis-API-ContentStudio';
   const workerFunctionName = 'CitationAnalysis-ContentStudioWorker';
@@ -1000,8 +1035,8 @@ export function extractContentStudioInfrastructureSnapshot(
     eventSourceMapping,
     ['Properties', 'DestinationConfig', 'OnFailure', 'Destination']
   );
-  const resourcePaths = buildResourcePaths(template);
-  const routes = nonPreflightMethods(template)
+  const resourcePaths = buildResourcePaths(apiTemplate);
+  const routes = nonPreflightMethods(apiTemplate)
     .map((method): ContentStudioRouteSnapshot => ({
       ...methodAuthSnapshot(method, resourcePaths),
       integrationUri: methodIntegrationUri(method),
@@ -1526,13 +1561,13 @@ export const EMPTY_CUSTOM_REPORTS_SNAPSHOT: CustomReportsSnapshot = {
   itemMethods: [],
 };
 
-/** The saved custom reports table, its ConfigMgmt wiring and its four API verbs, as synthesized. */
-export function extractCustomReportsSnapshot(template: Template): CustomReportsSnapshot {
+/** The saved custom reports table and its ConfigMgmt wiring (main stack), and its four API verbs (API stack), as synthesized. */
+export function extractCustomReportsSnapshot(template: Template, apiTemplate: Template): CustomReportsSnapshot {
   const tableName = 'CitationAnalysis-CustomReports';
   const configMgmt = 'CitationAnalysis-API-ConfigMgmt';
   const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
   const table: unknown = template.findResources('AWS::DynamoDB::Table')[tableLogicalId];
-  const collectionId = findApiResourceId(template, 'custom-reports');
+  const collectionId = findApiResourceId(apiTemplate, 'custom-reports');
   return {
     tableLogicalId,
     table: {
@@ -1547,8 +1582,8 @@ export function extractCustomReportsSnapshot(template: Template): CustomReportsS
     configMgmtFunctionLogicalId: findLambdaLogicalId(template, configMgmt),
     configMgmtTableEnv: extractLambdaEnvVars(template, configMgmt).DYNAMODB_TABLE_CUSTOM_REPORTS,
     configMgmtTableActions: extractFunctionRoleActionsOn(template, configMgmt, tableLogicalId),
-    collectionMethods: extractApiMethods(template, collectionId),
-    itemMethods: extractApiMethods(template, findApiResourceId(template, '{id}', collectionId)),
+    collectionMethods: extractApiMethods(apiTemplate, collectionId),
+    itemMethods: extractApiMethods(apiTemplate, findApiResourceId(apiTemplate, '{id}', collectionId)),
   };
 }
 
@@ -1593,6 +1628,7 @@ export interface ReportInsightsSnapshot {
   workerLayerCount: number;
   workerEnvironmentNames: string[];
   workerTableActions: Record<string, string[]>;
+  deduplicationKeywordRunKpisActions: string[];
   workerActions: string[];
   statsInsightsEnvironment: Record<string, unknown>;
   statsInsightsReportInsightsActions: string[];
@@ -1601,12 +1637,12 @@ export interface ReportInsightsSnapshot {
   statsInsightsFunctionLogicalId: string;
 }
 
-export function extractReportInsightsSnapshot(template: Template): ReportInsightsSnapshot {
+export function extractReportInsightsSnapshot(template: Template, apiTemplate: Template): ReportInsightsSnapshot {
   const worker = 'CitationAnalysis-ReportInsights';
   const statsInsights = 'CitationAnalysis-API-StatsInsights';
   const tableName = 'CitationAnalysis-ReportInsights';
   const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
-  const insightsResourceId = findApiResourceId(template, 'insights', findApiResourceId(template, 'reports'));
+  const insightsResourceId = findApiResourceId(apiTemplate, 'insights', findApiResourceId(apiTemplate, 'reports'));
   return {
     states: resolvePath(parseStateMachineDefinition(template, 'CitationAnalysis-Workflow'), ['States']),
     table: {
@@ -1619,11 +1655,12 @@ export function extractReportInsightsSnapshot(template: Template): ReportInsight
     workerLayerCount: extractLambdaLayerRefs(template, worker).length,
     workerEnvironmentNames: Object.keys(extractLambdaEnvVars(template, worker)).sort((left, right) => left.localeCompare(right)),
     workerTableActions: functionTableActions(template, worker),
+    deduplicationKeywordRunKpisActions: functionTableActions(template, 'CitationAnalysis-Deduplication')['CitationAnalysis-KeywordRunKpis'] ?? [],
     workerActions: extractFunctionRoleActions(template, worker),
     statsInsightsEnvironment: extractLambdaEnvVars(template, statsInsights),
     statsInsightsReportInsightsActions: extractFunctionRoleActionsOn(template, statsInsights, tableLogicalId),
     statsInsightsWorkerActions: extractFunctionRoleActionsOn(template, statsInsights, findLambdaLogicalId(template, worker)),
-    regenerateMethods: extractApiMethods(template, findApiResourceId(template, 'regenerate', insightsResourceId)),
+    regenerateMethods: extractApiMethods(apiTemplate, findApiResourceId(apiTemplate, 'regenerate', insightsResourceId)),
     statsInsightsFunctionLogicalId: findLambdaLogicalId(template, statsInsights),
   };
 }
@@ -1676,12 +1713,16 @@ function childPathParts(template: Template, parentId: string): string[] {
  * `extraCallers` that call `shared.models` without invoking a model), the
  * ProviderConfig variable and actions it reads the saved tier models with.
  */
-export function extractBedrockModelPickerSnapshot(template: Template, extraCallers: string[]): BedrockModelPickerSnapshot {
+export function extractBedrockModelPickerSnapshot(
+  template: Template,
+  apiTemplate: Template,
+  extraCallers: string[],
+): BedrockModelPickerSnapshot {
   const configMgmt = 'CitationAnalysis-API-ConfigMgmt';
   const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-ProviderConfig');
   const configMgmtRoleId = findFunctionRoleLogicalId(template, configMgmt);
   const callerNames = sortedUnique([...claudeInvokingFunctionNames(template), ...extraCallers]);
-  const providerId = findApiResourceId(template, '{id}', findApiResourceId(template, 'providers'));
+  const providerId = findApiResourceId(apiTemplate, '{id}', findApiResourceId(apiTemplate, 'providers'));
   return {
     providerConfigTableLogicalId: tableLogicalId,
     configMgmtActions: extractFunctionRoleActions(template, configMgmt),
@@ -1693,6 +1734,6 @@ export function extractBedrockModelPickerSnapshot(template: Template, extraCalle
       tableEnv: extractLambdaEnvVars(template, name).DYNAMODB_TABLE_PROVIDER_CONFIG,
       tableActions: extractFunctionRoleActionsOn(template, name, tableLogicalId),
     }])),
-    providerIdChildPathParts: childPathParts(template, providerId),
+    providerIdChildPathParts: childPathParts(apiTemplate, providerId),
   };
 }

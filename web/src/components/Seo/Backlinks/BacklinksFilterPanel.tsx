@@ -9,7 +9,7 @@ import {
   TAB_FILTER_FIELDS, cleanFilters, conditionCount, type RangeFilter
 } from './backlinksFilters';
 
-const FIELD_CLASS = 'w-full p-1.5 border border-gray-200 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-900';
+const FIELD_CLASS = 'w-full p-1.5 border border-gray-200 dark:border-gray-600 rounded-sm text-sm bg-white dark:bg-gray-900';
 const LABEL_CLASS = 'block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1';
 
 type LinkType = NonNullable<BacklinksFilters['link_type']>;

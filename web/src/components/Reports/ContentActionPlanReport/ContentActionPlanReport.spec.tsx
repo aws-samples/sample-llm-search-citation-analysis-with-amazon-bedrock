@@ -117,18 +117,12 @@ describe('ContentActionPlanReport', () => {
     expect(getReportHeading(/Content Action Plan/i)).toBeInTheDocument();
   });
 
-  it('renders the headline citation gap count', () => {
+  it.each([
+    ['the headline citation gap count', '18'],
+    ['the top citation target row', 'example.com'],
+    ['the brief title for ready content', 'Best Running Shoes 2026'],
+  ])('renders %s', (_case, text) => {
     renderReport();
-    expect(screen.getByText('18')).toBeInTheDocument();
-  });
-
-  it('renders the top citation target row', () => {
-    renderReport();
-    expect(screen.getByText('example.com')).toBeInTheDocument();
-  });
-
-  it('renders the brief title for ready content', () => {
-    renderReport();
-    expect(screen.getByText('Best Running Shoes 2026')).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });

@@ -39,34 +39,14 @@ describe('PrintToPdfButton', () => {
     expect(window.open).toHaveBeenCalledTimes(1);
   });
 
-  it('appends print=1 to the current path', () => {
-    renderAt('/citations');
+  it.each([
+    ['appends print=1 to the current path', '/citations', '/citations?print=1'],
+    ['preserves existing query params alongside print=1', '/visibility?persona=parent-with-kids', '/visibility?persona=parent-with-kids&print=1'],
+    ['overrides an existing print value rather than duplicating it', '/brands?print=0', '/brands?print=1'],
+  ])('%s', (_case, path, openedUrl) => {
+    renderAt(path);
     fireEvent.click(screen.getByRole('button'));
-    expect(window.open).toHaveBeenCalledWith(
-      '/citations?print=1',
-      '_blank',
-      'noopener,noreferrer',
-    );
-  });
-
-  it('preserves existing query params alongside print=1', () => {
-    renderAt('/visibility?persona=parent-with-kids');
-    fireEvent.click(screen.getByRole('button'));
-    expect(window.open).toHaveBeenCalledWith(
-      '/visibility?persona=parent-with-kids&print=1',
-      '_blank',
-      'noopener,noreferrer',
-    );
-  });
-
-  it('overrides an existing print value rather than duplicating it', () => {
-    renderAt('/brands?print=0');
-    fireEvent.click(screen.getByRole('button'));
-    expect(window.open).toHaveBeenCalledWith(
-      '/brands?print=1',
-      '_blank',
-      'noopener,noreferrer',
-    );
+    expect(window.open).toHaveBeenCalledWith(openedUrl, '_blank', 'noopener,noreferrer');
   });
 
   it('opens the new tab with noopener,noreferrer to prevent reverse-tabnabbing', () => {

@@ -48,11 +48,13 @@ class CappedRows:
     """Whether the time budget, not the row cap, stopped the read (``cut`` is then where it stopped)."""
 
 
-def _window_condition(keyword: str, since: str, until: str | None) -> Any:
-    """The key condition of ``keyword``'s rows from ``since`` on, through the run ``until`` when given."""
+def _window_condition(keyword: str, since: str, until: str | None, before: str | None = None) -> Any:
+    """The key condition of ``keyword``'s rows from ``since`` on, through the run ``until`` and before the run ``before`` when given."""
     sort_key = Key('timestamp_provider')
-    # Every sort key of the run `until` starts with `until#`, and '$' sorts right after '#'.
-    window = sort_key.gte(since) if until is None else sort_key.between(since, f'{until}$')
+    # Every sort key of the run `until` starts with `until#`, and '$' sorts right after '#';
+    # every sort key of the run `before` sorts after `before` itself (it is longer).
+    upper = before if before is not None else (None if until is None else f'{until}$')
+    window = sort_key.gte(since) if upper is None else sort_key.between(since, upper)
     return Key('keyword').eq(keyword) & window
 
 
@@ -63,9 +65,12 @@ def query_keyword_rows_capped(
     max_rows: int,
     *,
     until: str | None = None,
+    before: str | None = None,
     deadline: Deadline | None = None,
 ) -> CappedRows:
     """``keyword``'s projected rows from ``since`` on (through the run ``until``), at most ``max_rows`` of the newest.
+
+    ``before`` (a run timestamp, at most ``until``) ends the window before that run instead.
 
     The window is read newest first, so a cap drops the oldest runs and never
     the latest. The oldest run read may be incomplete when the cap stops the
@@ -78,7 +83,7 @@ def query_keyword_rows_capped(
     """
     budget = deadline or current_deadline()
     params: dict[str, Any] = {
-        'KeyConditionExpression': _window_condition(keyword, since, until),
+        'KeyConditionExpression': _window_condition(keyword, since, until, before),
         'ProjectionExpression': ANSWER_PROJECTION,
         'ExpressionAttributeNames': ANSWER_ATTRIBUTE_NAMES,
         'ScanIndexForward': False,

@@ -14,9 +14,9 @@ from shared.visibility_views import (
     PERIODS,
     SOURCES_LIMIT,
     period_key,
-    trend_view,
     visibility_view,
 )
+from testing.kpi_tally_fixtures import tallied_trend_view
 from testing.search_result_fixtures import ranked_brands
 
 HOTEL = 'Hotel Sol'
@@ -204,7 +204,7 @@ def _two_days() -> dict[str, list[Answer]]:
 
 class TestTrendView:
     def test_holds_every_answer_of_a_period_in_one_point(self):
-        points = trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['trend_data']
+        points = tallied_trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['trend_data']
 
         assert [(point['period'], point['keywords_with_data'], point['kpis']['answers'], point['kpis']['mention_rate']) for point in points] == [
             ('2026-09-01', 1, 1, 0.0), ('2026-09-08', 2, 3, 66.7),
@@ -213,32 +213,32 @@ class TestTrendView:
     def test_counts_the_runs_of_a_period(self):
         answers = {'spa': [_rival_only('spa', DAY_1), _hotel_first('spa', DAY_1_LATER)]}
 
-        assert trend_view(['spa'], answers, 'day')['trend_data'][0]['runs'] == 2
+        assert tallied_trend_view(['spa'], answers, 'day')['trend_data'][0]['runs'] == 2
 
     def test_pools_each_keywords_latest_period_into_the_latest_standing(self):
-        latest = trend_view(['spa', 'beach'], _two_days(), 'day')['latest']
+        latest = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['latest']
 
         assert (latest['answers'], latest['mention_rate']) == (3, 66.7)
 
     def test_compares_like_for_like_only_the_keywords_measured_in_both_periods(self):
-        change = trend_view(['spa', 'beach'], _two_days(), 'day')['change']
+        change = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['change']
 
         assert (change['keywords_compared'], change['deltas']['mention_rate'], change['trends']['mention_rate']) == (1, 100.0, 'improving')
 
     def test_calls_a_trend_for_every_rate_and_score(self):
-        change = trend_view(['spa', 'beach'], _two_days(), 'day')['change']
+        change = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['change']
 
         assert set(change['trends']) == set(TRENDED_KPIS)
 
     def test_has_no_change_before_a_keyword_has_two_periods(self):
         answers = {'spa': [_hotel_first('spa', DAY_2)]}
 
-        assert trend_view(['spa'], answers, 'day')['change'] is None
+        assert tallied_trend_view(['spa'], answers, 'day')['change'] is None
 
     def test_compares_the_last_two_of_three_periods(self):
         answers = {'spa': [_rival_only('spa', DAY_1), _rival_only('spa', DAY_2), _hotel_first('spa', '2026-09-15T06:00:00Z')]}
 
-        change = trend_view(['spa'], answers, 'day')['change']
+        change = tallied_trend_view(['spa'], answers, 'day')['change']
 
         assert (change['deltas']['mention_rate'], change['deltas']['answers']) == (100.0, 0)
 
@@ -246,21 +246,21 @@ class TestTrendView:
         assert PERIODS == ('day', 'week', 'month')
 
     def test_reports_each_keywords_latest_period_best_first(self):
-        trends = trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['keyword_trends']
+        trends = tallied_trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['keyword_trends']
 
         assert [(row['keyword'], row['period'], row['kpis']['visibility_score']) for row in trends] == [
             ('spa', '2026-09-08', 100.0), ('beach', '2026-09-08', 50.0),
         ]
 
     def test_gives_each_keyword_its_change_since_its_previous_period(self):
-        spa, beach = trend_view(['spa', 'beach'], _two_days(), 'day')['keyword_trends']
+        spa, beach = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['keyword_trends']
 
         assert (spa['change']['previous_period'], spa['change']['deltas']['visibility_score'], beach['change']) == ('2026-09-01', 100.0, None)
 
     def test_breaks_visibility_ties_by_keyword_name(self):
         answers = {'b': [_rival_only('b', DAY_1)], 'A': [_rival_only('A', DAY_1)], 'c': [_rival_only('c', DAY_1)]}
 
-        assert [row['keyword'] for row in trend_view(['b', 'A', 'c'], answers, 'day')['keyword_trends']] == ['A', 'b', 'c']
+        assert [row['keyword'] for row in tallied_trend_view(['b', 'A', 'c'], answers, 'day')['keyword_trends']] == ['A', 'b', 'c']
 
     def test_counts_keywords_by_the_trend_of_their_visibility_score(self):
         answers = {
@@ -270,40 +270,40 @@ class TestTrendView:
             'new': [_hotel_first('new', DAY_2)],
         }
 
-        overall = trend_view(list(answers), answers, 'day')['overall']
+        overall = tallied_trend_view(list(answers), answers, 'day')['overall']
 
         assert overall == {'improving_count': 1, 'declining_count': 1, 'stable_count': 2}
 
     def test_groups_runs_by_iso_week(self):
         answers = {'spa': [_rival_only('spa', DAY_1), _hotel_first('spa', DAY_2)]}
 
-        assert [point['period'] for point in trend_view(['spa'], answers, 'week')['trend_data']] == ['2026-W36', '2026-W37']
+        assert [point['period'] for point in tallied_trend_view(['spa'], answers, 'week')['trend_data']] == ['2026-W36', '2026-W37']
 
     def test_measures_citations_against_the_owned_domains(self):
-        latest = trend_view(['spa', 'beach'], _two_days(), 'day', ['hotel-sol.com'])['latest']
+        latest = tallied_trend_view(['spa', 'beach'], _two_days(), 'day', ['hotel-sol.com'])['latest']
 
         assert latest['citation_rate'] == 66.7
 
     def test_counts_the_keywords_with_data(self):
-        assert trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['keywords_with_data'] == 2
+        assert tallied_trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['keywords_with_data'] == 2
 
     def test_is_empty_without_answers(self):
-        view = trend_view(['golf'], {'golf': []}, 'month')
+        view = tallied_trend_view(['golf'], {'golf': []}, 'month')
 
         assert (view['trend_data'], view['keyword_trends'], view['change'], view['latest']['answers']) == ([], [], None, 0)
 
     def test_ranks_the_brands_of_the_latest_periods(self):
-        brands = trend_view(['spa', 'beach'], _two_days(), 'day')['latest_brands']
+        brands = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['latest_brands']
 
         assert [(brand['name'], brand['mentions']) for brand in brands] == [(RIVAL, 3), (HOTEL, 2)]
 
     def test_caps_the_latest_leaderboard(self):
         answers = {'spa': [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(12)))]}
 
-        assert (len(trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (10, 10)
+        assert (len(tallied_trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (10, 10)
 
     def test_follows_the_tracked_brand_per_period(self):
-        tracked = trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['tracked']
+        tracked = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['tracked']
 
         assert tracked == [
             {'period': '2026-09-01', 'share_of_voice': 0.0, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None},
@@ -311,7 +311,7 @@ class TestTrendView:
         ]
 
     def test_follows_the_leading_competitors_per_period(self):
-        competitors = trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['competitors']
+        competitors = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['competitors']
 
         assert competitors == [{
             'name': RIVAL,
@@ -325,7 +325,7 @@ class TestTrendView:
         brands = [(f'Rival {index}', 'competitor', index + 1) for index in range(7)]
         answers = {'spa': [_answer('spa', DAY_1, (HOTEL, 'first_party', 8), *brands)]}
 
-        names = [row['name'] for row in trend_view(['spa'], answers, 'day')['brand_trends']['competitors']]
+        names = [row['name'] for row in tallied_trend_view(['spa'], answers, 'day')['brand_trends']['competitors']]
 
         assert (names, BRAND_TREND_COMPETITORS) == ([f'Rival {index}' for index in range(5)], 5)
 
@@ -336,7 +336,7 @@ class TestTrendView:
     def test_scores_a_competitor_absent_from_a_period_zero(self, day_1, share_of_voice):
         answers = {'spa': [_answer('spa', DAY_1, *day_1), _rival_only('spa', DAY_2)]}
 
-        rival = trend_view(['spa'], answers, 'day')['brand_trends']['competitors'][0]
+        rival = tallied_trend_view(['spa'], answers, 'day')['brand_trends']['competitors'][0]
 
         assert rival['points'][0] == {
             'period': '2026-09-01', 'share_of_voice': share_of_voice, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None,

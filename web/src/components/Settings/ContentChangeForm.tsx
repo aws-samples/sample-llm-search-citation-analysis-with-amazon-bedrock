@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
+import type { SubmitEvent } from 'react';
 import type {
   ContentChangeMarker, KeywordGroup
 } from '../../types';
@@ -114,7 +114,7 @@ export function ContentChangeForm({
     recordContentChange,
   } = useContentChanges(values.groupId);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const handleSubmit = async (event: SubmitEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     const problem = validateContentChangeForm(values);
     setValidationError(problem);

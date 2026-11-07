@@ -13,7 +13,6 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
@@ -32,14 +31,14 @@ import { BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME } from './constructs/seo-backlink
 import { SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE } from './constructs/seo-domain';
 import { RANK_TRACKER_SCHEDULE_GROUP } from './constructs/seo-rank-tracking';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
+import { RUNTIME_CONFIG_OBJECT_KEY, type DashboardApiInputs } from './api-stack';
 import {
   apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
 } from './constructs/api-functions';
 import { citationAnalysisTable, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
-import { API_CORS_PREFLIGHT, addCorsGatewayResponses } from './constructs/api-cors';
 import {
-  allow, apiKeySecret, lambdaServiceRole, shareOneApiPermission
+  allow, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
 
@@ -356,6 +355,8 @@ export class CitationAnalysisStack extends cdk.Stack {
   public readonly mcpInputs: McpServerInputs;
   /** What the SEO stack builds on: the user pool. */
   public readonly seoInputs: SeoStackInputs;
+  /** What the API stack builds on: the API Lambdas, the user pool, the web bucket and the distribution. */
+  public readonly apiInputs: DashboardApiInputs;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -416,6 +417,20 @@ export class CitationAnalysisStack extends cdk.Stack {
           sortKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
         },
       ],
+    });
+
+    // DynamoDB Table: KeywordRunKpis (2.44.0)
+    // One row per (keyword, run) with the additive counts every KPI in
+    // shared/kpi_engine.py is computed from (shared/kpi_tally.py), written by
+    // DeduplicateCitations when the keyword's run completes. History reports
+    // (trends, overview, group KPIs, insights) sum these rows instead of
+    // re-reading every answer, so a 365-day window of 100 keywords is whole.
+    // Derived data: a missing row falls back to the raw answers, and the
+    // Deduplication Lambda's `backfill_keyword_run_kpis` action rebuilds it.
+    const keywordRunKpisTable = citationAnalysisTable(this, 'KeywordRunKpisTable', {
+      tableName: 'CitationAnalysis-KeywordRunKpis',
+      partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'run_timestamp', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: CrawledContent
@@ -964,14 +979,27 @@ export class CitationAnalysisStack extends cdk.Stack {
       role: deduplicationLambdaRole,
       layers: [sharedLayer],
       // Every citation is stored since 2.37.0, one update_item each: a keyword
-      // with many personas can carry several hundred URLs.
-      timeout: cdk.Duration.seconds(120),
-      memorySize: 256,
-      description: 'Deduplicate and prioritize citations',
+      // with many personas can carry several hundred URLs. Since 2.44.0 it
+      // also tallies the run's KPI counts (KeywordRunKpis) and runs the
+      // resumable `backfill_keyword_run_kpis` action, which deserializes whole
+      // SearchResults partitions: CPU-bound, hence 1024 MB and 300 s.
+      timeout: cdk.Duration.seconds(300),
+      memorySize: 1024,
+      description: 'Deduplicate and prioritize citations; record each keyword run\'s KPI counts',
       environment: {
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_RUN_KPIS: keywordRunKpisTable.tableName,
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
       },
     });
+    // The run's KPI row: read back (the backfill skips rows already current)
+    // and put. The owned domains decide which citations count as first-party;
+    // the backfill walks the active keywords.
+    keywordRunKpisTable.grant(deduplicationLambdaRole, 'dynamodb:Query', 'dynamodb:PutItem');
+    brandConfigTable.grantReadData(deduplicationLambdaRole);
+    keywordsTable.grant(deduplicationLambdaRole, 'dynamodb:Scan');
 
     // Crawler Lambda Layer - Browser tools (Playwright + AgentCore)
     // Separate from shared layer to keep each under 250MB limit
@@ -1158,6 +1186,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     searchResultsTable.grantReadData(reportInsightsFunction);
     keywordsTable.grantReadData(reportInsightsFunction);
+    // History windows read the per-run KPI counts first (shared/scoped_reports.py).
+    reportInsightsFunction.addEnvironment('DYNAMODB_TABLE_KEYWORD_RUN_KPIS', keywordRunKpisTable.tableName);
+    keywordRunKpisTable.grant(reportInsightsFunction, 'dynamodb:Query');
     brandConfigTable.grantReadData(reportInsightsFunction);
     allow(reportInsightsFunction, ['dynamodb:PutItem'], [reportInsightsTable.tableArn]);
     reportInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
@@ -1881,6 +1912,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Grant consolidated stats-insights function access to all required tables
     searchResultsTable.grantReadData(statsInsightsFunction);
     citationsTable.grantReadData(statsInsightsFunction);
+    // Trends, overview, group KPIs and insights sum the per-run KPI counts.
+    statsInsightsFunction.addEnvironment('DYNAMODB_TABLE_KEYWORD_RUN_KPIS', keywordRunKpisTable.tableName);
+    keywordRunKpisTable.grant(statsInsightsFunction, 'dynamodb:Query');
     crawledContentTable.grantReadData(statsInsightsFunction);
     keywordsTable.grantReadData(statsInsightsFunction);
     brandConfigTable.grantReadData(statsInsightsFunction);
@@ -2073,195 +2107,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Grant scheduler role permission to start executions
     stateMachine.grantStartExecution(schedulerRole);
 
-    // Create REST API Gateway
-    // Note: Auth construct created early, callback URLs updated after CloudFront distribution
+    // Cognito: created before the distribution, callback URLs updated after it.
+    // The REST API in front of the API Lambdas is `CitationAnalysisApiStack`.
     const auth = new Auth(this, 'Auth', {urls: ['http://localhost:5173'], // Temporary - updated below after CloudFront creation
     });
 
-    const api = new apigateway.RestApi(this, 'CitationAnalysisAPI', {
-      restApiName: 'CitationAnalysis-API',
-      description: 'API for Citation Analysis Dashboard - v2',
-      deployOptions: {
-        stageName: 'prod',
-        throttlingRateLimit: 100,
-        throttlingBurstLimit: 200,
-        // Per-method CloudWatch metrics (Count, 4XXError, 5XXError, Latency,
-        // IntegrationLatency) for every route on the stage.
-        //
-        // Without this the account had aggregate stage metrics only, so
-        // "the API is throwing 5XXs" could never be narrowed to *which*
-        // endpoint, and a per-endpoint alarm was not expressible at all —
-        // there was no metric to alarm on (AUDIT-2026-08-19 §2.6).
-        metricsEnabled: true,
-        // dataTraceEnabled is deliberately LEFT OFF. Do not turn it on
-        // alongside metricsEnabled — they look like a pair and are not.
-        //
-        // It logs full request and response bodies to CloudWatch, which here
-        // means Cognito-authenticated user payloads, brand configuration, and
-        // whole LLM responses. That is a privacy exposure with no retention
-        // story and a log-ingestion bill proportional to response size, in
-        // exchange for detail that X-Ray and the functions' own structured
-        // logging already provide. Enable it temporarily on a single
-        // reproduction if you must, then turn it back off.
-        dataTraceEnabled: false,
-      },
-      // gzip/deflate JSON bodies of 1 KiB or more for clients that accept it
-      // (browsers do). Cuts transfer for large pages several-fold; it does not
-      // raise the Lambda 6 MiB response cap, which is measured before this.
-      minCompressionSize: cdk.Size.kibibytes(1),
-      // CORS preflight: wildcard at API Gateway, real origin check in the Lambdas (see API_CORS_PREFLIGHT).
-      defaultCorsPreflightOptions: API_CORS_PREFLIGHT,
-    });
-
-    // Add Gateway Responses to include CORS headers in error responses
-    // This fixes the CORS issue when Cognito authorization fails (401/403)
-    // NOTE: Gateway response CORS origins are set after CloudFront distribution
-    // is created (see "Configure CORS with CloudFront Domain" section below)
-    // to use the actual CloudFront domain instead of wildcard '*'.
-
-    // Add Usage Plan for API throttling and quota management
-    const usagePlan = api.addUsagePlan('CitationAnalysisUsagePlan', {
-      name: 'CitationAnalysis-UsagePlan',
-      description: 'Usage plan for Citation Analysis API with rate limiting',
-      throttle: {
-        rateLimit: 100,  // Requests per second
-        burstLimit: 200, // Burst capacity
-      },
-      quota: {
-        limit: 10000,    // 10,000 requests per day
-        period: apigateway.Period.DAY,
-      },
-    });
-
-    // Associate usage plan with API stage
-    usagePlan.addApiStage({stage: api.deploymentStage,});
-
-    // API Resources and Methods
-    const apiResource = api.root.addResource('api');
-    
-    // Create Cognito User Pool Authorizer
-    const cognitoAuthorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
-      cognitoUserPools: [auth.userPool],
-      authorizerName: 'CitationAnalysis-CognitoAuthorizer',
-      identitySource: 'method.request.header.Authorization',
-    });
-    
-    // Common integration options with CORS headers
-    const integrationOptions: apigateway.LambdaIntegrationOptions = {proxy: true,};
-    
-    // Common method options with Cognito authorization
-    const methodOptions: apigateway.MethodOptions = {
-      authorizer: cognitoAuthorizer,
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-    };
-    
-    // Every route below is a Lambda proxy integration behind the Cognito
-    // authorizer, except the public health check.
-    const route = (resource: apigateway.IResource, fn: lambda.IFunction, ...httpMethods: string[]): void => {
-      for (const httpMethod of httpMethods) {
-        resource.addMethod(httpMethod, new apigateway.LambdaIntegration(fn, integrationOptions), methodOptions);
-      }
-    };
-
-    route(apiResource.addResource('stats'), statsInsightsFunction, 'GET');
-
-    // Health check endpoint - No authentication required
-    // NOSONAR: Health check must be public for load balancer/monitoring probes
-    const healthResource = apiResource.addResource('health');
-    healthResource.addMethod('GET', new apigateway.LambdaIntegration(healthCheckFunction, integrationOptions), {
-      authorizationType: apigateway.AuthorizationType.NONE, // NOSONAR
-    });
-
-    route(apiResource.addResource('citations'), citationsContentFunction, 'GET');
-    route(apiResource.addResource('url-breakdown'), citationsContentFunction, 'GET');
-    route(apiResource.addResource('searches'), citationsContentFunction, 'GET');
-
-    const keywordsResource = apiResource.addResource('keywords');
-    route(keywordsResource, keywordMgmtFunction, 'GET', 'POST');
-    
-    // Static 'promote' segment is matched ahead of the '{id}' path parameter by API Gateway,
-    // and it is POST-only while '{id}' is PUT/DELETE-only, so the two do not conflict.
-    route(keywordsResource.addResource('promote'), keywordMgmtFunction, 'POST');
-    route(keywordsResource.addResource('{id}'), keywordMgmtFunction, 'PUT', 'DELETE');
-
-    // Keyword groups (folders of keywords, typically one per hotel). Same
-    // consolidated function; `manage-keyword-groups.py` owns the routes.
-    const keywordGroupsResource = apiResource.addResource('keyword-groups');
-    route(keywordGroupsResource, keywordMgmtFunction, 'GET', 'POST');
-    const keywordGroupIdResource = keywordGroupsResource.addResource('{id}');
-    route(keywordGroupIdResource, keywordMgmtFunction, 'PUT', 'DELETE');
-    route(keywordGroupIdResource.addResource('keywords'), keywordMgmtFunction, 'PUT');
-
-    const queryPromptsResource = apiResource.addResource('query-prompts');
-    route(queryPromptsResource, configMgmtFunction, 'GET', 'POST');
-    route(queryPromptsResource.addResource('{id}'), configMgmtFunction, 'PUT', 'DELETE', 'PATCH');
-
-    route(apiResource.addResource('brand-mentions'), getBrandMentionsFunction, 'GET');
-
-    const brandConfigResource = apiResource.addResource('brand-config');
-    route(brandConfigResource, manageBrandConfigFunction, 'GET', 'POST', 'PUT', 'DELETE');
-    route(brandConfigResource.addResource('presets'), manageBrandConfigFunction, 'GET');
-    route(brandConfigResource.addResource('expand'), manageBrandConfigFunction, 'POST');
-    route(brandConfigResource.addResource('expand-all'), manageBrandConfigFunction, 'POST');
-    route(brandConfigResource.addResource('find-competitors'), manageBrandConfigFunction, 'POST');
-
-    route(apiResource.addResource('crawled-content'), citationsContentFunction, 'GET');
-    route(apiResource.addResource('trigger-analysis'), executionMgmtFunction, 'POST');
-    route(apiResource.addResource('trigger-keyword-analysis'), executionMgmtFunction, 'POST');
-    route(apiResource.addResource('executions').addResource('{id}'), executionMgmtFunction, 'GET');
-
-    const schedulesResource = apiResource.addResource('schedules');
-    route(schedulesResource, configMgmtFunction, 'GET', 'POST');
-    // GET /schedules?source=rank-trackers lists each rank tracker's own
-    // EventBridge schedule, read-only. A query parameter, not a sub-resource:
-    // the stack is at CloudFormation's 500-resource limit.
-
-    // Schedules v2 (2.3.0): the path parameter is the generated `sch-<hex>` id
-    // (the EventBridge schedule Name); the display name lives in Description.
-    // The path part stays `{name}`: API Gateway allows one variable sibling,
-    // and CloudFormation creates the renamed resource before deleting the old
-    // one, so `{id}` failed with "A sibling ({name}) already has a variable
-    // path part". The handler reads either key.
-    const scheduleIdResource = schedulesResource.addResource('{name}');
-    route(scheduleIdResource, configMgmtFunction, 'GET', 'PUT', 'DELETE');
-
-    // POST /schedules/{id}/run — start an analysis now with the schedule's scope.
-    route(scheduleIdResource.addResource('run'), configMgmtFunction, 'POST');
-
-    // Raw Responses Browser API
-    const rawResponsesResource = apiResource.addResource('raw-responses');
-    route(rawResponsesResource.addResource('browse'), citationsContentFunction, 'GET');
-    route(rawResponsesResource.addResource('file'), citationsContentFunction, 'GET');
-    route(rawResponsesResource.addResource('download'), citationsContentFunction, 'GET');
-
-    // Keyword Research API
-    const keywordResearchResource = apiResource.addResource('keyword-research');
-    route(keywordResearchResource.addResource('expand'), keywordMgmtFunction, 'POST');
-    route(keywordResearchResource.addResource('competitor'), keywordMgmtFunction, 'POST');
-
-    // POST /keyword-research/agent — start a research-agent job (2.5.0).
-    route(keywordResearchResource.addResource('agent'), keywordMgmtFunction, 'POST');
-
-    // /keyword-research/templates — the agent's saved system prompts. Open to
-    // every authenticated user (the agent is meant to be configurable by the
-    // people who run it); `{id}` here is a child of `templates`, not a sibling
-    // of the job `{id}` below, so API Gateway accepts both variable parts.
-    const keywordResearchTemplatesResource = keywordResearchResource.addResource('templates');
-    route(keywordResearchTemplatesResource, keywordMgmtFunction, 'GET', 'POST');
-    route(keywordResearchTemplatesResource.addResource('{id}'), keywordMgmtFunction, 'PUT', 'DELETE');
-    
-    route(keywordResearchResource.addResource('history'), keywordMgmtFunction, 'GET');
-    
-    const keywordResearchIdResource = keywordResearchResource.addResource('{id}');
-    // GET by id is what the UI polls: the job, its per-provider steps and the
-    // merged (partial) result. History was the only read before 2.2.0, so a
-    // job that fell off the first page of the scan vanished from the poll.
-    route(keywordResearchIdResource, keywordMgmtFunction, 'GET', 'DELETE');
-
-    // POST /keyword-research/{id}/retry — re-run only the failed steps.
-    route(keywordResearchIdResource.addResource('retry'), keywordMgmtFunction, 'POST');
-
-    // ========================================
     // Visibility & Insights API Routes
     // (Handled by consolidated StatsInsightsFunction)
     // ========================================
@@ -2309,6 +2159,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Self-Reflection API Routes
     route(apiResource.addResource('self-reflection'), selfReflectionFunction, 'POST', 'GET');
 
+=======
     // ========================================
     // Content Studio API
     // ========================================
@@ -2426,58 +2277,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       { event: events.RuleTargetInput.fromObject({ action: 'reconcile' }) }
     ));
 
-    // Content Studio API Routes. Every method keeps the shared Cognito options;
-    // generation begins only after its pending row is durably inserted.
-    const contentStudioResource = apiResource.addResource('content-studio');
-    route(contentStudioResource.addResource('ideas'), contentStudioFunction, 'GET');
-    route(contentStudioResource.addResource('generate'), contentStudioFunction, 'POST');
-    route(contentStudioResource.addResource('generate-batch'), contentStudioFunction, 'POST');
-    route(contentStudioResource.addResource('status').addResource('{id}'), contentStudioFunction, 'GET');
-    route(contentStudioResource.addResource('viewed'), contentStudioFunction, 'POST');
-    route(contentStudioResource.addResource('history'), contentStudioFunction, 'GET');
-
-    const contentStudioTemplatesResource = contentStudioResource.addResource('templates');
-    route(contentStudioTemplatesResource, contentStudioFunction, 'GET', 'POST');
-    route(contentStudioTemplatesResource.addResource('{id}'), contentStudioFunction, 'PUT', 'DELETE');
-
-    route(contentStudioResource.addResource('batches').addResource('{batch_id}'), contentStudioFunction, 'GET');
-    route(contentStudioResource.addResource('{id}'), contentStudioFunction, 'DELETE');
-
-    // ========================================
-    // Provider Configuration API
-    // ========================================
-
-    // Provider Config API Routes (handled by configMgmtFunction)
-    const providersResource = apiResource.addResource('providers');
-    route(providersResource, configMgmtFunction, 'GET');
-    
-    const providerIdResource = providersResource.addResource('{id}');
-    route(providerIdResource, configMgmtFunction, 'PUT');
-    route(providerIdResource.addResource('validate'), configMgmtFunction, 'POST');
-
-    // Models the stored key can use, for the Settings model picker (admin-only in the handler).
-    route(providerIdResource.addResource('models'), configMgmtFunction, 'GET');
-
-    // KPI alert history, singleton settings, and explicit content markers.
-    const alertsResource = apiResource.addResource('alerts');
-    route(alertsResource, configMgmtFunction, 'GET');
-    route(alertsResource.addResource('test-notification'), configMgmtFunction, 'POST');
-    route(alertsResource.addResource('{id}').addResource('acknowledge'), configMgmtFunction, 'POST');
-    route(alertsResource.addResource('settings'), configMgmtFunction, 'GET', 'PUT');
-    route(alertsResource.addResource('content-changes'), configMgmtFunction, 'GET', 'POST');
-
-    // Saved custom reports, open to every signed-in user (no admin gate in
-    // the handler); `manage-custom-reports.py` owns the routes.
-    const customReportsResource = apiResource.addResource('custom-reports');
-    route(customReportsResource, configMgmtFunction, 'GET', 'POST');
-    route(customReportsResource.addResource('{id}'), configMgmtFunction, 'PUT', 'DELETE');
-
-    // Markets (2.37.0): one resource for the whole API. GET for every
-    // signed-in user; PUT (replace the list) and POST (local keyword
-    // suggestions) are Admin-gated in `manage-markets.py`. The main stack is
-    // close to the 500-resource limit, so nothing else goes under it.
-    route(apiResource.addResource('markets'), configMgmtFunction, 'GET', 'PUT', 'POST');
-
     // ========================================
     // User Management API
     // ========================================
@@ -2509,15 +2308,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       'cognito-idp:ListGroups',
     ], [auth.userPool.userPoolArn]);
 
-    // User Management API Routes
-    const usersResource = apiResource.addResource('users');
-    route(usersResource, manageUsersFunction, 'GET', 'POST');
-    route(usersResource.addResource('groups'), manageUsersFunction, 'GET');
-    
-    const userUsernameResource = usersResource.addResource('{username}');
-    route(userUsernameResource, manageUsersFunction, 'GET', 'PUT', 'DELETE');
-    route(userUsernameResource.addResource('reset-password'), manageUsersFunction, 'POST');
-
     // ========================================
     // Visualization Dashboard - S3 + CloudFront
     // ========================================
@@ -2528,7 +2318,8 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Build the React app (npm run build must be run before deployment)
     // The build output will be in web/dist folder
-    // Note: API URL is injected via VITE_API_URL env var during build (see scripts/build-web.sh)
+    // The API URL is not built in: the dashboard reads it at startup from
+    // `config.json`, which CitationAnalysisApiStack writes into this bucket.
     const webPath = path.join(__dirname, '../web');
     const distPath = path.join(webPath, 'dist');
     
@@ -2542,6 +2333,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       sources: [s3deploy.Source.asset(distPath)],
       destinationBucket: webBucket,
       prune: false,
+      // Owned by CitationAnalysisApiStack: never uploaded from web/dist,
+      // never pruned, so a dashboard deploy keeps the API URL.
+      exclude: [RUNTIME_CONFIG_OBJECT_KEY],
       // The default 128 MB deployment handler peaked at 100% of its memory
       // and took ~60s per deploy unzipping the dashboard bundle.
       memoryLimit: 512,
@@ -2555,7 +2349,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // web ACL bills per month whether or not the demo is used. What protects
     // the app instead:
     //   - CloudFront: HTTPS only, origin access control, the security headers below
-    //   - API Gateway: the Cognito authorizer on every route except GET
+    //   - API Gateway (CitationAnalysisApiStack): the Cognito authorizer on every route except GET
     //     /api/health, the stage throttle (100 rps / 200 burst) and the usage
     //     plan quota, and input validation in the handlers
     // To add one, create a CLOUDFRONT-scope web ACL in us-east-1 and pass its
@@ -2618,16 +2412,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Configure CORS with CloudFront Domain
     // ========================================
     
-    // Now that we have the CloudFront domain, configure CORS headers
-    // This is done via a custom resource or by setting environment variables
-    // that Lambda functions use to return proper CORS headers
+    // The dashboard origin: the Lambdas' CORS origin (SSM below), the Cognito
+    // callback URLs and the API stack's gateway responses.
     const cloudFrontOrigin = `https://${distribution.distributionDomainName}`;
 
-    // SECURITY: Gateway responses use the CloudFront origin instead of wildcard '*'
-    // so that auth failure details (401/403) are not observable by arbitrary origins.
-    // In dev mode, use wildcard to allow localhost (Lambda-level CORS still validates per-request).
-    addCorsGatewayResponses(api, devMode ? '*' : cloudFrontOrigin);
-    
     this.mcpInputs = {
       userPool: auth.userPool,
       apiFunctions: {
@@ -2644,6 +2432,25 @@ export class CitationAnalysisStack extends cdk.Stack {
     };
 
     this.seoInputs = { userPool: auth.userPool };
+    this.apiInputs = {
+      functions: {
+        health: healthCheckFunction,
+        'stats-insights': statsInsightsFunction,
+        'citations-content': citationsContentFunction,
+        'keyword-mgmt': keywordMgmtFunction,
+        'config-mgmt': configMgmtFunction,
+        'execution-mgmt': executionMgmtFunction,
+        'brand-mentions': getBrandMentionsFunction,
+        'brand-config': manageBrandConfigFunction,
+        'content-studio': contentStudioFunction,
+        users: manageUsersFunction,
+        'persona-rankings': getPersonaRankingsFunction,
+        'self-reflection': selfReflectionFunction,
+      },
+      userPool: auth.userPool,
+      webBucket,
+      distribution,
+    };
 
     // Update Cognito User Pool Client callback URLs with CloudFront domain
     const cfnUserPoolClient = auth.userPoolClient.node.defaultChild as cdk.aws_cognito.CfnUserPoolClient;
@@ -2693,24 +2500,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // ========================================
-    // Optimize Lambda Permissions
-    // ========================================
-    // CDK creates 2 Lambda::Permission per API method (prod + test-invoke).
-    // For consolidated Lambdas backing many routes, replace N permissions with
-    // a single wildcard permission per function (lib/constructs/permissions.ts).
-
-    const consolidatedFunctions = [
-      statsInsightsFunction, citationsContentFunction, keywordMgmtFunction,
-      configMgmtFunction, executionMgmtFunction, manageBrandConfigFunction,
-      contentStudioFunction, manageUsersFunction,
-    ];
-    shareOneApiPermission(this, api, consolidatedFunctions);
-
-    // ========================================
     // Outputs
     // ========================================
 
-    exportedOutput(this, 'ApiGatewayUrl', api.url, 'API Gateway URL');
     exportedOutput(this, 'DashboardUrl', cloudFrontOrigin, 'Citation Analysis Dashboard URL');
     exportedOutput(
       this,

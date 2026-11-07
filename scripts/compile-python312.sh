@@ -1,7 +1,7 @@
 #!/bin/bash
 # Precompile a Lambda Python tree to CPython 3.12 bytecode.
 #
-#   compile-python312.sh [--docker] <tree> [<first-party dir under tree> ...]
+#   compile-python312.sh [--docker] [--runtime-dir <dir>] <tree> [<first-party dir under tree> ...]
 #
 # /var/task and /opt are read-only on Lambda, so a module shipped without its
 # `__pycache__/<name>.cpython-312.pyc` is recompiled on EVERY cold start
@@ -20,20 +20,31 @@
 # The .py files stay next to the .pyc: tracebacks, inspect and checked-hash
 # validation read them.
 #
+# Each code object records its file name. compileall would write the build
+# path (a host path, or the container's mount point), so the same input built
+# on two hosts gave different bytes. `-d` records <runtime dir>/<path in tree>
+# instead: where Lambda mounts the tree (/opt/python for a layer, the default).
+#
 # --docker compiles inside public.ecr.aws/lambda/python:3.12 (linux/amd64),
 # the runtime's own interpreter. Without it the host needs CPython 3.12:
 # $PYTHON312, `python3.12` on PATH, or `uv` (which fetches 3.12 if needed).
-# Any other version fails the build.
+# Any other version fails the build. The result is then checked by
+# scripts/verify-python-artifacts.sh with the same interpreter.
 
 set -euo pipefail
 
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 USE_DOCKER=false
-if [ "${1:-}" = "--docker" ]; then
-    USE_DOCKER=true
-    shift
-fi
+RUNTIME_DIR="/opt/python"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --docker) USE_DOCKER=true; shift ;;
+        --runtime-dir) RUNTIME_DIR="$2"; shift 2 ;;
+        *) break ;;
+    esac
+done
 if [ $# -lt 1 ]; then
-    echo "usage: $0 [--docker] <tree> [<first-party dir> ...]" >&2
+    echo "usage: $0 [--docker] [--runtime-dir <dir>] <tree> [<first-party dir> ...]" >&2
     exit 2
 fi
 
@@ -49,16 +60,16 @@ compile_commands() {
     local python="$1" root="$2"
     # A worker per CPU (-j 0). Each file's bytes depend only on its source,
     # not on scheduling (verified by building twice; see README).
-    "$python" -m compileall -q -j 0 --invalidation-mode unchecked-hash "$root"
+    "$python" -m compileall -q -j 0 --invalidation-mode unchecked-hash -d "$RUNTIME_DIR" "$root"
     for dir in "${FIRST_PARTY[@]+"${FIRST_PARTY[@]}"}"; do
-        "$python" -m compileall -q -f -j 0 --invalidation-mode checked-hash "$root/$dir"
+        "$python" -m compileall -q -f -j 0 --invalidation-mode checked-hash -d "$RUNTIME_DIR/$dir" "$root/$dir"
     done
 }
 
 if [ "$USE_DOCKER" = true ]; then
     FIRST_PARTY_ARGS=""
     for dir in "${FIRST_PARTY[@]+"${FIRST_PARTY[@]}"}"; do
-        FIRST_PARTY_ARGS+=" && python3.12 -m compileall -q -f -j 0 --invalidation-mode checked-hash /tree/$dir"
+        FIRST_PARTY_ARGS+=" && python3.12 -m compileall -q -f -j 0 --invalidation-mode checked-hash -d '$RUNTIME_DIR/$dir' '/tree/$dir'"
     done
     docker run --rm \
         --platform linux/amd64 \
@@ -67,7 +78,8 @@ if [ "$USE_DOCKER" = true ]; then
         -e PYTHONHASHSEED=0 \
         -v "$TREE":/tree \
         public.ecr.aws/lambda/python:3.12 \
-        bash -c "python3.12 -m compileall -q -j 0 --invalidation-mode unchecked-hash /tree${FIRST_PARTY_ARGS}"
+        bash -c "python3.12 -m compileall -q -j 0 --invalidation-mode unchecked-hash -d '$RUNTIME_DIR' /tree${FIRST_PARTY_ARGS}"
+    bash "$SCRIPTS_DIR/verify-python-artifacts.sh" --docker --runtime-dir "$RUNTIME_DIR" "$TREE" "${FIRST_PARTY[@]+"${FIRST_PARTY[@]}"}"
     exit 0
 fi
 
@@ -93,3 +105,4 @@ if ! "${PYTHON_CMD[0]}" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3
 fi
 
 compile_commands "${PYTHON_CMD[0]}" "$TREE"
+bash "$SCRIPTS_DIR/verify-python-artifacts.sh" --python "${PYTHON_CMD[0]}" --runtime-dir "$RUNTIME_DIR" "$TREE" "${FIRST_PARTY[@]+"${FIRST_PARTY[@]}"}"

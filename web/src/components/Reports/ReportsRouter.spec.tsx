@@ -53,7 +53,9 @@ describe('ReportsRouter', () => {
   it('opens the custom report builder at /reports/custom/new', async () => {
     renderReportsAt('/reports/custom/new');
 
-    // The builder's lazy chunk carries every block of the catalogue; a cold import takes a few seconds.
-    expect(await screen.findByRole('heading', { name: 'Create a custom report' }, { timeout: 5000 })).toBeInTheDocument();
+    // The builder is the largest lazy chunk (every report's section catalogue):
+    // its first import alone takes seconds on a loaded machine, past the
+    // default 1 s findBy timeout. The route, not the import speed, is under test.
+    expect(await screen.findByRole('heading', { name: 'Create a custom report' }, { timeout: 15_000 })).toBeInTheDocument();
   });
 });

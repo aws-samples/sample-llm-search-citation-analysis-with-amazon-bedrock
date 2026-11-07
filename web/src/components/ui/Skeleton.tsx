@@ -68,7 +68,7 @@ export const SkeletonTable = ({
     {Array.from({ length: rows }, (_, row) => (
       <div key={row} className={`flex items-center gap-6 px-6 ${rowClassName}`}>
         {Array.from({ length: columns }, (_, column) => (
-          <div key={column} className={`skeleton h-3.5 ${column === 0 ? 'flex-[2]' : 'flex-1'}`} />
+          <div key={column} className={`skeleton h-3.5 ${column === 0 ? 'flex-2' : 'flex-1'}`} />
         ))}
       </div>
     ))}

@@ -84,7 +84,7 @@ export function IndexNowSubmit({
       <label className="block text-sm text-gray-700">
         URLs (one per line)
         <textarea
-          className="mt-1 block h-28 w-full rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+          className="mt-1 block h-28 w-full rounded-sm border border-gray-300 px-2 py-1 font-mono text-xs"
           value={text}
           onChange={(event) => { setText(event.target.value); }}
         />

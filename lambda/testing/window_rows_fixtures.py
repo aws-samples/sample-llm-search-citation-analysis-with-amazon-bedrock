@@ -102,18 +102,22 @@ def _matches(sort_key: str, sort: Any) -> bool:
         return sort_key.startswith(value)
     if operator == '<':
         return sort_key < value
+    if operator == '>':
+        return sort_key > value
     assert operator == '>='
     return sort_key >= value
 
 
-def paged_search_results_table(rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]]], page_size: int = 400) -> MagicMock:
-    """A SearchResults ``Table`` whose ``query`` pages through ``rows_by_keyword`` as DynamoDB would."""
+def paged_search_results_table(
+    rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]]], page_size: int = 400, *, sort_key: str = 'timestamp_provider',
+) -> MagicMock:
+    """A SearchResults ``Table`` whose ``query`` pages through ``rows_by_keyword`` as DynamoDB would (any table keyed ``keyword`` / ``sort_key``)."""
 
     def query(**kwargs: Any) -> dict[str, Any]:
         keyword, sort = key_parts(kwargs['KeyConditionExpression'])
         rows = sorted(
-            (row for row in rows_by_keyword.get(keyword, []) if _matches(row['timestamp_provider'], sort)),
-            key=lambda row: row['timestamp_provider'],
+            (row for row in rows_by_keyword.get(keyword, []) if _matches(row[sort_key], sort)),
+            key=lambda row: row[sort_key],
             reverse=kwargs.get('ScanIndexForward') is False,
         )
         start = int(kwargs['ExclusiveStartKey']['offset']) if 'ExclusiveStartKey' in kwargs else 0

@@ -10,7 +10,7 @@ export const FolderListSkeleton = () => (
     <div className="space-y-2">
       {ENTRY_IDS.map((id) => (
         <div key={id} className="flex items-center p-3 rounded-lg border border-gray-200">
-          <Skeleton className="w-5 h-5 mr-3 rounded" />
+          <Skeleton className="w-5 h-5 mr-3 rounded-sm" />
           <div className="flex-1">
             <div className="flex h-5 items-center"><Skeleton className="h-3.5 w-48" /></div>
             <div className="flex h-4 items-center"><Skeleton className="h-3 w-16" /></div>

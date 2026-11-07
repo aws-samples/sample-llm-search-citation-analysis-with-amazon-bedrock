@@ -146,12 +146,12 @@ interface Dependency {
 
 function DependencyItem({ dep }: { readonly dep: Dependency }) {
   return (
-    <div className="flex items-center justify-between p-2 bg-white rounded border border-gray-200">
+    <div className="flex items-center justify-between p-2 bg-white rounded-sm border border-gray-200">
       <div>
         <span className="text-sm font-medium text-gray-900">{dep.name}</span>
         <span className="text-xs text-gray-500 ml-2">{dep.version}</span>
       </div>
-      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{dep.license}</span>
+      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-sm">{dep.license}</span>
     </div>
   );
 }
@@ -207,7 +207,7 @@ export function LicensesTab() {
         <h4 className="text-sm font-semibold text-gray-900 mb-3">AWS Services</h4>
         <div className="flex flex-wrap gap-2">
           {AWS_SERVICES.map((service) => (
-            <span key={service} className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded">
+            <span key={service} className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded-sm">
               {service}
             </span>
           ))}

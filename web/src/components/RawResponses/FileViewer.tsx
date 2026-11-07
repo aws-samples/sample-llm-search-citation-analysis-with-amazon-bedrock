@@ -177,7 +177,7 @@ const QuickInfoCards = ({ doc }: QuickInfoCardsProps) => (
   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
     <InfoCard label="Provider">
       <p
-        className={`mt-1 inline-block px-2 py-1 rounded text-xs sm:text-sm font-medium ${getProviderColor(doc.provider)}`}
+        className={`mt-1 inline-block px-2 py-1 rounded-sm text-xs sm:text-sm font-medium ${getProviderColor(doc.provider)}`}
       >
         {doc.provider}
       </p>

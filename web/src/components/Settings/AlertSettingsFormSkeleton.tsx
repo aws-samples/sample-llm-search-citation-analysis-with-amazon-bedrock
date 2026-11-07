@@ -21,7 +21,7 @@ const FieldSkeleton = ({ controlClassName }: { readonly controlClassName: string
 export const AlertSettingsFormSkeleton = () => (
   <SkeletonRegion label="Loading alert settings" className="space-y-5">
     <div className="flex items-start gap-3 rounded-lg border border-gray-200 p-4">
-      <Skeleton className="mt-0.5 h-4 w-4 rounded" />
+      <Skeleton className="mt-0.5 h-4 w-4 rounded-sm" />
       <div className="flex-1">
         <div className="flex h-5 items-center"><Skeleton className="h-3.5 w-28" /></div>
         <div className="mt-1 flex h-4 items-center"><Skeleton className="h-3 w-72 max-w-full" /></div>
@@ -40,7 +40,7 @@ export const AlertSettingsFormSkeleton = () => (
       <SkeletonLines lines={2} className="mt-2" />
       <div className="mt-3 flex h-5 items-center justify-between">
         <Skeleton className="h-3.5 w-48" />
-        <Skeleton className="h-5 w-20 rounded" />
+        <Skeleton className="h-5 w-20 rounded-sm" />
       </div>
     </div>
   </SkeletonRegion>

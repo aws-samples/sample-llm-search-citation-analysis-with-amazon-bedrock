@@ -74,7 +74,7 @@ export const KeywordExpansion = ({
   const expandedKeywords = useMemo(() => result?.keywords ?? [], [result]);
   const promotion = useRunPromotion(expandedKeywords, onKeywordsAdded, result);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!seedKeyword.trim()) return;
     await onExpand(seedKeyword.trim(), industry, count);
@@ -96,7 +96,7 @@ export const KeywordExpansion = ({
                 value={seedKeyword}
                 onChange={(e) => setSeedKeyword(e.target.value)}
                 placeholder={'e.g. project management software'}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
               />
             </div>
             <div>
@@ -106,7 +106,7 @@ export const KeywordExpansion = ({
                 name="industry"
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
               >
                 {INDUSTRIES.map((ind) => (
                   <option key={ind.value} value={ind.value}>{ind.label}</option>
@@ -123,7 +123,7 @@ export const KeywordExpansion = ({
                 name="count"
                 value={count}
                 onChange={(e) => setCount(Number(e.target.value))}
-                className="w-full sm:w-auto px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
               >
                 <option value={10}>10</option>
                 <option value={20}>20</option>

@@ -49,7 +49,7 @@ function CompetitorDomainRow({
                 disabled={!checked && atCap}
                 onChange={(e) => onToggle(domain, e.target.checked)}
                 aria-label={`${domain} for ${brand}`}
-                className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                className="rounded-sm border-amber-400 text-amber-600 focus:ring-amber-500"
               />
               {domain}
               {!checked && <span className="text-xs font-sans text-amber-600">(suggested)</span>}

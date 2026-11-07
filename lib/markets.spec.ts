@@ -6,8 +6,7 @@ import { synthesizeMarketsSnapshot } from './markets-fixtures';
 
 /**
  * Markets (2.37.0): the market list lives in the BrandConfig table, so the
- * feature adds one API resource and no table; the main stack sits at the
- * 500-resource limit.
+ * feature adds one API resource (in the API stack) and no table.
  */
 const snapshot = synthesizeMarketsSnapshot();
 

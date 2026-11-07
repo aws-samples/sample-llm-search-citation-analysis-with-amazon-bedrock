@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import DOMPurify from 'dompurify';
 
 import { isValidHttpUrl } from '../../infrastructure';
@@ -19,7 +20,7 @@ export const formatInlineMarkdown = (text: string): string => {
   // tags were never emitted and emphasis rendered broken).
   const step1 = text.replaceAll(/\*\*([^*]+)\*\*/gu, '<strong class="font-semibold">$1</strong>');
   const step2 = step1.replaceAll(/\*([^*]+)\*/gu, '<em class="italic">$1</em>');
-  const step3 = step2.replaceAll(/`([^`]+)`/gu, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>');
+  const step3 = step2.replaceAll(/`([^`]+)`/gu, '<code class="bg-gray-100 px-1 py-0.5 rounded-sm text-sm font-mono">$1</code>');
   
   // SECURITY: Sanitize HTML to prevent XSS from AI-generated content
   return DOMPurify.sanitize(step3, {

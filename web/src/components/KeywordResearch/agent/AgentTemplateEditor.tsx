@@ -39,7 +39,7 @@ interface AgentTemplateEditorProps {
   readonly disabled?: boolean;
 }
 
-const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
+const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
 
 function FieldProblem({ message }: { readonly message: string | undefined }) {
   if (message === undefined) return null;

@@ -50,7 +50,7 @@ const HistoryItem = ({
         <span className="text-sm font-medium text-gray-900">
           {formatDate(crawl.crawled_at)}
         </span>
-        <span className={`px-2 py-0.5 text-xs font-medium rounded ${statusColors[status]}`}>
+        <span className={`px-2 py-0.5 text-xs font-medium rounded-sm ${statusColors[status]}`}>
           {status === 'blocked' && 'Blocked'}
           {status === 'error' && 'Error'}
           {status === 'success' && 'Success'}
@@ -94,10 +94,10 @@ const HistoryScreenshot = ({ crawl }: { crawl: HistoryCrawl }) => {
           <img
             src={crawl.screenshot_url}
             alt={`Screenshot from ${formatDate(crawl.crawled_at)}`}
-            className="w-full border border-gray-300 rounded shadow-lg dark:brightness-90 dark:contrast-95"
+            className="w-full border border-gray-300 rounded-sm shadow-lg dark:brightness-90 dark:contrast-95"
           />
         ) : (
-          <div className="flex items-center justify-center h-48 bg-gray-100 rounded border border-gray-200">
+          <div className="flex items-center justify-center h-48 bg-gray-100 rounded-sm border border-gray-200">
             <p className="text-gray-500 text-sm">No screenshot available</p>
           </div>
         )}

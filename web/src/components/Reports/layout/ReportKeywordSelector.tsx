@@ -28,7 +28,7 @@ export function ReportKeywordSelector({
         id="report-keyword-select"
         value={selected ?? ''}
         onChange={(event) => onChange(event.target.value)}
-        className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 min-w-[14rem]"
+        className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 min-w-56"
       >
         {!selected && <option value="">Select a keyword…</option>}
         {keywords.map((keyword) => (

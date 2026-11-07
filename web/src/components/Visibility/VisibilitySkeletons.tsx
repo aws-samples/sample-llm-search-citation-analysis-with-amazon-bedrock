@@ -15,7 +15,7 @@ const HEADLINE_CARD_IDS = ['mention-rate', 'share-of-voice', 'visibility-score',
 
 /** An `OverviewPanel` frame with a heading-sized bar. */
 const PanelSkeleton = ({ children }: { readonly children: ReactNode }) => (
-  <div className="bg-white rounded-lg shadow p-4 space-y-3">
+  <div className="bg-white rounded-lg shadow-sm p-4 space-y-3">
     <div className="flex h-7 items-center"><Skeleton className="h-5 w-32" /></div>
     {children}
   </div>

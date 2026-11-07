@@ -21,5 +21,5 @@ export const UserRoleBadge = ({ groups }: { readonly groups: readonly string[] }
 
 /** Marks the signed-in person's own row. */
 export const YouTag = () => (
-  <span className="ml-2 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">You</span>
+  <span className="ml-2 inline-flex items-center rounded-sm bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">You</span>
 );

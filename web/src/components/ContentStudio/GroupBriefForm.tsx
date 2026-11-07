@@ -109,7 +109,7 @@ export function GroupBriefForm({
     setValidationIssues([]);
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: React.SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     const issues = validateGroupBriefDraft({
       scope: canonicalScope,
@@ -261,7 +261,7 @@ export function GroupBriefForm({
               value={outputLanguage}
               onChange={(event) => setOutputLanguage(event.target.value)}
               disabled={generating}
-              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
             >
               {GROUP_BRIEF_LANGUAGES.map((language) => (
                 <option key={language} value={language}>{language}</option>

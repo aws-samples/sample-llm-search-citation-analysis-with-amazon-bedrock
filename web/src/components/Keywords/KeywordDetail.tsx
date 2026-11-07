@@ -109,7 +109,7 @@ export const KeywordDetail = ({
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4 overflow-y-auto">
+    <div className="fixed top-0 left-0 right-0 bottom-0 bg-black/50 flex items-center justify-center z-100 p-4 overflow-y-auto">
       <div className="bg-gray-50 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
         <DetailHeader keyword={keyword} stats={stats} onClose={onClose} />
 
@@ -133,7 +133,7 @@ export const KeywordDetail = ({
 };
 
 const LoadingOverlay = () => (
-  <div className="fixed top-0 left-0 right-0 bottom-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
+  <div className="fixed top-0 left-0 right-0 bottom-0 bg-black/50 flex items-center justify-center z-100">
     <div className="bg-white rounded-lg p-8">
       <Spinner size="lg" className="mx-auto" />
       <p className="mt-4 text-gray-600">Loading keyword details...</p>

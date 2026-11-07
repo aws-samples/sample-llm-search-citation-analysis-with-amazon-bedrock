@@ -131,7 +131,7 @@ const ViewModeToggle = ({
       onClick={() => setViewMode('preview')}
       className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
         viewMode === 'preview'
-          ? 'bg-white text-gray-900 shadow-sm'
+          ? 'bg-white text-gray-900 shadow-xs'
           : 'text-gray-500 hover:text-gray-700'
       }`}
     >
@@ -141,7 +141,7 @@ const ViewModeToggle = ({
       onClick={() => setViewMode('raw')}
       className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
         viewMode === 'raw'
-          ? 'bg-white text-gray-900 shadow-sm'
+          ? 'bg-white text-gray-900 shadow-xs'
           : 'text-gray-500 hover:text-gray-700'
       }`}
     >
@@ -251,7 +251,7 @@ const ContentDetailBody = ({
         <ul className="mt-2 space-y-2">
           {content.key_points.map((point) => (
             <li key={point} className="text-sm text-gray-700 flex items-start gap-2">
-              <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
+              <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
               {point}
             </li>
           ))}

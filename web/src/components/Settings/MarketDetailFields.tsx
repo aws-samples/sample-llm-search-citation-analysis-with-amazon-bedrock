@@ -89,7 +89,7 @@ const DETAIL_FIELDS: readonly FieldSpec[] = [
   },
 ];
 
-const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
+const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
 
 interface BrandListFieldProps {
   readonly id: string;

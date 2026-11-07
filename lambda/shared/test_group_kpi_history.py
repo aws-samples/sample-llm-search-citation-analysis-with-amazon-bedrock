@@ -9,16 +9,16 @@ import pytest
 from shared.group_kpi_history import (
     DRIVER_IMPACT_KPIS,
     GROUP_RUN_MIN_COVERAGE,
-    answers_by_run,
     build_group_kpi_history,
-    group_kpi_history_from_answers,
+    group_kpi_history_from_runs,
     keyword_run_histories,
     keyword_summary,
     run_drivers,
-    run_models,
     summary_run,
 )
 from shared.kpi_engine import KPI_IDS, TRENDED_KPIS, answers_from_rows
+from shared.kpi_tally import run_tallies, tally_models
+from testing.kpi_tally_fixtures import tallies_by_keyword
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
 RUN_2 = '2026-09-08T06:00:00.000000Z'
@@ -81,11 +81,11 @@ def _keyword(history: dict[str, Any], keyword: str) -> dict[str, Any]:
     return matches[0]
 
 
-class TestAnswersByRun:
-    def test_groups_answers_by_run_and_drops_those_without_a_timestamp(self):
+class TestRunTallies:
+    def test_tallies_answers_by_run_oldest_first_and_drops_those_without_a_timestamp(self):
         answers = answers_from_rows([_hotel_first(RUN_2), _hotel_first(RUN_1), _hotel_first(''), _rival_only(RUN_2)])
 
-        assert {timestamp: len(run) for timestamp, run in answers_by_run(answers).items()} == {RUN_2: 2, RUN_1: 1}
+        assert [(run.timestamp, run.answers) for run in run_tallies('k', answers)] == [(RUN_1, 1), (RUN_2, 2)]
 
 
 class TestRunModels:
@@ -97,10 +97,10 @@ class TestRunModels:
             _answer(RUN_1, provider='gemini', model=''),
         ])
 
-        assert run_models(answers) == {'gemini': ['gemini-3-flash-preview'], 'openai': ['gpt-5-mini', 'gpt-5.2']}
+        assert tally_models(run_tallies('k', answers)) == {'gemini': ['gemini-3-flash-preview'], 'openai': ['gpt-5-mini', 'gpt-5.2']}
 
     def test_is_empty_when_no_answer_recorded_a_model(self):
-        assert run_models(answers_from_rows([_answer(RUN_1, metadata={})])) == {}
+        assert tally_models(run_tallies('k', answers_from_rows([_answer(RUN_1, metadata={})]))) == {}
 
 
 class TestGroupRunKpis:
@@ -383,15 +383,15 @@ def _two_group_runs_answers() -> dict[str, list[Any]]:
     }
 
 
-class TestHistoryFromAnswers:
+class TestHistoryFromRuns:
     def test_equals_the_history_built_from_the_rows(self):
-        assert group_kpi_history_from_answers(['k1', 'k2', 'k3'], _two_group_runs_answers()) == _two_group_runs()
+        assert group_kpi_history_from_runs(['k1', 'k2', 'k3'], tallies_by_keyword(_two_group_runs_answers())) == _two_group_runs()
 
     def test_keyword_run_histories_equal_the_keywords_of_the_history(self):
-        assert keyword_run_histories(['k1', 'k2', 'k3'], _two_group_runs_answers()) == _two_group_runs()['keywords']
+        assert keyword_run_histories(['k1', 'k2', 'k3'], tallies_by_keyword(_two_group_runs_answers()), []) == _two_group_runs()['keywords']
 
     def test_keyword_run_histories_answer_no_runs_for_a_keyword_without_answers(self):
-        assert keyword_run_histories(['k9'], {}) == [{'keyword': 'k9', 'runs': []}]
+        assert keyword_run_histories(['k9'], {}, []) == [{'keyword': 'k9', 'runs': []}]
 
 
 class TestSummaryShapes:

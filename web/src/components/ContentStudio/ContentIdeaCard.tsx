@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { ContentIdea } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import { StrokeIcon } from '../ui/StrokeIcon';

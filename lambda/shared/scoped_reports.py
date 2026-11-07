@@ -7,8 +7,9 @@ read at most ``SCOPE_KEYWORDS_CAP`` of the scope's keywords and echo the scope
 next to whether the cap cut it short. ``required_report_scope`` and
 ``capped_scope`` are those two steps; scope parsing itself lives in
 ``shared.scope_params``. ``TREND_WINDOW_PARAMS`` are the ``period`` / ``days``
-rules ``/trends`` and ``/reports/overview`` share. ``load_window_answers`` is
-the bounded windowed read behind ``/trends``, ``/reports/overview``,
+rules ``/trends`` and ``/reports/overview`` share. ``load_window_runs`` is
+the bounded windowed read (per-run KPI rollups first, raw rows for runs
+without one) behind ``/trends``, ``/reports/overview``,
 ``/reports/group-kpis`` and the stability facts of ``/reports/insights``.
 
 Every read here honours the request's time budget (``shared.request_deadline``):
@@ -20,13 +21,15 @@ from __future__ import annotations
 
 import functools
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
-from shared.answer_queries import query_keyword_rows_capped
+from shared.answer_queries import query_keyword_rows_capped, query_keyword_run_rows
 from shared.group_kpi_history import keyword_run_histories
-from shared.kpi_engine import Answer, answers_from_rows
+from shared.keyword_run_kpis import StoredRuns, query_stored_runs
+from shared.kpi_engine import answers_from_rows
+from shared.kpi_tally import RunTally, owned_fingerprint, run_tallies, run_tally
 from shared.request_deadline import Deadline, current_deadline
 from shared.scope_params import (
     MARKET_PARAM,
@@ -209,69 +212,147 @@ def window_read_deadline() -> Deadline:
 
 
 @dataclass(frozen=True)
-class WindowAnswers:
-    """Each keyword's answers of a window, cut at one run timestamp shared by every keyword read."""
+class WindowRuns:
+    """Each keyword's run tallies of a window (``shared.kpi_tally``), oldest first, cut at one run timestamp shared by every keyword read."""
 
-    answers: dict[str, list[Answer]]
+    runs: dict[str, list[RunTally]]
     truncated_before: str | None
-    """``None`` when the window was read whole; else the run timestamp at and before which no answer was kept."""
+    """``None`` when the window was read whole; else the run timestamp at and before which no run was kept."""
     skipped: tuple[str, ...] = ()
-    """Keywords the time budget left unread: they have no entry in ``answers``."""
+    """Keywords the time budget left unread: they have no entry in ``runs``."""
 
     def read_keywords(self, keywords: Sequence[str]) -> list[str]:
         """``keywords`` without the ones left unread, in order."""
-        return [keyword for keyword in keywords if keyword in self.answers]
+        return [keyword for keyword in keywords if keyword in self.runs]
 
 
 class _KeywordWindow(NamedTuple):
-    answers: list[Answer]
+    runs: list[RunTally]
     cut: str | None
 
 
-def load_window_answers(
+@dataclass(frozen=True)
+class _WindowRead:
+    """What one keyword's window read is asked for."""
+
+    table: Any
+    rollups: Any | None
+    since: str
+    until: str | None
+    limit: int
+    owned_domains: list[str]
+    brands: bool
+    several: bool
+    budget: Deadline
+
+    @property
+    def fingerprint(self) -> str:
+        return owned_fingerprint(self.owned_domains)
+
+
+def _latest_cut(*cuts: str | None) -> str | None:
+    return max((cut for cut in cuts if cut is not None), default=None)
+
+
+def _rebuilt_runs(request: _WindowRead, keyword: str, timestamps: list[str]) -> tuple[list[RunTally], str | None]:
+    """The runs whose rollup counted other owned domains, re-tallied from their rows, newest first until the budget stops.
+
+    The second value is the run the budget stopped at (it and older runs are dropped), or ``None``.
+    """
+    rebuilt: list[RunTally] = []
+    for timestamp in sorted(timestamps, reverse=True):
+        if request.budget.stop_reading('a stale keyword rollup'):
+            return rebuilt, timestamp
+        rows = query_keyword_run_rows(request.table, keyword, timestamp)
+        rebuilt.append(run_tally(keyword, timestamp, answers_from_rows(rows), request.owned_domains))
+    return rebuilt, None
+
+
+def _read_keyword_window(request: _WindowRead, keyword: str) -> _KeywordWindow | None:
+    """``keyword``'s runs of the window: rollup rows first, its raw rows for the runs older than its first rollup.
+
+    ``None`` when the keyword is not started, or (one of several) stopped inside its window.
+    """
+    if request.budget.stop_reading('a windowed report'):
+        return None
+    stored = StoredRuns([]) if request.rollups is None else query_stored_runs(
+        request.rollups, keyword, request.since, until=request.until, brands=request.brands, deadline=request.budget,
+    )
+    if stored.cut is not None and request.several:
+        return None
+    fingerprint = request.fingerprint
+    current = [run for run in stored.runs if run.matches_owned(fingerprint)]
+    rebuilt, rebuilt_cut = _rebuilt_runs(request, keyword, [run.timestamp for run in stored.runs if run.answers and not run.matches_owned(fingerprint)])
+    raw: list[RunTally] = []
+    raw_cut = None
+    if stored.cut is None:
+        oldest = stored.runs[0].timestamp if stored.runs else None
+        capped = query_keyword_rows_capped(
+            request.table, keyword, request.since, request.limit, until=request.until, before=oldest, deadline=request.budget,
+        )
+        if capped.stopped and request.several:
+            return None
+        raw, raw_cut = run_tallies(keyword, answers_from_rows(capped.rows), request.owned_domains), capped.cut
+    cut = _latest_cut(stored.cut, rebuilt_cut, raw_cut)
+    runs = sorted((run for run in (*raw, *current, *rebuilt) if run.answers and (cut is None or run.timestamp > cut)), key=lambda run: run.timestamp)
+    return _KeywordWindow(runs, cut)
+
+
+def load_window_runs(
     table: Any,
     keywords: list[str],
     since: str,
+    owned_domains: Iterable[str] = (),
     *,
+    rollups: Any | None = None,
     until: str | None = None,
     max_rows: int | None = None,
-) -> WindowAnswers:
-    """Each keyword's answers from ``since`` on (through the run ``until``), read in parallel and bounded.
+    brands: bool = True,
+) -> WindowRuns:
+    """Each keyword's run tallies from ``since`` on (through the run ``until``), read in parallel and bounded.
 
-    Each keyword reads at most ``max_rows`` rows (default ``rows_per_keyword``),
-    newest first. When a keyword's cap cuts its window, every keyword is cut at
-    the latest of those cuts, so the answers kept are every answer of the runs
+    A keyword's runs come from its ``rollups`` rows (``shared.keyword_run_kpis``,
+    one per run) where they exist: from its oldest rollup in the window on,
+    its runs are read as rollups, and only older runs (before rollups were
+    written or backfilled) are read from its SearchResults rows in ``table``.
+    A rollup counted against other owned domains than ``owned_domains`` is
+    re-tallied from that run's rows. ``brands`` False leaves the brand counts
+    unread. Without ``rollups`` every run is read raw (2.42.0).
+
+    The raw part reads at most ``max_rows`` rows a keyword (default
+    ``rows_per_keyword``), newest first. When a keyword's read is cut, every
+    keyword is cut at the latest of those cuts, so the runs kept are every run
     after ``truncated_before``: a shorter window, never a window with holes.
-    A keyword whose read fails has no answers (logged by ``map_scope_keywords``).
+    A keyword whose read fails has no runs (logged by ``map_scope_keywords``).
 
     The read stops at ``window_read_deadline``. A keyword not started by then,
     or (when there are several) stopped inside its window, is ``skipped``
     rather than shortening every other keyword's window; a single keyword
     keeps the newest runs it read, with ``truncated_before`` where it stopped.
     """
-    limit = max_rows if max_rows is not None else rows_per_keyword(len(keywords))
-    budget = window_read_deadline()
-    several = len(keywords) > 1
-
-    def read(keyword: str) -> _KeywordWindow | None:
-        if budget.stop_reading('a windowed report'):
-            return None
-        capped = query_keyword_rows_capped(table, keyword, since, limit, until=until, deadline=budget)
-        if capped.stopped and several:
-            return None
-        return _KeywordWindow(answers_from_rows(capped.rows), capped.cut)
+    request = _WindowRead(
+        table=table,
+        rollups=rollups,
+        since=since,
+        until=until,
+        limit=max_rows if max_rows is not None else rows_per_keyword(len(keywords)),
+        owned_domains=list(owned_domains),
+        brands=brands,
+        several=len(keywords) > 1,
+        budget=window_read_deadline(),
+    )
 
     def unread_or_empty(_keyword: str) -> _KeywordWindow | None:
-        return None if budget.cut or budget.expired() else _KeywordWindow([], None)
+        return None if request.budget.cut or request.budget.expired() else _KeywordWindow([], None)
 
-    results = dict(zip(keywords, map_scope_keywords(keywords, read, unread_or_empty), strict=True))
-    if budget.cut:
+    results = dict(zip(keywords, map_scope_keywords(keywords, lambda keyword: _read_keyword_window(request, keyword), unread_or_empty), strict=True))
+    if request.budget.cut:
         current_deadline().cut = True
     windows = {keyword: window for keyword, window in results.items() if window is not None}
-    cut = max((window.cut for window in windows.values() if window.cut is not None), default=None)
-    return WindowAnswers(
-        answers={
-            keyword: window.answers if cut is None else [answer for answer in window.answers if answer.timestamp > cut]
+    cut = _latest_cut(*(window.cut for window in windows.values()))
+    return WindowRuns(
+        runs={
+            keyword: window.runs if cut is None else [run for run in window.runs if run.timestamp > cut]
             for keyword, window in windows.items()
         },
         truncated_before=cut,
@@ -280,23 +361,23 @@ def load_window_answers(
 
 
 def window_histories(
-    table: Any, keywords: list[str], since: str, owned_domains: list[str],
-) -> tuple[list[dict[str, Any]], WindowAnswers]:
+    table: Any, keywords: list[str], since: str, owned_domains: list[str], *, rollups: Any | None = None,
+) -> tuple[list[dict[str, Any]], WindowRuns]:
     """Each read keyword's runs from ``since`` on with their KPIs (``keyword_run_histories``), and the window read."""
-    window = load_window_answers(table, keywords, since)
-    return keyword_run_histories(window.read_keywords(keywords), window.answers, owned_domains), window
+    window = load_window_runs(table, keywords, since, owned_domains, rollups=rollups, brands=False)
+    return keyword_run_histories(window.read_keywords(keywords), window.runs, owned_domains), window
 
 
 def load_window_histories(
-    table: Any, keywords: list[str], since: str, owned_domains: list[str],
+    table: Any, keywords: list[str], since: str, owned_domains: list[str], *, rollups: Any | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Each keyword's runs from ``since`` on with their KPIs (``keyword_run_histories``), and ``truncated_before``.
 
-    Read by ``load_window_answers``, so ``/reports/insights`` and the
+    Read by ``load_window_runs``, so ``/reports/insights`` and the
     report-insights Lambda stop at the same run when the window holds more
     rows than one report reads.
     """
-    histories, window = window_histories(table, keywords, since, owned_domains)
+    histories, window = window_histories(table, keywords, since, owned_domains, rollups=rollups)
     return histories, window.truncated_before
 
 

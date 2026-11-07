@@ -38,7 +38,7 @@ const AuthorCard = ({
     <img 
       src={author.photoSrc} 
       alt={author.name}
-      className={`w-12 h-12 rounded-full object-cover ${author.photoFocus} flex-shrink-0`}
+      className={`w-12 h-12 rounded-full object-cover ${author.photoFocus} shrink-0`}
     />
     <div>
       <h4 className="text-sm font-semibold text-gray-900">{author.name}</h4>

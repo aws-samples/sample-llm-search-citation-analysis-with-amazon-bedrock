@@ -39,13 +39,14 @@ from shared.decorators import api_handler, validate
 from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
 from shared.insights_narrative import group_scope_key, load_narrative
+from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.markets import market_scoped_key
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_dynamodb_resource
 from shared.scoped_reports import (
     TREND_WINDOW_PARAMS,
     ScopeRead,
-    WindowAnswers,
+    WindowRuns,
     capped_scope,
     read_scope_keywords,
     required_report_scope,
@@ -96,13 +97,15 @@ def load_latest_answers(keywords: list[str]) -> ScopeRead[list[Answer]]:
     return ScopeRead({keyword: answers_from_rows(keyword_rows) for keyword, keyword_rows in rows.values.items()}, rows.skipped)
 
 
-def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> tuple[list[dict[str, Any]], WindowAnswers]:
+def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> tuple[list[dict[str, Any]], WindowRuns]:
     """Each keyword's runs of the last ``days`` days with their KPIs, read as ``GET /api/reports/group-kpis`` reads them.
 
     The second value is the window read: ``truncated_before`` (``None`` for a
     window read whole) and the keywords the time budget left unread.
     """
-    return window_histories(dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days), owned_domains)
+    return window_histories(
+        dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(days), owned_domains, rollups=keyword_run_kpis_table(dynamodb),
+    )
 
 
 def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, Any] | None:

@@ -77,7 +77,8 @@ check_prerequisites() {
     
     # Check Node.js
     if command_exists node; then
-        local node_version=$(node --version)
+        local node_version
+        node_version=$(node --version)
         print_success "Node.js installed: $node_version"
     else
         print_error "Node.js is not installed. Please install Node.js 20+ first."
@@ -86,7 +87,8 @@ check_prerequisites() {
     
     # Check npm
     if command_exists npm; then
-        local npm_version=$(npm --version)
+        local npm_version
+        npm_version=$(npm --version)
         print_success "npm installed: $npm_version"
     else
         print_error "npm is not installed."
@@ -95,7 +97,8 @@ check_prerequisites() {
     
     # Check Python
     if command_exists python3; then
-        local python_version=$(python3 --version)
+        local python_version
+        python_version=$(python3 --version)
         print_success "Python installed: $python_version"
     else
         print_error "Python 3 is not installed. Please install Python 3.12+."
@@ -104,7 +107,8 @@ check_prerequisites() {
     
     # Check pip
     if command_exists pip3; then
-        local pip_version=$(pip3 --version)
+        local pip_version
+        pip_version=$(pip3 --version)
         print_success "pip installed: $pip_version"
     else
         print_error "pip3 is not installed."
@@ -113,7 +117,8 @@ check_prerequisites() {
     
     # Check AWS CLI
     if command_exists aws; then
-        local aws_version=$(aws --version)
+        local aws_version
+        aws_version=$(aws --version)
         print_success "AWS CLI installed: $aws_version"
     else
         print_error "AWS CLI is not installed. Please install it first."
@@ -122,7 +127,8 @@ check_prerequisites() {
     
     # Check CDK CLI
     if command_exists cdk; then
-        local cdk_version=$(cdk --version)
+        local cdk_version
+        cdk_version=$(cdk --version)
         print_success "AWS CDK installed: $cdk_version"
     else
         print_error "AWS CDK is not installed. Run: npm install -g aws-cdk"
@@ -351,10 +357,11 @@ rebuild_frontend_with_cognito() {
         return 1
     fi
     
-    # Upload updated frontend to S3
+    # Upload updated frontend to S3. config.json (the API URL) belongs to
+    # CitationAnalysisApiStack: --exclude keeps --delete from removing it.
     if [ -d "web/dist" ]; then
         print_info "Uploading updated frontend to S3 (${bucket_name})..."
-        aws s3 sync web/dist/ "s3://${bucket_name}/" --delete
+        aws s3 sync web/dist/ "s3://${bucket_name}/" --delete --exclude config.json
         print_success "Updated frontend uploaded to S3"
     else
         print_error "web/dist not found — build may have failed"
@@ -455,6 +462,22 @@ verify_deployment() {
                 print_success "  ✓ State machine exists: $state_machines"
             else
                 print_error "  ✗ State machine not found"
+                failures=$((failures + 1))
+            fi
+            
+            # The dashboard REST API has its own stack (2.44.0); the
+            # dashboard reads its URL from config.json in the web bucket.
+            print_info "Verifying the dashboard API stack..."
+            local api_stack_status
+            api_stack_status=$(aws cloudformation describe-stacks \
+                --stack-name CitationAnalysisApiStack \
+                --region "$region" \
+                --query 'Stacks[0].StackStatus' \
+                --output text 2>/dev/null || echo "")
+            if [ "$api_stack_status" = "CREATE_COMPLETE" ] || [ "$api_stack_status" = "UPDATE_COMPLETE" ]; then
+                print_success "  ✓ Stack CitationAnalysisApiStack: $api_stack_status"
+            else
+                print_error "  ✗ Stack CitationAnalysisApiStack: ${api_stack_status:-not found}"
                 failures=$((failures + 1))
             fi
             

@@ -4,8 +4,8 @@ import {
   countryOptions, languageOptions, type LocaleOption
 } from './marketLocales';
 
-const SELECT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
-const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
+const SELECT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
+const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
 
 const COUNTRIES = countryOptions();
 const LANGUAGES = languageOptions();

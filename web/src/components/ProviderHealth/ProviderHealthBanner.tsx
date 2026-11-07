@@ -80,7 +80,7 @@ export const ProviderHealthBanner = ({ onNavigateToProviders }: ProviderHealthBa
       <button
         onClick={handleDismiss}
         aria-label="Dismiss provider warning"
-        className="p-1 -mt-1 -mr-1 shrink-0 text-amber-600 hover:text-amber-900 hover:bg-amber-100 rounded transition-colors"
+        className="p-1 -mt-1 -mr-1 shrink-0 text-amber-600 hover:text-amber-900 hover:bg-amber-100 rounded-sm transition-colors"
       >
         <StrokeIcon className="w-4 h-4" paths={CLOSE_PATHS} />
       </button>

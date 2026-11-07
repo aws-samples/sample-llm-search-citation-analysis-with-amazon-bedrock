@@ -56,10 +56,10 @@ export function MoverColumn({
             <span className="text-gray-700 dark:text-gray-300 truncate">
               {row.keyword}
             </span>
-            <span className="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">
               {`Score ${formatKpi('visibility_score', row.visibility_score)}`}
             </span>
-            <span className={`font-mono font-semibold flex-shrink-0 ${accentClass}`}>
+            <span className={`font-mono font-semibold shrink-0 ${accentClass}`}>
               {formatKpiDelta('visibility_score', row.change)}
             </span>
           </li>

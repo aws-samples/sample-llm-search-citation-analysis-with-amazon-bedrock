@@ -26,22 +26,14 @@ describe('PromptCard', () => {
     expect(screen.getByText('losing')).toHaveClass('bg-red-100', 'text-red-800');
   });
 
-  it('displays first party mentions and rank', () => {
+  it.each([
+    ['first party mentions and rank', '10 mentions', 'Rank #1'],
+    ['competitor mentions and rank', '5 mentions', 'Rank #3'],
+    ['provider coverage percentages', '75% provider coverage', '50% provider coverage'],
+  ])('displays %s', (_case, firstText, secondText) => {
     render(<PromptCard prompt={basePrompt} />);
-    expect(screen.getByText('10 mentions')).toBeInTheDocument();
-    expect(screen.getByText('Rank #1')).toBeInTheDocument();
-  });
-
-  it('displays competitor mentions and rank', () => {
-    render(<PromptCard prompt={basePrompt} />);
-    expect(screen.getByText('5 mentions')).toBeInTheDocument();
-    expect(screen.getByText('Rank #3')).toBeInTheDocument();
-  });
-
-  it('displays provider coverage percentages', () => {
-    render(<PromptCard prompt={basePrompt} />);
-    expect(screen.getByText('75% provider coverage')).toBeInTheDocument();
-    expect(screen.getByText('50% provider coverage')).toBeInTheDocument();
+    expect(screen.getByText(firstText)).toBeInTheDocument();
+    expect(screen.getByText(secondText)).toBeInTheDocument();
   });
 
   it('displays score when provided', () => {

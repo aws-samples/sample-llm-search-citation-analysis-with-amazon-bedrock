@@ -6,7 +6,7 @@ every keyword), built from answers with ``shared.kpi_engine``:
   keyword's latest run, pooled, its change since each keyword's previous
   run, the brand leaderboard, every KPI per AI engine, the most cited
   domains and a row per keyword.
-- ``trend_view``: how it moved — every KPI per day, week or month, the
+- ``trend_view``: how it moved (from per-run tallies, ``shared.kpi_tally``) — every KPI per day, week or month, the
   latest period against the previous one, each keyword's own move, and the
   tracked brand against its leading competitors over time.
 
@@ -31,6 +31,7 @@ from shared.kpi_engine import (
     kpi_trends,
     source_table,
 )
+from shared.kpi_tally import BrandPool, RunTally, tally_brand_table, tally_kpis, tally_mentions
 
 #: The format of each trend period: a calendar day, an ISO week (Monday to Sunday) or a calendar month.
 _PERIOD_FORMATS = {'day': '%Y-%m-%d', 'week': '%G-W%V', 'month': '%Y-%m'}
@@ -151,12 +152,13 @@ def period_key(timestamp: str, period: str) -> str | None:
     return parsed.strftime(_PERIOD_FORMATS[period])
 
 
-def _by_period(answers: Iterable[Answer], period: str) -> dict[str, list[Answer]]:
-    buckets: dict[str, list[Answer]] = defaultdict(list)
-    for answer in answers:
-        key = period_key(answer.timestamp, period)
-        if key is not None:
-            buckets[key].append(answer)
+def _by_period(runs: Iterable[RunTally], period: str) -> dict[str, list[RunTally]]:
+    """Runs with answers grouped by ``period``, periods in order (a run of no answer has no period)."""
+    buckets: dict[str, list[RunTally]] = defaultdict(list)
+    for run in runs:
+        key = period_key(run.timestamp, period)
+        if key is not None and run.answers:
+            buckets[key].append(run)
     return dict(sorted(buckets.items()))
 
 
@@ -165,46 +167,49 @@ def _change(current: Mapping[str, Any], previous: Mapping[str, Any]) -> dict[str
     return {'deltas': deltas, 'trends': kpi_trends(deltas)}
 
 
-def _keyword_trend(keyword: str, periods: dict[str, list[Answer]], domains: list[str]) -> dict[str, Any]:
+def _keyword_trend(keyword: str, periods: dict[str, list[RunTally]], domains: list[str]) -> dict[str, Any]:
     """One keyword's latest period, and its change since the keyword's previous period."""
     keys = list(periods)
-    latest = brand_kpis(periods[keys[-1]], domains)
+    latest = tally_kpis(periods[keys[-1]], domains)
     change = None
     if len(keys) > 1:
-        change = {'previous_period': keys[-2], **_change(latest, brand_kpis(periods[keys[-2]], domains))}
+        change = {'previous_period': keys[-2], **_change(latest, tally_kpis(periods[keys[-2]], domains))}
     return {'keyword': keyword, 'period': keys[-1], 'kpis': latest, 'change': change}
 
 
-def _group_change(per_keyword: Mapping[str, dict[str, list[Answer]]], domains: list[str]) -> dict[str, Any] | None:
+def _group_change(per_keyword: Mapping[str, dict[str, list[RunTally]]], domains: list[str]) -> dict[str, Any] | None:
     """Latest against previous period, like for like: only the keywords measured in both are compared."""
     compared = [periods for periods in per_keyword.values() if len(periods) > 1]
     if not compared:
         return None
-    latest = [answer for periods in compared for answer in list(periods.values())[-1]]
-    previous = [answer for periods in compared for answer in list(periods.values())[-2]]
-    return {'keywords_compared': len(compared), **_change(brand_kpis(latest, domains), brand_kpis(previous, domains))}
+    latest = [run for periods in compared for run in list(periods.values())[-1]]
+    previous = [run for periods in compared for run in list(periods.values())[-2]]
+    return {'keywords_compared': len(compared), **_change(tally_kpis(latest, domains), tally_kpis(previous, domains))}
 
 
 def _brand_point(period: str, kpis: Mapping[str, Any]) -> dict[str, Any]:
     return {'period': period, **{kpi: kpis[kpi] for kpi in _BRAND_TREND_KPIS}}
 
 
-def _absent_brand(answers: list[Answer]) -> dict[str, Any]:
+def _absent_brand(runs: list[RunTally]) -> dict[str, Any]:
     """The KPIs of a brand no answer of the period names."""
-    named = any(answer.sightings for answer in answers)
+    named = tally_mentions(runs) > 0
     return {'share_of_voice': 0.0 if named else None, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None}
 
 
-def _brand_trends(series: Mapping[str, list[Answer]], tracked_kpis: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+def _brand_trends(series: Mapping[str, list[RunTally]], tracked_kpis: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     """Share of voice, mention rate, visibility score and position per period: the tracked brand and its leading competitors.
 
     The competitors are the ``BRAND_TREND_COMPETITORS`` with the best
     visibility score over the whole window; a period whose answers do not
     name one scores it 0 (no position).
     """
-    pooled = [answer for answers in series.values() for answer in answers]
-    leaders = [row['name'] for row in brand_table(pooled) if row['classification'] == COMPETITOR][:BRAND_TREND_COMPETITORS]
-    tables = {key: {row['name'].lower(): row for row in brand_table(answers)} for key, answers in series.items()}
+    pools = {key: BrandPool.of(runs) for key, runs in series.items()}
+    window = BrandPool()
+    for pool in pools.values():
+        window.add_pool(pool)
+    leaders = [row['name'] for row in window.table() if row['classification'] == COMPETITOR][:BRAND_TREND_COMPETITORS]
+    tables = {key: {row['name'].lower(): row for row in pool.table()} for key, pool in pools.items()}
     return {
         'tracked': [_brand_point(key, tracked_kpis[key]) for key in series],
         'competitors': [
@@ -219,11 +224,14 @@ def _brand_trends(series: Mapping[str, list[Answer]], tracked_kpis: Mapping[str,
 
 def trend_view(
     keywords: list[str],
-    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    runs_by_keyword: Mapping[str, Iterable[RunTally]],
     period: str,
     owned_domains: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Every KPI per period, the scope's latest standing and move, and each keyword's move.
+
+    ``runs_by_keyword`` holds each keyword's run tallies (``shared.kpi_tally``),
+    oldest first, counted against ``owned_domains``.
 
     - ``trend_data``: one point per period holding every answer of the scope in it.
     - ``latest``: every KPI over each keyword's latest period, pooled; ``latest_brands``: its leaderboard.
@@ -235,27 +243,27 @@ def trend_view(
     domains = list(owned_domains)
     per_keyword = {
         keyword: periods for keyword in keywords
-        if (periods := _by_period(answers_by_keyword.get(keyword, ()), period))
+        if (periods := _by_period(runs_by_keyword.get(keyword, ()), period))
     }
-    series = _by_period((answer for periods in per_keyword.values() for bucket in periods.values() for answer in bucket), period)
-    series_kpis = {key: brand_kpis(answers, domains) for key, answers in series.items()}
+    series = _by_period((run for periods in per_keyword.values() for bucket in periods.values() for run in bucket), period)
+    series_kpis = {key: tally_kpis(runs, domains) for key, runs in series.items()}
     keyword_trends = [_keyword_trend(keyword, periods, domains) for keyword, periods in per_keyword.items()]
     keyword_trends.sort(key=lambda row: (-row['kpis']['visibility_score'], row['keyword'].lower()))
     directions = [row['change']['trends']['visibility_score'] if row['change'] else 'stable' for row in keyword_trends]
-    latest = [answer for periods in per_keyword.values() for answer in list(periods.values())[-1]]
+    latest = [run for periods in per_keyword.values() for run in list(periods.values())[-1]]
     return {
         'keywords_with_data': len(per_keyword),
         'trend_data': [
             {
                 'period': key,
-                'runs': len({answer.timestamp for answer in answers}),
-                'keywords_with_data': len({answer.keyword for answer in answers}),
+                'runs': len({run.timestamp for run in runs}),
+                'keywords_with_data': len({run.keyword for run in runs}),
                 'kpis': series_kpis[key],
             }
-            for key, answers in series.items()
+            for key, runs in series.items()
         ],
-        'latest': brand_kpis(latest, domains),
-        'latest_brands': brand_table(latest)[:LATEST_BRANDS_LIMIT],
+        'latest': tally_kpis(latest, domains),
+        'latest_brands': tally_brand_table(latest)[:LATEST_BRANDS_LIMIT],
         'change': _group_change(per_keyword, domains),
         'keyword_trends': keyword_trends,
         'overall': {

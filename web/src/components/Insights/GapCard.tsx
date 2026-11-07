@@ -10,7 +10,7 @@ const PRIORITY_STYLES: Record<string, string> = {
 
 export function GapCard({ gap }: { readonly gap: CitationGap }) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow">
+    <div className="bg-white p-4 rounded-lg shadow-sm">
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1 min-w-0">
           <a
@@ -26,7 +26,7 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
             {gap.content_type === 'video' && <VideoBadge />}
           </div>
         </div>
-        <span className={`px-2 py-1 rounded text-xs ml-2 ${PRIORITY_STYLES[gap.priority] ?? PRIORITY_STYLES.low}`}>
+        <span className={`px-2 py-1 rounded-sm text-xs ml-2 ${PRIORITY_STYLES[gap.priority] ?? PRIORITY_STYLES.low}`}>
           {gap.priority}
         </span>
       </div>
@@ -47,7 +47,7 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
           <div className="text-xs text-gray-500 mb-1">Competitors mentioned:</div>
           <div className="flex flex-wrap gap-1">
             {gap.competitor_brands.map(brand => (
-              <span key={brand} className="px-2 py-0.5 bg-red-50 text-red-700 rounded text-xs">
+              <span key={brand} className="px-2 py-0.5 bg-red-50 text-red-700 rounded-sm text-xs">
                 {brand}
               </span>
             ))}

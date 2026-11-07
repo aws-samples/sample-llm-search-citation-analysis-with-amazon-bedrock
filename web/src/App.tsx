@@ -9,7 +9,6 @@ import { signOut } from 'aws-amplify/auth';
 import {
   useAuthenticator, Authenticator
 } from '@aws-amplify/ui-react';
-import '@aws-amplify/ui-react/styles.css';
 import { useDashboardData } from './hooks/useDashboardData';
 import { PanelLoadError } from './components/Dashboard/PanelLoadError';
 import { useExecutionPolling } from './hooks/useExecutionPolling';

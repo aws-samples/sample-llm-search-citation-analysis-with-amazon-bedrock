@@ -78,7 +78,7 @@ function HeaderCell<TRow, TKey extends string>({
           ? column.header
           : (
             <button type="button" onClick={() => onSort(sortKey)}
-              className={`inline-flex items-center gap-1 uppercase tracking-wider rounded hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${active ? 'text-gray-900' : ''}`}>
+              className={`inline-flex items-center gap-1 uppercase tracking-wider rounded-sm hover:text-gray-900 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 ${active ? 'text-gray-900' : ''}`}>
               {column.header}
               <SortGlyph active={active} order={order} />
             </button>

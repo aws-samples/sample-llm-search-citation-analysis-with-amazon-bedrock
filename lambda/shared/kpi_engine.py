@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any
 from urllib.parse import urlparse
 
@@ -266,10 +267,25 @@ def percent(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator * 100, 1) if denominator else None
 
 
-def position_weight(rank: int | None) -> float:
-    """Visibility score weight of a mention at ``rank`` (1st = 1.0, then x0.9 per position)."""
+_DECAY = Fraction(str(POSITION_DECAY))
+
+#: ``position_points(rank) / POSITION_POINTS_SCALE`` is the position weight ``POSITION_DECAY ** (rank - 1)``, exactly.
+POSITION_POINTS_SCALE = _DECAY.denominator ** (POSITION_WEIGHT_CAP - 1)
+
+
+def position_points(rank: int | None) -> int:
+    """Visibility score weight of a mention at ``rank`` (1st = 1.0, then x0.9 per position) in integer points.
+
+    Integers add up exactly in any order, so a visibility score pooled from
+    per-run sums (``shared.kpi_tally``) equals the one pooled from answers.
+    """
     capped = POSITION_WEIGHT_CAP if rank is None else min(rank, POSITION_WEIGHT_CAP)
-    return POSITION_DECAY ** (capped - 1)
+    return _DECAY.numerator ** (capped - 1) * _DECAY.denominator ** (POSITION_WEIGHT_CAP - capped)
+
+
+def visibility_percent(points: int, answers: int) -> float | None:
+    """The visibility score of ``points`` (``position_points`` summed) over ``answers``: the mean weight x 100, to one decimal."""
+    return round(points * 100 / (POSITION_POINTS_SCALE * answers), 1) if answers else None
 
 
 def _mention_counts(answers: Iterable[Answer]) -> dict[str, int]:
@@ -281,11 +297,20 @@ def _mention_counts(answers: Iterable[Answer]) -> dict[str, int]:
     return counts
 
 
+#: The order of a ``sentiment_split``.
+SPLIT_LABELS: tuple[str, ...] = ('positive', 'neutral', 'negative', 'mixed')
+
+
 def _net_sentiment(sightings: Iterable[Sighting]) -> dict[str, Any]:
-    split: dict[str, int] = dict.fromkeys(('positive', 'neutral', 'negative', 'mixed'), 0)
+    split: dict[str, int] = dict.fromkeys(SPLIT_LABELS, 0)
     for sighting in sightings:
         if sighting.sentiment is not None:
             split[sighting.sentiment] += 1
+    return sentiment_fields(split)
+
+
+def sentiment_fields(split: dict[str, int]) -> dict[str, Any]:
+    """``net_sentiment`` and ``sentiment_split`` of a count of labelled sightings per label (``SPLIT_LABELS``)."""
     labelled = sum(split.values())
     net = round((split['positive'] - split['negative']) / labelled * 100, 1) if labelled else None
     return {'net_sentiment': net, 'sentiment_split': split}
@@ -323,7 +348,7 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
     total_mentions = sum(len(answer.sightings) for answer in pool)
     engines = {answer.provider for answer in pool}
     keywords = {answer.keyword for answer in pool}
-    visibility = sum(position_weight(answer.best_first_party_rank()) for answer in mentioning)
+    visibility = sum(position_points(answer.best_first_party_rank()) for answer in mentioning)
     return {
         'answers': len(pool),
         'mentions': len(mentioning),
@@ -332,7 +357,7 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
         'average_position': round(sum(ranks) / len(ranks), 2) if ranks else None,
         'top_1_share': percent(sum(rank == 1 for rank in ranks), len(pool)),
         'top_3_share': percent(sum(rank <= 3 for rank in ranks), len(pool)),
-        'visibility_score': round(visibility / len(pool) * 100, 1) if pool else None,
+        'visibility_score': visibility_percent(visibility, len(pool)),
         **_citation_kpis(pool, domains),
         **_net_sentiment(sighting for answer in mentioning for sighting in answer.first_party()),
         'engine_coverage': percent(len({answer.provider for answer in mentioning}), len(engines)),
@@ -399,11 +424,16 @@ def brand_table(answers: Iterable[Answer]) -> list[dict[str, Any]]:
             'share_of_voice': percent(counts[key], total_mentions),
             'average_position': round(sum(ranks) / len(ranks), 2) if ranks else None,
             'best_position': min(ranks) if ranks else None,
-            'visibility_score': round(sum(position_weight(sighting.rank) for _answer, sighting in seen) / len(pool) * 100, 1),
+            'visibility_score': visibility_percent(sum(position_points(sighting.rank) for _answer, sighting in seen), len(pool)),
             'engines': sorted({answer.provider for answer, _sighting in seen}),
             'keywords': len({answer.keyword for answer, _sighting in seen}),
             **_net_sentiment(sighting for _answer, sighting in seen),
         })
+    return leaderboard(rows)
+
+
+def leaderboard(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Brand rows in ``brand_table``'s order: visibility score, then mentions, then name."""
     rows.sort(key=lambda row: (-row['visibility_score'], -row['mentions'], row['name'].lower()))
     return rows
 
@@ -498,7 +528,9 @@ __all__ = [
     'KPI_IDS',
     'NO_ANSWER',
     'PERCENT_KPIS',
+    'POSITION_POINTS_SCALE',
     'SENTIMENT_LABELS',
+    'SPLIT_LABELS',
     'TRENDED_KPIS',
     'Answer',
     'Sighting',
@@ -511,13 +543,16 @@ __all__ = [
     'is_owned_domain',
     'kpi_changes',
     'kpi_trends',
+    'leaderboard',
     'matches_domain',
     'normalize_domain',
     'overview_presence',
     'owned_domains_from',
     'percent',
-    'position_weight',
+    'position_points',
+    'sentiment_fields',
     'sighting_from_brand',
     'source_table',
     'trend_direction',
+    'visibility_percent',
 ]

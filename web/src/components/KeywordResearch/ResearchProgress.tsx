@@ -162,7 +162,7 @@ export const JobFailureMessage = ({
   if (message === undefined || message === '') return null;
 
   return (
-    <p className={`${spacingClassName}text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1`} title={message}>
+    <p className={`${spacingClassName}text-xs text-red-700 bg-red-50 border border-red-200 rounded-sm px-2 py-1`} title={message}>
       {formatResearchFailureMessage(message)}
     </p>
   );

@@ -1,5 +1,5 @@
 import {
-  useState, type FormEvent
+  useState, type SubmitEvent
 } from 'react';
 import { Button } from '../../ui/Button';
 import {
@@ -18,7 +18,7 @@ interface Props<TBound extends string> {
   readonly onApply: (form: FilterForm) => void;
 }
 
-const INPUT_CLASS = 'w-full rounded border border-gray-300 px-2 py-1 text-sm';
+const INPUT_CLASS = 'w-full rounded-sm border border-gray-300 px-2 py-1 text-sm';
 
 /**
  * Include / exclude terms, a search and min / max bounds. Apply sends one
@@ -38,7 +38,7 @@ export function DomainFilterPanel<TBound extends string>({
       [bound]: value,
     },
   }));
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     if (!overBudget) onApply(form);
   };

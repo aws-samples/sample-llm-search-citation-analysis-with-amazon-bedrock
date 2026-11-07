@@ -6,7 +6,7 @@ import {
   IDENTITY_LABELS, type IdentityInput, type IdentityKind, type PointInput
 } from './localSeoRequest';
 
-const INPUT_CLASS = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none';
+const INPUT_CLASS = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-hidden';
 const IDENTITY_KINDS: readonly IdentityKind[] = ['name', 'cid', 'place_id'];
 
 interface FieldProps {

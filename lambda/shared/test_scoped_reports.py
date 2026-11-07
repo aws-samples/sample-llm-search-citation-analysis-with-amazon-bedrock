@@ -25,10 +25,10 @@ from shared.scoped_reports import (
     ROW_HEAP_KIB,
     WINDOW_READ_SHARE,
     WINDOW_ROWS_CAP,
-    WindowAnswers,
+    WindowRuns,
     capped_scope,
-    load_window_answers,
     load_window_histories,
+    load_window_runs,
     optional_scope_keywords,
     read_scope_keywords,
     required_report_scope,
@@ -213,19 +213,23 @@ _WINDOW_ROWS = {
 _WINDOW_START = '2026-01-01T00:00:00.000000Z'
 
 
-def _run_timestamps(window: WindowAnswers, keyword: str) -> list[str]:
-    return sorted({answer.timestamp for answer in window.answers[keyword]})
+def _run_timestamps(window: WindowRuns, keyword: str) -> list[str]:
+    return [run.timestamp for run in window.runs[keyword]]
 
 
-class TestLoadWindowAnswers:
+def _answers(window: WindowRuns, keyword: str) -> int:
+    return sum(run.answers for run in window.runs[keyword])
+
+
+class TestLoadWindowRunsWithoutRollups:
     @pytest.fixture
     def capped_window(self) -> Any:
         """Both keywords' window read with a cap of six rows: inside the long keyword's history."""
-        return load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=6)
+        return load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=6)
     def test_reads_every_answer_of_the_window_under_the_cap(self) -> None:
-        window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=100)
+        window = load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START, max_rows=100)
 
-        assert ([len(window.answers[_LONG]), len(window.answers[_SHORT])], window.truncated_before) == ([12, 3], None)
+        assert ([_answers(window, _LONG), _answers(window, _SHORT)], window.truncated_before) == ([12, 3], None)
 
     def test_reports_the_run_the_cap_stopped_at(self, capped_window) -> None:
         assert capped_window.truncated_before == run_timestamp(1)
@@ -234,7 +238,7 @@ class TestLoadWindowAnswers:
         assert (_run_timestamps(capped_window, _LONG), _run_timestamps(capped_window, _SHORT)) == ([run_timestamp(2)], [run_timestamp(2)])
 
     def test_reads_through_the_run_until(self) -> None:
-        window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_SHORT], _WINDOW_START, until=run_timestamp(1))
+        window = load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_SHORT], _WINDOW_START, until=run_timestamp(1))
 
         assert _run_timestamps(window, _SHORT) == [run_timestamp(0), run_timestamp(1)]
 
@@ -249,61 +253,61 @@ class TestLoadWindowAnswers:
 
         table.query.side_effect = failing_for_the_short_keyword
 
-        window = load_window_answers(table, [_LONG, _SHORT], _WINDOW_START)
+        window = load_window_runs(table, [_LONG, _SHORT], _WINDOW_START)
 
-        assert ([len(window.answers[_LONG]), window.answers[_SHORT]], window.truncated_before) == ([12, []], None)
+        assert ([_answers(window, _LONG), window.runs[_SHORT]], window.truncated_before) == ([12, []], None)
 
     def test_reads_nothing_for_no_keywords(self) -> None:
-        window = load_window_answers(paged_search_results_table({}), [], _WINDOW_START)
+        window = load_window_runs(paged_search_results_table({}), [], _WINDOW_START)
 
-        assert (window.answers, window.truncated_before) == ({}, None)
+        assert (window.runs, window.truncated_before) == ({}, None)
 
 
-class TestLoadWindowAnswersTimeBudget:
+class TestLoadWindowRunsTimeBudget:
     """The window read stops at its deadline: newest runs kept, unread keywords named."""
 
     def test_keeps_the_newest_runs_of_a_single_keyword_the_budget_stops_mid_read(self) -> None:
         # Checks: the keyword's start, then after the first page (5 of 12 rows: run 2 and one row of run 1).
         with window_read_budget(lambda: ticking_deadline(2)):
-            window = load_window_answers(paged_search_results_table({_LONG: _WINDOW_ROWS[_LONG]}, page_size=5), [_LONG], _WINDOW_START)
+            window = load_window_runs(paged_search_results_table({_LONG: _WINDOW_ROWS[_LONG]}, page_size=5), [_LONG], _WINDOW_START)
 
         assert (_run_timestamps(window, _LONG), window.truncated_before) == ([run_timestamp(2)], run_timestamp(1))
 
     @pytest.fixture
-    def stopped_window(self) -> WindowAnswers:
+    def stopped_window(self) -> WindowRuns:
         """Both keywords' window, the short one read first, the budget spent after the long one's first page.
 
         Checks: the short keyword's start (one page), the long keyword's start, after its first page.
         """
         with one_scope_worker(), window_read_budget(lambda: ticking_deadline(3)):
-            return load_window_answers(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
+            return load_window_runs(paged_search_results_table(_WINDOW_ROWS, page_size=5), [_SHORT, _LONG], _WINDOW_START)
 
     def test_skips_a_keyword_of_several_the_budget_stops_mid_read(self, stopped_window) -> None:
-        assert (list(stopped_window.answers), stopped_window.skipped) == ([_SHORT], (_LONG,))
+        assert (list(stopped_window.runs), stopped_window.skipped) == ([_SHORT], (_LONG,))
 
     def test_keeps_the_whole_window_of_the_keywords_read_before_the_budget_ran_out(self, stopped_window) -> None:
-        assert (len(stopped_window.answers[_SHORT]), stopped_window.truncated_before) == (3, None)
+        assert (_answers(stopped_window, _SHORT), stopped_window.truncated_before) == (3, None)
 
     def test_skips_every_keyword_when_the_budget_is_spent_before_the_read(self) -> None:
         with window_read_budget(expired_deadline):
-            window = load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START)
+            window = load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG, _SHORT], _WINDOW_START)
 
-        assert (window.answers, set(window.skipped)) == ({}, {_LONG, _SHORT})
+        assert (window.runs, set(window.skipped)) == ({}, {_LONG, _SHORT})
 
     def test_marks_the_request_deadline_cut_when_the_window_read_stopped(self) -> None:
         with active_deadline(Deadline(60, lambda: 0.0)) as request, window_read_budget(expired_deadline):
-            load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
+            load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
 
         assert request.cut is True
 
     def test_leaves_the_request_deadline_uncut_when_the_window_was_read_whole(self) -> None:
         with active_deadline(Deadline(60, lambda: 0.0)) as request:
-            load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
+            load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
 
         assert request.cut is False
 
     def test_lists_the_unread_keywords_out_of_the_read_keywords(self) -> None:
-        window = WindowAnswers(answers={_SHORT: []}, truncated_before=None, skipped=(_LONG,))
+        window = WindowRuns(runs={_SHORT: []}, truncated_before=None, skipped=(_LONG,))
 
         assert window.read_keywords([_LONG, _SHORT]) == [_SHORT]
 
@@ -355,6 +359,6 @@ class TestScopeReadFields:
 
 def test_current_deadline_outside_a_request_is_never_cut_by_a_window_read() -> None:
     with window_read_budget(expired_deadline):
-        load_window_answers(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
+        load_window_runs(paged_search_results_table(_WINDOW_ROWS), [_LONG], _WINDOW_START)
 
     assert current_deadline().cut is False

@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # Build the web dashboard
-# Automatically fetches API Gateway URL and Cognito IDs from CloudFormation stack,
-# and the MCP server URL and client id from CitationAnalysisMcpStack when it exists,
-# and the SEO API URL from CitationAnalysisSeoStack when it exists
+# Fetches the Cognito IDs from CitationAnalysisStack, and the MCP server URL and
+# client id from CitationAnalysisMcpStack when it exists. The API URL is not
+# built in: the dashboard reads it at startup from /config.json, which
+# CitationAnalysisApiStack writes into the web bucket (set VITE_API_URL in
+# web/.env.local for `npm run dev`). The SEO API URL comes from
+# CitationAnalysisSeoStack when it exists.
 set -e
 
 echo "Building web dashboard..."
@@ -19,21 +22,6 @@ fi
 # Try to get configuration from CloudFormation
 if command -v aws &> /dev/null; then
     echo "Fetching configuration from CloudFormation..."
-    
-    # Get API Gateway URL
-    API_URL=$(aws cloudformation describe-stacks \
-        --stack-name CitationAnalysisStack \
-        --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
-        --output text 2>/dev/null || echo "")
-    
-    if [ -n "$API_URL" ] && [ "$API_URL" != "None" ]; then
-        # Remove trailing slash and add /api
-        API_URL="${API_URL%/}/api"
-        echo "Found API URL: $API_URL"
-        export VITE_API_URL="$API_URL"
-    else
-        echo "⚠️  Could not fetch API URL from CloudFormation"
-    fi
     
     # Get Cognito User Pool ID
     USER_POOL_ID=$(aws cloudformation describe-stacks \

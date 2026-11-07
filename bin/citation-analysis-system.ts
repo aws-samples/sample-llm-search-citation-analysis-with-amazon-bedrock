@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
 import { CitationAnalysisStack } from '../lib/citation-analysis-stack';
+import { CitationAnalysisApiStack } from '../lib/api-stack';
 import { CitationAnalysisMcpStack } from '../lib/mcp-stack';
 import { CitationAnalysisSeoStack } from '../lib/seo-stack';
 import { readWebSearchRegion } from '../lib/constructs/web-search';
@@ -17,8 +18,8 @@ const stack = new CitationAnalysisStack(app, 'CitationAnalysisStack', {
   description: 'Citation Analysis System - Multi-model AI citation comparison and analysis',
 });
 
-// The MCP server has its own stack and REST API: the main stack sits at
-// CloudFormation's 500-resource limit. `cdk deploy --all` deploys both.
+// The MCP server has its own stack and REST API, so it can be removed without
+// touching the dashboard. `cdk deploy --all` deploys every stack.
 const mcpStack = new CitationAnalysisMcpStack(app, 'CitationAnalysisMcpStack', {
   env,
   description: 'Citation Analysis System - MCP server for AI assistants',
@@ -37,6 +38,17 @@ const seoStack = new CitationAnalysisSeoStack(app, 'CitationAnalysisSeoStack', {
 });
 seoStack.node.addDependency(stack);
 
+// The dashboard REST API has its own stack: its ~300 API Gateway resources
+// took the main stack to CloudFormation's 500-resource limit. It imports the
+// main stack's API Lambdas, user pool, web bucket and distribution, so it is
+// deployed after it; `cdk deploy --all` deploys all stacks in that order.
+const apiStack = new CitationAnalysisApiStack(app, 'CitationAnalysisApiStack', {
+  env,
+  description: 'Citation Analysis System - dashboard REST API',
+  inputs: stack.apiInputs,
+});
+apiStack.node.addDependency(stack);
+
 // Amazon Bedrock Web Search only exists in three regions, so its gateway has its
 // own stack in a fixed region. The main stack reaches it through the SSM
 // parameter name and region constants only: no dependency, no cross-stack reference.
@@ -45,7 +57,7 @@ const webSearchStack = new CitationAnalysisWebSearchStack(app, 'CitationAnalysis
   description: 'Citation Analysis System - Amazon Bedrock Web Search gateway',
 });
 
-for (const taggedStack of [stack, mcpStack, seoStack, webSearchStack]) {
+for (const taggedStack of [stack, apiStack, mcpStack, seoStack, webSearchStack]) {
   cdk.Tags.of(taggedStack).add('Application', 'CitationAnalysis');
 }
 

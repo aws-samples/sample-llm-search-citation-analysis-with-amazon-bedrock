@@ -65,6 +65,11 @@ else
     echo "Cross-platform build completed"
 fi
 
+# pip's console scripts (bin/) are never run on Lambda (python/bin is not on
+# PATH) and their shebang names the installing interpreter, so the Docker and
+# pip builds of the same wheels differed only there. Drop them.
+rm -rf "${LAYER_DIR:?}/bin"
+
 # Copy shared Python modules (exclude test files from deployed layer)
 echo "Copying shared modules..."
 mkdir -p $LAYER_DIR/shared
@@ -86,7 +91,7 @@ fi
 echo "Lambda Layer built successfully in $LAYER_DIR/"
 echo ""
 echo "Layer structure:"
-ls -la $LAYER_DIR/ | head -20
+find "$LAYER_DIR" -mindepth 1 -maxdepth 1 | sort | head -20
 echo ""
 echo "Shared modules:"
 ls -la $LAYER_DIR/shared/

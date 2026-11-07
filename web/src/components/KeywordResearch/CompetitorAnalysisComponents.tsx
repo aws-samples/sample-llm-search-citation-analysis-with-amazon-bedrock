@@ -70,7 +70,7 @@ interface InputFormProps {
   url: string;
   setUrl: (url: string) => void;
   loading: boolean;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.SubmitEvent) => void;
 }
 
 export const InputForm = ({
@@ -90,7 +90,7 @@ export const InputForm = ({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://competitor.com"
-          className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+          className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
         />
       </div>
       <button
@@ -135,7 +135,7 @@ const SeoElementRow = ({
         {value}
       </a>
     ) : (
-      <span className="text-gray-700 break-words">{value}</span>
+      <span className="text-gray-700 wrap-break-word">{value}</span>
     )}
   </div>
 );
@@ -284,14 +284,14 @@ const KeywordRow = ({
             checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
             onChange={() => onToggle?.(kw.keyword)}
             aria-label={`Select ${kw.keyword}`}
-            className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+            className="h-4 w-4 rounded-sm border-gray-300 text-gray-900 focus:ring-gray-900"
           />
         </td>
       )}
       <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
       <KeywordSignalCells keyword={kw} />
       <td className="px-6 py-4">
-        {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{kw.source}</span>}
+        {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-sm bg-gray-100 text-gray-600">{kw.source}</span>}
       </td>
       {showOpportunity && (
         <td className="px-6 py-4 text-xs text-gray-600 max-w-xs truncate" title={kw.opportunity}>{kw.opportunity}</td>

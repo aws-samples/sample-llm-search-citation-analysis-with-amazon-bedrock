@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 
 from shared.kpi_engine import answers_from_rows
-from shared.visibility_views import trend_view
+from testing.kpi_tally_fixtures import tallied_trend_view
 from testing.response_size import assert_within_page_budget
 from testing.window_rows_fixtures import (
     WindowRead,
@@ -73,7 +73,7 @@ def test_trend_numbers_of_a_cut_window_equal_a_whole_read_of_the_runs_after_the_
     cut = body['truncated_before']
     answers = {keyword: [answer for answer in answers_from_rows(GROUP.rows[keyword]) if answer.timestamp > cut] for keyword in GROUP.keywords}
 
-    expected = trend_view(GROUP.keywords, answers, 'day', OWNED)
+    expected = tallied_trend_view(GROUP.keywords, answers, 'day', OWNED)
 
     assert (body['trend_data'], body['latest'], body['keyword_trends']) == (
         expected['trend_data'], expected['latest'], expected['keyword_trends'],

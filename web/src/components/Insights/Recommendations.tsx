@@ -38,17 +38,17 @@ interface PrioritySummaryProps {
 
 const PrioritySummary = ({ byPriority }: PrioritySummaryProps) => (
   <div className="grid grid-cols-3 gap-3 sm:gap-4">
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-red-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-red-500">
       <div className="text-xs sm:text-sm text-gray-500">High Priority</div>
       <div className="text-xl sm:text-2xl font-bold text-red-600">{byPriority.high}</div>
       <div className="text-xs text-gray-400 hidden sm:block">Urgent actions needed</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-yellow-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-yellow-500">
       <div className="text-xs sm:text-sm text-gray-500">Medium</div>
       <div className="text-xl sm:text-2xl font-bold text-yellow-600">{byPriority.medium}</div>
       <div className="text-xs text-gray-400 hidden sm:block">Should address soon</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-green-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-green-500">
       <div className="text-xs sm:text-sm text-gray-500">Low</div>
       <div className="text-xl sm:text-2xl font-bold text-green-600">{byPriority.low}</div>
       <div className="text-xs text-gray-400 hidden sm:block">Nice to have</div>
@@ -92,7 +92,7 @@ const Header = ({
           type="checkbox"
           checked={useLlm}
           onChange={(e) => setUseLlm(e.target.checked)}
-          className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          className="rounded-sm border-gray-300 text-gray-900 focus:ring-gray-900"
         />
         <span className="text-gray-700 font-medium">AI Enhanced</span>
       </label>

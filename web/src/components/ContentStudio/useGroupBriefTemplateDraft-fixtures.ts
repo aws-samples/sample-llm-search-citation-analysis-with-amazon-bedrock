@@ -1,7 +1,4 @@
 import {
-  StrictMode, createElement, type ReactNode
-} from 'react';
-import {
   act, renderHook, waitFor, type RenderHookResult
 } from '@testing-library/react';
 import {
@@ -101,12 +98,6 @@ export function prepareGroupBriefTemplateDraftMocks(): void {
   mockUseContentBriefTemplates.mockReturnValue(buildGroupBriefTemplateDraftHookResult());
 }
 
-interface TemplateStrictModeBoundaryProps { readonly children: ReactNode; }
-
-export function templateStrictModeBoundary({ children }: TemplateStrictModeBoundaryProps) {
-  return createElement(StrictMode, null, children);
-}
-
 interface TemplateDraftRenderOptions {
   readonly mode?: GroupBriefMode;
   readonly strict?: boolean;
@@ -116,8 +107,7 @@ export function renderGroupBriefTemplateDraft({
   mode = 'create_new_landing_page',
   strict = false,
 }: TemplateDraftRenderOptions = {}): TemplateDraftRender {
-  const wrapper = strict ? templateStrictModeBoundary : undefined;
-  return renderHook(() => useGroupBriefTemplateDraft(mode), { wrapper });
+  return renderHook(() => useGroupBriefTemplateDraft(mode), { reactStrictMode: strict });
 }
 
 export function renderGroupBriefTemplateDraftWithHooks(

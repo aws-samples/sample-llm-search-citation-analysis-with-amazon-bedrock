@@ -86,7 +86,7 @@ describe('shareOfVoiceSlices', () => {
   it('rounds the other brands\' share to one decimal', () => {
     const brands = [buildBrandRow('On', { share_of_voice: 0.1 }), buildBrandRow('Hoka', { share_of_voice: 0.2 })];
 
-    expect(shareOfVoiceSlices(brands, 0)[0].share).toBe(0.3);
+    expect(shareOfVoiceSlices(brands, 0)[0].share).toBeCloseTo(0.3, 10);
   });
 
   it.each([

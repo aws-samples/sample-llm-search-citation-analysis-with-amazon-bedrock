@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from shared import crawl_cache
+from shared import emf_metrics
 from shared.crawl_cache import (
     CrawlCacheConfigurationError,
     blocked_cache_scope,
@@ -219,7 +219,7 @@ def test_returns_miss_and_emits_metric_when_transient_cache_read_fails(
 ):
     table = MagicMock()
     table.query.side_effect = CacheReadError('DynamoDB unavailable')
-    monkeypatch.setattr(crawl_cache.time, 'time', MagicMock(return_value=1_600_000_000.5))
+    monkeypatch.setattr(emf_metrics.time, 'time', MagicMock(return_value=1_600_000_000.5))
 
     result = _find(table)
 
