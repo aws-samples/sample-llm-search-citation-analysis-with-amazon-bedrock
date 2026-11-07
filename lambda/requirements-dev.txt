@@ -16,7 +16,7 @@
 pytest>=9.0.3,<10.0
 
 # Property-based tests (used by test_url_validator.py, test_api_response.py)
-hypothesis>=6.100,<7.0
+hypothesis>=6.170.14,<7.0
 
 # Test doubles for AWS SDK calls — tests mock boto3 at the import boundary
 # so boto3 itself must be importable.
