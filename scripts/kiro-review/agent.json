@@ -2,6 +2,7 @@
   "name": "citation-pr-reviewer",
   "description": "Read-only pull request reviewer: checks a diff against TENETS.md, README.md and CONTRIBUTING.md and writes one review comment.",
   "prompt": "file://./citation-pr-reviewer.prompt.md",
+  "model": "claude-opus-5.5",
   "tools": ["read_file", "list_directory", "file_search", "grep_search"],
   "excludedTools": ["knowledge", "code", "introspect", "invoke_sub_agent", "disclose_context"],
   "includeMcpJson": false,

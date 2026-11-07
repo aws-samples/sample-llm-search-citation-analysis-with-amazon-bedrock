@@ -128,8 +128,10 @@ tenets, the repository rules and correctness and security, and answers with a ve
 - **Setup.** Create a dedicated Kiro API key for CI (Kiro Pro or above; an administrator may need to allow API keys)
   and store it as the repository secret `KIRO_API_KEY` with `gh secret set KIRO_API_KEY` (it prompts for the value,
   so the key never lands in shell history) or in Settings › Secrets and variables › Actions. Never paste a key in
-  code, a commit, an issue or a chat; if one was shared, revoke it and create another. Optionally set the
-  repository variable `KIRO_REVIEW_MODEL` to pin a model. A repository without the secret skips the review.
+  code, a commit, an issue or a chat; if one was shared, revoke it and create another. The agent runs on `claude-opus-5.5`
+  (`agent.json`); the repository variable `KIRO_REVIEW_MODEL` overrides it. The model list depends on the account:
+  `kiro-cli chat --v3 --list-models` shows the key's models only when no browser login is active, because a
+  `kiro-cli login` session takes precedence over `KIRO_API_KEY`. A repository without the secret skips the review.
 - **How the key stays private.** The workflow uses `pull_request`, so a pull request from a fork gets no secrets
   (and is skipped). The key reaches only the step that runs Kiro, as an environment variable. The agent, its prompt
   and the documents it judges against come from `main`, so a pull request cannot change its own review. The pull

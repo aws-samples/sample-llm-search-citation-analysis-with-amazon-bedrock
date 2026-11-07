@@ -144,6 +144,7 @@ jobs:
           KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
           KIRO_REVIEW_MODEL: ${{ vars.KIRO_REVIEW_MODEL }}
         run: |
+          # The agent pins claude-opus-5.5 (agent.json); the repository variable KIRO_REVIEW_MODEL overrides it.
           model=()
           if [ -n "$KIRO_REVIEW_MODEL" ]; then model=(--model "$KIRO_REVIEW_MODEL"); fi
           # No --trust-tools / --trust-all-tools on purpose: with Kiro CLI 3.1.0 a trusted tool skipped the agent's
