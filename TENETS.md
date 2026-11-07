@@ -84,13 +84,19 @@ sleep and re-check.
   rules route them to the work that follows. Adding a reaction means adding a rule, not editing the producer.
 - **EventBridge Scheduler is the heartbeat.** Anything driven by time (scheduled runs, reconciliation, expiry,
   retries) is a schedule. No Lambda waits or loops to watch the clock.
-- **AWS AppSync Events notifies clients.** The dashboard, and the API and MCP clients of tenet 4, subscribe to
-  channels (run progress, job finished, alert raised) and are told when something happens, instead of polling a REST
-  route. AppSync Events is pay per message and connection, so it adds no fixed cost (tenet 7).
+- **AWS AppSync Events notifies clients.** The dashboard, and the API and MCP clients of tenet 4 that can hold a
+  subscription, subscribe to channels (run progress, job finished, alert raised) and are told when something
+  happens, instead of polling a REST route. AppSync Events is pay per message and connection, so it adds no fixed
+  cost (tenet 7). Events never replace reads: every state an event announces stays readable through its REST route
+  and MCP (tenet 4 ranks higher), and a client that cannot subscribe, such as a CLI or an MCP tool call, reads it
+  when it needs it.
 - **Polling is the exception, and it is bounded.** A client reads once to catch up when it connects or reconnects.
   An external API that offers no callback (a provider's asynchronous search archive) is polled with backoff and a
   deadline, and the result is published as an event. A scheduled reconcile that picks up events that were missed
   is a safety net and stays (tenet 1 ranks higher): it is never the main path.
+- **Until AppSync Events is in place**, a new long-running dashboard job may report progress through the existing
+  polling hooks (bounded, stopping when the job ends), and it is added to the gap below. The change that introduces
+  AppSync Events moves those hooks to subscriptions.
 
 ---
 
@@ -233,6 +239,6 @@ Tenets touched: <!-- e.g. 2, D1, D4 — or "none" -->
 - [ ] Headless: available and enforced via the API/MCP, not only the UI (4)
 - [ ] Providers: a new engine fits the provider contract; its failure costs only its own answers (5)
 - [ ] Cost: no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
-- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop (8)
+- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop outside the bounded transition rule, and every announced state stays readable through REST and MCP (8)
 - [ ] Trade-off: if this weakens a lower tenet to serve a higher one, explain it here
 ```

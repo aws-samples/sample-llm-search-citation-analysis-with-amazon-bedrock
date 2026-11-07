@@ -114,6 +114,13 @@ jobs:
             mv data/diff.full data/diff.patch
           fi
           rm -f data/diff.full
+          # Say what was left out, so the reviewer can tell an omitted lockfile from an unchanged one.
+          locks="$(git -C pr diff --numstat "$base" HEAD -- package-lock.json web/package-lock.json)"
+          if [ -n "$locks" ]; then
+            printf '\n[lockfiles omitted from this diff; lines added, removed, file:]\n%s\n' "$locks" >> data/diff.patch
+            git -C pr diff --no-color --unified=0 "$base" HEAD -- package-lock.json web/package-lock.json \
+              | grep -E '^[+-] ' | head -n 40 | sed 's/^/[lockfile] /' >> data/diff.patch || true
+          fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
           wc -c data/*
           echo "ready=true" >> "$GITHUB_OUTPUT"
