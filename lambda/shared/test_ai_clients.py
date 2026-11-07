@@ -475,6 +475,7 @@ class TestClientPayloads:
             'input': 'query text',
             'tools': [{'type': 'web_search'}],
             'max_output_tokens': 4096,
+            'instructions': ai_clients.PERPLEXITY_CITATION_INSTRUCTION,
         }
 
     def test_perplexity_sends_the_clients_model(self):
@@ -497,7 +498,7 @@ class TestClientPayloads:
             'model': 'claude-opus-4-7',
             'max_tokens': 4096,
             'messages': _QUESTION,
-            'tools': [{'type': 'web_search_20260318', 'name': 'web_search'}],
+            'tools': [{'type': 'web_search_20260318', 'name': 'web_search', 'allowed_callers': ['direct']}],
             'system': 'cite sources',
         }
 

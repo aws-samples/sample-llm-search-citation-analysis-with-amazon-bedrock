@@ -2,7 +2,7 @@
 Tests for shared.bounded_reads.
 
 ``collect_capped_partition`` pages through one table or GSI partition under a
-page cap.
+page cap; ``newest_items`` reads one newest-first page of a partition.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 from boto3.dynamodb.conditions import Key
 
-from shared.bounded_reads import collect_capped_partition
+from shared.bounded_reads import collect_capped_partition, newest_items
 
 
 class TestCollectCappedPartition:
@@ -34,3 +34,27 @@ class TestCollectCappedPartition:
         collect_capped_partition(table, 'keyword', 'k', 1)
 
         table.query.assert_called_once_with(KeyConditionExpression=Key('keyword').eq('k'))
+
+
+class TestNewestItems:
+    def test_queries_one_newest_first_page_of_the_partition(self) -> None:
+        table = MagicMock()
+        table.query.return_value = {'Items': [{'pk': 'k'}]}
+
+        assert newest_items(table, 'pk', 'k', 7) == [{'pk': 'k'}]
+        table.query.assert_called_once_with(KeyConditionExpression=Key('pk').eq('k'), ScanIndexForward=False, Limit=7)
+
+    def test_reads_the_named_index_when_given(self) -> None:
+        table = MagicMock()
+        table.query.return_value = {}
+
+        assert newest_items(table, 'gsi1pk', 'audits', 50, index_name='AuditIndex') == []
+        assert table.query.call_args.kwargs['IndexName'] == 'AuditIndex'
+
+    def test_omits_the_index_name_without_one(self) -> None:
+        table = MagicMock()
+        table.query.return_value = {'Items': []}
+
+        newest_items(table, 'pk', 'k', 1)
+
+        assert 'IndexName' not in table.query.call_args.kwargs

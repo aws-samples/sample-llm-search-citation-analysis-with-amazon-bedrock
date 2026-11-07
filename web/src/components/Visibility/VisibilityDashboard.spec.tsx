@@ -129,7 +129,7 @@ describe('VisibilityDashboard', () => {
 
       renderDashboard();
 
-      expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenCalledWith({ kind: 'all' }, undefined);
+      expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenCalledWith({ kind: 'all' }, undefined, undefined, 'all');
       expect(trendsHook.fetchHistoricalTrends).toHaveBeenCalledWith({ kind: 'all' }, 'day', 30);
     });
 
@@ -263,7 +263,7 @@ describe('VisibilityDashboard', () => {
 
       await renderDashboardScoped('keyword:hotels');
 
-      expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith(HOTELS_SCOPE, undefined);
+      expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith(HOTELS_SCOPE, undefined, undefined, 'all');
       expect(trendsHook.fetchHistoricalTrends).toHaveBeenLastCalledWith(HOTELS_SCOPE, 'day', 30);
       expect(personaHook.fetchPersonaRankings).toHaveBeenCalledWith('hotels');
     });
@@ -276,7 +276,24 @@ describe('VisibilityDashboard', () => {
       expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith({
         kind: 'group',
         groupId: 'group-coruna'
-      }, undefined);
+      }, undefined, undefined, 'all');
+    });
+
+    it('measures only the answers to queries without the brand when that filter is picked', async () => {
+      const visibilityHook = stubVisibility(null);
+      renderDashboard();
+
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Queries' }), 'neutral');
+
+      expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith({ kind: 'all' }, undefined, undefined, 'neutral');
+    });
+
+    it('offers the all, neutral and branded query filters', () => {
+      renderDashboard();
+
+      expect(renderedScopeOptionLabels('Queries')).toStrictEqual([
+        'All queries', 'Queries without your brand', 'Queries naming your brand',
+      ]);
     });
 
     it('shows the insights of the selected keyword group', async () => {

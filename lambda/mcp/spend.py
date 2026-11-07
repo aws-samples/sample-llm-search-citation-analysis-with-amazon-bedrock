@@ -7,7 +7,8 @@ read tool, counts the calls the spend will make, and binds a single-use
 token to the caller, the family and the exact API request (``state``). The
 start presents the token, which is consumed atomically before anything else,
 then passes the per-caller limits and replays the request. No dollar
-figures: the estimate is a call count. Read-only counting, so an estimate
+figures: the estimate is a call count (for the ``seo`` family, DataForSEO
+calls with the static price of one call, ``seo_spend``). Read-only counting, so an estimate
 never spends; the API handlers still apply their own checks to the start.
 """
 
@@ -34,6 +35,7 @@ from invoke import (
     replay,
     tool_result,
 )
+from seo_spend import seo_calls
 
 from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN
 from shared.markets import keyword_market_id
@@ -45,11 +47,15 @@ logger.setLevel(logging.INFO)
 
 #: ``shared.ai_clients.WEB_SEARCH_PROVIDERS``: the providers keyword research fans out to (checked by a test).
 RESEARCH_PROVIDERS = ('perplexity', 'openai', 'gemini')
+
+#: Engines a run asks the plain keyword once per keyword, whatever the personas (``search/handler.py``
+#: ``PLAIN_KEYWORD_PROVIDERS``): Google takes no persona wording.
+PLAIN_KEYWORD_ENGINES = frozenset({'google_ai_overview'})
 SIGNALS_PROVIDER = 'serpapi'
 #: Keyword pages (1,000 rows scanned each) an estimate reads before it gives up counting.
 MAX_KEYWORD_PAGES = 20
 #: The UTC-day counter each family draws from.
-COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs'}
+COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs', 'seo': 'seo_calls'}
 _RUNNING = 'RUNNING'
 
 
@@ -86,11 +92,16 @@ def _ask(caller: Caller, route: Route) -> tuple[int, Any]:
         return 502, {'error': 'The API could not be reached'}
 
 
-def _read(caller: Caller, router: str, path: str, query: dict[str, str] | None = None) -> Any:
-    status, body = _ask(caller, Route(router, 'GET', path, path, None, query, None))
+def _answer(caller: Caller, route: Route) -> Any:
+    """The body of a free API request an estimate makes; ``UpstreamError`` when the API refuses."""
+    status, body = _ask(caller, route)
     if not 200 <= status < 300:
         raise UpstreamError(status, body)
     return body
+
+
+def _read(caller: Caller, router: str, path: str, query: dict[str, str] | None = None) -> Any:
+    return _answer(caller, Route(router, 'GET', path, path, None, query, None))
 
 
 def _count_pages(
@@ -181,13 +192,18 @@ def estimate_run(caller: Caller, route: Route, _arguments: JsonObject) -> Estima
     providers = _providers(caller)
     engines, search = _active(providers, 'llm'), _active(providers, 'search')
     personas = _enabled_personas(caller)
-    calls = keywords * max(1, personas) * (len(engines) + len(search))
+    plain = [engine for engine in engines if engine in PLAIN_KEYWORD_ENGINES]
+    prompted = len(engines) - len(plain) + len(search)
+    calls = keywords * (max(1, personas) * prompted + len(plain))
     counts = {
         'keywords': keywords, 'engines': engines, 'search_providers': search, 'personas': personas,
         'provider_calls': calls, 'serpapi_enabled': SIGNALS_PROVIDER in search,
     }
-    summary = (f'{keywords} keyword(s) x {max(1, personas)} persona(s) x {len(engines) + len(search)} provider(s) '
-               f'= {calls} provider call(s)')
+    summary = f'{keywords} keyword(s) x {max(1, personas)} persona(s) x {prompted} provider(s)'
+    if plain:
+        # Google AI Overviews asks the plain keyword once, not once per persona.
+        summary += f' + {keywords} keyword(s) x {len(plain)} once-per-keyword engine(s)'
+    summary += f' = {calls} provider call(s)'
     notes = ['Crawling cited pages and summarising them with Bedrock adds calls that depend on the answers.']
     return Estimate(counts, summary, _run_blocker(keywords, complete, calls), notes)
 
@@ -223,13 +239,38 @@ def estimate_content(_caller: Caller, route: Route, _arguments: JsonObject) -> E
     return Estimate(counts, f'1 Bedrock generation (retried at most twice on failure), {fetches} page fetch(es)')
 
 
+def estimate_seo(caller: Caller, route: Route, _arguments: JsonObject) -> Estimate:
+    calls = seo_calls(route, lambda request: _answer(caller, request))
+    counts = {'dataforseo_calls': calls.calls, 'price_per_call': calls.per_call}
+    summary = f'at most {calls.calls} DataForSEO call(s); {calls.per_call}'
+    notes = ['A cached answer costs nothing. DataForSEO bills every call it makes, also one that finds nothing, '
+             'and the SEO API never re-sends a billed call.']
+    return Estimate(counts, summary, calls.blocker, notes)
+
+
 Estimator = Callable[[Caller, Route, JsonObject], Estimate]
-ESTIMATORS: dict[str, Estimator] = {'run': estimate_run, 'research': estimate_research, 'content': estimate_content}
+ESTIMATORS: dict[str, Estimator] = {
+    'run': estimate_run, 'research': estimate_research, 'content': estimate_content, 'seo': estimate_seo,
+}
 
 
-#: The tool that confirms each family's estimate.
-STARTS = {'run': 'start_run', 'research': 'start_research', 'content': 'generate_content_brief'}
-_DAILY_WHAT = {'run': 'analysis runs', 'research': 'research or content jobs', 'content': 'research or content jobs'}
+#: The tool that confirms each estimate.
+STARTS = {
+    'estimate_run': 'start_run',
+    'estimate_research': 'start_research',
+    'estimate_content_brief': 'generate_content_brief',
+    'estimate_seo_keywords': 'run_seo_keywords',
+    'estimate_seo_domain': 'run_seo_domain',
+    'estimate_seo_backlinks': 'run_seo_backlinks',
+    'estimate_seo_local': 'run_seo_local',
+    'estimate_seo_job': 'start_seo_job',
+}
+_DAILY_WHAT = {
+    'run': 'analysis runs',
+    'research': 'research or content jobs',
+    'content': 'research or content jobs',
+    'seo': 'DataForSEO lookups or SEO jobs',
+}
 
 
 @dataclass(frozen=True)
@@ -259,7 +300,7 @@ class _Call:
 
 def _per_day(family: str) -> int:
     limits = state.limits()
-    return limits.runs_per_day if family == 'run' else limits.jobs_per_day
+    return {'run': limits.runs_per_day, 'seo': limits.seo_calls_per_day}.get(family, limits.jobs_per_day)
 
 
 def _limit_message(family: str) -> str:
@@ -286,7 +327,7 @@ def _estimate_result(call: _Call, estimate: Estimate, limits: JsonObject, token:
         data.update({'can_start': False, 'reason': estimate.blocker})
         return tool_result(f'{name}: {estimate.summary}. Cannot start: {estimate.blocker}', data)
     data.update({'can_start': True, CONFIRMATION_ARGUMENT: token[0], 'expires_at': token[1]})
-    text = (f'{name}: {estimate.summary}. Show this to the user; only after they approve, call {STARTS[call.family]} '
+    text = (f'{name}: {estimate.summary}. Show this to the user; only after they approve, call {STARTS[name]} '
             f'with the same arguments and this confirmation_token (single use, expires {token[1]}).')
     return tool_result(text, data)
 

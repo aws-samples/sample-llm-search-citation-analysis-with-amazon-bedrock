@@ -9,15 +9,16 @@ import { KeywordExpansion } from './KeywordExpansion';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
 import { ResearchAgent } from './agent/ResearchAgent';
+import { KeywordExplorer } from './explorer/KeywordExplorer';
 import type { ResearchRunViewProps } from './researchRunView';
 import {
   TabBar, TabPanel, type TabDefinition
 } from '../ui/TabBar';
 import {
-  BOLT_PATHS, CLOCK_PATHS, GLOBE_PATHS 
+  BOLT_PATHS, CLOCK_PATHS, GLOBE_PATHS, SEARCH_PATHS
 } from '../ui/iconPaths';
 
-type ResearchTab = 'expand' | 'competitor' | 'history' | 'agent';
+type ResearchTab = 'expand' | 'explorer' | 'competitor' | 'history' | 'agent';
 
 const RESEARCH_TABS: ReadonlyArray<TabDefinition<ResearchTab>> = [
   {
@@ -25,6 +26,12 @@ const RESEARCH_TABS: ReadonlyArray<TabDefinition<ResearchTab>> = [
     label: 'Related Keywords',
     shortLabel: 'Expand',
     iconPaths: BOLT_PATHS,
+  },
+  {
+    id: 'explorer',
+    label: 'Keyword Explorer',
+    shortLabel: 'Explorer',
+    iconPaths: SEARCH_PATHS,
   },
   {
     id: 'competitor',
@@ -82,7 +89,7 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
       {/* Header */}
       <div>
         <p className="text-gray-600 text-sm">
-          Expand seed terms, analyze competitor websites, or let the research agent plan and run a business&apos;s keyword research.
+          Expand seed terms, explore search volume and difficulty, analyze competitor websites, or let the research agent plan and run a business&apos;s keyword research.
         </p>
       </div>
 
@@ -90,6 +97,7 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
 
       <TabPanel id={panelId} activeId={activeTab}>
         {activeTab === 'agent' && <ResearchAgent onKeywordsAdded={onKeywordsAdded} />}
+        {activeTab === 'explorer' && <KeywordExplorer onKeywordsAdded={onKeywordsAdded} />}
         {activeTab === 'expand' && (
           <KeywordExpansion
             {...runViewProps}

@@ -16,7 +16,8 @@ export * from './api/responses';
  * individual report (executive summary, keyword deep dive, etc.) shares this
  * tab id so the sidebar's `Reporting` section stays highlighted regardless of
  * which sub-report the user is currently viewing. The actual sub-routing for
- * `/reports/...` is handled by `ReportsRouter`, not by `TabContent`.
+ * `/reports/...` is handled by `ReportsRouter`, not by `TabContent`. `seo`
+ * works the same way for every page under `/seo/*` (`SeoRouter`).
  */
 export type TabType = 
   | 'dashboard' 
@@ -29,6 +30,7 @@ export type TabType =
   | 'execution' 
   | 'schedule'
   | 'keyword-research'
+  | 'seo'
   | 'content-studio'
   | 'reports'
   | 'settings'

@@ -7,14 +7,23 @@ This is the reference for every visibility KPI the system reports: what each one
 
 ## Conventions
 
-**Answer.** The unit of measurement is one successful answer from one AI engine (OpenAI, Perplexity, Gemini, Claude) to one query in one analysis run. A query is a keyword, optionally rewritten by a persona. For example, one run over 10 keywords, 4 engines and no personas produces up to 40 answers.
+**Answer.** The unit of measurement is one successful answer from one AI engine (OpenAI, Perplexity, Gemini, Claude, Google AI Overviews) to one query in one analysis run. A query is a keyword, optionally rewritten by a persona. For example, one run over 10 keywords, 4 engines and no personas produces up to 40 answers.
+
+**Google AI Overviews.** Google AI Overviews is an AI engine: the overview Google writes at the top of a results page (read through DataForSEO) is an answer, its references are its citations. It is asked the plain keyword once per keyword and run, never a persona's wording, so its answer is filed under the default (unpersonalised) prompt. A results page without an overview is *no answer* (`status` `no_answer`) and is excluded from every KPI; it is counted separately as [overview presence](#google-ai-overviews-presence).
 
 These are not answers and are excluded from every KPI:
 
 - rows from the optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl, Amazon Bedrock Web Search), because they return links and never write an answer that could name a brand;
-- failed engine calls (`status` other than `success`).
+- failed engine calls and Google results pages without an AI Overview (`status` other than `success`);
+- engine replies without answer text (blank after trimming). The call worked, so it is not a failure and the provider stays healthy, but it is stored as *no answer* (`status` `no_answer`, counted as `no_answers` in the run summary) because there is nothing to read a brand from.
 
 A row is an answer when its `provider` is an AI engine; the provider decides the type. A row without `status` counts as successful.
+
+**Cited, not retrieved.** An answer's citations are the URLs the answer itself cites: OpenAI's `url_citation` annotations, Perplexity's message annotations and the `search_results` its numbered markers (`[1]`, `[web:1]`) name, the citations on Claude's text blocks, Gemini's grounding chunks, Google AI Overviews' references, plus any URL written in the answer text. A Perplexity answer with no marker and no annotation cites all its `search_results`, which Perplexity reports as the sources of the answer. Engines also report pages they only read while searching (OpenAI's `web_search_call` sources, the Perplexity `search_results` a marked or annotated answer does not name, Claude's `web_search_tool_result` blocks). Those are stored on the row as `retrieved_urls` and never count: not in the citation KPIs, not in the Citations table, not in deduplication or crawling. A page the engine read and did not cite is not a source of the answer.
+
+**Branded queries.** Every answer row records `branded` when it is written: `true` when the query the engine was asked (the keyword, or the persona's wording of it) names a first-party brand name or alias (as a whole word, case-, accent- and whitespace-insensitive, in any script) or an owned domain or a subdomain of it. Domains are label-guarded: `hotel.com` is named by `www.hotel.com` and `blog.hotel.com/x`, not by `hotel.com.evil.test` or `nothotel.com`. Competitor names do not make a query branded. An answer to a branded query mentions the brand almost by construction, so it says little about unprompted visibility. KPIs are computed over every answer by default; the Visibility tab can narrow them to `neutral` (non-branded) or `branded` answers (`branded` query parameter of `/api/visibility`, default `all`), and [alerts](#changes-and-trends) compare neutral answers. Rows written before 2.43 carry no flag and read as neutral.
+
+**Cell.** One (keyword, persona, AI engine, market) combination. Comparisons between runs match answers cell by cell (see [Changes and trends](#changes-and-trends)).
 
 **Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively.
 
@@ -178,6 +187,14 @@ Tables that list every brand named in the answers apply the same formulas to eac
 
 A table is sorted by visibility score, then mentions, then name. A brand's name and classification are taken from the first answer read that names it.
 
+## Google AI Overviews presence
+
+Not a KPI: it describes Google, not your brand. Reported next to `answers` (`kpi_engine.overview_presence`) as "Overview shown for n of m queries":
+
+- `aio_queries`: Google AI Overviews rows whose results page was read (`success` + `no_answer`; failed calls measured nothing);
+- `aio_overviews`: those that showed an overview (`success`);
+- `aio_presence_rate`: `aio_overviews` ÷ `aio_queries` × 100, empty without a query.
+
 ## Breakdowns
 
 These apply the same formulas to a slice of the scope's answers:
@@ -215,4 +232,15 @@ These apply the same formulas to a slice of the scope's answers:
   | Lost keyword mention | a keyword was mentioned in the previous snapshot and is not now | — |
   | Improvement after a content change | the visibility score rose by at least the threshold after a content change recorded between the two snapshots | 5 points |
 
-  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
+  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`, 4 since 2.43); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
+
+  **Like for like.** The rules do not compare the two snapshots' pooled values. They compare the neutral answers (queries that do not name the brand) of the [cells](#conventions) answered in both runs: the previous run's rows are read back for the group's current keywords, and a keyword, persona, engine or market present in only one run is left out, so enabling an engine or adding a persona never reads as a gain or a loss. Each snapshot stores its `comparison` with the previous one:
+
+  | `state` | When | Alerts |
+  |---|---|---|
+  | `no_previous` | no earlier snapshot of the same KPI version | none |
+  | `scope_changed` | the two runs share no answered cell | none |
+  | `incomplete` | either run answered fewer than 90 % (`MIN_ANSWERED_SHARE`) of its planned answers (its answer-engine rows; a `no_answer` reply counts as answered, a failed call does not) | none |
+  | `comparable` | otherwise | the rules above, on the matched cells |
+
+  with `matched_cells`, `answered_share` (`previous`, `current`, in %) and `previous_snapshot_at`. A change is shown, and an alert raised, only when the state is `comparable`.

@@ -34,6 +34,8 @@ vi.mock('../ContentStudio', () => ({
 vi.mock('../Dashboard/ProviderChart', () => ({ ProviderChart: () => <div>Provider chart marker</div> }));
 vi.mock('../Dashboard/BrandChart', () => ({ BrandChart: () => <div>Brand chart marker</div> }));
 vi.mock('../Dashboard/AlertsPanel', () => ({ AlertsPanel: () => <section>Alerts panel marker</section> }));
+vi.mock('../Dashboard/SeoDashboardCards', () => ({ SeoDashboardCards: () => <section>SEO cards marker</section> }));
+vi.mock('../Seo/SeoRouter', () => ({ SeoRouter: () => <div>SEO router marker</div> }));
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
 
 /** The dashboard over `COMBINED_PANELS` with `market` picked in the header; the market reads answer Chile's figures. */
@@ -80,15 +82,23 @@ describe('TabContent content studio wiring', () => {
   });
 });
 
-describe('TabContent dashboard composition', () => {
-  it('places alerts after charts and before quick actions', () => {
-    render(<TabContent {...buildTabContentProps({ activeTab: 'dashboard' })} />);
-    const chartMarker = screen.getByText('Brand chart marker');
-    const alertsMarker = screen.getByText('Alerts panel marker');
-    const quickActions = screen.getByText('Quick Actions');
+describe('TabContent SEO wiring', () => {
+  it('renders the SEO router when the seo tab is active', async () => {
+    render(<TabContent {...buildTabContentProps({ activeTab: 'seo' })} />);
 
-    expect(chartMarker.compareDocumentPosition(alertsMarker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(alertsMarker.compareDocumentPosition(quickActions)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(await screen.findByText('SEO router marker')).toBeInTheDocument();
+  });
+});
+
+describe('TabContent dashboard composition', () => {
+  it('places the charts, the SEO cards, the alerts and the quick actions in that order', () => {
+    render(<TabContent {...buildTabContentProps({ activeTab: 'dashboard' })} />);
+    const [charts, seoCards, alerts, quickActions] = ['Brand chart marker', 'SEO cards marker', 'Alerts panel marker', 'Quick Actions']
+      .map((text) => screen.getByText(text));
+
+    expect(charts.compareDocumentPosition(seoCards)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(seoCards.compareDocumentPosition(alerts)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(alerts.compareDocumentPosition(quickActions)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('counts every cited URL of the scope on the citations quick action, not just the first page', () => {

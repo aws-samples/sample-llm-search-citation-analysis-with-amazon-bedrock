@@ -73,26 +73,37 @@ def _llm_result(provider: str = 'openai', prompt_id: str = 'p1') -> dict[str, An
 # --- Response shapes -----------------------------------------------------------
 
 
+def _perplexity_annotated(*urls: str) -> dict[str, Any]:
+    """The recorded Perplexity answer with its message annotated by ``urls``."""
+    answer = copy.deepcopy(PERPLEXITY_AGENT_RESPONSE)
+    answer['output'][1]['content'][0]['annotations'] = [{'type': 'url_citation', 'url': url} for url in urls]
+    return answer
+
+
 class TestPerplexityAgentApiAnswer:
     def test_reads_the_text_of_the_message_item(self, search_handler):
-        assert search_handler._parse_perplexity_response(PERPLEXITY_AGENT_RESPONSE)[0] == PERPLEXITY_AGENT_TEXT
+        assert search_handler._parse_perplexity_response(PERPLEXITY_AGENT_RESPONSE).text == PERPLEXITY_AGENT_TEXT
 
-    def test_cites_the_search_results_that_have_a_url(self, search_handler):
-        assert search_handler._parse_perplexity_response(PERPLEXITY_AGENT_RESPONSE)[1] == [_ABC, _BLOOMBERG]
+    def test_cites_every_search_result_with_a_url_when_the_answer_has_no_marker_or_annotation(self, search_handler):
+        assert search_handler._parse_perplexity_response(PERPLEXITY_AGENT_RESPONSE).citations == [_ABC, _BLOOMBERG]
 
-    def test_adds_the_urls_of_message_annotations_once(self, search_handler):
-        answer = copy.deepcopy(PERPLEXITY_AGENT_RESPONSE)
-        answer['output'][1]['content'][0]['annotations'] = [
-            {'type': 'url_citation', 'url': _BLOOMBERG},
-            {'type': 'url_citation', 'url': 'https://www.altiplano-air.example/cl/es?utm_source=pplx'},
-        ]
+    def test_retrieves_nothing_apart_when_the_answer_has_no_marker_or_annotation(self, search_handler):
+        assert search_handler._parse_perplexity_response(PERPLEXITY_AGENT_RESPONSE).retrieved_urls == []
 
-        assert search_handler._parse_perplexity_response(answer)[1] == [_ABC, _BLOOMBERG, 'https://www.altiplano-air.example/cl/es']
+    def test_cites_the_urls_of_message_annotations_once_and_cleaned(self, search_handler):
+        answer = _perplexity_annotated(_BLOOMBERG, 'https://www.altiplano-air.example/cl/es?utm_source=pplx', _BLOOMBERG)
 
-    def test_falls_back_to_the_urls_in_the_text_without_search_results(self, search_handler):
+        assert search_handler._parse_perplexity_response(answer).citations == [_BLOOMBERG, 'https://www.altiplano-air.example/cl/es']
+
+    def test_drops_a_cited_search_result_from_the_retrieved_urls(self, search_handler):
+        answer = _perplexity_annotated(_BLOOMBERG)
+
+        assert search_handler._parse_perplexity_response(answer).retrieved_urls == [_ABC]
+
+    def test_cites_the_urls_written_in_the_text(self, search_handler):
         answer = {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Ver https://www.altiplano-air.example/cl.'}]}]}
 
-        assert search_handler._parse_perplexity_response(answer)[1] == ['https://www.altiplano-air.example/cl']
+        assert search_handler._parse_perplexity_response(answer).citations == ['https://www.altiplano-air.example/cl']
 
     @pytest.mark.parametrize(('answer', 'field', 'expected'), [
         (PERPLEXITY_AGENT_RESPONSE, 'cost_usd', 0.00538),
@@ -129,45 +140,55 @@ class TestSlowEngineAttempts:
 
 class TestOpenAIWebSearchAnswer:
     def test_reads_the_message_text(self, search_handler):
-        text, _citations = search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE)
+        parsed = search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE)
 
-        assert text.startswith('Buen — te doy una comparación práctica')
+        assert parsed.text.startswith('Buen — te doy una comparación práctica')
 
-    def test_cites_the_searched_sources_then_the_annotations_cleaned_and_once(self, search_handler):
-        assert search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE)[1] == [
-            'https://www.airlineratings.com/airlines/altiplano/safety',
-            'https://skytraxratings.com/airlines/altiplano-airlines-rating',
+    def test_cites_only_the_annotations_cleaned_and_once(self, search_handler):
+        assert search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE).citations == [
             'https://comparadorvuelos.jac.gob.cl/Home/Fichas',
+            'https://www.airlineratings.com/airlines/altiplano/safety',
+        ]
+
+    def test_keeps_the_searched_sources_it_did_not_cite_as_retrieved(self, search_handler):
+        assert search_handler._parse_openai_response(OPENAI_WEB_SEARCH_RESPONSE).retrieved_urls == [
+            'https://skytraxratings.com/airlines/altiplano-airlines-rating',
         ]
 
 
 class TestClaudeWebSearchAnswer:
-    def test_cites_the_results_of_searches_run_from_code(self, search_handler):
-        assert search_handler._parse_claude_response(CLAUDE_DYNAMIC_FILTERING_RESPONSE)[1] == [
+    def test_cites_nothing_when_searches_run_from_code_and_the_text_cites_nothing(self, search_handler):
+        assert search_handler._parse_claude_response(CLAUDE_DYNAMIC_FILTERING_RESPONSE).citations == []
+
+    def test_keeps_the_results_of_searches_run_from_code_as_retrieved(self, search_handler):
+        assert search_handler._parse_claude_response(CLAUDE_DYNAMIC_FILTERING_RESPONSE).retrieved_urls == [
             'https://chile.ladevi.info/transporte/companias-aereas/aerolineas-sky-airline-lidero-el-ranking-puntualidad-latinoamerica-junio-n102959',
             'https://www.tripadvisor.com/ShowTopic-g294291-i1357-k13686355-Sky_Airline_and_Jetsmart-Chile.html',
         ]
 
     def test_reads_only_the_text_blocks_as_the_answer(self, search_handler):
-        assert search_handler._parse_claude_response(CLAUDE_DYNAMIC_FILTERING_RESPONSE)[0] == (
+        assert search_handler._parse_claude_response(CLAUDE_DYNAMIC_FILTERING_RESPONSE).text == (
             '**Resumen:** Altiplano es una buena opción para volar desde Chile.'
         )
 
-    def test_cites_the_sources_text_blocks_name_after_the_search_results(self, search_handler):
-        assert search_handler._parse_claude_response(CLAUDE_DIRECT_RESPONSE)[1] == [
-            _BLOOMBERG, 'https://www.aviacionnews.com/2026/09/altiplano-vuelve-a-ser-la-mejor-aerolinea-de-sudamerica/',
+    def test_cites_only_the_sources_text_blocks_name(self, search_handler):
+        assert search_handler._parse_claude_response(CLAUDE_DIRECT_RESPONSE).citations == [
+            'https://www.aviacionnews.com/2026/09/altiplano-vuelve-a-ser-la-mejor-aerolinea-de-sudamerica/',
         ]
 
+    def test_keeps_the_uncited_search_results_of_a_cited_answer_as_retrieved(self, search_handler):
+        assert search_handler._parse_claude_response(CLAUDE_DIRECT_RESPONSE).retrieved_urls == [_BLOOMBERG]
+
     def test_joins_the_text_blocks_of_a_cited_answer(self, search_handler):
-        assert search_handler._parse_claude_response(CLAUDE_DIRECT_RESPONSE)[0] == (
+        assert search_handler._parse_claude_response(CLAUDE_DIRECT_RESPONSE).text == (
             '# ¿Es Altiplano una buena aerolínea?\n\nTambién fue la aerolínea más limpia de Sudamérica.'
         )
 
     def test_keeps_the_answer_of_a_failed_search_without_its_citations(self, search_handler):
         """The error object in place of the result list used to be iterated and crash the parse."""
-        text, citations = search_handler._parse_claude_response(claude_search_error_response('max_uses_exceeded'))
+        parsed = search_handler._parse_claude_response(claude_search_error_response('max_uses_exceeded'))
 
-        assert (text.endswith('más limpia de Sudamérica.'), citations) == (True, [])
+        assert (parsed.text.endswith('más limpia de Sudamérica.'), parsed.citations, parsed.retrieved_urls) == (True, [], [])
 
 
 # --- The event's market ----------------------------------------------------------
@@ -391,3 +412,57 @@ class TestRawResponseKey:
 
         document = json.loads(storage.s3.put_object.call_args.kwargs['Body'])
         assert (document['query_prompt_id'], document['market_id']) == ('p1', 'cl-es')
+
+
+class TestBrandedRows:
+    def test_marks_an_answer_to_a_query_naming_a_first_party_brand_branded(self, storage):
+        storage.store({**_llm_result(), 'query': 'Is Altiplano a good airline?'})
+
+        assert _stored_rows(storage)[0]['branded'] is True
+
+    def test_marks_an_answer_to_a_query_naming_no_tracked_brand_neutral(self, storage):
+        storage.store({**_llm_result(), 'query': 'best airline from Santiago'})
+
+        assert _stored_rows(storage)[0]['branded'] is False
+
+    def test_marks_an_answer_to_a_query_naming_an_owned_domain_branded(self, storage):
+        storage.get_brand_config.return_value = {**storage.stored_config, 'first_party_domains': ['altiplano-air.example']}
+
+        storage.store({**_llm_result(), 'query': 'reviews of www.altiplano-air.example'})
+
+        assert _stored_rows(storage)[0]['branded'] is True
+
+    def test_does_not_mark_a_query_naming_a_competitor_branded(self, storage):
+        storage.store({**_llm_result(), 'query': 'is Avianca a good airline'})
+
+        assert _stored_rows(storage)[0]['branded'] is False
+
+    def test_marks_a_query_naming_a_market_alias_branded(self, storage):
+        storage.get_brand_config.return_value = {'tracked_brands': {'first_party': [], 'competitors': []}}
+
+        storage.store({**_llm_result(), 'query': 'altiplano air chile opiniones'}, market=build_market())
+
+        assert _stored_rows(storage)[0]['branded'] is True
+
+    def test_leaves_web_search_rows_without_the_flag(self, storage):
+        storage.store({'provider': 'brave', 'provider_type': 'search', 'status': 'success', 'citations': [], 'query': 'Altiplano'})
+
+        assert 'branded' not in _stored_rows(storage)[0]
+
+
+class TestRetrievedUrlsStored:
+    def test_stores_the_retrieved_urls_apart_from_the_citations(self, storage):
+        storage.store({**_llm_result(), 'retrieved_urls': [_ABC]})
+
+        row = _stored_rows(storage)[0]
+        assert (row['citations'], row['retrieved_urls']) == (['https://www.altiplano-air.example/cl'], [_ABC])
+
+    def test_stores_an_empty_retrieved_list_for_an_engine_that_reports_none(self, storage):
+        storage.store()
+
+        assert _stored_rows(storage)[0]['retrieved_urls'] == []
+
+    def test_keeps_the_retrieved_urls_out_of_the_workflow_state(self, search_handler):
+        slim = search_handler._slim_result({**_llm_result(), 'retrieved_urls': [_ABC]})
+
+        assert ('retrieved_urls' in slim, slim['citations']) == (False, ['https://www.altiplano-air.example/cl'])

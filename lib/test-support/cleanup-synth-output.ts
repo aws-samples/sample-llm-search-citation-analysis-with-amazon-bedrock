@@ -19,7 +19,9 @@ export default function setup(): () => void {
     for (const name of readdirSync(root)) {
       if (!name.startsWith('cdk.out')) continue;
       const path = join(root, name);
-      if (statSync(path).birthtimeMs >= startedAt) {
+      // A concurrent run's teardown may have removed the folder since `readdirSync`.
+      const stats = statSync(path, { throwIfNoEntry: false });
+      if (stats !== undefined && stats.birthtimeMs >= startedAt) {
         rmSync(path, {
           recursive: true,
           force: true,

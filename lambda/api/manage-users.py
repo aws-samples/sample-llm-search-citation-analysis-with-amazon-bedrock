@@ -406,9 +406,11 @@ def handle_reset_password(event: dict, context: Any, username: str, body: dict |
     """
     current = cognito_client.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
     if current.get('UserStatus') == _PENDING_INVITE_STATUS:
+        # The pool signs in by email, so the path carries the user's internal id (the sub) while
+        # MessageAction=RESEND only takes the email: an id is refused as "Username should be an email".
         cognito_client.admin_create_user(
             UserPoolId=USER_POOL_ID,
-            Username=username,
+            Username=format_user(current)['email'] or username,
             MessageAction='RESEND',
             DesiredDeliveryMediums=['EMAIL'],
         )

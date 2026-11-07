@@ -210,7 +210,8 @@ The app uses the system font stack inherited from Tailwind defaults.
 - Standard card padding: `p-6` (24 px), `p-4` on dense lists.
 - Standard gap between cards: `gap-4` to `gap-6`.
 - Section margin between blocks: `mb-6 sm:mb-8`.
-- Sidebar width: `w-64` (256 px); header height: `h-16` (64 px).
+- Sidebar width: `w-64` (256 px), `w-16` (64 px) when collapsed to its
+  icon rail on desktop; header height: `h-16` (64 px).
 - Page content sits in `max-w-7xl mx-auto` with `p-4 sm:p-6 lg:p-8`
   around it.
 
@@ -294,12 +295,11 @@ file (`ui/ClipboardIcon.tsx`) used by copy buttons.
 There is no right chevron: rotate `ChevronDownIcon` (`-rotate-90` for a
 collapsed row, `rotate-180` for a "show less" toggle).
 
-The sidebar (`Layout/Sidebar.tsx`) defines its own navigation icons
-(`DashboardIcon`, `BrandIcon`, `CitationsIcon`, `SearchesIcon`,
-`RawResponsesIcon`, `KeywordResearchIcon`, `PromptIcon`, `GapsIcon`,
-`RecommendationsIcon`, `ContentStudioIcon`, `ReportsIcon`) with the same
-convention, and uses `EyeIcon`, `PlayIcon`, `ClockIcon`, `CogIcon` and
-`CloseIcon` from the shared set.
+The sidebar's navigation (`Layout/sidebarNav.tsx`) draws its entry icons
+with `StrokeIcon` and path data (the shared `*_PATHS` where one exists),
+and uses `EyeIcon`, `PlayIcon`, `ClockIcon` and `CogIcon` from the shared
+set; `Layout/Sidebar.tsx` adds `CloseIcon` and the rail toggle
+(`CHEVRON_DOUBLE_LEFT_PATHS`, turned 180° while collapsed).
 
 ### 6.2 Adding a new icon
 
@@ -425,11 +425,25 @@ its own file.
 | `MarkdownProcessor.tsx` | Renders AI markdown, sanitized with DOMPurify. |
 | `chartTheme.ts` | `getChartTheme(isDark)` plus `themedLegend`, `themedTooltip`, `themedAxis` (§7.5). |
 | `pagination.ts` | Client-side `paginate()` helper. |
+| `DataTable.tsx` | The dense data table (§9): typed columns (`DataColumn`: header, `help` tooltip, `sortKey`, `numeric`), hidden caption, `aria-sort` sort buttons, sticky header past 15 rows, optional leading column and rows under a row (`renderAfter`, cells with `DATA_TABLE_CELL`). |
+| `tableCells.tsx` | Cell contents: `Chip` (tones neutral / green / blue / indigo / purple / amber / red; search intents: informational blue, commercial purple, transactional green, navigational indigo, unknown neutral), `PositionBadge` (Google position: top 3 green, 4-10 blue, 11-20 amber), `ScoreChip` (0-100 score: under 30 green, under 70 amber, else red), `CompactNumber` (`1.2M` with the exact figure as tooltip), `UrlCell` (one-line link, full URL as tooltip, only http(s) is a link), `pageColumn`. |
+| `numberFormat.ts` | `integerText`, `compactText`, `usdText`, `compactUsdText`, `decimalText`: thousands separators, compact from 10,000, `—` for unknown (never 0). |
+| `TablePager.tsx` | Pager of a server-paged table: rows per page and range on the left, Previous / "Page n of m" / Next on the right; copes with an unknown total. |
 
 ### 7.3 Layout
 
 `Layout/Sidebar.tsx` is the only navigation chrome: sections, items, count
-badges and the "running" pulse on Run Analysis. A new top-level feature gets
+badges and the "running" pulse on Run Analysis (entries in
+`Layout/sidebarNav.tsx`). On desktop the button beside the title collapses
+it to a 64 px icon rail (`aria-expanded`, `aria-controls="app-sidebar"`):
+labels become `title` tooltips and stay in the link name (`lg:sr-only`),
+section titles give way to a rule, count badges shrink to dots. The choice
+is stored under `localStorage['sidebar-collapsed']` (guarded:
+unavailable storage means expanded). `<main>` follows the width through
+Tailwind's `peer` on the `<aside data-collapsed>`
+(`lg:ml-64 lg:peer-data-[collapsed=true]:ml-16`), so the aside must stay
+`<main>`'s preceding sibling. Every collapsed style is `lg:`-only: on mobile
+the sidebar still slides out at full width. A new top-level feature gets
 a sidebar entry, a `TAB_TO_PATH` / `PAGE_TITLES` entry in `App.tsx` and a
 case in `Layout/TabContent.tsx`, not a new chrome component.
 
@@ -565,6 +579,20 @@ Do NOT apply the filter to:
 - Header row: `bg-gray-50`; header cells `px-6 py-3 text-xs font-medium
   uppercase tracking-wider text-gray-500`.
 - Body cells: `px-6 py-4`; row separators `divide-y divide-gray-200`.
+- Dense data tables (SEO keywords, pages, backlinks) use `ui/DataTable`:
+  `px-4` cells, a row hover (`hover:bg-gray-50`), numbers right-aligned in
+  `tabular-nums` with thousands separators and `ui/numberFormat`'s compact
+  form for large values (exact figure in the tooltip), URLs through
+  `UrlCell`, positions as `PositionBadge`, 0-100 scores as `ScoreChip`,
+  flags as `Chip`. The card scrolls sideways on narrow screens; past 15 rows
+  it scrolls inside `max-h-[70vh]` under a sticky header. Loading is a
+  `SkeletonTable` in the same bordered card; server paging goes under the
+  table with `ui/TablePager`.
+- A page of such tables opens with `PageHeaderCard` (title, description,
+  the search form as its children); headline figures are
+  `Reports/layout/ReportStatCard` tiles in a `ReportStatGrid`; result tabs
+  are an underline `TabBar` across the top of a white card with a
+  `TabPanel` under it.
 - Sortable columns set `aria-sort` on the header cell.
 - Expandable rows use `ChevronDownIcon` (rotated `-rotate-90` while
   collapsed) inside a button with `aria-expanded`.
@@ -640,6 +668,7 @@ web/src/components/ui/
 ├── MarkdownProcessor.tsx     # sanitized AI markdown
 ├── chartTheme.ts             # Chart.js theme helpers
 ├── pagination.ts
+├── DataTable.tsx             # dense data table (+ tableCells, numberFormat, TablePager)
 └── index.ts                  # re-exports Button and the icons
 web/src/components/Reports/layout/   # report page building blocks
 web/src/components/Reports/charts/   # report chart library

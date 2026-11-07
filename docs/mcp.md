@@ -102,6 +102,19 @@ Catalogue reads include providers, personas, engine answers, persona rankings, p
 
 Large lists come in pages: keywords, the citation list, recent searches, crawled pages, brand appearances (`get_brand_mentions` `view=appearances`), group KPI keywords and drivers (`get_report` `kind=group_kpis`), sentiment examples, schedules, research jobs and Content Studio items return `next_token`; pass it back with the same arguments for the next page (`null` on the last page). A result over 50,000 characters is cut to a first page and marked `truncated`; when it also has a `next_token`, ask again with a smaller `limit` first, because the cursor continues after the whole page. An API answer over 5 MB is read by the server from its temporary S3 copy, so tools see the same data as the dashboard.
 
+SEO reads (SEO stack, router `seo`; they need `CitationAnalysisSeoStack` deployed). They are free: none calls DataForSEO, and each description starts with "Free".
+
+- `get_keyword_metrics(keyword_ids, market_id?)`: the stored search volume, monthly searches, keyword difficulty, CPC, competition and intent of up to 500 keywords (`POST /api/seo/keywords/metrics/lookup`). Ids without stored metrics are absent; fetching new metrics for tracked keywords is not exposed (use the dashboard).
+- `get_seo_geo_comparison(market_id?, group_id?)`: per keyword, the Google organic position, competitor positions, whether an AI Overview showed and cites you, the AI mention rate and the SEO vs GEO quadrant, with totals (`GET /api/seo/seo-geo`).
+- `get_seo_recommendations(market_id?, group_id?)`: the SEO recommendations over those rows, with their status (`GET /api/seo/insights`).
+- `get_rank_tracking(view, ...)`: `trackers` (active trackers with their `keyword_scope` — `all` Settings keywords of the market, one `group`, or `list` for older trackers of extra keywords only — keyword counts and latest run), `tracker` (one tracker and its keywords), `results` (positions over `1d`/`7d`/`30d`/`90d`) or `history` (one keyword over up to 365 days).
+- `get_domain_snapshots(domain, market_id?)`: the stored estimated-traffic snapshots of a domain.
+- `get_backlink_snapshots()`: the stored weekly backlink snapshots of your and your competitors' domains.
+- `get_site_audits(view, ...)`: `list` (recent audits), `summary` (status, progress, summary, AI readiness) or `issues` (issue types, or with `issue_type` the affected pages, paged).
+- `get_local_job(job_id)`: status and results of a local job (rank grid, reviews, profile updates).
+
+Engine filters (`provider`) accept `google_ai_overview` (Google AI Overviews) next to the four other AI engines.
+
 Prompts (`prompts/list`, `prompts/get`):
 
 - `geo_audit(group)`: an audit of one keyword group built from visibility, insights, KPI history and citation gaps. It quotes only numbers the tools returned.
@@ -109,23 +122,42 @@ Prompts (`prompts/list`, `prompts/get`):
 
 ## Spending credit: estimate, then confirm
 
-Any operation that calls AI providers, search providers or Bedrock is split into two steps:
+Any operation that calls AI providers, search providers, DataForSEO or Bedrock is split into two steps:
 
 | Estimate | Start | Scope | Who |
 |---|---|---|---|
 | `estimate_run` | `start_run` | `run` | Admins only, as in the dashboard |
 | `estimate_research` | `start_research` | `write` | Any signed-in user |
 | `estimate_content_brief` | `generate_content_brief` | `write` | Any signed-in user |
+| `estimate_seo_keywords` | `run_seo_keywords` | `run` | Any signed-in user |
+| `estimate_seo_domain` | `run_seo_domain` | `run` | Any signed-in user |
+| `estimate_seo_backlinks` | `run_seo_backlinks` | `run` | Any signed-in user |
+| `estimate_seo_local` | `run_seo_local` | `run` | Any signed-in user |
+| `estimate_seo_job` | `start_seo_job` | `run` | Admins only, as in the dashboard |
 
-1. The estimate counts what the spend would do, without spending. For a run that is keywords × enabled personas (or 1) × enabled AI engines and search providers with a key. For research it is the web-search calls and, for the agent, the upper bound of Bedrock calls. For a brief it is one Bedrock generation. Counts only, no prices: provider pricing differs per account. Use each provider's pricing page for the cost.
+1. The estimate counts what the spend would do, without spending. For a run that is keywords × enabled personas (or 1) × enabled AI engines and search providers with a key, plus keywords × 1 for Google AI Overviews when it is on (it asks the plain keyword once per keyword, whatever the personas). The DataForSEO credential itself is not a provider a run calls. For research it is the web-search calls and, for the agent, the upper bound of Bedrock calls. For a brief it is one Bedrock generation. Counts only, no prices: provider pricing differs per account. Use each provider's pricing page for the cost.
 2. If the spend can start, the estimate returns a `confirmation_token`. The token is single use, valid 5 minutes, and bound to you, the operation and the exact request (scope and arguments). The assistant is told to show you the estimate and wait for your approval.
 3. The start call carries the same arguments and the token. The token is used up atomically before anything else happens. Missing, expired, used, issued to someone else or issued for other arguments: the start is refused and nothing starts.
+
+### DataForSEO (family `seo`)
+
+The SEO stack's paid operations, each through the SEO API with its caches and checks (a cached answer costs nothing; a billed DataForSEO call is never re-sent):
+
+- `*_seo_keywords`: `lookup=research` (keyword ideas around a seed: `mode`, `limit` 150/300/500, `clickstream`, `group_keywords`) or `lookup=serp` (organic Google results, `depth` 20/50).
+- `*_seo_domain`: `lookup=overview` (organic keywords, traffic, traffic value) or `lookup=ranked_keywords` (one page of the keywords a domain ranks for).
+- `*_seo_backlinks`: `lookup=overview` (totals and a year of history) or one page of `links`, `referring_domains` or `top_pages`.
+- `*_seo_local`: `lookup=businesses` (listings near a point), `profile` (one Google Business Profile) or `serp` (Maps or Local Finder results and where a business sits in them).
+- `*_seo_job` (Admin): `rank_run` (check a rank tracker now), `site_audit` (crawl your own site), `domain_snapshot`, `backlinks_snapshot` (every tracked domain) or `rank_grid` (local rank on a 3×3, 5×5 or 7×7 grid). Follow a job with the free reads above.
+
+The estimate states the most DataForSEO calls the request makes and the list price of one call (from the same price table the SEO API uses), for example "at most 1 DataForSEO call(s); live Google organic results, $0.0035 at depth 20". A rank run counts one live check per keyword and device (from the free tracker estimate); a backlinks snapshot one call per tracked domain; a site audit makes no DataForSEO call. No dollar total is added up and no spend is tracked. Each tool's description gives the approximate price per call.
+
+A failed DataForSEO call answers with the SEO API's fixed error text (for example "DataForSEO is unavailable, try again later"), never the provider's own message. Results are trimmed to 50,000 characters like every tool result.
 
 The tokens rely on no MCP elicitation, because connector hosts do not support it. The approval is the assistant asking you in the conversation. A tool result can carry text from third-party pages, but it cannot start a spend by itself, because a spend needs a fresh estimate and token.
 
 ### Limits per user
 
-Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0` turns a spend off):
+Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0` turns a spend off; an unknown key fails synth):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -133,6 +165,7 @@ Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0`
 | `runsPerDay` | 5 | Analysis runs you can start per UTC day |
 | `jobsPerDay` | 20 | Research jobs and content briefs together, per UTC day |
 | `maxRunKeywords` | 50 | Keywords one `start_run` can cover; counted at the estimate and again at the start |
+| `seoCallsPerDay` | 50 | DataForSEO lookups and SEO jobs together (`run_seo_*`, `start_seo_job`), per UTC day |
 
 A refusal names the limit and, for the daily ones, when it resets (midnight UTC). The keyword cap is checked by counting the scope's active keywords page by page; the count stops as soon as it passes `maxRunKeywords`. If it cannot finish inside the request's time budget the start is refused ("The scope's keywords could not all be counted (too many, or the API was slow)"), because a spend is never started on a guess. A start that the API itself refuses gives the day's use back. A start that timed out keeps it, because the run may have started. Runs in flight that cannot be checked in time count as running.
 
@@ -154,4 +187,4 @@ Every call writes one structured log line (`caller_sub`, `tool`, `operation`, `o
 
 ## Not exposed
 
-User management, provider API keys and provider settings, brand configuration writes, schedule writes, and every delete. Use the dashboard for those.
+User management, provider API keys and provider settings, brand configuration writes, schedule writes, SEO setup (creating or editing rank trackers, the weekly backlink snapshot schedule, cancelling an audit, fetching keyword metrics for tracked keywords), and every delete. Use the dashboard for those.

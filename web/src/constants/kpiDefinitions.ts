@@ -47,13 +47,16 @@ export interface KpiSpec extends KpiDefinition {
 
 const ANSWER_NOTE = 'An answer is one successful response of one AI engine to one query in one run.';
 
+const CITED_NOTE = 'Only the sources an answer cites count; pages the engine only read while searching do not.';
+
 export const KPI_DEFINITIONS: Readonly<Record<KpiId, KpiSpec>> = {
   answers: {
     id: 'answers',
     unit: 'count',
     label: 'Answers',
     definition: `The AI answers these figures are computed from. ${ANSWER_NOTE} `
-      + 'Web-search providers and failed calls are not answers. Small samples are noisy: with 20 answers, one mention moves a rate by 5 points.',
+      + 'Web-search providers, failed calls and replies without answer text are not answers. '
+      + 'Small samples are noisy: with 20 answers, one mention moves a rate by 5 points.',
   },
   mentions: {
     id: 'mentions',
@@ -105,21 +108,22 @@ export const KPI_DEFINITIONS: Readonly<Record<KpiId, KpiSpec>> = {
     id: 'citations',
     unit: 'count',
     label: 'Citations',
-    definition: 'Answers that cite at least one of your owned domains as a source. Set owned domains in Settings › Brand Tracking.',
+    definition: 'Answers that cite at least one of your owned domains as a source. Set owned domains in Settings › Brand Tracking. '
+      + CITED_NOTE,
   },
   citation_rate: {
     id: 'citation_rate',
     unit: 'percent',
     label: 'Citation rate',
     definition: 'Share of AI answers that cite your website (an owned domain or its subdomains) as a source, '
-      + 'whether or not the text names your brand. Empty until owned domains are set.',
+      + `whether or not the text names your brand. ${CITED_NOTE} Empty until owned domains are set.`,
   },
   citation_share: {
     id: 'citation_share',
     unit: 'percent',
     label: 'Citation share',
     definition: 'Your owned domains\' share of all the sources the answers cite. Each domain counts once per answer. '
-      + 'Empty until owned domains are set.',
+      + `${CITED_NOTE} Empty until owned domains are set.`,
   },
   net_sentiment: {
     id: 'net_sentiment',
@@ -160,7 +164,9 @@ export const TREND_DEFINITION: KpiDefinition = {
   definition:
     'A change compares a KPI with the previous comparable run or period, in points for percentages and scores and in places for '
     + 'the average position. It counts as improving or declining from 2 points (half a place for the average position); '
-    + 'anything smaller is stable, within the normal run-to-run variation of AI answers.',
+    + 'anything smaller is stable, within the normal run-to-run variation of AI answers. KPI alerts compare only the answers '
+    + 'to queries that do not name your brand, for the same keyword, persona, engine and market in both runs, and only when '
+    + 'each run answered at least 90 % of its queries.',
 };
 
 

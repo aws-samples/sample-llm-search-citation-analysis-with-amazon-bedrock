@@ -29,7 +29,9 @@ Scope and limits, so nobody over-trusts the output:
     Lambda and read only by another's code passes. Reads through f-strings
     (``os.environ.get(f"BEDROCK_TIER_{role.value.upper()}")``) are expanded
     against the StrEnum values declared in Lambda code, so they name exactly
-    the variables the runtime can read.
+    the variables the runtime can read. A read through a module-level string
+    constant of the same file (``os.environ[TABLE_ENV]``) names that constant's
+    value; a constant imported from another module is not followed.
   * types matches member names as whole words anywhere in non-test dashboard
     source (declaration lines excluded), so a name that also occurs as an
     unrelated identifier is a false negative, never a false positive. Dynamic
@@ -74,6 +76,8 @@ TYPE_MEMBER_UNREAD_ALLOWED: dict[str, str] = {}
 
 _CDK_KEY = re.compile(r"^\s+'?([A-Z][A-Z0-9_]+)'?\s*:", re.MULTILINE)
 _CDK_ADD_ENV = re.compile(r"addEnvironment\(\s*'([A-Z][A-Z0-9_]+)'")
+# A SEO feature table: `this.sharedTable('<id>', '<ENV_NAME>', {...})` gives both SEO functions its name.
+_CDK_SHARED_TABLE = re.compile(r"sharedTable\(\s*'[^']*',\s*'([A-Z][A-Z0-9_]+)'")
 
 
 def cdk_env_keys() -> dict[str, list[str]]:
@@ -83,7 +87,7 @@ def cdk_env_keys() -> dict[str, list[str]]:
         if path.name.endswith(('.spec.ts', '-fixtures.ts')):
             continue
         text = path.read_text(encoding='utf-8')
-        for match in (*_CDK_KEY.finditer(text), *_CDK_ADD_ENV.finditer(text)):
+        for match in (*_CDK_KEY.finditer(text), *_CDK_ADD_ENV.finditer(text), *_CDK_SHARED_TABLE.finditer(text)):
             keys.setdefault(match.group(1), []).append(str(path.relative_to(REPO)))
     return keys
 
@@ -151,11 +155,19 @@ def _string_prefix(node: ast.AST) -> str | None:
 
 
 class _EnvVisitor(ast.NodeVisitor):
-    def __init__(self, reads: EnvReads, file: str) -> None:
+    def __init__(self, reads: EnvReads, file: str, constants: dict[str, str]) -> None:
         self.reads = reads
         self.file = file
+        self.constants = constants
+
+    def _resolved(self, node: ast.AST) -> ast.AST:
+        """A module-level string constant (``TABLE_ENV = 'NAME'``) read by name, as its literal."""
+        if isinstance(node, ast.Name) and node.id in self.constants:
+            return ast.Constant(self.constants[node.id])
+        return node
 
     def _record(self, node: ast.AST, *, required: bool) -> None:
+        node = self._resolved(node)
         name = _string_prefix(node)
         if name is None:
             return
@@ -193,7 +205,7 @@ class _EnvVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _record_table_env(self, node: ast.Call) -> None:
-        names = tuple(n for n in (_string_prefix(arg) for arg in node.args) if n)
+        names = tuple(n for n in (_string_prefix(self._resolved(arg)) for arg in node.args) if n)
         if not names:
             return
         keywords = {kw.arg: kw.value for kw in node.keywords}
@@ -206,11 +218,26 @@ class _EnvVisitor(ast.NodeVisitor):
             self.reads.required_any_of.append((names, self.file))
 
 
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """``NAME = 'literal'`` assignments at module level, so a read through such a constant names its variable."""
+    constants: dict[str, str] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            target, value = statement.target, statement.value
+        else:
+            continue
+        if isinstance(target, ast.Name) and isinstance(value, ast.Constant) and isinstance(value.value, str):
+            constants[target.id] = value.value
+    return constants
+
+
 def lambda_env_reads() -> EnvReads:
     reads = EnvReads()
     for path in lambda_production_files():
         tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-        _EnvVisitor(reads, str(path.relative_to(REPO))).visit(tree)
+        _EnvVisitor(reads, str(path.relative_to(REPO)), _module_string_constants(tree)).visit(tree)
     return reads
 
 

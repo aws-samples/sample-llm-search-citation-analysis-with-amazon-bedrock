@@ -12,6 +12,7 @@ and ``shared.api_response.DecimalEncoder``. This module is the single home;
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -54,3 +55,19 @@ def convert_floats_to_decimal(obj: Any) -> Any:
     if isinstance(obj, list):
         return [convert_floats_to_decimal(item) for item in obj]
     return obj
+
+
+def plain_number(value: Decimal) -> int | float:
+    """A DynamoDB ``Decimal`` as an ``int`` when it is whole, a ``float`` otherwise."""
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def plain(value: Any) -> Any:
+    """``value`` with DynamoDB's ``Decimal`` numbers turned back into ``int`` (when whole) / ``float``, recursively."""
+    if isinstance(value, Decimal):
+        return plain_number(value)
+    if isinstance(value, Mapping):
+        return {key: plain(entry) for key, entry in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [plain(entry) for entry in value]
+    return value

@@ -75,9 +75,9 @@ describe('ReportsLandingView', () => {
     expect(link).toHaveAttribute('href', '/reports/competitor');
   });
 
-  it('makes each of the nine report cards a link', () => {
+  it('makes each of the ten report cards a link', () => {
     renderLanding();
-    expect(screen.getAllByRole('link')).toHaveLength(9);
+    expect(screen.getAllByRole('link')).toHaveLength(10);
   });
 
   it.each([
@@ -85,6 +85,7 @@ describe('ReportsLandingView', () => {
     ['AI Engines', '/reports/engines'],
     ['Sources', '/reports/sources'],
     ['Sentiment', '/reports/sentiment'],
+    ['SEO vs GEO', '/reports/seo-geo'],
   ])('links the %s card to %s', (title, path) => {
     renderLanding();
     expect(screen.getByRole('heading', { name: title }).closest('a')).toHaveAttribute('href', path);

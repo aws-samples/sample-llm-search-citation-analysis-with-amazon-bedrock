@@ -84,6 +84,7 @@ class Limits:
     runs_per_day: int = 5
     jobs_per_day: int = 20
     max_run_keywords: int = 50
+    seo_calls_per_day: int = 50
 
 
 _LIMIT_KEYS = {
@@ -91,6 +92,7 @@ _LIMIT_KEYS = {
     'runsPerDay': 'runs_per_day',
     'jobsPerDay': 'jobs_per_day',
     'maxRunKeywords': 'max_run_keywords',
+    'seoCallsPerDay': 'seo_calls_per_day',
 }
 
 

@@ -1,21 +1,15 @@
 import { useState } from 'react';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
-import { usesIamAuth } from '../../constants/providers';
-import { describeProviderHealth } from '../../formatting/providerHealth';
-import type {
-  ProviderHealthDescriptor, ProviderHealthTone
-} from '../../formatting/providerHealth';
-import { formatRelativeTime } from '../../formatting/dateFormatter';
-import { Spinner } from '../ui/Spinner';
 import { RefreshIcon } from '../ui';
-import { ProviderModelEditor } from './ProviderModelEditor';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import {
-  EXCLAMATION_TRIANGLE_PATHS, EXTERNAL_LINK_PATHS 
-} from '../ui/iconPaths';
 import { ProvidersConfigSkeleton } from './ProvidersConfigSkeleton';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
+import {
+  ProviderCard, type ProviderCardControls
+} from './ProviderCard';
+import {
+  groupProviders, withBorrowedCredentials
+} from './providerCredentials';
 
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
@@ -34,168 +28,6 @@ export interface ProvidersConfigProps {
   /** Threaded from the parent, which already resolved membership. */
   readonly isAdmin: boolean;
 }
-
-function getProviderCardBorderClass(configured: boolean, enabled: boolean): string {
-  if (configured && enabled) return 'border-emerald-200';
-  if (configured) return 'border-amber-200';
-  return 'border-gray-200';
-}
-
-function getProviderDotClass(configured: boolean, enabled: boolean): string {
-  if (configured && enabled) return 'bg-emerald-500';
-  if (configured) return 'bg-amber-500';
-  return 'bg-gray-300';
-}
-
-function getToggleTitle(provider: ProviderConfig): string {
-  if (!provider.configured) {
-    return usesIamAuth(provider) ? 'Gateway not deployed: deploy the web search stack to enable this provider' : 'Configure API key first';
-  }
-  return provider.enabled ? 'Disable' : 'Enable';
-}
-
-/**
- * Credit exhaustion and rejected keys stop the provider until someone acts, so
- * they get the loudest treatment; rate limits and timeouts usually clear up on
- * their own.
- */
-const HEALTH_TONE_CLASSES: Record<ProviderHealthTone, string> = {
-  ok: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-  warning: 'text-amber-800 bg-amber-50 border-amber-200',
-  critical: 'text-red-800 bg-red-50 border-red-300 font-semibold',
-};
-
-function getHealthTitle(health: ProviderHealthDescriptor): string | undefined {
-  return health.tone === 'ok'
-    ? `Last successful result ${formatRelativeTime(health.occurredAt)}`
-    : health.rawError;
-}
-
-interface ProviderHealthProps {readonly provider: ProviderConfig;}
-
-const ProviderHealthBadge = ({ provider }: ProviderHealthProps) => {
-  const health = describeProviderHealth(provider);
-  if (health === null) return null;
-
-  const showElapsed = health.tone !== 'ok' && health.occurredAt !== undefined;
-
-  return (
-    <output
-      className={`text-xs px-2 py-1 rounded border ${HEALTH_TONE_CLASSES[health.tone]}`}
-      title={getHealthTitle(health)}
-    >
-      {health.label}
-      {showElapsed && (
-        <span className="font-normal opacity-75">{` · ${formatRelativeTime(health.occurredAt)}`}</span>
-      )}
-    </output>
-  );
-};
-
-/**
- * Spelled out on its own row rather than squeezed into the badge: an
- * auto-disabled provider stays off until a human turns it back on, which is
- * not something to discover from a tooltip.
- */
-const ProviderAutoDisabledNote = ({ provider }: ProviderHealthProps) => {
-  const health = describeProviderHealth(provider);
-  if (health?.autoDisabledNote === undefined) return null;
-
-  return (
-    <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3">
-      <StrokeIcon className="w-4 h-4 mt-0.5 shrink-0 text-red-600" paths={EXCLAMATION_TRIANGLE_PATHS} />
-      <p className="text-xs text-red-800">
-        <span className="font-semibold">The system switched this provider off. </span>
-        {health.autoDisabledNote}
-      </p>
-    </div>
-  );
-};
-
-/** "Configured" plus the masked key and health, or the amber "Not configured" pill. */
-const ProviderStatus = ({ provider }: ProviderHealthProps) => {
-  if (!provider.configured) {
-    const label = usesIamAuth(provider) ? 'Gateway not deployed' : 'Not configured';
-    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{label}</span>;
-  }
-  const iam = usesIamAuth(provider);
-  return (
-    <>
-      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
-        {iam ? 'IAM — no key needed' : 'Configured'}
-      </span>
-      {!iam && provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
-      <ProviderHealthBadge provider={provider} />
-    </>
-  );
-};
-
-interface ProviderToggleProps {
-  readonly provider: ProviderConfig;
-  readonly saving: boolean;
-  readonly onToggle: () => void;
-}
-
-/** The enable/disable switch; inert until an API key is stored. */
-const ProviderToggle = ({
-  provider, saving, onToggle 
-}: ProviderToggleProps) => {
-  const on = provider.enabled && provider.configured;
-  return (
-    <button
-      onClick={onToggle}
-      disabled={saving || !provider.configured}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        on ? 'bg-emerald-500' : 'bg-gray-300'
-      } ${provider.configured ? '' : 'opacity-50 cursor-not-allowed'}`}
-      title={getToggleTitle(provider)}
-    >
-      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-        on ? 'translate-x-6' : 'translate-x-1'
-      }`} />
-    </button>
-  );
-};
-
-interface ApiKeyEditorProps {
-  readonly provider: ProviderConfig;
-  readonly value: string;
-  readonly saving: boolean;
-  readonly onChange: (value: string) => void;
-  readonly onSave: () => void;
-  readonly onCancel: () => void;
-}
-
-const ApiKeyEditor = ({
-  provider, value, saving, onChange, onSave, onCancel 
-}: ApiKeyEditorProps) => (
-  <div className="mt-4 pt-4 border-t border-gray-100">
-    <div className="flex gap-2">
-      <input
-        type="password"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={`Enter ${provider.name} API key...`}
-        className="flex-1 p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
-        autoFocus
-      />
-      <button
-        onClick={onSave}
-        disabled={saving}
-        className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-      >
-        {saving ? <Spinner size="sm" /> : 'Save'}
-      </button>
-      <button onClick={onCancel} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-    </div>
-    <p className="mt-2 text-xs text-gray-500">
-      Get your API key from{' '}
-      <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="text-gray-700 underline hover:text-gray-900">
-        {provider.name}'s console
-      </a>
-    </p>
-  </div>
-);
 
 export const ProvidersConfig = ({
   providers, loading, onUpdate, onRefresh, updateError = null, isAdmin 
@@ -220,14 +52,14 @@ export const ProvidersConfig = ({
     setSaving(null);
   };
 
-  const handleSaveApiKey = async (providerId: string) => {
-    if (!apiKeyInput.trim()) {
+  const handleSaveApiKey = async (providerId: string, apiKey: string) => {
+    if (!apiKey.trim()) {
       setError('API key cannot be empty');
       return;
     }
     setSaving(providerId);
     setError(null);
-    const success = await onUpdate(providerId, { api_key: apiKeyInput.trim() });
+    const success = await onUpdate(providerId, { api_key: apiKey.trim() });
     if (success) {
       setEditingProvider(null);
       setApiKeyInput('');
@@ -249,6 +81,29 @@ export const ProvidersConfig = ({
     setError(null);
   };
 
+  const controlsFor = (provider: ProviderConfig): ProviderCardControls => ({
+    isAdmin,
+    saving: saving === provider.id,
+    editingKey: editingProvider === provider.id,
+    editingModel: editingModel === provider.id,
+    apiKeyInput,
+    onApiKeyInput: setApiKeyInput,
+    onToggle: () => handleToggleEnabled(provider.id, provider.enabled),
+    onEditKey: () => startEditing(provider.id),
+    onEditModel: () => setEditingModel(provider.id),
+    onCloseModel: () => setEditingModel(null),
+    onSaveKey: (apiKey) => handleSaveApiKey(provider.id, apiKey),
+    onInvalidKey: setError,
+    onCancelKey: cancelEditing,
+    onModelSaved: onRefresh,
+  });
+
+  const renderCard = (provider: ProviderConfig) => (
+    <ProviderCard key={provider.id} provider={provider} controls={controlsFor(provider)} />
+  );
+
+  const groups = groupProviders(withBorrowedCredentials(providers));
+
   // Only the first load: a refresh keeps the cards (and any open editor) in place.
   if (loading && providers.length === 0) {
     return <ProvidersConfigSkeleton />;
@@ -266,74 +121,18 @@ export const ProvidersConfig = ({
       <SettingsErrorNotice error={updateError ?? error} />
 
       <div className="space-y-4">
-        {providers.map((provider) => (
-          <div key={provider.id} className={`bg-white rounded-lg border p-4 transition-colors ${getProviderCardBorderClass(provider.configured, provider.enabled)}`}>
-            <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
-                <div className={`mt-1 w-3 h-3 rounded-full ${getProviderDotClass(provider.configured, provider.enabled)}`} />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-semibold text-gray-900">{provider.name}</h4>
-                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{provider.model}</span>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-1">{provider.description}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <ProviderStatus provider={provider} />
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Both controls call PUT /api/providers/{id}, which is
-                    Admin-only server-side. Non-admins keep the read-only card,
-                    the status badge, and the docs link. */}
-                {isAdmin && (
-                  <>
-                    <ProviderToggle
-                      provider={provider}
-                      saving={saving === provider.id}
-                      onToggle={() => handleToggleEnabled(provider.id, provider.enabled)}
-                    />
-                    {provider.model_configurable === true && provider.configured && (
-                      <button onClick={() => setEditingModel(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                        Change model
-                      </button>
-                    )}
-                    {!usesIamAuth(provider) && (
-                      <button onClick={() => startEditing(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                        {provider.configured ? 'Update Key' : 'Add Key'}
-                      </button>
-                    )}
-                  </>
-                )}
-                <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title={usesIamAuth(provider) ? 'Documentation' : 'Get API Key'}>
-                  <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
-                </a>
-              </div>
-            </div>
-
-            <ProviderAutoDisabledNote provider={provider} />
-
-            {isAdmin && editingProvider === provider.id && (
-              <ApiKeyEditor
-                provider={provider}
-                value={apiKeyInput}
-                saving={saving === provider.id}
-                onChange={setApiKeyInput}
-                onSave={() => handleSaveApiKey(provider.id)}
-                onCancel={cancelEditing}
-              />
-            )}
-
-            {isAdmin && editingModel === provider.id && (
-              <ProviderModelEditor
-                provider={provider}
-                onSaved={onRefresh}
-                onClose={() => setEditingModel(null)}
-              />
-            )}
-          </div>
-        ))}
+        {groups.engines.map(renderCard)}
       </div>
+
+      {groups.seo.length > 0 && (
+        <section aria-labelledby="seo-data-providers" className="space-y-4">
+          <div>
+            <h4 id="seo-data-providers" className="text-sm font-semibold text-gray-900">SEO data</h4>
+            <p className="text-xs text-gray-600 mt-1">Search volume, keyword difficulty and Google results pages for the SEO views and the Google AI Overviews engine.</p>
+          </div>
+          {groups.seo.map(renderCard)}
+        </section>
+      )}
 
       <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
         <h4 className="text-sm font-medium text-gray-900 mb-2">How it works</h4>
@@ -343,6 +142,9 @@ export const ProvidersConfig = ({
           <li>• Disable providers temporarily without removing their API keys</li>
           <li>• The OpenAI and Gemini models can be changed as new versions appear; each is checked before it is saved</li>
           <li>• Each provider has different capabilities and pricing</li>
+          {groups.seo.length > 0 && (
+            <li>• DataForSEO takes a login and an API password; Google AI Overviews uses that login, so it can be enabled once the login is saved</li>
+          )}
           {!isAdmin && (
             <li>• Changing provider settings requires an administrator</li>
           )}

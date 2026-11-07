@@ -128,19 +128,26 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
     successful search that found nothing, and the run reported
     ``success_rate: 100.0`` (AUDIT-2026-08-19, production).
 
+    ``no_answers`` counts the ``status: 'no_answer'`` rows (a Google results
+    page without an AI Overview): the call worked, so they are not failures,
+    but they are not answers either, so the summary must not read them as
+    "queried, 0 citations".
+
     Returns:
         ``{'result_count': int, 'by_provider': {name: {'queries', 'citations',
-        'failures', 'error_categories'}}}``
+        'failures', 'error_categories', 'no_answers'}}}``
     """
     by_provider: dict[str, dict[str, Any]] = {}
 
     for result in results:
         provider = result.get('provider', 'unknown')
-        counts = by_provider.setdefault(provider, empty_provider_counts())
+        counts = by_provider.setdefault(provider, {**empty_provider_counts(), 'no_answers': 0})
         counts['queries'] += 1
         counts['citations'] += len(result.get('citations', []))
 
-        if result.get('status') == 'error':
+        if result.get('status') == 'no_answer':
+            counts['no_answers'] += 1
+        elif result.get('status') == 'error':
             counts['failures'] += 1
             # Classified upstream by `shared.provider_health`.
             add_error_categories(counts, [result.get('error_category', 'unknown')])

@@ -21,11 +21,13 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
 
+from shared.dynamo_decimal import plain_number
+
 # Longest token any route accepts. Merged-partition cursors (one start key per
 # provider) are the largest, about 2 KB.
 MAX_CURSOR_LENGTH = 4096
 
-CURSOR_ERROR_MESSAGE = 'Invalid next_token'
+CURSOR_ERROR_MESSAGE = 'Invalid next_token: pass the next_token of the previous page, with the same filters'
 
 # The `@validate` schema entry for the `next_token` query parameter.
 CURSOR_QUERY_PARAM: dict[str, dict[str, Any]] = {
@@ -36,7 +38,7 @@ CURSOR_QUERY_PARAM: dict[str, dict[str, Any]] = {
 def _key_value(value: Any) -> Any:
     """``json.dumps`` default: DynamoDB numbers keep their numeric JSON form."""
     if isinstance(value, Decimal):
-        return int(value) if value == value.to_integral_value() else float(value)
+        return plain_number(value)
     return str(value)
 
 

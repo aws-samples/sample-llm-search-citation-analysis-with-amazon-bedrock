@@ -231,9 +231,9 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
    | Provider | Default model | Web search |
    |---|---|---|
    | OpenAI | `gpt-5-mini` | Responses API `web_search` tool, `tool_choice: required` (every answer searches) |
-   | Perplexity | `perplexity/sonar` | Agent API (`POST /v1/agent`) with the `web_search` tool; the Sonar Chat Completions API it replaced was retired on 2026-09-27 |
+   | Perplexity | `perplexity/sonar` | Agent API (`POST /v1/agent`) with the `web_search` tool, asked to cite inline (`[1][2]`); the Sonar Chat Completions API it replaced was retired on 2026-09-27 |
    | Google Gemini | `gemini-3.6-flash` | Google Search grounding (`generateContent`) |
-   | Anthropic Claude | `claude-sonnet-5-5` | `web_search_20260318` tool with dynamic filtering, no cap on searches, 4,096 output tokens |
+   | Anthropic Claude | `claude-sonnet-5-5` | `web_search_20260318` tool in direct mode (`allowed_callers: ["direct"]`, so its text cites its sources; it reads full search results, so more input tokens), no cap on searches, 4,096 output tokens |
 
    **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity lists the Agent API models (`perplexity/sonar`, `openai/gpt-6-luna`, ...), and you can type any id. A Perplexity model saved before 2.37.0 (`sonar`, `sonar-pro`, `sonar-reasoning-pro`) is read as `perplexity/sonar`. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
 

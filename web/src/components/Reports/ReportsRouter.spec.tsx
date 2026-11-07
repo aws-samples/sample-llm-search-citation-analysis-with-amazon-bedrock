@@ -14,6 +14,7 @@ import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtu
 vi.mock('./scopeReport/useScopeReportData', () => ({ useScopeReportData: vi.fn() }));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 vi.mock('chart.js', () => import('../Dashboard/chartJs-fixtures'));
+vi.mock('../../api/seo', () => import('../../hooks/useSeoAccount-fixtures'));
 vi.mock('../../hooks/usePrintMode', () => ({ usePrintMode: vi.fn(() => ({ isPrintMode: false })) }));
 
 import { useScopeReportData } from './scopeReport/useScopeReportData';
@@ -40,9 +41,19 @@ describe('ReportsRouter', () => {
     })).toBeInTheDocument();
   });
 
+  it('opens the SEO vs GEO report at /reports/seo-geo', async () => {
+    renderReportsAt('/reports/seo-geo');
+
+    expect(await screen.findByRole('heading', {
+      level: 1,
+      name: 'SEO vs GEO',
+    })).toBeInTheDocument();
+  });
+
   it('opens the custom report builder at /reports/custom/new', async () => {
     renderReportsAt('/reports/custom/new');
 
-    expect(await screen.findByRole('heading', { name: 'Create a custom report' })).toBeInTheDocument();
+    // The builder's lazy chunk carries every block of the catalogue; a cold import takes a few seconds.
+    expect(await screen.findByRole('heading', { name: 'Create a custom report' }, { timeout: 5000 })).toBeInTheDocument();
   });
 });

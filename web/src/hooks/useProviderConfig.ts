@@ -11,13 +11,15 @@ import {
   PROVIDER_DOCS_URLS
 } from '../constants/providers';
 import type { ProviderHealthRecord } from '../formatting/providerHealth';
+import type { ProviderCredentialFields } from '../types/api/providers';
+import { decodeProviders } from '../api/providerDecoders';
 
 /**
  * Extends `ProviderHealthRecord`, whose fields are all optional: they only
  * appear once a provider has succeeded or failed at least once since health
  * tracking shipped.
  */
-export interface ProviderConfig extends ProviderHealthRecord {
+export interface ProviderConfig extends ProviderHealthRecord, ProviderCredentialFields {
   id: string;
   name: string;
   description: string;
@@ -58,15 +60,9 @@ class ProviderFetchError extends Error {
   }
 }
 
-interface ProvidersResponse {providers?: ProviderConfig[];}
-
 interface ErrorResponse {
   error?: string;
   details?: string;
-}
-
-function isProvidersResponse(data: unknown): data is ProvidersResponse {
-  return typeof data === 'object' && data !== null;
 }
 
 function isErrorResponse(data: unknown): data is ErrorResponse {
@@ -110,10 +106,11 @@ export function useProviderConfig(): UseProviderConfigReturn {
       if (!response.ok) {
         throw new ProviderFetchError(`Failed to fetch providers: ${response.status}`);
       }
-      const data: unknown = await response.json();
-      if (isProvidersResponse(data)) {
-        setProviders(data.providers ?? []);
+      const decoded = decodeProviders(await response.json());
+      if (decoded === null) {
+        throw new ProviderFetchError('Providers API returned an invalid provider list');
       }
+      setProviders(decoded);
     } catch (err) {
       setError(getErrorMessage(err, 'providers'));
       console.error('[providers] Error fetching providers:', err);

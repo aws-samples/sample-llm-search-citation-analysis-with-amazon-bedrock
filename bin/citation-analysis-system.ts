@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { CitationAnalysisStack } from '../lib/citation-analysis-stack';
 import { CitationAnalysisMcpStack } from '../lib/mcp-stack';
+import { CitationAnalysisSeoStack } from '../lib/seo-stack';
 import { readWebSearchRegion } from '../lib/constructs/web-search';
 import { CitationAnalysisWebSearchStack } from '../lib/web-search-stack';
 
@@ -25,6 +26,17 @@ const mcpStack = new CitationAnalysisMcpStack(app, 'CitationAnalysisMcpStack', {
 });
 mcpStack.node.addDependency(stack);
 
+// The SEO features (DataForSEO, Google AI Overviews engine) have their own stack
+// and REST API for the same reason. It imports only the user pool and the
+// CorsOrigin export; deploy it before enabling `-c seoEngine=true`, which makes
+// the main workflow call its AI Overviews function by name.
+const seoStack = new CitationAnalysisSeoStack(app, 'CitationAnalysisSeoStack', {
+  env,
+  description: 'Citation Analysis System - SEO API and Google AI Overviews engine',
+  inputs: stack.seoInputs,
+});
+seoStack.node.addDependency(stack);
+
 // Amazon Bedrock Web Search only exists in three regions, so its gateway has its
 // own stack in a fixed region. The main stack reaches it through the SSM
 // parameter name and region constants only: no dependency, no cross-stack reference.
@@ -33,7 +45,7 @@ const webSearchStack = new CitationAnalysisWebSearchStack(app, 'CitationAnalysis
   description: 'Citation Analysis System - Amazon Bedrock Web Search gateway',
 });
 
-for (const taggedStack of [stack, mcpStack, webSearchStack]) {
+for (const taggedStack of [stack, mcpStack, seoStack, webSearchStack]) {
   cdk.Tags.of(taggedStack).add('Application', 'CitationAnalysis');
 }
 

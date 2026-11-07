@@ -6,25 +6,24 @@ import { MemoryRouter } from 'react-router-dom';
 import {
   render, screen
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { publishSettingsAttention } from '../Layout/settingsAttention';
 import { SettingsView } from './SettingsView';
 import {
   buildAdminMembership,
   buildConfiguredOpenAiProvider,
   buildSettingsViewProps,
   HOSPITALITY_BRAND_CONFIG,
+  publishedAttention,
 } from './SettingsView-fixtures';
 import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildProviderConfigHookResult } from '../ProviderHealth/ProviderHealthBanner-fixtures';
-import {
-  createdKeywordFixture, existingKeywordFixture
-} from '../Keywords/KeywordsManager-fixtures';
 
-vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
-vi.mock('../../hooks/useProviderConfig', () => ({ useProviderConfig: vi.fn() }));
 vi.mock('../Keywords/KeywordsManager', () => ({ KeywordsManager: () => <div data-testid="keywords-manager">Keywords Manager</div> }));
+vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 vi.mock('../Brands/BrandConfigContent', () => ({ BrandConfigContent: () => <div data-testid="brand-config">Brand Config</div> }));
+vi.mock('../../hooks/useProviderConfig', () => ({ useProviderConfig: vi.fn() }));
 vi.mock('../AiAssistants', () => ({ AiAssistantsView: () => <div data-testid="ai-assistants-guide">AI Assistants Guide</div> }));
+vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 vi.mock('./AlertsConfig', () => ({
   AlertsConfig: ({ isAdmin }: { isAdmin: boolean }) => (
     <div data-testid="alerts-config">Alerts Config admin: {String(isAdmin)}</div>
@@ -37,7 +36,6 @@ vi.mock('./MarketsConfig', () => ({
   ),
 }));
 vi.mock('./UsersConfig', () => ({ UsersConfig: () => <div data-testid="users-config">Users Config</div> }));
-vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 
 import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { useProviderConfig } from '../../hooks/useProviderConfig';
@@ -47,7 +45,6 @@ const mockUseBrandConfig = vi.mocked(useBrandConfig);
 const mockUseProviderConfig = vi.mocked(useProviderConfig);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
-const NON_ADMIN_SECTIONS = ['keywords', 'markets', 'brand tracking', 'personas', 'ai providers', 'alerts', 'ai assistants'];
 const NON_ADMIN = buildAdminMembership({ isAdmin: false });
 /** Admin-only sections: name, link name, URL and the test id of their (mocked) content. */
 const ADMIN_SECTIONS = [
@@ -71,16 +68,6 @@ function renderSettingsView(
   );
 }
 
-/** The Settings nav link whose accessible name contains `section` (case-insensitive). */
-function getSectionLinkElement(section: string) {
-  return screen.getByRole('link', { name: new RegExp(section, 'i') });
-}
-
-async function renderAndOpenSection(sectionName: RegExp, membership = buildAdminMembership()) {
-  renderSettingsView('/settings', {}, membership);
-  await userEvent.click(screen.getByRole('link', { name: sectionName }));
-}
-
 function mockConfiguredProviders() {
   mockUseProviderConfig.mockReturnValue(
     buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
@@ -88,39 +75,14 @@ function mockConfiguredProviders() {
 }
 
 beforeEach(() => {
+  publishSettingsAttention([]);
   mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult());
   mockUseProviderConfig.mockReturnValue(buildProviderConfigHookResult());
   mockUseIsAdmin.mockReturnValue(buildAdminMembership());
 });
 
 describe('SettingsView', () => {
-  describe('section navigation', () => {
-    it.each([
-      ['keywords', '/settings/keywords'],
-      ['markets', '/settings/markets'],
-      ['brand tracking', '/settings/brand'],
-      ['personas', '/settings/personas'],
-      ['ai providers', '/settings/providers'],
-      ['alerts', '/settings/alerts'],
-      ['users', '/settings/users'],
-      ['bedrock models', '/settings/bedrock-models'],
-      ['ai assistants', '/settings/ai-assistants'],
-    ])('links the %s entry to %s', (section, href) => {
-      renderSettingsView();
-
-      expect(getSectionLinkElement(section)).toHaveAttribute('href', href);
-    });
-
-    it.each([
-      ['brand tracking', 'text-violet-500'],
-      ['markets', 'text-cyan-500'],
-      ['ai assistants', 'text-indigo-500'],
-    ])('tints the %s icon with its accent %s', (section, tone) => {
-      renderSettingsView();
-
-      expect(getSectionLinkElement(section).querySelector('svg')).toHaveClass(tone);
-    });
-
+  describe('section from the URL', () => {
     it('shows keywords section by default', () => {
       renderSettingsView();
 
@@ -143,102 +105,48 @@ describe('SettingsView', () => {
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
-    it('switches to brand config section when clicked', async () => {
-      await renderAndOpenSection(/brand tracking/i);
-
-      expect(screen.getByTestId('brand-config')).toBeInTheDocument();
-    });
-
-    it('switches to alerts config section when clicked', async () => {
-      await renderAndOpenSection(/alerts/i);
+    it('passes admin membership to alerts for admins', () => {
+      renderSettingsView('/settings/alerts');
 
       expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: true');
     });
 
-    it('marks the alerts link as current when alerts are open', () => {
-      renderSettingsView('/settings/alerts');
-
-      expect(screen.getByRole('link', { name: /alerts/i })).toHaveAttribute('aria-current', 'page');
-    });
-
-    it('switches to users section when clicked', async () => {
-      await renderAndOpenSection(/users/i);
-
-      expect(screen.getByTestId('users-config')).toBeInTheDocument();
-    });
-  });
-
-  describe('section captions', () => {
     it('opens the markets section read-only for non-admin users', () => {
       renderSettingsView('/settings/markets', {}, NON_ADMIN);
 
       expect(screen.getByTestId('markets-config')).toHaveTextContent('Markets Config admin: false');
     });
 
-    it('shows the market count under the markets link', () => {
+    it('draws no section menu of its own (the sidebar lists the sections)', () => {
       renderSettingsView();
 
-      expect(getSectionLinkElement('markets')).toHaveTextContent('Countries and languages');
+      expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     });
-    it('shows the keyword count under the keywords link', () => {
-      renderSettingsView('/settings', { keywords: [existingKeywordFixture, createdKeywordFixture] });
+  });
 
-      expect(screen.getByRole('link', { name: /keywords/i })).toHaveTextContent('2 keywords');
+  describe('setup the sidebar flags', () => {
+    it('publishes brand tracking and AI providers while neither is set up', () => {
+      renderSettingsView();
+
+      expect(publishedAttention()).toStrictEqual(['brand-config', 'providers']);
     });
 
-    it('shows the tracked industry once the brand config has loaded', () => {
+    it('publishes nothing once the brand and a provider are set up', () => {
       mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult({ config: HOSPITALITY_BRAND_CONFIG }));
-
-      renderSettingsView();
-
-      expect(screen.getByRole('link', { name: /brand tracking/i })).toHaveTextContent('hospitality');
-    });
-
-    it('holds a placeholder instead of the default industry while the brand config loads', () => {
-      mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult({ loading: true }));
-
-      renderSettingsView();
-
-      expect(screen.getByRole('link', { name: /brand tracking/i }).querySelector('.skeleton')).not.toBeNull();
-    });
-
-    it('shows the enabled provider count once providers have loaded', () => {
       mockConfiguredProviders();
 
       renderSettingsView();
 
-      expect(screen.getByRole('link', { name: /ai providers/i })).toHaveTextContent('1 of 1 enabled');
+      expect(publishedAttention()).toStrictEqual([]);
     });
 
-    it('holds a placeholder instead of 0 of 0 while providers load', () => {
+    it('publishes nothing while the brand config and providers load', () => {
+      mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult({ loading: true }));
       mockUseProviderConfig.mockReturnValue(buildProviderConfigHookResult({ loading: true }));
 
       renderSettingsView();
 
-      expect(screen.getByRole('link', { name: /ai providers/i })).not.toHaveTextContent('0 of 0');
-    });
-  });
-
-  describe('attention bubbles', () => {
-    it('shows attention dots for unconfigured brand and providers', () => {
-      renderSettingsView();
-
-      expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(2);
-    });
-
-    it('shows a keywords attention dot when no keywords exist', () => {
-      renderSettingsView('/settings', { keywords: [] });
-
-      expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(3);
-    });
-
-    it('hides all attention dots when everything is configured', () => {
-      mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult({ config: HOSPITALITY_BRAND_CONFIG }));
-      mockConfiguredProviders();
-
-      renderSettingsView();
-
-      expect(screen.queryByRole('status', { name: 'Needs configuration' })).not.toBeInTheDocument();
+      expect(publishedAttention()).toStrictEqual([]);
     });
   });
 
@@ -251,48 +159,19 @@ describe('SettingsView', () => {
   });
 
   describe('providers section', () => {
-    it('switches to providers section when clicked', async () => {
+    it('shows the providers of the providers URL', () => {
       mockConfiguredProviders();
 
-      await renderAndOpenSection(/ai providers/i);
+      renderSettingsView('/settings/providers');
 
       expect(screen.getByText('Configured')).toBeInTheDocument();
     });
   });
 
-  describe('admin-only section visibility', () => {
+  describe('admin-only sections', () => {
     const MEMBERSHIP_LOADING = buildAdminMembership({
       isAdmin: false,
       loading: true,
-    });
-    const HIDDEN_LINKS = ADMIN_SECTIONS.flatMap(([section, link]) => [
-      [section, 'from non-admin users', link, NON_ADMIN],
-      [section, 'while admin membership is still loading', link, MEMBERSHIP_LOADING],
-    ] as const);
-
-    it.each(HIDDEN_LINKS)('hides the %s link %s', (_section, _condition, link, membership) => {
-      renderSettingsView('/settings', {}, membership);
-
-      expect(screen.queryByRole('link', { name: link })).not.toBeInTheDocument();
-    });
-
-    it('lists Bedrock models under Processing for admins', () => {
-      renderSettingsView();
-
-      expect(screen.getByText('Processing')).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: /bedrock models/i })).toHaveTextContent('Claude on Amazon Bedrock');
-    });
-
-    it('drops the Processing group for non-admin users', () => {
-      renderSettingsView('/settings', {}, NON_ADMIN);
-
-      expect(screen.queryByText('Processing')).not.toBeInTheDocument();
-    });
-
-    it.each(NON_ADMIN_SECTIONS)('keeps the %s section available to non-admin users', (section) => {
-      renderSettingsView('/settings', {}, NON_ADMIN);
-
-      expect(getSectionLinkElement(section)).toBeInTheDocument();
     });
 
     it('passes read-only membership to alerts for non-admin users', () => {

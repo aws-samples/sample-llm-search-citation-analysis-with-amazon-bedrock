@@ -35,10 +35,21 @@ def _fresh_cognito():
     mock_cognito.admin_create_user.return_value = {'User': cognito_user(NEW_EMAIL, status='FORCE_CHANGE_PASSWORD')}
 
 
+#: The internal id (the sub) the dashboard puts in the path: the pool signs in by email, so it is the username.
+PENDING_SUB = '185143c0-4031-701a-5c1f-afb13e67ab3c'
+
+
 def _reset_password(status: str) -> tuple[int, Any]:
     """``(status, body)`` of resetting OTHER_USER's password while Cognito reports ``status`` for them."""
     mock_cognito.admin_get_user.return_value = cognito_user(OTHER_USER, status=status)
     return invoke(handler_module, user_event('POST', OTHER_USER, suffix='/reset-password'))
+
+
+def _resend_by_sub() -> tuple[int, Any]:
+    """``(status, body)`` of resending the invite of a pending user addressed by their sub, email OTHER_USER."""
+    pending = {**cognito_user(OTHER_USER, status='FORCE_CHANGE_PASSWORD'), 'Username': PENDING_SUB}
+    mock_cognito.admin_get_user.return_value = pending
+    return invoke(handler_module, user_event('POST', PENDING_SUB, suffix='/reset-password'))
 
 
 def _invite(groups: list[str]) -> tuple[int, Any]:
@@ -67,6 +78,14 @@ class TestResetPasswordOfAPendingInvite:
         mock_cognito.admin_create_user.assert_called_once_with(
             UserPoolId=USER_POOL_ID, Username=OTHER_USER, MessageAction='RESEND', DesiredDeliveryMediums=['EMAIL'],
         )
+
+    def test_resends_to_the_email_when_the_path_names_the_users_sub(self):
+        _resend_by_sub()
+
+        assert mock_cognito.admin_create_user.call_args.kwargs['Username'] == OTHER_USER
+
+    def test_answers_200_when_the_path_names_the_users_sub(self):
+        assert _resend_by_sub()[0] == 200
 
     def test_does_not_attempt_a_password_reset_cognito_would_refuse(self):
         _reset_password('FORCE_CHANGE_PASSWORD')

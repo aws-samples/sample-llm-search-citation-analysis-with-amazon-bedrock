@@ -19,6 +19,7 @@ import { Sidebar } from './components/Layout/Sidebar';
 import { TabContent } from './components/Layout/TabContent';
 import { DashboardGate } from './components/Layout/DashboardGate';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
+import { SEO_BASE_PATH } from './components/Seo/seoPages';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
 import { OnboardingModal } from './components/Onboarding';
@@ -54,6 +55,7 @@ const TAB_TO_PATH: Record<TabType, string> = {
   'citation-gaps': '/citation-gaps',
   recommendations: '/recommendations',
   'keyword-research': '/keyword-research',
+  seo: SEO_BASE_PATH,
   'content-studio': '/content-studio',
   reports: '/reports',
   searches: '/searches',
@@ -70,10 +72,12 @@ const PATH_TO_TAB: Record<string, TabType> = Object.fromEntries(
 /**
  * Resolve a route pathname back to its TabType. Sub-paths under `/reports/`
  * (e.g. `/reports/keyword/foo`) all resolve to the `reports` tab so the
- * sidebar stays highlighted when navigating between individual reports.
+ * sidebar stays highlighted when navigating between individual reports;
+ * `/seo/...` pages resolve to `seo` the same way.
  */
 function resolveActiveTab(pathname: string): TabType {
   if (pathname.startsWith('/reports')) return 'reports';
+  if (pathname === SEO_BASE_PATH || pathname.startsWith(`${SEO_BASE_PATH}/`)) return 'seo';
   if (isSettingsPath(pathname)) return 'settings';
   return PATH_TO_TAB[pathname] ?? 'dashboard';
 }
@@ -147,6 +151,7 @@ const PAGE_TITLES: Record<TabType, string> = {
   execution: 'Run Analysis',
   schedule: 'Schedule',
   'keyword-research': 'Keyword Research',
+  seo: 'SEO',
   settings: 'Settings',
   searches: 'Recent Searches',
   'raw-responses': 'Raw Responses',
@@ -275,8 +280,7 @@ function MainApp() {
     }
   }, [location.pathname]);
 
-  const handleTabChange = (tab: TabType) => {
-    const targetPath = TAB_TO_PATH[tab];
+  const handleNavigate = (targetPath: string) => {
     if (isRunning && activeTab === 'execution') {
       setPendingPath(targetPath);
       setShowLeaveConfirm(true);
@@ -284,6 +288,8 @@ function MainApp() {
     }
     navigate(targetPath);
   };
+
+  const handleTabChange = (tab: TabType) => handleNavigate(TAB_TO_PATH[tab]);
 
   const handleNavigateToRawResponses = (path: string) => {
     setRawResponsesPath(path);
@@ -314,6 +320,7 @@ function MainApp() {
             <Sidebar
               activeTab={activeTab}
               onTabChange={handleTabChange}
+              onNavigate={handleNavigate}
               keywordsCount={keywords.length}
               schedulesCount={schedules.length}
               isRunning={isRunning}
@@ -322,7 +329,7 @@ function MainApp() {
             />
           )}
 
-          <main className={`${isPrintMode ? '' : 'lg:ml-64'} min-h-screen`}>
+          <main className={`${isPrintMode ? '' : 'lg:ml-64 lg:peer-data-[collapsed=true]:ml-16 transition-[margin] duration-300'} min-h-screen`}>
             <AppHeader
               isPrintMode={isPrintMode}
               title={PAGE_TITLES[activeTab]}

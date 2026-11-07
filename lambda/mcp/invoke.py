@@ -45,7 +45,7 @@ import state
 from auth import Caller, authorize_tool
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
-from catalogue import InvalidArguments, JsonObject, NotFound, Route, Tool, validate_arguments
+from catalogue import InvalidArguments, JsonObject, NotFound, Route, Tool, build_route
 
 from shared.request_deadline import current_deadline
 from shared.response_spill import spilled_location
@@ -351,8 +351,7 @@ def audit(
 def checked_route(tool_name: str, operation: Tool, arguments: Any, caller: Caller, started: float) -> tuple[JsonObject, Route]:
     """``(validated arguments, route)``; audits and re-raises ``InvalidArguments``."""
     try:
-        valid = validate_arguments(operation.input_schema, arguments)
-        return valid, operation.route(valid)
+        return build_route(operation, arguments)
     except InvalidArguments:
         audit(caller, tool_name, operation, 'invalid_arguments', started)
         raise

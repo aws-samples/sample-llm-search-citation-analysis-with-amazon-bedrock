@@ -38,6 +38,8 @@ describe('useVisibilityMetrics', () => {
       ['https://api.test.com/visibility?keyword=best+hotels+in+paris', 'only a keyword scope is given', [keywordScope('best hotels in paris')]],
       ['https://api.test.com/visibility?keyword=best+hotels&brand=MyHotel', 'a brand filter is given', [keywordScope('best hotels'), undefined, 'MyHotel']],
       ['https://api.test.com/visibility?keyword=best+hotels&query_prompt_id=prompt-7', 'a query prompt id is given', [keywordScope('best hotels'), 'prompt-7']],
+      ['https://api.test.com/visibility?keyword=best+hotels&branded=neutral', 'the neutral filter is given', [keywordScope('best hotels'), undefined, undefined, 'neutral']],
+      ['https://api.test.com/visibility?keyword=best+hotels', 'the all filter is given', [keywordScope('best hotels'), undefined, undefined, 'all']],
       ['https://api.test.com/visibility?group_id=grp-luxury', 'a group scope is given', [groupScope('grp-luxury')]],
       ['https://api.test.com/visibility?scope=all', 'the all-keywords scope is given', [ALL_SCOPE]],
     ],

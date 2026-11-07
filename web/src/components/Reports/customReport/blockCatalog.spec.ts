@@ -5,6 +5,7 @@ import {
   blockName, CATALOG_ENTRIES, catalogEntry, DATA_BLOCKS, scopeHint, scopeNeed, sourcesFor
 } from './blockCatalog';
 import { BLOCK_CATEGORIES } from './catalog/catalogTypes';
+import { ALL_SCOPE } from '../../ui/reportScope';
 
 /** The block types saved reports store: renaming one silently drops it from every saved report. */
 const STORED_DATA_BLOCK_TYPES = [
@@ -20,6 +21,7 @@ const STORED_DATA_BLOCK_TYPES = [
   'keyword_sentiment_examples', 'keyword_top_sources',
   'kpi_definitions',
   'sentiment_brands', 'sentiment_engines', 'sentiment_headline', 'sentiment_trend',
+  'seo_geo_quadrants', 'seo_geo_table',
   'sources_domains_table', 'sources_headline', 'sources_top_domains',
   'visibility_brand_rankings', 'visibility_headline', 'visibility_keyword_table', 'visibility_keyword_trends', 'visibility_movers',
   'visibility_trend_history',
@@ -28,6 +30,14 @@ const STORED_DATA_BLOCK_TYPES = [
 describe('block catalogue', () => {
   it('keeps every stored data block type', () => {
     expect(DATA_BLOCKS.map((block) => block.type).sort((left, right) => left.localeCompare(right))).toStrictEqual(STORED_DATA_BLOCK_TYPES);
+  });
+
+  it('offers the SEO vs GEO quadrants and table in the SEO category', () => {
+    expect(['seo_geo_quadrants', 'seo_geo_table'].map((type) => catalogEntry(type)?.category)).toStrictEqual(['seo', 'seo']);
+  });
+
+  it('reads the SEO source only for the SEO blocks', () => {
+    expect(sourcesFor([{ type: 'seo_geo_table' }, { type: 'kpi_definitions' }], ALL_SCOPE)).toStrictEqual(new Set(['seo']));
   });
 
   it('gives every entry a distinct type the server accepts', () => {

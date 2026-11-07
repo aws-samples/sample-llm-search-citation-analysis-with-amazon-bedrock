@@ -9,6 +9,107 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.43.0] - 2026-11-07
+
+### Added
+
+- **SEO stack** (`CitationAnalysisSeoStack`, `lib/seo-stack.ts`): Google organic data from DataForSEO next to the
+  AI-visibility numbers, behind its own Cognito-protected API (`CitationAnalysis-SeoApi`, routes under `/api/seo/`,
+  one router Lambda `CitationAnalysis-SeoRouter` plus a jobs Lambda for work longer than an API call). A separate
+  stack because the main stack is at the 500-resource limit; it builds its own shared layer and imports only the
+  user pool and the CloudFront origin. Nothing paid runs on page load: every DataForSEO call follows a click, batch
+  or recurring spend asks for confirmation with the price first, billed calls and timeouts are never re-sent, and
+  answers are cached (a cached non-empty answer is never replaced by an empty one). Creating, scheduling or
+  starting recurring paid work is for Admins; one-off lookups are open to every signed-in user. Setup, pages and
+  prices: [docs/seo.md](docs/seo.md).
+  - **DataForSEO client** (`shared/dataforseo_client.py`): Basic auth from `citation-analysis/dataforseo-key`
+    (`login:password`), one deadline per call capped by the Lambda's remaining time, server errors retried only on
+    idempotent reads; DataForSEO's in-body status codes become typed errors and a billed failure keeps its cost.
+    Queued tasks (`shared/dataforseo_tasks.py`) for scheduled work at the cheaper queue price.
+  - **Keyword Explorer** (Keyword Research › Keyword Explorer): keyword ideas for a seed in the header market with
+    volume, trend, difficulty, CPC, competition and intent; filters, CSV export with a formula-injection guard, the
+    Google results page of a keyword (top 20 or 50) and *Track keywords* into a keyword group. Every national
+    research stores its rows' metrics (`CitationAnalysis-SeoKeywordMetrics`), so tracking costs nothing extra.
+  - **SEO vs GEO report** (`/reports/seo-geo`, custom report blocks *SEO vs GEO quadrants* and *SEO vs GEO table*):
+    per keyword and market, your organic position next to the AI mention rate, AI Overview presence and citation
+    overlap, in four quadrants; plus the ranked position from rank tracking or traffic snapshots when the results
+    page has none of your domains, estimated traffic per keyword, and share of estimated search traffic against
+    share of AI mentions. Definitions: [docs/seo-metrics.md](docs/seo-metrics.md).
+  - **Rank Tracking** (`/seo/rank-tracking`): Google positions of a domain for up to 1,000 keywords per tracker,
+    desktop and/or mobile, top 10 to 100, daily, weekly, monthly or manual; organic positions only, subdomains
+    match. A suspicious miss or drop is re-checked up to twice through the queue, and a keyword that ranked before
+    shows *Not found (unconfirmed)* until a second check confirms it. History and the position distribution per
+    check. [docs/seo-rank-tracking.md](docs/seo-rank-tracking.md).
+  - **Domain Overview and estimated traffic** (`/seo/domain`): organic keywords, estimated traffic and its value,
+    position buckets, top keywords and pages and SERP competitors of any domain, subdomain, subfolder or URL
+    (about $0.03 per analysis); weekly traffic snapshots of your and your competitors' domains, and SEO
+    recommendations built on the SEO vs GEO rows (`GET /api/seo/insights`). [docs/seo-domain.md](docs/seo-domain.md).
+  - **Backlinks** (`/seo/backlinks`): totals and a year of history, links, referring domains, anchors, new and lost
+    links and top pages of a target (overview about $0.06); weekly authority snapshots of the tracked domains,
+    switched on by an Admin. [docs/seo-backlinks.md](docs/seo-backlinks.md).
+  - **Local SEO** (`/seo/local`): Google business listings near a point, Google Business Profiles with reviews,
+    updates and questions, Maps and Local Finder results with your business's position, and a 3 × 3 to 7 × 7 local
+    rank grid run in DataForSEO's queue. [docs/seo-local.md](docs/seo-local.md).
+  - **Site Audit with AI readiness** (`/seo/site-audit`): crawls your own site (100, 500 or 2,000 pages, one request
+    per second, robots.txt obeyed, no paid API) and lists technical issues per page and AI-readiness checks: AI
+    search and training crawlers blocked in robots.txt, `llms.txt`, structured data and more; CSV export.
+    [docs/seo-site-audit.md](docs/seo-site-audit.md).
+  - **Performance** (`/seo/performance`): Lighthouse category scores, Core Web Vitals rated against their published
+    limits and the top opportunities of a page of your own domains ($0.005 per page and device; an Admin audit
+    sample of 10 pages × 2 devices up to $0.10), and **IndexNow** submissions of changed URLs (free).
+    [docs/seo-performance.md](docs/seo-performance.md).
+  - **SEO navigation**: a sidebar **SEO** section opening `/seo` (one card per page and the next setup step), each
+    page on its own URL. The **Action Center** lists the SEO recommendations next to the answer-based ones, marked
+    **SEO**, with the same status tracking (the answer-based ones still show when the SEO API is unreachable). The
+    **Dashboard** gains *SEO vs GEO* and *Rankings* cards, free reads of stored data.
+  - **Settings › AI Providers › SEO data**: a DataForSEO card (login and password, checked with DataForSEO's free
+    account endpoint, balance shown to Admins).
+  - **MCP tools**: free reads `get_keyword_metrics`, `get_seo_geo_comparison`, `get_seo_recommendations`,
+    `get_rank_tracking`, `get_domain_snapshots`, `get_backlink_snapshots`, `get_site_audits` and `get_local_job`;
+    and the spend family `seo` (estimate, then run with the confirmation token): `*_seo_keywords`, `*_seo_domain`,
+    `*_seo_backlinks`, `*_seo_local` and the Admin `*_seo_job` (rank run, site audit, snapshots, rank grid). Estimates state the most
+    calls a request makes and the list price of one call, never a total; a new per-caller daily limit
+    `seoCallsPerDay` (default 50). [docs/mcp.md](docs/mcp.md).
+- **Google AI Overviews is the fifth answer engine** (`google_ai_overview`): the AI Overview of the Google results
+  page for the plain keyword, once per keyword per run whatever the personas, through the DataForSEO login. A page
+  without an overview is stored as `no_answer` and counts in no KPI; the same call records the organic top 10. Its
+  Lambda (`CitationAnalysis-Search-google_ai_overview`) lives in the SEO stack; the main workflow calls it by name
+  when deployed with `-c seoEngine=true`. Like every engine it follows the 2.42.0 search time budget: its one call
+  per keyword is stored as soon as it answers and is not asked again when the invocation is retried.
+- **Queries filter** on the Visibility tab (all / without your brand / naming your brand; `branded` parameter of
+  `/api/visibility`, default all): each answer row records whether its query named a first-party brand or domain.
+- **SEO pages start from Settings**: a rank tracker checks the Settings keywords of its market or of one keyword
+  group (extra keywords optional), its domain is picked from Brand Tracking, the empty Rank Tracking page offers
+  one-click *Track your rankings* / *Track competitors* (paid checks reviewed first), and the other SEO pages are
+  prefilled with your domains, markets and keywords.
+- **Collapsible sidebar**: on large screens the sidebar folds to an icon rail; the choice is remembered per browser.
+- **Domain Overview and Backlinks tables restyled**: page header card with the search form, stat tiles, position
+  badges, score chips, compact numbers with exact tooltips, sticky headers and one pager (`ui/DataTable`).
+- **Intent column in Domain Overview top keywords**: DataForSEO's main search intent per ranked keyword as a chip
+  (informational, commercial, transactional, navigational, unknown); keyword pages cached without it are refetched.
+
+### Changed
+
+- `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit
+  list read one newest-first page with it.
+- **GEO KPI corrections** ([docs/geo-corrections.md](docs/geo-corrections.md)): only the sources an answer cites
+  count as citations (OpenAI `url_citation` annotations, Perplexity's numbered markers, Claude's text citations;
+  pages an engine only read are kept as `retrieved_urls` and never count); an engine reply without text is *no
+  answer* and leaves every KPI; KPI alerts compare only the cells both runs answered, over queries that do not name
+  your brand, and a run under 90 % answered raises none. Citation counts and rates usually drop from this release
+  on; earlier results keep the citations they were stored with. KPI alerts keep the 2.42.0 time budget: the
+  like-for-like comparison runs inside each (group, market) pair's evaluation.
+- **Claude and Perplexity are asked to cite.** Every Claude web search (runs and the Settings model check) sends `allowed_callers: ["direct"]`, so its text carries `web_search_result_location` citations (direct mode
+  reads full search results: more input tokens); the dynamic-filtering fallback is gone. Every Perplexity request's
+  `instructions` ask for inline `[1][2]` markers, after any market instructions; the query itself is unchanged.
+- `KPI_VERSION` is 4: KPI alerts do not compare snapshots taken before Google AI Overviews joined the engines or
+  before the corrections above, so the first run after the upgrade sets a new baseline.
+- The main stack's table, Lambda, CORS and permission helpers moved to `lib/constructs/` so the stacks share them
+  (the main stack's template is unchanged).
+- `npm run contracts` resolves module-level string constants and shared-table helpers when matching CDK
+  environment variables to Lambda reads.
+- A deployment of a pre-release SEO stack that already created `CitationAnalysis-SeoPromptExplores` keeps that table
+  after the upgrade (tables are retained); nothing reads it any more, so it can be deleted by hand.
 ## [2.42.2] - 2026-11-08
 
 ### Changed

@@ -7,6 +7,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { cognitoMethodOptions } from './api-auth';
 import { ManagedLoginBranding } from './managed-login-branding';
 import type { McpState } from './mcp-state';
 import { lambdaSourceCode } from './python-layer';
@@ -374,16 +375,9 @@ export class McpServer extends Construct {
    */
   private addRoutes(props: McpServerProps, serverFunction: lambda.IFunction, resourceUrl: string): void {
     const integration = new apigateway.LambdaIntegration(serverFunction, { proxy: true });
-    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'Authorizer', {
-      cognitoUserPools: [props.userPool],
-      authorizerName: 'CitationAnalysis-McpAuthorizer',
-      identitySource: 'method.request.header.Authorization',
-    });
-    const protectedRoute: apigateway.MethodOptions = {
-      authorizer,
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-      authorizationScopes: MCP_SCOPES.map((scope) => `${resourceUrl}/${scope.name}`),
-    };
+    const protectedRoute = cognitoMethodOptions(
+      this, props.userPool, 'CitationAnalysis-McpAuthorizer', MCP_SCOPES.map((scope) => `${resourceUrl}/${scope.name}`),
+    );
 
     const mcpResource = this.api.root.addResource(MCP_PATH);
     mcpResource.addMethod('POST', integration, protectedRoute);

@@ -67,17 +67,6 @@ def routers(api) -> FakeRouters:
 
 
 @pytest.fixture
-def admin(claims):
-    return claims(scope=ALL_SCOPES, **{'cognito:groups': 'Admin'})
-
-
-@pytest.fixture
-def member(claims):
-    """A ``Users`` member with every scope."""
-    return claims(scope=ALL_SCOPES)
-
-
-@pytest.fixture
 def limits(monkeypatch):
     """``limits(runsPerDay=1, ...)``: set ``MCP_LIMITS`` for the test."""
     def set_limits(**values: int) -> None:
@@ -193,6 +182,17 @@ class TestEstimateRunBlockers:
         routers.answer('GET', '/api/providers', 200, {'providers': [provider('openai', 'llm', enabled=False)]})
 
         assert call('estimate_run', GROUP_SCOPE)['structuredContent']['reason'] == 'No AI engine or search provider is enabled with a key'
+
+    @pytest.mark.parametrize(('extra', 'calls'), [
+        # 4 keywords x (2 personas x openai + 1 overview) = 12
+        pytest.param(provider('google_ai_overview', 'llm'), 12, id='overviews-once-per-keyword'),
+        # The DataForSEO credential (type seo) is no provider a run calls: 4 x 2 x openai = 8
+        pytest.param(provider('dataforseo', 'seo'), 8, id='seo-credential-not-called'),
+    ])
+    def test_counts_provider_calls_when_dataforseo_backed_entries_listed(self, call, routers, extra, calls):
+        routers.answer('GET', '/api/providers', 200, {'providers': [provider('openai', 'llm'), extra]})
+
+        assert call('estimate_run', GROUP_SCOPE)['structuredContent']['provider_calls'] == calls
 
     def test_gives_no_token_when_todays_runs_are_used_up(self, call, routers, limits):
         limits(runsPerDay=0)

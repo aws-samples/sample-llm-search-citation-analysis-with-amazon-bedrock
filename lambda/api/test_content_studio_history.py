@@ -204,7 +204,7 @@ class TestIndexedHistory:
 
         status, body = call_api(event, content_studio_resource(content_table=fake_table()))
 
-        assert (status, body) == (400, {"error": "Invalid next_token", "field": "next_token"})
+        assert (status, body) == (400, {"error": "Invalid next_token: pass the next_token of the previous page, with the same filters", "field": "next_token"})
 
 
 class TestGenerationStatus:

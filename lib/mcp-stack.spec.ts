@@ -5,7 +5,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
-  extractLambdaLayerRefs, extractUserPoolClientProps, resolveString
+  extractLambdaEnvVars, extractLambdaLayerRefs, extractUserPoolClientProps, resolveString
 } from './citation-analysis-stack-fixtures';
 import { CitationAnalysisMcpStack, DEFAULT_REDIRECT_URIS } from './mcp-stack';
 
@@ -30,15 +30,23 @@ describe('CitationAnalysisMcpStack', () => {
     template.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'CitationAnalysis-Mcp' });
   });
 
-  it('calls exactly the nine API router Lambdas of the main stack', () => {
-    const environment = Object.values(template.findResources('AWS::Lambda::Function', {
-      Properties: { FunctionName: 'CitationAnalysis-Mcp' },
-    }))[0];
+  it('calls exactly the nine API router Lambdas of the main stack and the SEO router', () => {
+    const environment = extractLambdaEnvVars(template, 'CitationAnalysis-Mcp');
     // Cross-stack function names arrive as `Fn::Join` fragments, so match the router names themselves.
     const routers = JSON.stringify(environment)
-      .match(/keyword-mgmt|config-mgmt|execution-mgmt|stats-insights|citations-content|brand-config|brand-mentions|persona-rankings|content-studio/g) ?? [];
+      .match(/keyword-mgmt|config-mgmt|execution-mgmt|stats-insights|citations-content|brand-config|brand-mentions|persona-rankings|content-studio|CitationAnalysis-SeoRouter/g) ?? [];
 
-    expect(new Set(routers).size).toBe(9);
+    expect(new Set(routers).size).toBe(10);
+  });
+
+  it('lets the MCP server invoke the SEO router by its name', () => {
+    const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
+
+    expect(policies).toContain('function:CitationAnalysis-SeoRouter"');
+  });
+
+  it('gives the MCP server the default daily limit of DataForSEO lookups and SEO jobs', () => {
+    expect(JSON.stringify(extractLambdaEnvVars(template, 'CitationAnalysis-Mcp'))).toContain('\\"seoCallsPerDay\\":50');
   });
 
   it('leaves the main stack without MCP resources', () => {

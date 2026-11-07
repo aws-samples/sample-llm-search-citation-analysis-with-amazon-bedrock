@@ -118,7 +118,7 @@ class TestPages:
 
     @pytest.mark.parametrize('token', ['not-a-token', encode_offset_cursor(-1, 4) or '', 'eyJvZmZzZXQiOnRydWV9'])
     def test_rejects_a_malformed_next_token_with_400(self, citations_module, token):
-        assert _get(citations_module, {'next_token': token}) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+        assert _get(citations_module, {'next_token': token}) == (400, {'error': 'Invalid next_token: pass the next_token of the previous page, with the same filters', 'field': 'next_token'})
 
     def test_rejects_an_unknown_sort_column_with_400(self, citations_module):
         status, body = _get(citations_module, {'sort': 'title'})

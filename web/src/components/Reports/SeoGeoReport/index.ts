@@ -1,0 +1,1 @@
+export { SeoGeoReport } from './SeoGeoReport';

@@ -84,9 +84,9 @@ class TestNonPointerUntouched:
         assert (invoke_route(ROUTE, caller), store.requests) == ((200, body), [])
 
     def test_an_error_body_is_returned_without_reading_s3(self, api, caller, store):
-        api.answer(400, {'error': 'Invalid next_token', 'field': 'next_token'})
+        api.answer(400, {'error': 'Invalid next_token: pass the next_token of the previous page, with the same filters', 'field': 'next_token'})
 
-        assert invoke_route(ROUTE, caller) == (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+        assert invoke_route(ROUTE, caller) == (400, {'error': 'Invalid next_token: pass the next_token of the previous page, with the same filters', 'field': 'next_token'})
 
 
 class TestDownloadRefused:

@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.42.2",
+  "version": "2.43.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -30,7 +30,10 @@
     "deploy:full": "npm run deploy:cdk && npm run clear-cache",
     "clear-cache": "bash scripts/clear-cloudfront-cache.sh",
     "synth": "cdk synth",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:users": ".venv/bin/python scripts/e2e_user_invites.py",
+    "e2e:seo": ".venv/bin/python scripts/e2e_seo.py",
+    "e2e": "npm run e2e:seo && npm run e2e:users"
   },
   "keywords": [
     "cdk",

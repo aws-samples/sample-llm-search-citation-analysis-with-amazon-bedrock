@@ -268,7 +268,7 @@ class TestLimit:
 class TestProjection:
     def test_reads_an_answers_attributes_its_key_and_its_persona_name_without_the_text(self) -> None:
         assert (SIGHTING_PROJECTION, SIGHTING_ATTRIBUTE_NAMES) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, timestamp_provider, query_prompt_name',
+            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id, timestamp_provider, query_prompt_name',
             {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
 

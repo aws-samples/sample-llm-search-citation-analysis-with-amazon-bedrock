@@ -58,6 +58,12 @@ export interface ResetPasswordResponse {
   action: 'invite_resent' | 'password_reset';
 }
 
+/**
+ * The user routes answer every failure with `{error}` (a 500 too: "Failed to reset password"), so the error
+ * shown is the server's message, never a bare "HTTP 500:" (API Gateway sends no status text over HTTP/2).
+ */
+const USER_ERROR_OPTIONS = { allowStructuredErrors: true } satisfies { allowStructuredErrors: boolean };
+
 /** The most users `GET /users` returns per page. */
 export const USERS_PAGE_LIMIT = 100;
 
@@ -66,18 +72,18 @@ export async function listUsers(limit = 50, nextToken: string | null = null): Pr
 }
 
 export async function inviteUser(request: InviteUserRequest): Promise<InviteUserResponse> {
-  return apiPost<InviteUserResponse>('/users', request);
+  return apiPost<InviteUserResponse>('/users', request, USER_ERROR_OPTIONS);
 }
 
 export async function updateUser(username: string, request: UpdateUserRequest): Promise<{ user: CognitoUser }> {
-  return apiPut<{ user: CognitoUser }>(`/users/${encodeURIComponent(username)}`, request);
+  return apiPut<{ user: CognitoUser }>(`/users/${encodeURIComponent(username)}`, request, USER_ERROR_OPTIONS);
 }
 
 export async function deleteUser(username: string): Promise<{ message: string }> {
-  return apiDelete<{ message: string }>(`/users/${encodeURIComponent(username)}`);
+  return apiDelete<{ message: string }>(`/users/${encodeURIComponent(username)}`, USER_ERROR_OPTIONS);
 }
 
 /** Resets the password, or resends the invitation while the user has not signed in yet. */
 export async function resetUserPassword(username: string): Promise<ResetPasswordResponse> {
-  return apiPost<ResetPasswordResponse>(`/users/${encodeURIComponent(username)}/reset-password`, {});
+  return apiPost<ResetPasswordResponse>(`/users/${encodeURIComponent(username)}/reset-password`, {}, USER_ERROR_OPTIONS);
 }

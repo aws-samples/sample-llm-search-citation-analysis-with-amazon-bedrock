@@ -43,14 +43,14 @@ def _web_block(source: str, declaration: str) -> str:
 def _web_provider_ids() -> dict[str, str]:
     """``PROVIDER`` constant name to provider id, in source order."""
     block = _web_block(_WEB_PROVIDERS.read_text(encoding='utf-8'), 'export const PROVIDER')
-    return dict(re.findall(r"^  ([A-Z]+): '([a-z]+)',$", block, flags=re.MULTILINE))
+    return dict(re.findall(r"^  ([A-Z_]+): '([a-z_]+)',$", block, flags=re.MULTILINE))
 
 
 def _web_record(declaration: str) -> dict[str, str]:
     """A ``Record<ProviderId, string>`` of ``providers.ts``, keyed by provider id."""
     ids = _web_provider_ids()
     block = _web_block(_WEB_PROVIDERS.read_text(encoding='utf-8'), f'export const {declaration}: Record<ProviderId, string>')
-    return {ids[name]: value for name, value in re.findall(r"^  \[PROVIDER\.([A-Z]+)\]: '([^']+)',$", block, flags=re.MULTILINE)}
+    return {ids[name]: value for name, value in re.findall(r"^  \[PROVIDER\.([A-Z_]+)\]: '([^']+)',$", block, flags=re.MULTILINE)}
 
 
 def _web_fallback_models() -> dict[str, str]:
@@ -59,7 +59,7 @@ def _web_fallback_models() -> dict[str, str]:
     source = _WEB_PROVIDER_CONFIG.read_text(encoding='utf-8')
     match = re.search(r'const FALLBACK_PROVIDER_MODELS = \[\n(.*?)\n\] as const;', source, flags=re.DOTALL)
     assert match is not None, 'FALLBACK_PROVIDER_MODELS not found'
-    return {ids[name]: model for name, model in re.findall(r"\[PROVIDER\.([A-Z]+), '([^']+)'\]", match.group(1))}
+    return {ids[name]: model for name, model in re.findall(r"\[PROVIDER\.([A-Z_]+), '([^']+)'\]", match.group(1))}
 
 
 def _run_llm_provider_ids() -> list[str]:
@@ -69,7 +69,7 @@ def _run_llm_provider_ids() -> list[str]:
     name, which only resolve with ``lambda/search`` on ``sys.path``.
     """
     source = _SEARCH_HANDLER.read_text(encoding='utf-8')
-    names = re.findall(r"^    \(Provider\.([A-Z]+), '[^']+', '[^']+', ", source, flags=re.MULTILINE)
+    names = re.findall(r"^    \(Provider\.([A-Z_]+), '[^']+', '[^']+', ", source, flags=re.MULTILINE)
     return [provider_id for provider_id in (getattr(Provider, name) for name in names) if provider_id in LLM_PROVIDERS]
 
 

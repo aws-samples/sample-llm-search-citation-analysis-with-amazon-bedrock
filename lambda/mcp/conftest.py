@@ -24,7 +24,15 @@ import invoke
 import pytest
 from auth import Caller, verify_claims
 
-from testing.mcp_result_fixtures import BASE_URL, HOSTED_LOGIN_URL, METADATA_URL, READ_SCOPE, RESOURCE_URL, WRITE_SCOPE
+from testing.mcp_result_fixtures import (
+    BASE_URL,
+    HOSTED_LOGIN_URL,
+    METADATA_URL,
+    READ_SCOPE,
+    RESOURCE_URL,
+    RUN_SCOPE,
+    WRITE_SCOPE,
+)
 from testing.mcp_state_fixtures import FakeStateTable, install_fake_table
 from testing.module_loader import load_handler_module
 
@@ -58,6 +66,8 @@ MCP_ENV = {
     'MCP_STATE_TABLE': 'test-mcp-state',
     'MCP_LIMITS': '{}',
 }
+
+ALL_SCOPES = f'openid {READ_SCOPE} {WRITE_SCOPE} {RUN_SCOPE}'
 
 ClaimsFactory = Callable[..., dict[str, Any]]
 Poster = Callable[..., dict[str, Any]]
@@ -98,6 +108,18 @@ def claims() -> ClaimsFactory:
         return {**base, **overrides}
 
     return build
+
+
+@pytest.fixture
+def admin(claims: ClaimsFactory) -> dict[str, Any]:
+    """Claims of an ``Admin`` member with read, write and run scopes."""
+    return claims(scope=ALL_SCOPES, **{'cognito:groups': 'Admin'})
+
+
+@pytest.fixture
+def member(claims: ClaimsFactory) -> dict[str, Any]:
+    """Claims of a ``Users`` member with read, write and run scopes."""
+    return claims(scope=ALL_SCOPES)
 
 
 @pytest.fixture

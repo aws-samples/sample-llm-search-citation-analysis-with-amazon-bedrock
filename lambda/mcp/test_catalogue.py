@@ -18,6 +18,7 @@ from catalogue import (
     OPERATIONS,
     InvalidArguments,
     Route,
+    build_route,
     find_operation,
     listed_operations,
     tool_listing,
@@ -30,7 +31,7 @@ from shared import content_brief, research_agent
 TOKEN_BUDGET = 3500
 ROUTERS = {
     'keyword-mgmt', 'config-mgmt', 'execution-mgmt', 'stats-insights', 'citations-content',
-    'brand-config', 'brand-mentions', 'persona-rankings', 'content-studio',
+    'brand-config', 'brand-mentions', 'persona-rankings', 'content-studio', 'seo',
 }
 DIRECT_TOOLS = [
     'list_keyword_groups', 'list_keywords', 'get_brand_config', 'get_visibility', 'get_report', 'get_citations',
@@ -41,8 +42,17 @@ SPEND_TOOLS = [
     ('estimate_run', 'run', True), ('start_run', 'run', True),
     ('estimate_research', 'write', False), ('start_research', 'write', False),
     ('estimate_content_brief', 'write', False), ('generate_content_brief', 'write', False),
+    ('estimate_seo_keywords', 'run', False), ('run_seo_keywords', 'run', False),
+    ('estimate_seo_domain', 'run', False), ('run_seo_domain', 'run', False),
+    ('estimate_seo_backlinks', 'run', False), ('run_seo_backlinks', 'run', False),
+    ('estimate_seo_local', 'run', False), ('run_seo_local', 'run', False),
+    ('estimate_seo_job', 'run', True), ('start_seo_job', 'run', True),
 ]
-SPEND_STARTS = ['start_run', 'start_research', 'generate_content_brief']
+SPEND_STARTS = [
+    'start_run', 'start_research', 'generate_content_brief',
+    'run_seo_keywords', 'run_seo_domain', 'run_seo_backlinks', 'run_seo_local', 'start_seo_job',
+]
+SPEND_ESTIMATES = [name for name, _scope, _admin in SPEND_TOOLS if name.startswith('estimate_')]
 
 
 def _names(tools) -> list[str]:
@@ -50,8 +60,7 @@ def _names(tools) -> list[str]:
 
 
 def _route(name: str, arguments: dict) -> Route:
-    tool = find_operation(name)
-    return tool.route(validate_arguments(tool.input_schema, arguments))
+    return build_route(find_operation(name), arguments)[1]
 
 
 def _idea(arguments: dict) -> dict:
@@ -395,18 +404,20 @@ class TestSpendEntries:
     def test_every_start_requires_the_confirmation_token(self, name):
         assert CONFIRMATION_ARGUMENT in find_operation(name).input_schema['required']
 
-    @pytest.mark.parametrize('name', ['estimate_run', 'estimate_research', 'estimate_content_brief'])
+    @pytest.mark.parametrize('name', SPEND_ESTIMATES)
     def test_every_estimate_rejects_a_confirmation_token(self, name):
         with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): confirmation_token'):
             validate_arguments(find_operation(name).input_schema, {CONFIRMATION_ARGUMENT: 'x'})
 
-    @pytest.mark.parametrize('name', ['estimate_run', 'estimate_research', 'estimate_content_brief'])
+    @pytest.mark.parametrize('name', SPEND_ESTIMATES)
     def test_every_estimate_tells_the_model_to_wait_for_approval(self, name):
         assert 'wait for approval' in find_operation(name).description
 
     @pytest.mark.parametrize(('estimate', 'start'), [
         ('estimate_run', 'start_run'), ('estimate_research', 'start_research'),
-        ('estimate_content_brief', 'generate_content_brief'),
+        ('estimate_content_brief', 'generate_content_brief'), ('estimate_seo_keywords', 'run_seo_keywords'),
+        ('estimate_seo_domain', 'run_seo_domain'), ('estimate_seo_backlinks', 'run_seo_backlinks'),
+        ('estimate_seo_local', 'run_seo_local'), ('estimate_seo_job', 'start_seo_job'),
     ])
     def test_an_estimate_and_its_start_build_the_same_api_request(self, estimate, start):
         arguments = dict(find_operation(estimate).examples[0])
