@@ -82,8 +82,10 @@ sleep and re-check.
 - **Amazon EventBridge is the backbone.** Service events (Step Functions status changes, S3 object-created
   notifications, DynamoDB streams through Pipes) and the events our own code publishes go through EventBridge, and
   rules route them to the work that follows. Adding a reaction means adding a rule, not editing the producer.
-- **EventBridge Scheduler is the heartbeat.** Anything driven by time (scheduled runs, reconciliation, expiry,
-  retries) is a schedule. No Lambda waits or loops to watch the clock.
+- **EventBridge Scheduler is the heartbeat.** Anything driven by time (scheduled runs, reconciliation, expiry, a
+  retry in a later invocation) is a schedule. No Lambda waits or loops to watch the clock. A short, bounded backoff
+  inside one call to a throttled or flaky service (`Retry-After`, a few seconds) is a retry, not polling, and stays
+  in the code that makes the call.
 - **AWS AppSync Events notifies clients.** The dashboard, and the API and MCP clients of tenet 4 that can hold a
   subscription, subscribe to channels (run progress, job finished, alert raised) and are told when something
   happens, instead of polling a REST route. AppSync Events is pay per message and connection, so it adds no fixed
@@ -187,7 +189,7 @@ tenet; closing a gap is a change of its own. Known gaps (2026-11):
 | 5 | Ten providers behind one search contract, each with its own Lambda and concurrency cap; a failed provider does not fail the run. | Not measured here: how much provider-specific code lives outside `lambda/search/`. |
 | 6 | Everything in CDK; tables and data buckets are `RETAIN` with point-in-time recovery; buckets block public access and require TLS. | Encryption uses AWS-managed keys, not a key the deployment controls; several roles get table-wide `grantReadWriteData` / `grantWriteData` (which include deletes) rather than per-action grants; cost is visible per stack only. |
 | 7 | No WAF by default (SECURITY.md explains how to add one); on-demand DynamoDB; no NAT gateway or always-on compute. | Secrets Manager holds one secret per provider key ($0.40 each per month). No test fails the synth on a new fixed-cost resource. |
-| 8 | A DynamoDB stream starts Content Studio generation; analysis runs are started by EventBridge Scheduler; each run is a Step Functions workflow whose steps hand over directly. | No AppSync Events: the dashboard polls for run status, research jobs, Content Studio generations, ranking analyses and insight regeneration (`web/src/hooks/useExecutionPolling.ts`, `researchPolling.ts`, `useContentStudio.ts`, `useSelfReflection.ts`, `useNarrativeRegeneration.ts`); the Content Studio reconcile (a safety net for missed stream records) runs on a scheduled EventBridge rule, not EventBridge Scheduler; nothing publishes run, crawl or alert events to EventBridge for other consumers; the API marks a stuck research job failed when it is read, not when it times out. |
+| 8 | A DynamoDB stream starts Content Studio generation; analysis runs are started by EventBridge Scheduler; each run is a Step Functions workflow whose steps hand over directly. | No AppSync Events: the dashboard polls for run status, research jobs, Content Studio generations, ranking analyses and insight regeneration (`web/src/hooks/useExecutionPolling.ts`, `researchPolling.ts`, `useContentStudio.ts`, `useSelfReflection.ts`, `useNarrativeRegeneration.ts`); the Content Studio reconcile (a safety net for missed stream records) runs on a scheduled EventBridge rule, not EventBridge Scheduler; nothing publishes run, crawl or alert events to EventBridge for other consumers; the API marks a stuck research job failed when it is read, not when it times out; the crawler waits a fixed 10 s before it connects to the AgentCore browser, which exposes no readiness signal yet (`lambda/shared/browser_tools.py`); the SerpAPI archive poll is bounded but returns its result in-process instead of publishing it as an event (`lambda/shared/serpapi.py`). |
 | D1 | Each run writes new `SearchResults` rows (keyword / timestamp_provider) and new raw-response objects; crawls are keyed by URL and crawl time. | Data buckets are unversioned and raw objects are not write-once; `Citations` rows are updated in place by deduplication. |
 | D2 | Bronze ≈ the `raw-responses` bucket and screenshots; Silver ≈ `SearchResults`, `Citations`, `CrawledContent`; Gold ≈ rollups, snapshots, summaries, insights. | The raw object also stores the extracted brands beside the raw answer; the raw-response write is best-effort (a failure is logged and the row is stored without it); rows carry no pipeline or prompt version. |
 | D3 | Citation rollups are rebuilt after every run. | No replay of extraction or aggregation from Bronze; no side-by-side comparison of versions. |
@@ -239,6 +241,6 @@ Tenets touched: <!-- e.g. 2, D1, D4 — or "none" -->
 - [ ] Headless: available and enforced via the API/MCP, not only the UI (4)
 - [ ] Providers: a new engine fits the provider contract; its failure costs only its own answers (5)
 - [ ] Cost: no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
-- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop outside the bounded transition rule, and every announced state stays readable through REST and MCP (8)
+- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop except under "Until AppSync Events is in place", and every announced state stays readable through REST and MCP (8)
 - [ ] Trade-off: if this weakens a lower tenet to serve a higher one, explain it here
 ```
