@@ -10,4 +10,4 @@ beautifulsoup4>=4.12.0
 # IANA time zone database for `zoneinfo`: the schedule API validates the
 # timezone of every schedule against it, and the Lambda runtime ships no
 # system tz database to fall back on.
-tzdata>=2024.1
+tzdata>=2026.6
