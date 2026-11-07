@@ -9,6 +9,18 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.42.2] - 2026-11-08
+
+### Added
+
+- **Tenet 8, "Event-driven. Events drive the architecture; nothing polls."** (`TENETS.md`): every change of state
+  is an event that consumers subscribe to. Amazon EventBridge routes service events (Step Functions status, S3
+  object created, DynamoDB streams) and our own; EventBridge Scheduler is the heartbeat for anything time-based;
+  AWS AppSync Events tells the dashboard and API/MCP clients when something happens instead of them polling.
+  Polling is the bounded exception (one catch-up read on connect, external APIs without callbacks). The gap table
+  lists where the platform polls today, and the pull request checklist, the Kiro PR review and the Kiro issue
+  triage now judge changes and feature requests against tenet 8.
+
 ## [2.42.1] - 2026-11-07
 
 The quality gate now runs on GitHub as well as before a push, and the repository has written tenets. `npm run

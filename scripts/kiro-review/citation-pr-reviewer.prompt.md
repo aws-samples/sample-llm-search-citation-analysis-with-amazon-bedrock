@@ -26,7 +26,7 @@ outside the review root.
 
 ## What to check, in order
 
-1. **Tenets.** Which tenets does the change touch (product 1–7, data lake D1–D7)? Does it move away from any of
+1. **Tenets.** Which tenets does the change touch (product 1–8, data lake D1–D7)? Does it move away from any of
    them? A change that weakens a higher tenet to serve a lower one is blocking unless the description explains the
    trade-off. A change must not widen a gap listed under "Where the platform stands today". Compare your list with
    the `Tenets touched:` line in `data/pr.md` and say whether they agree.
