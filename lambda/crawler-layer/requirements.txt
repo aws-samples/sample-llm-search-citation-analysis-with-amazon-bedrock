@@ -2,18 +2,18 @@
 # Uses Bedrock AgentCore managed browsers (no local Chromium needed)
 
 # Pin the remote-browser client stack to versions validated together.
-bedrock-agentcore==1.23.1
-playwright==1.63.0
+bedrock-agentcore==1.25.2
+playwright==1.64.1
 greenlet==3.5.6
 pyee==13.0.1
-websockets==17.1
+websockets==17.4
 
 # AgentCore 1.23.1 requires boto3/botocore >=1.43.72, while the current
 # Lambda Python 3.12 runtime image provides 1.42.x. Bundle and pin a compatible
 # SDK in this layer so an AWS runtime refresh cannot silently break imports.
-boto3==1.43.98
-botocore==1.43.98
-s3transfer==0.19.2
+boto3==1.43.123
+botocore==1.43.123
+s3transfer==0.19.3
 jmespath==1.1.0
 
 # The crawler reads cited YouTube videos through oEmbed with
