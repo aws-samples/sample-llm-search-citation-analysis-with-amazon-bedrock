@@ -13,11 +13,14 @@ process.
 
 ### Added
 
-- **Tenet 8, "Event-driven. Events drive the architecture; nothing polls."** (`TENETS.md`): every change of state
-  is an event that consumers subscribe to. Amazon EventBridge routes service events (Step Functions status, S3
+- **Tenet 8, "Event-driven. Events drive the architecture; nothing polls."** (`TENETS.md`). Why: a poll costs a
+  request and a Lambda invocation each time it asks, mostly while nothing has changed; the reader learns of a change
+  up to one interval late; and the load grows with the number of open dashboards and headless clients rather than
+  with the work being done. Every change of state is an event that consumers subscribe to. Amazon EventBridge routes service events (Step Functions status, S3
   object created, DynamoDB streams) and our own; EventBridge Scheduler is the heartbeat for anything time-based;
   AWS AppSync Events tells the dashboard and API/MCP clients when something happens instead of them polling.
-  Polling is the bounded exception (one catch-up read on connect, external APIs without callbacks). The gap table
+  Polling is the bounded exception (one catch-up read on connect, external APIs without callbacks); a scheduled
+  reconcile for missed events stays as a safety net. The gap table
   lists where the platform polls today, and the pull request checklist, the Kiro PR review and the Kiro issue
   triage now judge changes and feature requests against tenet 8.
 
