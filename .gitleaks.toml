@@ -1,0 +1,50 @@
+# gitleaks configuration (scripts/gitleaks-tree.sh, a scripts/validate.sh step): the default rule set.
+
+title = "Citation Analysis System"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------------------------
+# Working-tree scan: `gitleaks dir` does not read .gitignore, so dependencies, build output and tool
+# caches are skipped by path here. None of these paths is tracked; in a `gitleaks git` scan this list
+# matches nothing.
+[[allowlists]]
+description = "Untracked dependencies, build output and tool caches (gitignored)"
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)venv/''',
+  '''(^|/)\.git/''',
+  '''(^|/)\.cache/''',
+  '''(^|/)dist/''',
+  '''(^|/)cdk\.out[^/]*/''',
+  '''(^|/)coverage/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)\.(ruff|mypy|pytest)_cache/''',
+  '''(^|/)\.hypothesis/''',
+  '''(^|/)\.mutmut-cache''',
+  '''(^|/)\.stryker-tmp/''',
+  '''(^|/)web/reports/''',
+  '''(^|/)\.codeql-local/''',
+  '''(^|/)\.deps/''',
+  '''(^|/)\.env(\.[^/]*)?$''',
+  '''^lambda/(layer|crawler-layer)/python/''',
+  '''^web-deploy/''',
+]
+
+# Reviewed false positives of the default `generic-api-key` rule: pagination cursors in tests and
+# fixtures. Each is base64url of a short JSON object (`eyJ` = `{"`, e.g. `{"offset":1}`) or of a
+# "not-a-…" placeholder. A real JWT starts the same way but is far longer and carries dots, so the
+# length cap and the alphabet keep it out; outside test and fixture files the rule is unchanged.
+[[allowlists]]
+description = "Pagination cursors (base64url JSON or 'not-a-…') in tests and fixtures"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''(^|/)test_[^/]+\.py$''',
+  '''\.spec\.tsx?$''',
+  '''-fixtures\.tsx?$''',
+]
+regexTarget = "secret"
+regexes = ['''^(eyJ[A-Za-z0-9_-]{6,60}|bm90LWEt[A-Za-z0-9_-]{0,40})$''']

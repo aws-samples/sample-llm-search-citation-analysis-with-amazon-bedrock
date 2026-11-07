@@ -397,29 +397,30 @@ npm run lint:fix       # ESLint --fix
 cd web && npm run dev  # Vite dev server on :5173 (deploy with -c dev=true)
 ```
 
-UI conventions are in [docs/design-system.md](docs/design-system.md); versioning and the changelog in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog).
+The tenets every change is measured against are in [TENETS.md](TENETS.md). UI conventions are in [docs/design-system.md](docs/design-system.md); versioning and the changelog in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog).
 
 ### Validation
 
-`npm run validate` runs every quality gate and stops at the first failure:
+`npm run validate` (`scripts/validate.sh`) runs every quality gate in parallel lanes and stops at the first failure; the
+`quality gates` workflow runs the same script, one lane per job, on every pull request. `npm run validate:help` explains
+the lanes, options, logs and the workflow to follow on a failure; `npm run validate:failed` re-runs only the steps that
+did not pass.
 
-| Step | Command | Checks |
+| Lane | Steps | Checks |
 |---|---|---|
-| 1 | `npm run lint` | ESLint over the CDK app and `web/src` |
-| 2 | `npm run build` | `tsc` for the CDK app |
-| 3 | `npm run test` | Vitest (CDK stack tests) |
-| 4–5 | `npm run duplication`, `duplication:tests` | jscpd over `bin`, `lib`, `web/src`: production code, then specs and fixtures |
-| 6–7 | `npm run deadcode`, `deadcode:prod` | knip, then `knip --production --strict` |
-| 8 | `npm run contracts` | `scripts/check-contracts.py`: every env var CDK sets is read by a Lambda and vice versa; every member in `web/src/types` is read by dashboard code (allowlist entries need a reason) |
-| 9 | `npm run validate:web` | In `web/`: `tsc --noEmit`, Vitest, knip, `knip --production --strict` |
-| 10 | `npm run validate:python` | `scripts/validate-python.sh`: ruff, pyright, vulture (production, then whole tree), jscpd (code, then tests), pytest |
-| 11 | `npm run quality:codeql` | `scripts/codeql-local.sh`: CodeQL's `security-and-quality` suites for Python (172 rules), JavaScript/TypeScript (201) and GitHub Actions (27) — every security query of GitHub's default code scanning plus the code-quality queries the github-code-quality review uses; any result fails. For Python it loads the repository's model pack (`scripts/codeql/python-lambda-models`), which declares the API Gateway `event` of every decorated Lambda handler as attacker-controlled input: CodeQL only knows web frameworks as taint sources, so without it the log-injection, SSRF, path- and regex-injection queries are silent on Lambda code (GitHub's default setup cannot load repository model packs, so this is the local gate's advantage). Needs `gh extension install github/gh-codeql`; skipped with a notice without it |
+| `py` | ruff, pyright, vulture ×2, contracts, pytest | `scripts/lint-python.sh` (lint, types, dead code in production code, then the whole tree); `scripts/check-contracts.py`: every env var CDK sets is read by a Lambda and vice versa, every member in `web/src/types` is read by dashboard code (allowlist entries need a reason); the Lambda tests |
+| `tsc` | version, repo script tests, `tsc` ×2, knip ×4 | `package.json`, `web/package.json` and the newest `CHANGELOG.md` release agree; the tests of `scripts/*.mjs`; `tsc --noEmit` for the CDK app and the dashboard; knip, then `knip --production --strict`, for both |
+| `lint` | ESLint, jscpd ×4, gitleaks, actionlint + zizmor | ESLint over the CDK app, `web/src` and `scripts/*.mjs`; jscpd over TypeScript and Python, code then tests; secrets in the working tree (`.gitleaks.toml`); the GitHub Actions workflows (`scripts/actions-lint.sh`) |
+| `test` | vite build, Vitest | the dashboard build the CDK app stages, then the CDK stack tests |
+| `web` | Vitest | the dashboard tests (jsdom) |
+| `sec` | CodeQL | `scripts/codeql-local.sh`: CodeQL's `security-and-quality` suites for Python, JavaScript/TypeScript and GitHub Actions; any result fails. For Python it loads the repository's model pack (`scripts/codeql/python-lambda-models`), which declares the API Gateway `event` of every decorated Lambda handler as attacker-controlled input: CodeQL only knows web frameworks as taint sources, so without it the log-injection, SSRF, path- and regex-injection queries are silent on Lambda code. Needs `gh extension install github/gh-codeql`; skipped with a notice without it, and skipped on GitHub Actions, where code scanning runs |
 
-The Python gate needs the dev toolchain in a repo-local venv and the built shared layer, which the tests import runtime libraries from:
+The gate needs the Python dev toolchain in a repo-local venv, both built layers (the tests import runtime libraries from the shared layer, and the CDK tests synthesize the app) and the scanners:
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r lambda/requirements-dev.txt
-bash lambda/layer/build-layer.sh
+python3.12 -m venv .venv && .venv/bin/pip install -r lambda/requirements-dev.txt
+bash lambda/layer/build-layer.sh && bash lambda/crawler-layer/build-layer.sh
+brew install gitleaks actionlint zizmor shellcheck   # macOS; elsewhere their GitHub releases
 ```
 
 Rules the gates enforce:

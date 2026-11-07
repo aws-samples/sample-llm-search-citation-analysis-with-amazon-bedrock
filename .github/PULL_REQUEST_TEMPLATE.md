@@ -13,6 +13,10 @@ Please delete options that are not relevant.
 - [ ] Breaking change (API contract, auth behavior, or a manual step before `cdk deploy`) — major
 - [ ] Documentation or CI only (no version bump)
 
+## Tenets
+
+Tenets touched: <!-- e.g. 2, D1, D4 — or "none". See TENETS.md, "Pull request checklist" -->
+
 ## How Has This Been Tested?
 
 Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce.

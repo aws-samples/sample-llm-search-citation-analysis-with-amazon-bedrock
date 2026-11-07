@@ -32,10 +32,11 @@ To send us a pull request, please:
 1. Fork the repository.
 2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
 3. Run the local gates below and make sure they are clean.
-4. Bump the version and add a changelog entry if the change touches anything that ships (see [Versioning and changelog](#versioning-and-changelog)).
-5. Commit to your fork using clear commit messages.
-6. Send us a pull request, answering any default questions in the pull request interface.
-7. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+4. Name the tenets the change touches in the pull request's `## Tenets` section ([TENETS.md](TENETS.md)).
+5. Bump the version and add a changelog entry if the change touches anything that ships (see [Versioning and changelog](#versioning-and-changelog)).
+6. Commit to your fork using clear commit messages.
+7. Send us a pull request, answering any default questions in the pull request interface.
+8. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
@@ -52,20 +53,25 @@ bash lambda/layer/build-layer.sh
 bash lambda/crawler-layer/build-layer.sh
 ```
 
-- **`npm run validate`** from the repo root runs every gate and stops at the first failure: ESLint, `tsc`, the CDK
-  Vitest suite, jscpd, knip, the contract checks (`npm run contracts`), the dashboard gate (`web`: `tsc --noEmit`,
-  Vitest, knip) and the Python gate (`scripts/validate-python.sh`: ruff, pyright, vulture, jscpd, pytest), then
-  **CodeQL** (`npm run quality:codeql`, `scripts/codeql-local.sh`): the same code-quality queries the
-  github-code-quality review comments from, over Python and JavaScript/TypeScript, failing on any result. Install
-  the CLI once with `gh extension install github/gh-codeql` (free for open source; the run is skipped with a notice
-  when no CLI is installed, `CODEQL_REQUIRED=1` makes that a failure). The
-  step-by-step table and the limits each gate enforces are in [README.md, "Validation"](README.md#validation).
-  Fix findings; never raise a limit or suppress a finding inline.
+Install the scanners the gate runs (macOS: `brew install gitleaks actionlint zizmor shellcheck`; elsewhere their
+GitHub releases). `quality-gates.yml` pins the versions CI uses.
+
+- **`npm run validate`** from the repo root runs every gate (`scripts/validate.sh`) in parallel lanes and stops at
+  the first failure: Python (ruff, pyright, vulture, the contract checks, pytest), TypeScript (`tsc` and knip for
+  the CDK app and the dashboard, the version check, the repo scripts' tests), lint (ESLint, jscpd, gitleaks,
+  actionlint + zizmor), the CDK Vitest suite (after a `vite build` of the dashboard), the dashboard Vitest suite,
+  and **CodeQL** (`scripts/codeql-local.sh`): the code-quality queries the github-code-quality review comments
+  from, over Python and JavaScript/TypeScript, failing on any result. Install the CodeQL CLI once with
+  `gh extension install github/gh-codeql` (free for open source; the step is skipped with a notice when no CLI is
+  installed, `CODEQL_REQUIRED=1` makes that a failure). **`npm run validate:help`** explains every lane, option and
+  log, and the workflow an agent follows on a failure; `npm run validate:failed` re-runs only what did not pass,
+  and `npm run validate:python` / `validate:web` run one area. Step logs are kept in `.cache/validate/logs/`. The
+  limits each gate enforces are in [README.md, "Validation"](README.md#validation). Fix findings; never raise a
+  limit or suppress a finding inline.
 - **Pre-push hook.** `npm install` (its `prepare` script) or `npm run hooks:install` links `.githooks/pre-push` into
-  `.git/hooks/`, so every `git push` runs `npm run validate` first and stops on a failure. The gate is local by
-  design; GitHub does not run it. Pushes that only delete branches or tags skip it. Don't use
-  `git push --no-verify`, which also skips Code Defender's checks on machines that have it; for an emergency push
-  use `SKIP_VALIDATE=1 git push` and say so in the pull request.
+  `.git/hooks/`, so every `git push` runs `npm run validate` first and stops on a failure. Pushes that only delete
+  branches or tags skip it. Don't use `git push --no-verify`, which also skips Code Defender's checks on machines
+  that have it; for an emergency push use `SKIP_VALIDATE=1 git push` and say so in the pull request.
 - **Layer rebuilds.** Both layers carry a copy of `lambda/shared`, and `cdk synth` fails when either copy is
   missing or stale. After changing anything in `lambda/shared/`, or a layer's `requirements.txt`, rerun
   `bash lambda/layer/build-layer.sh` and `bash lambda/crawler-layer/build-layer.sh`. The Python tests also import
@@ -93,6 +99,39 @@ bash lambda/crawler-layer/build-layer.sh
   [docs/kpi-definitions.md](docs/kpi-definitions.md) (`lambda/shared/test_kpi_contract.py` keeps that document, the
   KPI engine and the dashboard definitions in step).
 
+
+## Continuous integration
+
+Every workflow under `.github/workflows/` pins its actions to commit SHAs, holds the least permissions it needs and
+keeps no checkout credential; `actionlint` and `zizmor` check that in the gate.
+
+| Workflow | When | What |
+|---|---|---|
+| `quality gates` | every pull request, pushes to `main` | `scripts/validate.sh --lane <lane>`, one job per lane (`py`, `tsc`, `lint`, `test`, `web`), and a final `scripts/validate.sh` check that is green only when every lane is. CodeQL runs as GitHub code scanning instead of here. |
+| `version and changelog check` | pull requests to `main` | the version bump and changelog entry below |
+| `dependency review` | every pull request | a dependency the PR adds or changes must carry a license from `.github/dependency-review-config.yml` |
+| `dependency audit` | PRs that touch a manifest, lockfile or requirements file; Mondays 05:23 UTC; by hand | `scripts/dependency-audit.mjs` (see Dependencies) |
+| `scheduled failure watch` | after each scheduled `dependency audit` | opens an issue when the scheduled run fails, comments while it keeps failing, closes it when it is green again |
+
+Dependabot (`.github/dependabot.yml`) opens grouped minor and patch updates every Monday for the actions, both npm
+lockfiles and the Python requirements, never for a release younger than seven days.
+
+## Dependencies
+
+- **Audit.** `npm run deps:audit` (`scripts/dependency-audit.mjs`) checks both npm lockfiles with `npm audit` and
+  both Lambda layers' requirements with `pip-audit` (`pip install pip-audit`), resolved for the Lambda target
+  (CPython 3.12, x86_64). It fails on an npm production advisory of high or critical severity, an npm
+  development advisory of critical severity, any advisory in a layer, and an audit that could not run;
+  `lambda/requirements-dev.txt` is reported only.
+- **Reviewed ignores.** An advisory that cannot reach us, or has no fix yet, goes into
+  `.github/dependency-audit-ignore.json` with its id, package, the reason and an expiry at most 90 days ahead. An
+  expired or malformed entry fails the audit; an entry that matches nothing is reported so it can be deleted.
+- **A red scheduled audit** has an issue titled `Scheduled workflow failing: dependency audit`. Update the
+  dependency (or add a reviewed ignore) in a pull request; the next green scheduled run closes the issue.
+- **Dependabot pull requests** change what ships, so they need the version bump below: check out the branch, run
+  `npm version <x.y.z> --no-git-tag-version` at the root and in `web/`, add the `CHANGELOG.md` entry, push, merge.
+- **Licenses.** A new dependency must carry a license from `.github/dependency-review-config.yml`; anything else
+  needs a reviewed exception there with its reason, and an entry in `THIRD_PARTY_LICENSES.md`.
 
 ## Versioning and changelog
 

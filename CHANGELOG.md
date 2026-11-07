@@ -9,6 +9,42 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.42.1] - 2026-11-07
+
+The quality gate now runs on GitHub as well as before a push, and the repository has written tenets. `npm run
+validate` was a local-only chain of npm scripts that stopped at the first failure and ran every step one after
+another; it is now `scripts/validate.sh`, which CI runs too. The CI setup follows
+[sample-voice-of-customer-datalake](https://github.com/aws-samples/sample-voice-of-customer-datalake). No deployed
+behaviour changes.
+
+### Added
+
+- **`TENETS.md`**: the ranked product tenets and the data lake tenets (D1–D7) every design and pull request is
+  measured against, adapted from the Voice of the Customer sample, with the known gaps of the platform today. The
+  pull request template has a `## Tenets` section.
+- **`quality gates` workflow**: `scripts/validate.sh --lane <lane>` on every pull request and push to `main`, one
+  job per lane, and a single `scripts/validate.sh` check for branch protection.
+- **`dependency audit` workflow** (`scripts/dependency-audit.mjs`, `npm run deps:audit`): `npm audit` on both
+  lockfiles and `pip-audit` on both Lambda layers, on pull requests that touch dependencies and weekly; reviewed
+  ignores with an expiry in `.github/dependency-audit-ignore.json`. A failing scheduled run opens an issue
+  (`scheduled failure watch` workflow).
+- **`dependency review` workflow**: a license gate for dependencies a pull request adds or changes
+  (`.github/dependency-review-config.yml`).
+- **Dependabot** version updates (`.github/dependabot.yml`): weekly, grouped minor and patch, 7-day cooldown.
+- **New gates in `validate`**: the version check (`package.json`, `web/package.json` and `CHANGELOG.md` agree),
+  gitleaks over the working tree (`.gitleaks.toml`), actionlint and zizmor over `.github/`, and the tests of the
+  repo scripts.
+
+### Changed
+
+- **`scripts/validate.sh`** replaces the npm-script chain and `scripts/validate-python.sh`. Steps run in parallel
+  lanes (about 3 minutes instead of the steps' 9 minutes end to end on an 8-core laptop), each writes its own log
+  under `.cache/validate/logs/`, a failure prints the failing step's log tail and a status table ends every run.
+  `--failed` re-runs only what did not pass, `--only` / `--lane` select steps, and `--help`
+  (`npm run validate:help`) explains every lane, option and log and the workflow an agent follows on a failure.
+  The CDK tests now build the dashboard first (`vite build`), which they need to synthesize the app.
+- `version-check.yml` pins `actions/checkout` to a commit SHA and keeps no checkout credential.
+
 ## [2.42.0] - 2026-11-05
 
 A customer's dashboard came up blank on every page. `GET /api/citations` without a scope read the whole Citations

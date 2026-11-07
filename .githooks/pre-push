@@ -31,7 +31,7 @@ if [ "${SKIP_VALIDATE:-}" = "1" ]; then
 fi
 
 cd "$(git rev-parse --show-toplevel)"
-echo "pre-push: running npm run validate (lint, build, CDK + web + Python tests, duplication, dead code, contracts)..." >&2
+echo "pre-push: running npm run validate (every quality gate, the same steps CI runs; npm run validate:help explains them)..." >&2
 if ! npm run validate; then
   echo "" >&2
   echo "pre-push: npm run validate failed; the push was stopped. Fix the findings and push again." >&2

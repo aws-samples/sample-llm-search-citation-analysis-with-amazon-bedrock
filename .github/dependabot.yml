@@ -1,0 +1,106 @@
+# Dependabot version updates: a handful of grouped pull requests a week, never a release younger than
+# a week. Security updates are a separate repository setting; this file only adds the routine version
+# updates. Reference: GitHub docs, "Dependabot options reference".
+#
+# A Dependabot pull request changes what ships, so the `version check` workflow and the
+# `version: CHANGELOG ↔ package.json` step of scripts/validate.sh fail on it until whoever merges it adds
+# the release bump. That is intended (CONTRIBUTING.md, "Dependencies"): check out the branch, run
+# `npm version <x.y.z> --no-git-tag-version` at the root and in web/, add the CHANGELOG.md entry, push, merge.
+#
+# Choices, and why:
+# - weekly, Monday 06:00 UTC: one review batch a week instead of a trickle.
+# - groups: one pull request per directory for every minor and patch update together.
+# - ignore semver-major: a major changes an API or a default, so it is upgraded deliberately, one at a time.
+#   `update-types` in an ignore rule applies to version updates only: security updates still arrive,
+#   majors included.
+# - cooldown 7 days: a release must be a week old before it is proposed. Most malicious or broken releases
+#   are found and pulled within days. Security updates are not delayed by it.
+# - labels: only labels that exist in the repository (dependencies, javascript).
+# - pip `versioning-strategy: increase`: the requirements files mix exact pins with `>=` floors; this moves
+#   a floor up to the release it proposes instead of leaving an old floor that still resolves to anything.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    # "/" covers .github/workflows. Actions are pinned to commit SHAs with a `# vX.Y.Z` comment;
+    # Dependabot updates both.
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    # One entry per lockfile: the CDK app and the dashboard.
+    directories:
+      - /
+      - /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - javascript
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    # requirements-dev.txt (test and lint tools) and the two Lambda layers' requirements.txt.
+    directories:
+      - /lambda
+      - /lambda/layer
+      - /lambda/crawler-layer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - minor
+          - patch

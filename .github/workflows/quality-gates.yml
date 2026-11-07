@@ -1,0 +1,129 @@
+# Runs scripts/validate.sh, every quality gate in the repo, on each pull request and on pushes to main.
+# CI calls that script and nothing else, so a green local `npm run validate` is a green run here.
+#
+# One job per validate.sh lane (`--lane <name>`), so the lanes run on separate runners and the run takes as
+# long as its slowest lane. The `sec` lane (CodeQL) is not run here: its step skips itself on GitHub Actions
+# (`GITHUB_ACTIONS` is set), and the repository's CodeQL code scanning covers it. The last job is the single
+# `scripts/validate.sh` check branch protection can require.
+name: quality gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lane:
+    name: validate (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # Every lane reports, so one run shows every failing gate.
+      fail-fast: false
+      matrix:
+        lane: [py, tsc, lint, test, web]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No step pushes, tags or calls the API, so the token has no use in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # 3.12 is the Lambda runtime, the pyright target, and the interpreter the layer builds and the CDK
+      # synth compile bytecode with (scripts/compile-python312.sh).
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: lambda/requirements-dev.txt
+
+      - name: Install Node dependencies (root and web/, each with its own lockfile)
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --prefix web --no-audit --no-fund
+
+      - name: Install the Python toolchain into .venv
+        if: ${{ matrix.lane == 'py' }}
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --disable-pip-version-check -q -r lambda/requirements-dev.txt
+
+      # pytest imports runtime libraries from the shared layer (lambda/conftest.py); the CDK tests synthesize
+      # the app, which fails when either layer or its copy of lambda/shared is missing or stale.
+      - name: Build both Lambda layers
+        if: ${{ matrix.lane == 'py' || matrix.lane == 'test' }}
+        run: |
+          bash lambda/layer/build-layer.sh
+          bash lambda/crawler-layer/build-layer.sh
+
+      - name: Install gitleaks (the working-tree secret scan, scripts/gitleaks-tree.sh)
+        if: ${{ matrix.lane == 'lint' }}
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          # Committed digest (the release checksums file agrees); bump with the version.
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          echo "${GITLEAKS_SHA256}  /tmp/${tarball}" | sha256sum --check --strict -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "/tmp/${tarball}" -C "$HOME/.local/bin" gitleaks
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Pinned binaries for scripts/actions-lint.sh, verified against digests committed HERE (not a checksum
+      # file fetched from the same release, which an attacker able to replace the asset could replace too).
+      # Bump: update the version and digest together, and ACTIONLINT_VERSION / ZIZMOR_VERSION in the script.
+      - name: Install actionlint + zizmor (GitHub Actions lint, scripts/actions-lint.sh)
+        if: ${{ matrix.lane == 'lint' }}
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          ZIZMOR_VERSION: 1.31.1
+          ZIZMOR_SHA256: d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "/tmp/${al}" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${al}"
+          echo "${ACTIONLINT_SHA256}  /tmp/${al}" | sha256sum --check --strict -
+          tar -xzf "/tmp/${al}" -C "$HOME/.local/bin" actionlint
+          zz="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSfL -o "/tmp/${zz}" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${zz}"
+          echo "${ZIZMOR_SHA256}  /tmp/${zz}" | sha256sum --check --strict -
+          tar -xzf "/tmp/${zz}" -C "$HOME/.local/bin" zizmor
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate (one lane)
+        env:
+          LANE: ${{ matrix.lane }}
+        run: bash scripts/validate.sh --lane "$LANE"
+
+  # The one check a PR shows for the gate (and the name branch protection reads): green only when every lane is.
+  validate:
+    name: scripts/validate.sh
+    needs: lane
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every lane passed
+        env:
+          LANES_RESULT: ${{ needs.lane.result }}
+        run: |
+          echo "lanes: $LANES_RESULT (each lane's own result is its validate (<lane>) check above)"
+          test "$LANES_RESULT" = success
