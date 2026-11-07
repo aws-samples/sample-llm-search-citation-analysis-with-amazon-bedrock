@@ -3,7 +3,7 @@
  * Turns the Kiro reviewer's raw output into the pull request comment `.github/workflows/kiro-review.yml` posts.
  *
  * The output is written by a model that read text the pull request's author controls, so it is treated as
- * untrusted: this keeps only the review (from its last `### Verdict:` line), strips ANSI codes, HTML and images,
+ * untrusted: this keeps only the review (from its last `### Verdict:` line), strips ANSI codes, escapes HTML, drops images,
  * breaks @-mentions so nobody is pinged, caps the length, and refuses to produce a comment at all
  * when the text looks like it contains a credential. GitHub also drops a job output that holds a masked secret, so
  * a leaked KIRO_API_KEY would be stopped twice.
@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 export const MARKER = '<!-- kiro-review -->'
 export const MAX_BODY = 60_000
+export const BANNER = '> **This is an automated PR review done with Kiro CLI.** It is advisory: a person reviews and decides.'
 const VERDICT = /^#{1,6}\s*Verdict:\s*(PASS|CONCERNS|BLOCKING)\b/im
 // ANSI CSI and OSC sequences, as a terminal would print them (built from char codes: ESC 27, BEL 7).
 const ESC = String.fromCharCode(27)
@@ -70,12 +71,13 @@ function withoutHtmlComments(text) {
 }
 
 /**
- * Markdown that cannot ping or embed: no HTML, no images, no @-mentions. Links stay: GitHub autolinks a bare URL
+ * Markdown that cannot ping or embed: every `<` is escaped (so no HTML element, comment or tag can form, whatever
+ * nesting the model produced), images are reduced to their alt text, and @-mentions are broken. Links stay: GitHub autolinks a bare URL
  * anyway, refuses `javascript:` targets, and the prompt asks for repository paths only.
  */
 export function sanitize(markdown) {
   return withoutHtmlComments(markdown)
-    .replaceAll(/<\/?[A-Za-z][^>]*>/g, '')
+    .replaceAll('<', '&lt;')
     .replaceAll(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replaceAll(/(^|[^\w`])@(?=[A-Za-z0-9])/g, '$1@\u200B')
 }
@@ -88,7 +90,7 @@ export function buildComment(raw, {
   const verdict = verdictOf(review)
   const commit = headSha ? `\`${headSha.slice(0, 12)}\`` : 'this pull request'
   const runLink = runUrl ? ` [Run log](${runUrl})` : ''
-  const note = `Kiro review of ${commit} against TENETS.md, README.md and CONTRIBUTING.md (\`scripts/kiro-review/\`). Advisory: a person decides.${runLink}`
+  const note = `Kiro review of ${commit} against TENETS.md, README.md and CONTRIBUTING.md (\`scripts/kiro-review/\`).${runLink}`
   const footer = ['', '---', `<sub>${note}</sub>`].join('\n')
   let content
   if (review === null) {
@@ -99,7 +101,7 @@ export function buildComment(raw, {
   }
   return {
     verdict,
-    body: `${MARKER}\n${content}\n${footer}\n` 
+    body: `${MARKER}\n${BANNER}\n\n${content}\n${footer}\n`,
   }
 }
 
