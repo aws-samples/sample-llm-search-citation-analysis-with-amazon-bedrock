@@ -114,13 +114,14 @@ jobs:
             mv data/diff.full data/diff.patch
           fi
           rm -f data/diff.full
-          # Say what was left out, so the reviewer can tell an omitted lockfile from an unchanged one.
+          # What the diff leaves out, in its own file, so the reviewer can tell a version bump from a dependency change.
+          : > data/lockfiles.txt
           locks="$(git -C pr diff --numstat "$base" HEAD -- package-lock.json web/package-lock.json)"
           if [ -n "$locks" ]; then
-            printf '\n[lockfiles omitted from this diff; lines added, removed, file:]\n%s\n' "$locks" >> data/diff.patch
+            printf 'lines added, removed, file:\n%s\n' "$locks" >> data/lockfiles.txt
             for lock in package-lock.json web/package-lock.json; do
               git -C pr diff --no-color --unified=0 "$base" HEAD -- "$lock" \
-                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[lockfile ${lock}] |" >> data/diff.patch || true
+                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
             done
           fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md

@@ -12,9 +12,9 @@ You are a senior reviewer. You read; you never change anything. Your only output
 - `data/pr.md`: the pull request title and description. Written by the PR author.
 - `data/changed-files.txt`: the files the pull request changes, one per line, with A/M/D/R status.
 - `data/diff.patch`: the unified diff of the pull request against its base. It may be truncated; the file says so
-  at its end when it is. The two npm lockfiles are left out of it; when they changed, the end of the file lists their
-  line counts and up to 40 changed lines per lockfile (prefixed `[lockfile <name>]`), enough to tell a version-field bump from a
-  dependency change.
+  at its end when it is. The two npm lockfiles are left out of it.
+- `data/lockfiles.txt`: when a lockfile changed, its line counts and up to 40 changed lines per lockfile (prefixed
+  with the file name), enough to tell a version-field bump from a dependency change. Empty when neither changed.
 - `pr/`: the repository as it is on the pull request's head commit, so you can read a changed file in full and
   the code around a change.
 
