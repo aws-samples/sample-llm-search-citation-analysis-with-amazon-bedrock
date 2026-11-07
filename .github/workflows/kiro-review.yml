@@ -1,0 +1,199 @@
+# Kiro review: a read-only Kiro CLI agent reviews every pull request against TENETS.md, README.md and
+# CONTRIBUTING.md, and posts (then updates) one comment with its verdict. Kiro headless mode:
+# https://kiro.dev/docs/cli/headless/
+#
+# Advisory: KIRO_REVIEW_ENFORCED 'false' never fails the check; 'true' fails it on a BLOCKING verdict.
+#
+# Trust model (the API key is the asset; the PR's content is untrusted input):
+# - The key lives in the repository secret KIRO_API_KEY and reaches ONE step (the Kiro run), as an env var. It
+#   is never written to a file, a job output or GITHUB_ENV. GitHub masks it in logs.
+# - `pull_request`, not `pull_request_target`: a pull request from a fork gets no secrets, and is skipped here
+#   anyway, as are drafts and Dependabot. Collaborators who can push branches here can change this workflow in
+#   their PR and so could read the secret; that is true of every secret in a repository, and is why the key
+#   should be a dedicated one with a small usage limit (see CONTRIBUTING.md, "Kiro review").
+# - The reviewer (agent, prompt, task) and the documents it judges against come from the DEFAULT branch, so a PR
+#   cannot rewrite the review it gets. The PR head is checked out only as files to read: nothing from it is
+#   built, installed or executed, and its `.kiro/` (agents, hooks, steering) is deleted before Kiro starts.
+# - The agent has read tools only (read_file, list_directory, file_search, grep_search). Its permissions allow
+#   reads inside the review root (this workspace) and deny .git, .env files, writes, shell, web, MCP and
+#   sub-agents. Nothing is pre-trusted on the command line, so any call outside those rules needs an approval
+#   that headless mode refuses. No MCP config is loaded.
+# - Two jobs: `review` (the secret, read-only token, writes nothing on GitHub) and `post` (writes the comment,
+#   no secret). The comment is built by scripts/kiro-review/comment.mjs, which refuses text that looks like a
+#   credential, strips HTML and images and breaks @-mentions; GitHub also drops a job output that
+#   holds a masked secret.
+# - A repository without the KIRO_API_KEY secret (a fork of the sample) skips the review with a notice.
+name: Kiro review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: kiro-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  KIRO_REVIEW_ENFORCED: 'false'
+  # Pinned; the installer verifies the package checksum. Bump deliberately.
+  KIRO_CLI_VERSION: 3.1.0
+
+jobs:
+  review:
+    name: review
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && !github.event.pull_request.draft
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # the trusted checkout and the PR head checkout
+    outputs:
+      body: ${{ steps.comment.outputs.body }}
+      verdict: ${{ steps.comment.outputs.verdict }}
+    steps:
+      - name: Is the review set up here?
+        id: gate
+        env:
+          HAS_KEY: ${{ secrets.KIRO_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Kiro review::no KIRO_API_KEY secret in this repository; skipped (CONTRIBUTING.md, Kiro review)"
+          fi
+
+      - name: Check out the reviewer and the documents from the default branch
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/kiro-review/
+            /TENETS.md
+            /README.md
+            /CONTRIBUTING.md
+            /docs/kpi-definitions.md
+          persist-credentials: false
+
+      - name: Check out the pull request head (files to read, never run)
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare the review inputs (as data)
+        id: inputs
+        if: steps.gate.outputs.ready == 'true' && hashFiles('trusted/scripts/kiro-review/agent.json') != ''
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Workspace configuration a PR could add, and that Kiro might load, is removed before Kiro starts.
+          rm -rf pr/.kiro pr/.amazonq pr/AGENTS.md
+          mkdir -p data
+          base="$(git -C pr merge-base "origin/${BASE_REF}" HEAD)"
+          git -C pr diff --name-status "$base" HEAD > data/changed-files.txt
+          # Generated lockfile churn says nothing a reviewer can judge and crowds out the code.
+          git -C pr diff --no-color --unified=5 "$base" HEAD -- . ':(exclude)package-lock.json' ':(exclude)web/package-lock.json' > data/diff.full
+          max=400000
+          if [ "$(wc -c < data/diff.full)" -gt "$max" ]; then
+            head -c "$max" data/diff.full > data/diff.patch
+            printf '\n\n[diff truncated at %s bytes; read the changed files under pr/ for the rest]\n' "$max" >> data/diff.patch
+          else
+            mv data/diff.full data/diff.patch
+          fi
+          rm -f data/diff.full
+          { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
+          wc -c data/*
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Kiro CLI
+        if: steps.inputs.outputs.ready == 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kiro-install.sh" https://cli.kiro.dev/install
+          bash "$RUNNER_TEMP/kiro-install.sh" --version "$KIRO_CLI_VERSION" --no-modify-path --force
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install the reviewer agent
+        if: steps.inputs.outputs.ready == 'true'
+        run: |
+          mkdir -p "$HOME/.kiro/agents"
+          # The agent may read the review root (this workspace) only.
+          sed "s|__REVIEW_ROOT__|${GITHUB_WORKSPACE}|g" trusted/scripts/kiro-review/agent.json \
+            > "$HOME/.kiro/agents/citation-pr-reviewer.json"
+          cp trusted/scripts/kiro-review/citation-pr-reviewer.prompt.md "$HOME/.kiro/agents/"
+          kiro-cli settings chat.enableKnowledge false
+          kiro-cli settings chat.enableCodeIntelligence false
+
+      - name: Review (Kiro headless)
+        id: review
+        if: steps.inputs.outputs.ready == 'true'
+        continue-on-error: ${{ env.KIRO_REVIEW_ENFORCED != 'true' }}
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          KIRO_REVIEW_MODEL: ${{ vars.KIRO_REVIEW_MODEL }}
+        run: |
+          model=()
+          if [ -n "$KIRO_REVIEW_MODEL" ]; then model=(--model "$KIRO_REVIEW_MODEL"); fi
+          # No --trust-tools / --trust-all-tools on purpose: with Kiro CLI 3.1.0 a trusted tool skipped the agent's
+          # fs_read deny rules (a read outside the root succeeded). Without them, only the agent's allow rules
+          # (the review root) run unattended; any other call needs approval, which headless mode denies.
+          timeout 1200 kiro-cli chat --v3 --no-interactive --agent citation-pr-reviewer "${model[@]}" \
+            < trusted/scripts/kiro-review/task.md > "$RUNNER_TEMP/review.out"
+          echo "review: $(wc -c < "$RUNNER_TEMP/review.out") bytes"
+
+      - name: Build the comment
+        id: comment
+        if: steps.inputs.outputs.ready == 'true' && !cancelled()
+        env:
+          REVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          touch "$RUNNER_TEMP/review.out"
+          node trusted/scripts/kiro-review/comment.mjs "$RUNNER_TEMP/review.out" "$RUNNER_TEMP/comment.md" >> "$GITHUB_OUTPUT"
+          delimiter="kiro_review_$(openssl rand -hex 16)"
+          { echo "body<<${delimiter}"; cat "$RUNNER_TEMP/comment.md"; echo "${delimiter}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Enforce the verdict
+        if: env.KIRO_REVIEW_ENFORCED == 'true' && steps.comment.outputs.verdict == 'BLOCKING'
+        run: |
+          echo "::error title=Kiro review::the review found blocking issues (see the PR comment)"
+          exit 1
+
+  post:
+    name: post
+    needs: review
+    if: ${{ !cancelled() && needs.review.outputs.body != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write # the review comment, the only write this workflow makes
+    steps:
+      - name: Post or update the review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BODY: ${{ needs.review.outputs.body }}
+        run: |
+          printf '%s' "$BODY" > "$RUNNER_TEMP/comment.md"
+          # One comment per PR, updated on every push: the newest bot comment that starts with the marker.
+          id="$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- kiro-review -->"))) | .id' | tail -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+            echo "updated comment $id"
+          else
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$RUNNER_TEMP/comment.md"
+          fi

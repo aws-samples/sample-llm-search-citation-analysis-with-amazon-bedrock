@@ -30,6 +30,9 @@ behaviour changes.
   (`scheduled failure watch` workflow).
 - **`dependency review` workflow**: a license gate for dependencies a pull request adds or changes
   (`.github/dependency-review-config.yml`).
+- **Kiro review** (`.github/workflows/kiro-review.yml`, `scripts/kiro-review/`): a read-only Kiro CLI agent, run
+  headless with the `KIRO_API_KEY` repository secret, reviews each pull request against `TENETS.md`, `README.md`
+  and `CONTRIBUTING.md` and posts one comment (verdict, findings, tenets), updated on every push. Advisory.
 - **Dependabot** version updates (`.github/dependabot.yml`): weekly, grouped minor and patch, 7-day cooldown.
 - **New gates in `validate`**: the version check (`package.json`, `web/package.json` and `CHANGELOG.md` agree),
   gitleaks over the working tree (`.gitleaks.toml`), actionlint and zizmor over `.github/`, and the tests of the

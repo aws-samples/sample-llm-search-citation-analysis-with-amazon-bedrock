@@ -111,10 +111,38 @@ keeps no checkout credential; `actionlint` and `zizmor` check that in the gate.
 | `version and changelog check` | pull requests to `main` | the version bump and changelog entry below |
 | `dependency review` | every pull request | a dependency the PR adds or changes must carry a license from `.github/dependency-review-config.yml` |
 | `dependency audit` | PRs that touch a manifest, lockfile or requirements file; Mondays 05:23 UTC; by hand | `scripts/dependency-audit.mjs` (see Dependencies) |
+| `Kiro review` | pull requests to `main` from this repository (not forks, drafts or Dependabot) | a read-only Kiro CLI agent reviews the diff against `TENETS.md`, `README.md` and this file, and posts one comment it updates on every push (see Kiro review) |
 | `scheduled failure watch` | after each scheduled `dependency audit` | opens an issue when the scheduled run fails, comments while it keeps failing, closes it when it is green again |
 
 Dependabot (`.github/dependabot.yml`) opens grouped minor and patch updates every Monday for the actions, both npm
 lockfiles and the Python requirements, never for a release younger than seven days.
+
+## Kiro review
+
+`.github/workflows/kiro-review.yml` runs [Kiro CLI in headless mode](https://kiro.dev/docs/cli/headless/) with the
+agent in `scripts/kiro-review/` (`agent.json`, its prompt and the task). The agent checks the change against the
+tenets, the repository rules and correctness and security, and answers with a verdict (`PASS`, `CONCERNS` or
+`BLOCKING`), blocking findings, concerns and a tenet table. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
+`'true'` in the workflow to fail the check on `BLOCKING`.
+
+- **Setup.** Create a dedicated Kiro API key for CI (Kiro Pro or above; an administrator may need to allow API keys)
+  and store it as the repository secret `KIRO_API_KEY` with `gh secret set KIRO_API_KEY` (it prompts for the value,
+  so the key never lands in shell history) or in Settings › Secrets and variables › Actions. Never paste a key in
+  code, a commit, an issue or a chat; if one was shared, revoke it and create another. Optionally set the
+  repository variable `KIRO_REVIEW_MODEL` to pin a model. A repository without the secret skips the review.
+- **How the key stays private.** The workflow uses `pull_request`, so a pull request from a fork gets no secrets
+  (and is skipped). The key reaches only the step that runs Kiro, as an environment variable. The agent, its prompt
+  and the documents it judges against come from `main`, so a pull request cannot change its own review. The pull
+  request's files are read as data: nothing from it is built or run, and its `.kiro/` folder is deleted first. The
+  agent can only read files under the review root (`--trust-tools` is not used, because in Kiro CLI 3.1.0 it let a
+  read outside the agent's rules through); writes, shell, web, MCP and sub-agents are denied. A separate job with no
+  secret posts the comment after `scripts/kiro-review/comment.mjs` refuses anything that looks like a credential.
+  Anyone who can push a branch here can still edit the workflow in their pull request, so give the CI key a small
+  usage limit and rotate it if a collaborator leaves.
+- **Changing the reviewer.** Edit `scripts/kiro-review/`; the change applies to pull requests opened after it
+  merges. To try it locally, put `agent.json` (with `__REVIEW_ROOT__` replaced by a directory holding `trusted/`,
+  `data/` and `pr/` as the workflow lays them out) and the prompt in that directory's `.kiro/agents/`, and run
+  `kiro-cli chat --v3 --no-interactive --agent citation-pr-reviewer < scripts/kiro-review/task.md` from it.
 
 ## Dependencies
 
