@@ -11,6 +11,13 @@ process.
 
 ## [2.42.2] - 2026-11-08
 
+### Changed
+
+- **Tenet 7 is now "Fully serverless, paid per action. Low cost, or no cost when idle."** (`TENETS.md`): every part
+  of the platform is paid per action (request, invocation, state transition, message, read or write, gigabyte
+  stored), so an idle deployment costs close to nothing; no polling loop, long poll or waiting Lambda spends actions
+  that do nothing, and work starts when an event arrives (tenet 8).
+
 ### Added
 
 - **Tenet 8, "Event-driven. Events drive the architecture; nothing polls."** (`TENETS.md`). Why: a poll costs a

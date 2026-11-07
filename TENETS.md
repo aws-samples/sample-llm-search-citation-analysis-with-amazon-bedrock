@@ -61,12 +61,19 @@ provider that fails, throttles or times out costs its own answers only, never th
 Even as a sample, we design for a managed service: least privilege, infrastructure as code, serverless pay-per-use,
 encryption by default, and cost visibility per workload. The data outlives any single deployment or stack.
 
-### 7. Fully serverless. Cost-optimised by default, performance by choice.
+### 7. Fully serverless, paid per action. Low cost, or no cost when idle.
 
-The platform runs fully serverless and, by default, with **no fixed monthly cost** beyond what the data itself needs:
-no WAF, no SnapStart, no provisioned concurrency or capacity, no NAT gateway, no always-on database, cache or
-container. As a GitHub sample, we would rather wait a couple of seconds more than pay to hide a slow path: we make the
-Lambda faster (smaller imports, right-sized memory, fewer round trips) before we reach for a paid feature.
+The platform is serverless and every part of it is **paid per action**: a request, an invocation, a state
+transition, a message, a read or write, a gigabyte stored. When nobody uses it, it costs (close to) nothing. By
+default there is **no fixed monthly cost** beyond what the data itself needs: no WAF, no SnapStart, no provisioned
+concurrency or capacity, no NAT gateway, no always-on database, cache, container or connection. A design that pays
+for capacity whether or not it is used is the wrong design here.
+
+Because we pay per action, we do not spend actions that do nothing: no polling loops, no long polling, no Lambda
+that waits for something to happen. Work starts when an event arrives (tenet 8), so the bill follows the work, not
+the clock or the number of open screens. As a GitHub sample, we would rather wait a couple of seconds more than pay
+to hide a slow path: we make the Lambda faster (smaller imports, right-sized memory, fewer round trips) before we
+reach for a paid feature.
 
 Performance or protection features that carry a fixed cost are **opt-in**, behind a flag a deployment chooses.
 Architecturally we build for the service either way (tenet 6); only the bill is opt-in. Lambda **reserved**
@@ -74,10 +81,12 @@ concurrency is free (it only caps a function's share of the account) and is allo
 
 ### 8. Event-driven. Events drive the architecture; nothing polls.
 
-Every change of state is an event, and whoever needs to know subscribes to it instead of asking again and again: a
-run, a step or a Lambda finishing, a Step Functions execution changing status, an object landing in S3, a crawl or a
-browser session ending, a row written to a table, a KPI alert firing. Components react to events; they never loop,
-sleep and re-check.
+This is an event-driven platform. Every change of state is an event, and whoever needs to know subscribes to it
+instead of asking again and again: a run, a step or a Lambda finishing, a Step Functions execution changing status,
+an object landing in S3, a crawl or a browser session ending, a row written to a table, a KPI alert firing.
+Components react to events; they never loop, sleep and re-check, and nothing long-polls (holds a request or a Lambda
+open waiting for a change). On a platform paid per action (tenet 7), every poll that finds nothing is an action paid
+for nothing; an event is paid for once, when something happened.
 
 - **Amazon EventBridge is the backbone.** Service events (Step Functions status changes, S3 object-created
   notifications, DynamoDB streams through Pipes) and the events our own code publishes go through EventBridge, and
@@ -241,7 +250,7 @@ Tenets touched: <!-- e.g. 2, D1, D4 — or "none" -->
 - [ ] AI: numbers come from rules; model output cites only computed evidence; non-AI features work without Bedrock (3)
 - [ ] Headless: available and enforced via the API/MCP, not only the UI (4)
 - [ ] Providers: a new engine fits the provider contract; its failure costs only its own answers (5)
-- [ ] Cost: no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
-- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop except under "Until AppSync Events is in place", and every announced state stays readable through REST and MCP (8)
+- [ ] Cost: everything new is paid per action, with no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
+- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop or long poll except under "Until AppSync Events is in place", and every announced state stays readable through REST and MCP (8)
 - [ ] Trade-off: if this weakens a lower tenet to serve a higher one, explain it here
 ```

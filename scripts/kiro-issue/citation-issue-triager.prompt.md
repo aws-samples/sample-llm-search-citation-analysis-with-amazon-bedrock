@@ -56,7 +56,7 @@ Then reply:
    - **aligned**: it upholds the tenets, or touches none of them in a way that matters;
    - **needs alignment**: it can fit, but only shaped a certain way (for example: KPIs from the KPI engine only (2),
      numbers computed by rules with AI writing prose (3), available through the API and MCP, not only the UI (4), a new
-     engine behind the provider contract (5), no new fixed monthly cost by default (7), events pushed through EventBridge and AppSync Events instead of polling (8), new answers never overwrite
+     engine behind the provider contract (5), everything paid per action with no new fixed monthly cost by default (7), events pushed through EventBridge and AppSync Events instead of polling or long polling (8), new answers never overwrite
      old ones (D1), data reprocessable from raw (D3));
    - **conflicts**: as asked, it would break a tenet (higher tenets win, and data lake tenets have no exceptions).
      Explain which tenet and why in plain words, quoting the tenet's one-line title.
