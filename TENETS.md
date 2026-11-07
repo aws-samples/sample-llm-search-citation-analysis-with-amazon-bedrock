@@ -66,12 +66,14 @@ encryption by default, and cost visibility per workload. The data outlives any s
 The platform is serverless and every part of it is **paid per action**: a request, an invocation, a state
 transition, a message, a read or write, a gigabyte stored. When nobody uses it, it costs (close to) nothing. By
 default there is **no fixed monthly cost** beyond what the data itself needs: no WAF, no SnapStart, no provisioned
-concurrency or capacity, no NAT gateway, no always-on database, cache, container or connection. A design that pays
+concurrency or capacity, no NAT gateway, no always-on database, cache, container or self-hosted connection server
+(a pay-per-use client subscription, billed by message and connection time, is fine). A design that pays
 for capacity whether or not it is used is the wrong design here.
 
 Because we pay per action, we do not spend actions that do nothing: no polling loops, no long polling, no Lambda
 that waits for something to happen (tenet 8 lists the few bounded exceptions). Work starts when an event arrives, so the bill follows the work, not
-the clock or the number of open screens. As a GitHub sample, we would rather wait a couple of seconds more than pay
+the clock: an open screen costs the connection time of its subscription, not repeated requests and Lambda
+invocations. As a GitHub sample, we would rather wait a couple of seconds more than pay
 to hide a slow path: we make the Lambda faster (smaller imports, right-sized memory, fewer round trips) before we
 reach for a paid feature.
 
