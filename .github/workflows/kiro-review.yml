@@ -118,8 +118,10 @@ jobs:
           locks="$(git -C pr diff --numstat "$base" HEAD -- package-lock.json web/package-lock.json)"
           if [ -n "$locks" ]; then
             printf '\n[lockfiles omitted from this diff; lines added, removed, file:]\n%s\n' "$locks" >> data/diff.patch
-            git -C pr diff --no-color --unified=0 "$base" HEAD -- package-lock.json web/package-lock.json \
-              | grep -E '^[+-] ' | head -n 40 | sed 's/^/[lockfile] /' >> data/diff.patch || true
+            for lock in package-lock.json web/package-lock.json; do
+              git -C pr diff --no-color --unified=0 "$base" HEAD -- "$lock" \
+                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[lockfile ${lock}] |" >> data/diff.patch || true
+            done
           fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
           wc -c data/*

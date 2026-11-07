@@ -23,10 +23,10 @@ process.
   reconcile for missed events stays as a safety net. Events never replace reads: every announced state stays
   readable through REST and MCP for clients that cannot subscribe. A bounded backoff inside one call to a throttled
   service is a retry, not polling. Until AppSync Events exists, a new long-running
-  dashboard job may use the existing bounded polling hooks and is listed in the gap table. The gap table
+  dashboard job may use the existing bounded polling hooks and is listed in the gap table (tracked in #208). The gap table
   lists where the platform polls today, and the pull request checklist, the Kiro PR review and the Kiro issue
   triage now judge changes and feature requests against tenet 8.
-- The Kiro PR review sees the lockfile changes it leaves out of the diff (line counts and up to 40 changed lines).
+- The Kiro PR review sees the lockfile changes it leaves out of the diff (line counts and up to 40 changed lines per lockfile).
 
 ## [2.42.1] - 2026-11-07
 

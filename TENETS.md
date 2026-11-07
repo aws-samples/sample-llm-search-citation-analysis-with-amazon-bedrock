@@ -98,7 +98,8 @@ sleep and re-check.
   is a safety net and stays (tenet 1 ranks higher): it is never the main path.
 - **Until AppSync Events is in place**, a new long-running dashboard job may report progress through the existing
   polling hooks (bounded, stopping when the job ends), and it is added to the gap below. The change that introduces
-  AppSync Events moves those hooks to subscriptions.
+  AppSync Events moves those hooks to subscriptions and removes this clause; it is tracked in
+  [issue #208](https://github.com/aws-samples/sample-llm-search-citation-analysis-with-amazon-bedrock/issues/208).
 
 ---
 
