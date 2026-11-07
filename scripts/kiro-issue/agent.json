@@ -1,0 +1,88 @@
+{
+  "name": "citation-issue-triager",
+  "description": "Read-only issue triager: classifies a new issue, checks a feature request against TENETS.md and helps the author align it.",
+  "prompt": "file://./citation-issue-triager.prompt.md",
+  "model": "claude-opus-5.5",
+  "tools": [
+    "read_file",
+    "list_directory",
+    "file_search",
+    "grep_search"
+  ],
+  "excludedTools": [
+    "knowledge",
+    "code",
+    "introspect",
+    "invoke_sub_agent",
+    "disclose_context"
+  ],
+  "includeMcpJson": false,
+  "mcpServers": {},
+  "resources": [],
+  "permissions": {
+    "rules": [
+      {
+        "capability": "fs_read",
+        "match": [
+          "__REVIEW_ROOT__/**"
+        ],
+        "exclude": [
+          "__REVIEW_ROOT__/**/.env",
+          "__REVIEW_ROOT__/**/.env.*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          "/**"
+        ],
+        "exclude": [
+          "__REVIEW_ROOT__/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          "**/.git/**",
+          "**/.env",
+          "**/.env.*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_write",
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "effect": "deny"
+      },
+      {
+        "capability": "web_fetch",
+        "effect": "deny"
+      },
+      {
+        "capability": "web_search",
+        "effect": "deny"
+      },
+      {
+        "capability": "mcp",
+        "effect": "deny"
+      },
+      {
+        "capability": "subagent",
+        "effect": "deny"
+      },
+      {
+        "capability": "skill",
+        "effect": "deny"
+      },
+      {
+        "capability": "power",
+        "effect": "deny"
+      }
+    ]
+  }
+}

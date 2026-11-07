@@ -112,6 +112,7 @@ keeps no checkout credential; `actionlint` and `zizmor` check that in the gate.
 | `dependency review` | every pull request | a dependency the PR adds or changes must carry a license from `.github/dependency-review-config.yml` |
 | `dependency audit` | PRs that touch a manifest, lockfile or requirements file; Mondays 05:23 UTC; by hand | `scripts/dependency-audit.mjs` (see Dependencies) |
 | `Kiro review` | pull requests to `main` from this repository (not forks, drafts or Dependabot) | a read-only Kiro CLI agent reviews the diff against `TENETS.md`, `README.md` and this file, and posts one comment it updates on every push (see Kiro review) |
+| `Kiro issue triage` | every new issue; comments by the author on an `enhancement` issue | a read-only Kiro CLI agent labels the issue (bug, enhancement, documentation, question, invalid) and replies; for a feature request it checks the tenets and helps the author align it (see Kiro review) |
 | `scheduled failure watch` | after each scheduled `dependency audit` | opens an issue when the scheduled run fails, comments while it keeps failing, closes it when it is green again |
 
 Dependabot (`.github/dependabot.yml`) opens grouped minor and patch updates every Monday for the actions, both npm
@@ -141,6 +142,14 @@ tenets, the repository rules and correctness and security, and answers with a ve
   secret posts the comment after `scripts/kiro-review/comment.mjs` refuses anything that looks like a credential.
   Anyone who can push a branch here can still edit the workflow in their pull request, so give the CI key a small
   usage limit and rotate it if a collaborator leaves.
+- **Issue triage.** `.github/workflows/kiro-issue-triage.yml` runs the agent in `scripts/kiro-issue/` on every new
+  issue with the same key and the same read-only limits. It sets one type label (`bug`, `enhancement`,
+  `documentation`, `question` or `invalid`), replacing the template's label on the first triage only, and replies.
+  For a feature request it names the tenets the request touches, labels it `tenets: aligned`, `tenets: needs
+  alignment` or `tenets: conflicts`, proposes the closest version that fits the tenets, and drafts the request
+  in the feature template's structure plus **Tenets touched** and **Acceptance criteria**. When the issue's author
+  answers, it replies again and updates the tenet label, at most five times per issue; after that, or at any
+  point, a maintainer takes over. Issue text is untrusted input from anyone, so it is only ever read as data.
 - **Changing the reviewer.** Edit `scripts/kiro-review/`; the change applies to pull requests opened after it
   merges. To try it locally, put `agent.json` (with `__REVIEW_ROOT__` replaced by a directory holding `trusted/`,
   `data/` and `pr/` as the workflow lays them out) and the prompt in that directory's `.kiro/agents/`, and run

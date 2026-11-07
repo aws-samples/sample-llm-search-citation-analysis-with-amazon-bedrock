@@ -33,6 +33,11 @@ behaviour changes.
 - **Kiro review** (`.github/workflows/kiro-review.yml`, `scripts/kiro-review/`): a read-only Kiro CLI agent, run
   headless with the `KIRO_API_KEY` repository secret, reviews each pull request against `TENETS.md`, `README.md`
   and `CONTRIBUTING.md` and posts one comment (verdict, findings, tenets), updated on every push. Advisory.
+- **Kiro issue triage** (`.github/workflows/kiro-issue-triage.yml`, `scripts/kiro-issue/`): every new issue is
+  labeled (bug, enhancement, documentation, question, invalid) with a first reply. A feature request is checked
+  against `TENETS.md` (labels `tenets: aligned` / `needs alignment` / `conflicts`), with the closest version that
+  fits and a draft of the request; the agent follows up when the author answers, up to five times. The feature
+  request template asks for the tenets touched and acceptance criteria.
 - **Dependabot** version updates (`.github/dependabot.yml`): weekly, grouped minor and patch, 7-day cooldown.
 - **New gates in `validate`**: the version check (`package.json`, `web/package.json` and `CHANGELOG.md` agree),
   gitleaks over the working tree (`.gitleaks.toml`), actionlint and zizmor over `.github/`, and the tests of the

@@ -185,6 +185,10 @@ means a green pipeline.
 - **Kiro review** (`.github/workflows/kiro-review.yml`, `scripts/kiro-review/`): a read-only Kiro agent reads each
   pull request's diff against this file, README.md and CONTRIBUTING.md and posts its verdict and the tenets the
   change touches as a comment. Advisory; it fails no check unless `KIRO_REVIEW_ENFORCED` is turned on.
+- **Kiro issue triage** (`.github/workflows/kiro-issue-triage.yml`, `scripts/kiro-issue/`): every new issue is
+  labeled, and a feature request is checked against this file. The triage tells the author which tenets it
+  touches, whether it is aligned, and the closest version that fits, and keeps the conversation going until the
+  request is aligned (labels `tenets: aligned`, `tenets: needs alignment`, `tenets: conflicts`).
 - **Pull request description**: every PR has a `## Tenets` section naming the tenets it touches (`1`–`7`, `D1`–`D7`)
   or `none` (`.github/PULL_REQUEST_TEMPLATE.md`). Reviewed by people; not checked by CI yet.
 
