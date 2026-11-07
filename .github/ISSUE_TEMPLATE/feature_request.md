@@ -18,3 +18,9 @@ A clear and concise description of any alternative solutions or features you've 
 
 **Additional context**
 Add any other context or screenshots about the feature request here.
+
+**Tenets touched**
+Which tenets in the repository's TENETS.md does this touch (for example 2, 4, D1), or none? An automated triage checks the request against them and suggests a version that fits.
+
+**Acceptance criteria**
+How will we know it is done? A short list of observable outcomes.

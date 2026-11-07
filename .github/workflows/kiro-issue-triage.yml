@@ -1,0 +1,203 @@
+# Kiro issue triage: a read-only Kiro CLI agent labels every new issue (bug, enhancement, documentation, question
+# or invalid) and replies. For a feature request it checks the request against TENETS.md, says which tenets it
+# touches and whether it is aligned, needs alignment or conflicts, proposes the closest version that fits, and
+# shows how a complete request is structured. When the author answers, it continues the conversation (at most
+# MAX_FOLLOWUPS replies per issue) until the request is aligned and complete. Kiro headless mode:
+# https://kiro.dev/docs/cli/headless/
+#
+# Trust model (the API key is the asset; issue text is untrusted input from anyone on the internet):
+# - `issues` and `issue_comment` workflows always run this file and the scripts as they are on the default
+#   branch, so nobody can change the triager from an issue or a pull request.
+# - The key lives in the repository secret KIRO_API_KEY and reaches ONE step (the Kiro run), as an env var.
+# - Issue text reaches the agent only as a data file. The agent (scripts/kiro-issue/agent.json) has read tools
+#   only, limited to the review root (this workspace: the trusted documents and the data file); writes, shell,
+#   web, MCP and sub-agents are denied, and nothing is pre-trusted on the command line.
+# - Two jobs: `triage` (the secret, read-only token) and `post` (writes the comment and labels, no secret). The
+#   comment is built by scripts/kiro-issue/issue.mjs, which refuses credential-shaped text, escapes HTML, drops
+#   images and breaks @-mentions.
+# - Cost: the issue and comments are capped in size, bots never trigger it, follow-ups come only from the issue's
+#   author on an `enhancement` issue, and each issue gets at most 1 + MAX_FOLLOWUPS runs.
+name: Kiro issue triage
+
+on:
+  issues:
+    types: [opened]
+  # zizmor flags issue_comment (dangerous-triggers): the risk is a privileged run that checks out and executes a
+  # pull request's code. Neither happens here: comments on pull requests are skipped (`!issue.pull_request`), the
+  # only checkout is the default branch, and comment text is read as data by an agent with read-only tools.
+  issue_comment: # zizmor: ignore[dangerous-triggers]
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: kiro-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  # Pinned; the installer verifies the package checksum. Bump deliberately.
+  KIRO_CLI_VERSION: 3.1.0
+  MAX_FOLLOWUPS: 5
+
+jobs:
+  triage:
+    name: triage
+    if: >-
+      github.event.sender.type != 'Bot'
+      && (github.event_name == 'issues'
+          || (github.event_name == 'issue_comment'
+              && !github.event.issue.pull_request
+              && github.event.comment.user.login == github.event.issue.user.login
+              && contains(github.event.issue.labels.*.name, 'enhancement')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # the trusted checkout
+      issues: read # the issue and its comments
+    outputs:
+      body: ${{ steps.reply.outputs.body }}
+      label: ${{ steps.reply.outputs.label }}
+      tenets: ${{ steps.reply.outputs.tenets }}
+      mode: ${{ steps.inputs.outputs.mode }}
+    steps:
+      - name: Is the triage set up here?
+        id: gate
+        env:
+          HAS_KEY: ${{ secrets.KIRO_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Kiro issue triage::no KIRO_API_KEY secret in this repository; skipped (CONTRIBUTING.md, Kiro review)"
+          fi
+
+      - name: Check out the triager and the documents from the default branch
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/kiro-issue/
+            /scripts/kiro-review/comment.mjs
+            /TENETS.md
+            /README.md
+            /CONTRIBUTING.md
+            /docs/kpi-definitions.md
+            /.github/ISSUE_TEMPLATE/
+          persist-credentials: false
+
+      - name: Read the issue and its comments (as data)
+        id: inputs
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          mkdir -p data "$RUNNER_TEMP/api"
+          gh api "repos/$REPO/issues/$ISSUE" > "$RUNNER_TEMP/api/issue.json"
+          gh api --paginate --slurp "repos/$REPO/issues/$ISSUE/comments" > "$RUNNER_TEMP/api/comments.json"
+          followups="$(node trusted/scripts/kiro-issue/issue.mjs thread "$RUNNER_TEMP/api/issue.json" "$RUNNER_TEMP/api/comments.json" data/issue.md | sed -n 's/^followups=//p')"
+          if [ "$EVENT" = issues ]; then
+            mode=triage
+          elif [ "$followups" -eq 0 ]; then
+            echo "::notice title=Kiro issue triage::no earlier triage reply on this issue; a comment does not start one"
+            exit 0
+          elif [ "$followups" -gt "$MAX_FOLLOWUPS" ]; then
+            echo "::notice title=Kiro issue triage::this issue reached its ${MAX_FOLLOWUPS} follow-ups; a maintainer takes it from here"
+            exit 0
+          else
+            mode=followup
+          fi
+          printf '%s\n' "$mode" > data/mode.txt
+          wc -c data/*
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Kiro CLI
+        if: steps.inputs.outputs.ready == 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kiro-install.sh" https://cli.kiro.dev/install
+          bash "$RUNNER_TEMP/kiro-install.sh" --version "$KIRO_CLI_VERSION" --no-modify-path --force
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install the triage agent
+        if: steps.inputs.outputs.ready == 'true'
+        run: |
+          mkdir -p "$HOME/.kiro/agents"
+          # The agent may read the review root (this workspace) only.
+          sed "s|__REVIEW_ROOT__|${GITHUB_WORKSPACE}|g" trusted/scripts/kiro-issue/agent.json \
+            > "$HOME/.kiro/agents/citation-issue-triager.json"
+          cp trusted/scripts/kiro-issue/citation-issue-triager.prompt.md "$HOME/.kiro/agents/"
+          kiro-cli settings chat.enableKnowledge false
+          kiro-cli settings chat.enableCodeIntelligence false
+
+      - name: Triage (Kiro headless)
+        if: steps.inputs.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          KIRO_REVIEW_MODEL: ${{ vars.KIRO_REVIEW_MODEL }}
+        run: |
+          # The agent pins claude-opus-5.5 (agent.json); the repository variable KIRO_REVIEW_MODEL overrides it.
+          model=()
+          if [ -n "$KIRO_REVIEW_MODEL" ]; then model=(--model "$KIRO_REVIEW_MODEL"); fi
+          # No --trust-tools on purpose (see kiro-review.yml): only the agent's allow rules run unattended.
+          timeout 900 kiro-cli chat --v3 --no-interactive --agent citation-issue-triager "${model[@]}" \
+            < trusted/scripts/kiro-issue/task.md > "$RUNNER_TEMP/triage.out"
+          echo "triage: $(wc -c < "$RUNNER_TEMP/triage.out") bytes"
+
+      - name: Build the reply
+        id: reply
+        if: steps.inputs.outputs.ready == 'true' && !cancelled()
+        run: |
+          touch "$RUNNER_TEMP/triage.out"
+          node trusted/scripts/kiro-issue/issue.mjs reply "$RUNNER_TEMP/triage.out" "$RUNNER_TEMP/comment.md" >> "$GITHUB_OUTPUT"
+          # No comment file: the output was not usable, and nothing is posted (the log above says why).
+          if [ ! -f "$RUNNER_TEMP/comment.md" ]; then exit 0; fi
+          delimiter="kiro_issue_$(openssl rand -hex 16)"
+          { echo "body<<${delimiter}"; cat "$RUNNER_TEMP/comment.md"; echo "${delimiter}"; } >> "$GITHUB_OUTPUT"
+
+  post:
+    name: post
+    needs: triage
+    if: ${{ !cancelled() && needs.triage.outputs.body != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # the reply and the labels, the only writes this workflow makes
+    steps:
+      - name: Post the reply and set the labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          BODY: ${{ needs.triage.outputs.body }}
+          LABEL: ${{ needs.triage.outputs.label }}
+          TENETS: ${{ needs.triage.outputs.tenets }}
+          MODE: ${{ needs.triage.outputs.mode }}
+        run: |
+          printf '%s' "$BODY" > "$RUNNER_TEMP/comment.md"
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file "$RUNNER_TEMP/comment.md"
+          current="$(gh issue view "$ISSUE" --repo "$REPO" --json labels --jq '.labels[].name')"
+          args=()
+          # The type label: set on the first triage only (a maintainer's later relabel is never undone).
+          case "$LABEL" in bug|enhancement|documentation|question|invalid) ;; *) LABEL="" ;; esac
+          if [ "$MODE" = triage ] && [ -n "$LABEL" ]; then
+            for other in bug enhancement documentation question invalid; do
+              if [ "$other" != "$LABEL" ] && grep -qxF "$other" <<< "$current"; then args+=(--remove-label "$other"); fi
+            done
+            args+=(--add-label "$LABEL")
+          fi
+          # The tenet label follows the latest judgment on a feature request.
+          case "$TENETS" in aligned|needs-alignment|conflicts) want="tenets: ${TENETS//-/ }" ;; *) want="" ;; esac
+          if [ -n "$want" ]; then
+            for other in "tenets: aligned" "tenets: needs alignment" "tenets: conflicts"; do
+              if [ "$other" != "$want" ] && grep -qxF "$other" <<< "$current"; then args+=(--remove-label "$other"); fi
+            done
+            args+=(--add-label "$want")
+          fi
+          if [ "${#args[@]}" -gt 0 ]; then gh issue edit "$ISSUE" --repo "$REPO" "${args[@]}"; fi

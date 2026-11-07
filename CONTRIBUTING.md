@@ -32,10 +32,11 @@ To send us a pull request, please:
 1. Fork the repository.
 2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
 3. Run the local gates below and make sure they are clean.
-4. Bump the version and add a changelog entry if the change touches anything that ships (see [Versioning and changelog](#versioning-and-changelog)).
-5. Commit to your fork using clear commit messages.
-6. Send us a pull request, answering any default questions in the pull request interface.
-7. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+4. Name the tenets the change touches in the pull request's `## Tenets` section ([TENETS.md](TENETS.md)).
+5. Bump the version and add a changelog entry if the change touches anything that ships (see [Versioning and changelog](#versioning-and-changelog)).
+6. Commit to your fork using clear commit messages.
+7. Send us a pull request, answering any default questions in the pull request interface.
+8. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
@@ -52,20 +53,25 @@ bash lambda/layer/build-layer.sh
 bash lambda/crawler-layer/build-layer.sh
 ```
 
-- **`npm run validate`** from the repo root runs every gate and stops at the first failure: ESLint, `tsc`, the CDK
-  Vitest suite, jscpd, knip, the contract checks (`npm run contracts`), the dashboard gate (`web`: `tsc --noEmit`,
-  Vitest, knip) and the Python gate (`scripts/validate-python.sh`: ruff, pyright, vulture, jscpd, pytest), then
-  **CodeQL** (`npm run quality:codeql`, `scripts/codeql-local.sh`): the same code-quality queries the
-  github-code-quality review comments from, over Python and JavaScript/TypeScript, failing on any result. Install
-  the CLI once with `gh extension install github/gh-codeql` (free for open source; the run is skipped with a notice
-  when no CLI is installed, `CODEQL_REQUIRED=1` makes that a failure). The
-  step-by-step table and the limits each gate enforces are in [README.md, "Validation"](README.md#validation).
-  Fix findings; never raise a limit or suppress a finding inline.
+Install the scanners the gate runs (macOS: `brew install gitleaks actionlint zizmor shellcheck`; elsewhere their
+GitHub releases). `quality-gates.yml` pins the versions CI uses.
+
+- **`npm run validate`** from the repo root runs every gate (`scripts/validate.sh`) in parallel lanes and stops at
+  the first failure: Python (ruff, pyright, vulture, the contract checks, pytest), TypeScript (`tsc` and knip for
+  the CDK app and the dashboard, the version check, the repo scripts' tests), lint (ESLint, jscpd, gitleaks,
+  actionlint + zizmor), the CDK Vitest suite (after a `vite build` of the dashboard), the dashboard Vitest suite,
+  and **CodeQL** (`scripts/codeql-local.sh`): the code-quality queries the github-code-quality review comments
+  from, over Python and JavaScript/TypeScript, failing on any result. Install the CodeQL CLI once with
+  `gh extension install github/gh-codeql` (free for open source; the step is skipped with a notice when no CLI is
+  installed, `CODEQL_REQUIRED=1` makes that a failure). **`npm run validate:help`** explains every lane, option and
+  log, and the workflow an agent follows on a failure; `npm run validate:failed` re-runs only what did not pass,
+  and `npm run validate:python` / `validate:web` run one area. Step logs are kept in `.cache/validate/logs/`. The
+  limits each gate enforces are in [README.md, "Validation"](README.md#validation). Fix findings; never raise a
+  limit or suppress a finding inline.
 - **Pre-push hook.** `npm install` (its `prepare` script) or `npm run hooks:install` links `.githooks/pre-push` into
-  `.git/hooks/`, so every `git push` runs `npm run validate` first and stops on a failure. The gate is local by
-  design; GitHub does not run it. Pushes that only delete branches or tags skip it. Don't use
-  `git push --no-verify`, which also skips Code Defender's checks on machines that have it; for an emergency push
-  use `SKIP_VALIDATE=1 git push` and say so in the pull request.
+  `.git/hooks/`, so every `git push` runs `npm run validate` first and stops on a failure. Pushes that only delete
+  branches or tags skip it. Don't use `git push --no-verify`, which also skips Code Defender's checks on machines
+  that have it; for an emergency push use `SKIP_VALIDATE=1 git push` and say so in the pull request.
 - **Layer rebuilds.** Both layers carry a copy of `lambda/shared`, and `cdk synth` fails when either copy is
   missing or stale. After changing anything in `lambda/shared/`, or a layer's `requirements.txt`, rerun
   `bash lambda/layer/build-layer.sh` and `bash lambda/crawler-layer/build-layer.sh`. The Python tests also import
@@ -93,6 +99,78 @@ bash lambda/crawler-layer/build-layer.sh
   [docs/kpi-definitions.md](docs/kpi-definitions.md) (`lambda/shared/test_kpi_contract.py` keeps that document, the
   KPI engine and the dashboard definitions in step).
 
+
+## Continuous integration
+
+Every workflow under `.github/workflows/` pins its actions to commit SHAs, holds the least permissions it needs and
+keeps no checkout credential; `actionlint` and `zizmor` check that in the gate.
+
+| Workflow | When | What |
+|---|---|---|
+| `quality gates` | every pull request, pushes to `main` | `scripts/validate.sh --lane <lane>`, one job per lane (`py`, `tsc`, `lint`, `test`, `web`), and a final `scripts/validate.sh` check that is green only when every lane is. CodeQL runs as GitHub code scanning instead of here. |
+| `version and changelog check` | pull requests to `main` | the version bump and changelog entry below |
+| `dependency review` | every pull request | a dependency the PR adds or changes must carry a license from `.github/dependency-review-config.yml` |
+| `dependency audit` | PRs that touch a manifest, lockfile or requirements file; Mondays 05:23 UTC; by hand | `scripts/dependency-audit.mjs` (see Dependencies) |
+| `Kiro review` | pull requests to `main` from this repository (not forks, drafts or Dependabot) | a read-only Kiro CLI agent reviews the diff against `TENETS.md`, `README.md` and this file, and posts one comment it updates on every push (see Kiro review) |
+| `Kiro issue triage` | every new issue; comments by the author on an `enhancement` issue | a read-only Kiro CLI agent labels the issue (bug, enhancement, documentation, question, invalid) and replies; for a feature request it checks the tenets and helps the author align it (see Kiro review) |
+| `scheduled failure watch` | after each scheduled `dependency audit` | opens an issue when the scheduled run fails, comments while it keeps failing, closes it when it is green again |
+
+Dependabot (`.github/dependabot.yml`) opens grouped minor and patch updates every Monday for the actions, both npm
+lockfiles and the Python requirements, never for a release younger than seven days.
+
+## Kiro review
+
+`.github/workflows/kiro-review.yml` runs [Kiro CLI in headless mode](https://kiro.dev/docs/cli/headless/) with the
+agent in `scripts/kiro-review/` (`agent.json`, its prompt and the task). The agent checks the change against the
+tenets, the repository rules and correctness and security, and answers with a verdict (`PASS`, `CONCERNS` or
+`BLOCKING`), blocking findings, concerns and a tenet table. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
+`'true'` in the workflow to fail the check on `BLOCKING`.
+
+- **Setup.** Create a dedicated Kiro API key for CI (Kiro Pro or above; an administrator may need to allow API keys)
+  and store it as the repository secret `KIRO_API_KEY` with `gh secret set KIRO_API_KEY` (it prompts for the value,
+  so the key never lands in shell history) or in Settings › Secrets and variables › Actions. Never paste a key in
+  code, a commit, an issue or a chat; if one was shared, revoke it and create another. The agent runs on `claude-opus-5.5`
+  (`agent.json`); the repository variable `KIRO_REVIEW_MODEL` overrides it. The model list depends on the account:
+  `kiro-cli chat --v3 --list-models` shows the key's models only when no browser login is active, because a
+  `kiro-cli login` session takes precedence over `KIRO_API_KEY`. A repository without the secret skips the review.
+- **How the key stays private.** The workflow uses `pull_request`, so a pull request from a fork gets no secrets
+  (and is skipped). The key reaches only the step that runs Kiro, as an environment variable. The agent, its prompt
+  and the documents it judges against come from `main`, so a pull request cannot change its own review. The pull
+  request's files are read as data: nothing from it is built or run, and its `.kiro/` folder is deleted first. The
+  agent can only read files under the review root (`--trust-tools` is not used, because in Kiro CLI 3.1.0 it let a
+  read outside the agent's rules through); writes, shell, web, MCP and sub-agents are denied. A separate job with no
+  secret posts the comment after `scripts/kiro-review/comment.mjs` refuses anything that looks like a credential.
+  Anyone who can push a branch here can still edit the workflow in their pull request, so give the CI key a small
+  usage limit and rotate it if a collaborator leaves.
+- **Issue triage.** `.github/workflows/kiro-issue-triage.yml` runs the agent in `scripts/kiro-issue/` on every new
+  issue with the same key and the same read-only limits. It sets one type label (`bug`, `enhancement`,
+  `documentation`, `question` or `invalid`), replacing the template's label on the first triage only, and replies.
+  For a feature request it names the tenets the request touches, labels it `tenets: aligned`, `tenets: needs
+  alignment` or `tenets: conflicts`, proposes the closest version that fits the tenets, and drafts the request
+  in the feature template's structure plus **Tenets touched** and **Acceptance criteria**. When the issue's author
+  answers, it replies again and updates the tenet label, at most five times per issue; after that, or at any
+  point, a maintainer takes over. Issue text is untrusted input from anyone, so it is only ever read as data.
+- **Changing the reviewer.** Edit `scripts/kiro-review/`; the change applies to pull requests opened after it
+  merges. To try it locally, put `agent.json` (with `__REVIEW_ROOT__` replaced by a directory holding `trusted/`,
+  `data/` and `pr/` as the workflow lays them out) and the prompt in that directory's `.kiro/agents/`, and run
+  `kiro-cli chat --v3 --no-interactive --agent citation-pr-reviewer < scripts/kiro-review/task.md` from it.
+
+## Dependencies
+
+- **Audit.** `npm run deps:audit` (`scripts/dependency-audit.mjs`) checks both npm lockfiles with `npm audit` and
+  both Lambda layers' requirements with `pip-audit` (`pip install pip-audit`), resolved for the Lambda target
+  (CPython 3.12, x86_64). It fails on an npm production advisory of high or critical severity, an npm
+  development advisory of critical severity, any advisory in a layer, and an audit that could not run;
+  `lambda/requirements-dev.txt` is reported only.
+- **Reviewed ignores.** An advisory that cannot reach us, or has no fix yet, goes into
+  `.github/dependency-audit-ignore.json` with its id, package, the reason and an expiry at most 90 days ahead. An
+  expired or malformed entry fails the audit; an entry that matches nothing is reported so it can be deleted.
+- **A red scheduled audit** has an issue titled `Scheduled workflow failing: dependency audit`. Update the
+  dependency (or add a reviewed ignore) in a pull request; the next green scheduled run closes the issue.
+- **Dependabot pull requests** change what ships, so they need the version bump below: check out the branch, run
+  `npm version <x.y.z> --no-git-tag-version` at the root and in `web/`, add the `CHANGELOG.md` entry, push, merge.
+- **Licenses.** A new dependency must carry a license from `.github/dependency-review-config.yml`; anything else
+  needs a reviewed exception there with its reason, and an entry in `THIRD_PARTY_LICENSES.md`.
 
 ## Versioning and changelog
 
