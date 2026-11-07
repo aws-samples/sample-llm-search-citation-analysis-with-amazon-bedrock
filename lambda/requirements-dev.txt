@@ -13,7 +13,7 @@
 # anything a real Lambda handler needs goes in layer/requirements.txt.
 
 # Test runner (9.0.3+: PYSEC-2026-1845)
-pytest>=9.0.3,<10.0
+pytest>=9.2.0,<10.0
 
 # Property-based tests (used by test_url_validator.py, test_api_response.py)
 hypothesis>=6.100,<7.0
