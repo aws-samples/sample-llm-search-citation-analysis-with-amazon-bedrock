@@ -59,6 +59,9 @@ allow-dependencies-licenses:
   # LGPL-3.0-only. An ESLint plugin (eslint.config.mjs); development scope only, runs in the linter, never
   # bundled or shipped, and we do not modify it. LGPL places no terms on code that merely uses the library.
   - pkg:npm/eslint-plugin-sonarjs
+  # LGPL-3.0-only. The configuration library eslint-plugin-sonarjs 4.x depends on (same use: development
+  # scope only, runs in the linter, never bundled, shipped or modified).
+  - pkg:npm/%40sonarsource/analyzer-commons-configurations
   # "MIT AND MITNFA" (MIT plus no false attribution) for some versions. User-agent parsing pulled in by the
   # AWS SDK for JavaScript under aws-amplify; permissive, but not common enough to allow generically.
   - pkg:npm/bowser

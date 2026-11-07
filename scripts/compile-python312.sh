@@ -71,8 +71,11 @@ if [ "$USE_DOCKER" = true ]; then
     for dir in "${FIRST_PARTY[@]+"${FIRST_PARTY[@]}"}"; do
         FIRST_PARTY_ARGS+=" && python3.12 -m compileall -q -f -j 0 --invalidation-mode checked-hash -d '$RUNTIME_DIR/$dir' '/tree/$dir'"
     done
+    # As the calling user: on Linux, files a root container writes cannot be removed by the host user
+    # (the rm of python/bin below, a rebuild). HOME=/tmp gives pip a writable home.
     docker run --rm \
         --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" -e HOME=/tmp \
         --entrypoint "" \
         -e SOURCE_DATE_EPOCH=0 \
         -e PYTHONHASHSEED=0 \

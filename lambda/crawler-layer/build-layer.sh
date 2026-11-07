@@ -17,8 +17,11 @@ mkdir -p "$LAYER_DIR"
 if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     BUILT_WITH_DOCKER=true
     echo "Using Docker to build for Linux compatibility..."
+    # As the calling user: on Linux, files a root container writes cannot be removed by the host user
+    # (the rm of python/bin below, a rebuild). HOME=/tmp gives pip a writable home.
     docker run --rm \
         --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" -e HOME=/tmp \
         --entrypoint "" \
         -v "$(pwd)":/var/task \
         -w /var/task \
