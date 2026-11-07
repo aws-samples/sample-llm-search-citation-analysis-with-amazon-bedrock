@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import {
+  readFileSync, readdirSync 
+} from 'node:fs'
+import {
   decide, findIssue, issueTitle, messageFor 
 } from './scheduled-failure-watch.mjs'
 
@@ -105,4 +108,20 @@ test('only an open, bot-created issue with exactly the title matches (not a pull
   ]
   assert.equal(findIssue(issues, title)?.number, 4)
   assert.equal(findIssue(issues.slice(0, 3), title), undefined)
+})
+
+test('the watch lists exactly the scheduled workflows, by their current name', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url)
+  const lines = (file) => readFileSync(new URL(file, dir), 'utf8').split('\n')
+  const scheduled = readdirSync(dir)
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
+    .map(lines)
+    .filter((text) => text.includes('  schedule:'))
+    .map((text) => text.find((line) => line.startsWith('name:')).slice('name:'.length).trim())
+  const watch = lines('scheduled-failure-watch.yml')
+  const start = watch.indexOf('    workflows:') + 1
+  const end = watch.findIndex((line, index) => index >= start && !line.startsWith('      - '))
+  const watched = watch.slice(start, end).map((line) => line.slice('      - '.length).trim())
+  assert.ok(watched.length > 0)
+  assert.deepEqual(watched.sort(), scheduled.sort(), 'rename a scheduled workflow here too, or add a new one')
 })

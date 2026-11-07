@@ -2,7 +2,8 @@
 # failing, and closes it when a later scheduled run is green. The logic and its tests are in
 # scripts/scheduled-failure-watch.mjs (+ .test.mjs).
 #
-# Watched: every workflow with a `schedule:` trigger. Today that is only `dependency audit`; add a new
+# Watched: every workflow with a `schedule:` trigger (scripts/scheduled-failure-watch.test.mjs fails when this list and
+# those workflows' `name:` disagree, so a rename cannot silently stop the watch). Today that is only `dependency audit`; add a new
 # scheduled workflow's `name:` to the list below.
 #
 # Safety: `workflow_run` runs in the context of the default branch with this file and the script as
