@@ -70,7 +70,7 @@ concurrency or capacity, no NAT gateway, no always-on database, cache, container
 for capacity whether or not it is used is the wrong design here.
 
 Because we pay per action, we do not spend actions that do nothing: no polling loops, no long polling, no Lambda
-that waits for something to happen. Work starts when an event arrives (tenet 8), so the bill follows the work, not
+that waits for something to happen (tenet 8 lists the few bounded exceptions). Work starts when an event arrives, so the bill follows the work, not
 the clock or the number of open screens. As a GitHub sample, we would rather wait a couple of seconds more than pay
 to hide a slow path: we make the Lambda faster (smaller imports, right-sized memory, fewer round trips) before we
 reach for a paid feature.
