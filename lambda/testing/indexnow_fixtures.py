@@ -10,7 +10,7 @@ import pytest
 from shared import indexnow_store
 from testing.dynamodb_stubs import conditional_check_failure
 
-KEY = '0123456789abcdef' * 2
+SAMPLE_HEX_32 = '0123456789abcdef' * 2
 """An IndexNow key of the expected shape (32 hex characters); a made-up test value, not a credential."""
 
 

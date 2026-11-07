@@ -7,7 +7,8 @@ import re
 import pytest
 
 from shared import indexnow_store
-from testing.indexnow_fixtures import KEY, install_key_table
+from testing.indexnow_fixtures import SAMPLE_HEX_32 as KEY
+from testing.indexnow_fixtures import install_key_table
 
 
 @pytest.fixture

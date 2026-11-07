@@ -10,7 +10,7 @@ import pytest
 from shared import indexnow
 from shared.audit_fetch import FetchResult
 from shared.dataforseo_client import call_deadline
-from testing.indexnow_fixtures import KEY
+from testing.indexnow_fixtures import SAMPLE_HEX_32 as KEY
 from testing.site_audit_fixtures import FakeSite, redirect, serving, text_response
 
 OWNED = ['example.com']

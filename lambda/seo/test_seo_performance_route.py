@@ -12,7 +12,8 @@ from botocore.exceptions import ClientError
 from shared import indexnow, lighthouse_runs
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
-from testing.indexnow_fixtures import KEY, KeyTable, install_key_table
+from testing.indexnow_fixtures import SAMPLE_HEX_32 as KEY
+from testing.indexnow_fixtures import KeyTable, install_key_table
 from testing.local_seo_fixtures import MemoryCache
 from testing.performance_fixtures import install_run_cache, saved_run, stored_run
 from testing.seo_fixtures import SEO_DIR, SEO_ENV, seo_event
