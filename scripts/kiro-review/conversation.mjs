@@ -10,7 +10,12 @@
  * Everything here is untrusted text written by anyone who can comment, so it is capped (it costs credits and could
  * crowd out the diff) and the reviewer's prompt treats it as data.
  *
- * Usage: node scripts/kiro-review/conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md> [pr-author]
+ * Usage:
+ *   node scripts/kiro-review/conversation.mjs commenters <issue-comments.json> <reviews.json> <review-comments.json>
+ *     prints one login per line: the human commenters whose permission the workflow then looks up
+ *   node scripts/kiro-review/conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md>
+ *       [pr-author] [maintainers.txt]
+ *     maintainers.txt: the commenters with write access or more, one login per line
  *   Each JSON file is a `gh api --paginate --slurp` result (an array of pages).
  */
 import {
@@ -23,7 +28,6 @@ export const MAX_ENTRY = 6000
 export const MAX_ENTRIES = 60
 export const MAX_TOTAL = 120_000
 const BOT = 'github-actions[bot]'
-const MAINTAINERS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
 
 /** True for the reviewer's own comment (the Actions bot, starting with the review marker). */
 export function isOwnReview(entry) {
@@ -32,17 +36,25 @@ export function isOwnReview(entry) {
 
 /**
  * How the reviewer should weigh an author: its own review, a bot, the PR's author (who cannot settle their own
- * review's points the way another maintainer can), a maintainer, or anyone else.
+ * review's points the way another maintainer can), a maintainer (in `maintainers`), or anyone else.
  */
-export function roleOf(entry, prAuthor = '') {
+export function roleOf(entry, prAuthor = '', maintainers = new Set()) {
   if (isOwnReview(entry)) return 'kiro, your previous review'
   if (entry.user?.type === 'Bot' || entry.user?.login?.endsWith('[bot]')) return 'bot'
-  const maintainer = MAINTAINERS.has(entry.author_association)
+  // A maintainer is someone with write access or more (the workflow asks GitHub per commenter), not an
+  // `author_association`: COLLABORATOR covers read-only invitees and MEMBER every member of the organisation.
+  const maintainer = maintainers.has(entry.user?.login)
   if (prAuthor !== '' && entry.user?.login === prAuthor) return maintainer ? 'PR author, maintainer' : 'PR author'
   return maintainer ? 'maintainer' : 'contributor'
 }
 
 const capped = (text, max) => (text.length > max ? `${text.slice(0, max)}\n[truncated at ${max} characters]` : text)
+
+/** The distinct human commenters, so the workflow can ask GitHub which of them have write access. */
+export function commenters(issueComments, reviews, reviewComments) {
+  const all = [...issueComments, ...reviews, ...reviewComments]
+  return [...new Set(all.filter((e) => roleOf(e) === 'contributor').map((e) => e.user?.login).filter(Boolean))].sort()
+}
 
 /** One entry per comment, review and inline comment that says something, oldest first. */
 export function entries(issueComments, reviews, reviewComments) {
@@ -78,9 +90,9 @@ export function quoted(body) {
   return body.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n')
 }
 
-function block(entry, prAuthor) {
+function block(entry, prAuthor, maintainers) {
   const body = isOwnReview(entry) ? entry.body.slice(MARKER.length) : entry.body
-  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry, prAuthor)}), ${entry.at}`
+  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry, prAuthor, maintainers)}), ${entry.at}`
   return `${heading}\n\n${quoted(capped(body.trim(), MAX_ENTRY))}`
 }
 
@@ -90,15 +102,15 @@ const byTime = (a, b) => String(a.at).localeCompare(String(b.at))
  * The conversation as Markdown. When it is long, whole entries are dropped oldest first (never part of one) until it
  * fits MAX_ENTRIES and MAX_TOTAL; the reviewer's own last review is always kept.
  */
-export function conversationMarkdown(issueComments, reviews, reviewComments, prAuthor = '') {
+export function conversationMarkdown(issueComments, reviews, reviewComments, prAuthor = '', maintainers = new Set()) {
   const list = entries(issueComments, reviews, reviewComments)
   if (list.length === 0) return 'No comments or reviews on this pull request yet.\n'
   const own = list.filter(isOwnReview).at(-1)
-  const ownBlock = own ? block(own, prAuthor) : ''
+  const ownBlock = own ? block(own, prAuthor, maintainers) : ''
   let budget = MAX_TOTAL - ownBlock.length
   const others = []
   for (const entry of list.filter((e) => !isOwnReview(e)).reverse()) {
-    const text = block(entry, prAuthor)
+    const text = block(entry, prAuthor, maintainers)
     if (others.length >= MAX_ENTRIES || text.length + 2 > budget) break
     budget -= text.length + 2
     others.push({
@@ -120,12 +132,18 @@ function pages(path) {
 }
 
 function main(argv) {
-  if (argv.length < 4 || argv.length > 5) {
-    console.error('usage: conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md> [pr-author]')
+  if (argv[0] === 'commenters' && argv.length === 4) {
+    const [, issueComments, reviews, reviewComments] = argv
+    for (const login of commenters(pages(issueComments), pages(reviews), pages(reviewComments))) console.log(login)
+    return 0
+  }
+  if (argv.length < 4 || argv.length > 6) {
+    console.error('usage: conversation.mjs [commenters] <issue-comments.json> <reviews.json> <review-comments.json> [<out.md> [pr-author] [maintainers.txt]]')
     return 2
   }
-  const [issueComments, reviews, reviewComments, out, prAuthor = ''] = argv
-  writeFileSync(out, conversationMarkdown(pages(issueComments), pages(reviews), pages(reviewComments), prAuthor))
+  const [issueComments, reviews, reviewComments, out, prAuthor = '', maintainersFile = ''] = argv
+  const maintainers = new Set(maintainersFile ? readFileSync(maintainersFile, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean) : [])
+  writeFileSync(out, conversationMarkdown(pages(issueComments), pages(reviews), pages(reviewComments), prAuthor, maintainers))
   return 0
 }
 

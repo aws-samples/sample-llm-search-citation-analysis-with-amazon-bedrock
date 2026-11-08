@@ -143,8 +143,16 @@ jobs:
               || { echo "::warning title=Kiro review::could not read ${part%%:*}; the review runs without it"; echo '[]' > "$api/${part##*:}.json"; }
           done
           if [ -f trusted/scripts/kiro-review/conversation.mjs ]; then
-            node trusted/scripts/kiro-review/conversation.mjs \
-              "$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json" data/conversation.md "$PR_AUTHOR"
+            conv=trusted/scripts/kiro-review/conversation.mjs
+            jsons=("$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json")
+            # Maintainers are the commenters GitHub says have write access or more; a failed lookup makes nobody one.
+            : > "$api/maintainers.txt"
+            for login in $(node "$conv" commenters "${jsons[@]}" || true); do
+              perm="$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission 2>/dev/null || true)"
+              case "$perm" in admin|maintain|write) echo "$login" >> "$api/maintainers.txt" ;; esac
+            done
+            node "$conv" "${jsons[@]}" data/conversation.md "$PR_AUTHOR" "$api/maintainers.txt" \
+              || { echo "::warning title=Kiro review::could not build the conversation; the review runs without it"; echo 'No conversation available to this review.' > data/conversation.md; }
           else
             # The default branch predates conversation.mjs (the PR that adds it).
             echo 'No conversation available to this review.' > data/conversation.md

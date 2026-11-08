@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { MARKER } from './comment.mjs'
 import {
-  MAX_ENTRIES, MAX_ENTRY, MAX_TOTAL, conversationMarkdown, entries, isOwnReview, quoted, roleOf,
+  MAX_ENTRIES, MAX_ENTRY, MAX_TOTAL, commenters, conversationMarkdown, entries, isOwnReview, quoted, roleOf,
 } from './conversation.mjs'
 
 const bot = {
@@ -35,7 +35,9 @@ test('roles: the reviewer\'s own review, maintainers, bots and contributors are 
     user: { login: 'github-advanced-security[bot]' },
     body: 'x' 
   }), 'bot')
-  assert.equal(roleOf(comment('ana', 'MEMBER', 'x')), 'maintainer')
+  assert.equal(roleOf(comment('ana', 'MEMBER', 'x'), '', new Set(['ana'])), 'maintainer')
+  assert.equal(roleOf(comment('ana', 'MEMBER', 'x')), 'contributor', 'an org member without write access is not a maintainer')
+  assert.equal(roleOf(comment('cid', 'COLLABORATOR', 'x')), 'contributor', 'a read-only collaborator is not a maintainer')
   assert.equal(roleOf(comment('bob', 'NONE', 'x')), 'contributor')
   assert.equal(isOwnReview({
     user: { login: 'eve' },
@@ -69,7 +71,7 @@ test('the Markdown names author and role, strips the marker, and keeps the revie
   const md = conversationMarkdown([
     own('### Verdict: CONCERNS\n- bundling', '2026-11-08T01:00:00Z'),
     comment('ana', 'OWNER', 'Accepted as bundled.', '2026-11-08T02:00:00Z'),
-  ], [], [])
+  ], [], [], '', new Set(['ana']))
   assert.match(md, /## comment by github-actions\[bot\] \(kiro, your previous review\)/)
   assert.match(md, /## comment by ana \(maintainer\), 2026-11-08T02:00:00Z\n\n> Accepted as bundled\./)
   assert.doesNotMatch(md, /kiro-review -->/)
@@ -113,9 +115,31 @@ test('the total cap drops whole oldest entries, never the reviewer\'s own review
 })
 
 test('the PR author is told apart from other maintainers, whatever their repository role', () => {
-  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'ana'), 'PR author, maintainer')
-  assert.equal(roleOf(comment('bob', 'NONE', 'x'), 'bob'), 'PR author')
-  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'bob'), 'maintainer')
-  const md = conversationMarkdown([comment('ana', 'OWNER', 'accepted as bundled', '2026-11-08T02:00:00Z')], [], [], 'ana')
+  const writers = new Set(['ana'])
+  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'ana', writers), 'PR author, maintainer')
+  assert.equal(roleOf(comment('bob', 'NONE', 'x'), 'bob', writers), 'PR author')
+  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'bob', writers), 'maintainer')
+  const md = conversationMarkdown([comment('ana', 'OWNER', 'accepted as bundled', '2026-11-08T02:00:00Z')], [], [], 'ana', writers)
   assert.match(md, /## comment by ana \(PR author, maintainer\)/)
+})
+
+test('the commenters to look up are the distinct humans, without bots or the reviewer', () => {
+  const list = commenters(
+    [comment('bob', 'NONE', 'x'), comment('ana', 'OWNER', 'y'), own('z'), {
+      user: { login: 'dependabot[bot]' },
+      body: 'b' 
+    }],
+    [{
+      user: { login: 'ana' },
+      body: 'r' 
+    }],
+    [{
+      user: {
+        login: 'cid',
+        type: 'User' 
+      },
+      body: 'i' 
+    }],
+  )
+  assert.deepEqual(list, ['ana', 'bob', 'cid'])
 })
