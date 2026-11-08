@@ -42,8 +42,9 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -73,8 +74,40 @@ from shared.kpi_engine import KPI_IDS, SPLIT_LABELS
 from shared.request_deadline import Deadline
 from shared.response_spill import SPILL_KEY
 
+# The owner claim is what per-caller spend limits count an export's reads against.
+from shared.seo_spend_limit import EXPORT_OWNER_CLAIM, EXPORT_SERVICE
+
 #: The identity the routers see for an export read (``validate`` checked the real caller).
-EXPORT_SERVICE_SUB = 'export-service'
+EXPORT_SERVICE_SUB = EXPORT_SERVICE
+
+
+@dataclass
+class ExportRead:
+    """One chunk's route reads: whom they are made for, and how long a view job still computing asks to wait."""
+
+    owner: str
+    wait_seconds: float | None = None
+
+
+_export_read: ContextVar[ExportRead | None] = ContextVar('export_read', default=None)
+
+
+@contextmanager
+def reading_for(owner: str) -> Generator[ExportRead]:
+    """Every route read made inside names ``owner`` (the export's owner, as ``cognito:username`` names a caller).
+
+    A route answering ``202 computing`` stops the reads and sets ``wait_seconds`` on the yielded ``ExportRead``:
+    the export state machine waits that long before the next chunk, so no Lambda sleeps while a view job runs
+    (TENETS.md, tenets 7 and 8).
+    """
+    read = ExportRead(owner)
+    token = _export_read.set(read)
+    try:
+        yield read
+    finally:
+        _export_read.reset(token)
+
+
 ADMIN_GROUP = 'Admin'
 #: Seconds a router may take (its own timeout is 29 s).
 ROUTER_READ_SECONDS = 35
@@ -125,6 +158,9 @@ type RouteInvoker = Callable[[RouteRequest], tuple[int, Any]]
 def route_event(request: RouteRequest) -> dict[str, Any]:
     """The API Gateway proxy event a router Lambda expects for ``request``."""
     claims: dict[str, Any] = {'sub': EXPORT_SERVICE_SUB, 'cognito:username': EXPORT_SERVICE_SUB}
+    read = _export_read.get()
+    if read is not None:
+        claims[EXPORT_OWNER_CLAIM] = read.owner
     if request.admin:
         claims['cognito:groups'] = ADMIN_GROUP
     return {
@@ -370,7 +406,6 @@ class RouteSource:
     select: str | None = None
     """A parameter naming the one list (by sheet name) to export; ``None``: every list, in order."""
     invoker: RouteInvoker = lambda_route_invoker
-    sleep: Callable[[float], None] = time.sleep
 
     @property
     def sheets(self) -> tuple[ExportSheet, ...]:
@@ -523,7 +558,8 @@ class _ListReading:
 
     def _page(self, token: RouteToken, deadline: Deadline, *, reread: bool = False) -> _Page | None:
         """
-        The page at ``token``, or ``None`` when the deadline came first (the next chunk asks again).
+        The page at ``token``, or ``None`` when the deadline came first or a view job is still computing (the next
+        chunk asks again; for a computing job, after the wait the state machine takes).
 
         A read starts only while more than ``INVOKE_START_SECONDS`` remain.
 
@@ -534,8 +570,11 @@ class _ListReading:
         while deadline.remaining() > INVOKE_START_SECONDS:
             status, body = self.source.invoker(self._request(token, reread=reread))
             if status == 202:
-                self.source.sleep(min(_retry_after(body), max(deadline.remaining() - INVOKE_START_SECONDS, 0.0)))
-                continue
+                # A view job is computing: stop here and let the state machine wait (never sleep in the Lambda).
+                read = _export_read.get()
+                if read is not None:
+                    read.wait_seconds = _retry_after(body)
+                return None
             if status != 200 or not isinstance(body, dict | list) or job_failed(body):
                 raise ExportSourceError(f'{self.route_list.path} answered {status}: {_message(body)}')
             if any(path_value(body, flag) is True for flag in self.route_list.partial_flags):

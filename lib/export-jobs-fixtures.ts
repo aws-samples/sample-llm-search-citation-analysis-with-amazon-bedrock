@@ -32,6 +32,8 @@ export interface ExportStateSnapshot {
   catch: { errors: string[]; next: string; resultPath: string }[];
   choices?: unknown[];
   defaultState?: string;
+  /** A Wait state's `SecondsPath`. */
+  secondsPath?: string;
 }
 
 /** Everything the export-service spec asserts on, read once from both templates. */
@@ -98,6 +100,7 @@ function stateSnapshot(state: unknown): ExportStateSnapshot {
     })),
     ...(resolvePath(state, ['Choices']) === undefined ? {} : { choices: listOf(resolvePath(state, ['Choices'])) }),
     ...(typeof defaultState === 'string' ? { defaultState } : {}),
+    ...(typeof resolvePath(state, ['SecondsPath']) === 'string' ? { secondsPath: resolveString(state, ['SecondsPath']) } : {}),
   };
 }
 

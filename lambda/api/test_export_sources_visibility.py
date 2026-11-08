@@ -13,7 +13,7 @@ from shared import artifact_latest
 from shared.export_source_routes import RouteSource
 from shared.export_source_visibility import BRAND_LEADERBOARD, ENGINES, KEYWORD_VISIBILITY, SOURCES
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
-from testing.export_source_fixtures import USER, all_rows, resumed_from_every_row, row_values
+from testing.export_source_fixtures import USER, all_rows, resumes_from_every_row, row_values
 from testing.full_list_fixtures import TenantRoutes, oracle_values, over_tenant
 from testing.scale_data import ScaleSpec, group_id, keyword_text, market_id
 
@@ -72,11 +72,7 @@ _RESUME_ROWS = {'brand-leaderboard': 17, 'sources': 17, 'keyword-visibility': 7,
 def test_resuming_after_every_row_yields_exactly_the_remaining_rows(tenant, view):
     source = over_tenant(_SOURCES[view], TenantRoutes(tenant, patches=_SHORT_PAGES))
     params = _RESUME_PARAMS.get(view, {'group_id': group_id(0)})
-    rows = all_rows(source, params)
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, params, rows)}
-
-    assert (len(rows) > _RESUME_ROWS[view], resumed) == (True, {index: row_values(rows[index + 1:]) for index in range(len(rows))})
+    assert resumes_from_every_row(source, params, _RESUME_ROWS[view])
 
 
 @pytest.mark.parametrize('view', list(_SOURCES))

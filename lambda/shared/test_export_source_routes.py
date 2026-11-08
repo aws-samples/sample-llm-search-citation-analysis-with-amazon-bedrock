@@ -22,33 +22,31 @@ from shared.export_source_routes import (
     RouteSource,
     cell,
     columns,
+    reading_for,
     route_event,
     router_client_config,
 )
-from testing.clocks import JumpClock, SleepClock
+from testing.clocks import JumpClock
 from testing.export_source_fixtures import (
     ADMIN,
     USER,
     PagedRoute,
     all_rows,
-    counting_sleeps,
     drained,
     expired_deadline,
     fixed_answer,
     long_deadline,
     numbered_items,
-    resumed_from_every_row,
-    row_values,
+    resumes_from_every_row,
 )
 
 _COLUMNS = columns('name', 'rank', 'tags', 'rate=kpis.rate')
 
 
-def _source(route: PagedRoute, *, page: int = 3, by_offset: bool = False, sleep=None) -> RouteSource:
+def _source(route: PagedRoute, *, page: int = 3, by_offset: bool = False) -> RouteSource:
     paging = Paging('offset', request_param='offset', limit=page) if by_offset else Paging(limit=page)
     route_list = RouteList('Items', _COLUMNS, 'stats-insights', '/api/items', 'items', paging, fixed={'view': 'items'})
-    source = RouteSource('sources', (route_list,), params=('scope', 'market_id'), invoker=route)
-    return replace(source, sleep=sleep) if sleep else source
+    return RouteSource('sources', (route_list,), params=('scope', 'market_id'), invoker=route)
 
 
 def test_rows_hold_every_item_in_route_order_when_the_route_pages_by_token() -> None:
@@ -90,20 +88,28 @@ def test_resuming_after_any_row_yields_exactly_the_remaining_rows(count: int, pa
     source = _source(PagedRoute(numbered_items(count), by_offset=by_offset), page=page, by_offset=by_offset)
     if keyed:
         source = replace(source, lists=(replace(source.lists[0], resume_key=('name',)),))
-    rows = all_rows(source, {})
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, {}, rows)}
-
-    assert resumed == {index: row_values(rows[index + 1:]) for index in range(len(rows))}
+    assert resumes_from_every_row(source, {})
 
 
-def test_a_computing_answer_is_waited_for_and_then_read() -> None:
-    waits, sleep = counting_sleeps()
-    route = PagedRoute(numbered_items(2), computing_first=2)
+def test_a_computing_answer_stops_the_reads_and_asks_for_its_wait_instead_of_sleeping() -> None:
+    route = PagedRoute(numbered_items(2), computing_first=1)
 
-    rows = all_rows(_source(route, sleep=sleep), {})
+    with reading_for('alice') as read:
+        rows, end = drained(_source(route).rows({}, None, long_deadline()))
 
-    assert (len(rows), waits) == (2, [1.5, 1.5])
+    assert (rows, end, read.wait_seconds, len(route.requests)) == ([], RowsEnd.STOPPED, 1.5, 1)
+
+
+def test_the_next_read_after_the_wait_reads_the_list() -> None:
+    route = PagedRoute(numbered_items(2), computing_first=1)
+    source = _source(route)
+    with reading_for('alice'):
+        drained(source.rows({}, None, long_deadline()))
+
+    with reading_for('alice') as read:
+        rows, end = drained(source.rows({}, None, long_deadline()))
+
+    assert (len(rows), end, read.wait_seconds) == (2, RowsEnd.FINISHED, None)
 
 
 def test_rows_stop_without_error_when_the_deadline_has_passed() -> None:
@@ -136,15 +142,6 @@ def test_a_source_stopping_for_time_marks_the_deadline_cut() -> None:
     drained(_source(PagedRoute(numbered_items(10), clock=clock, request_seconds=599.5)).rows({}, None, deadline))
 
     assert (deadline.expired(), deadline.cut) == (False, True)
-
-
-def test_rows_end_stopped_when_a_view_job_computes_until_the_deadline() -> None:
-    clock = SleepClock()
-    source = _source(PagedRoute(numbered_items(3), computing_first=10_000), sleep=clock.sleep)
-
-    rows, end = drained(source.rows({}, None, clock.deadline(60)))
-
-    assert (rows, end) == ([], RowsEnd.STOPPED)
 
 
 def test_a_page_its_filter_empties_is_followed_by_a_mark_at_the_next_page() -> None:

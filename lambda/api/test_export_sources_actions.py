@@ -12,7 +12,7 @@ from shared import action_list_builders
 from shared.export_source_actions import CITATION_GAPS, GAP_KEYWORD_SUMMARIES, PROMPT_INSIGHTS, RECOMMENDATIONS
 from shared.export_source_routes import RouteSource
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
-from testing.export_source_fixtures import USER, all_rows, resumed_from_every_row, row_values
+from testing.export_source_fixtures import USER, all_rows, resumes_from_every_row, row_values
 from testing.full_list_fixtures import TenantRoutes, oracle_values, over_tenant, short_paged
 from testing.scale_data import ScaleSpec, group_id, keyword_text, market_id
 
@@ -57,11 +57,7 @@ def test_the_scope_all_list_is_longer_than_a_short_page(tenant, view):
 def test_resuming_after_every_row_yields_exactly_the_remaining_rows(tenant, view):
     source = over_tenant(short_paged(_SOURCES[view], _PAGE), TenantRoutes(tenant, patches=_SHORT_PAGES))
     params = {'group_id': group_id(0)}
-    rows = all_rows(source, params)
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, params, rows)}
-
-    assert resumed == {index: row_values(rows[index + 1:]) for index in range(len(rows))}
+    assert resumes_from_every_row(source, params)
 
 
 def test_prompt_insights_writes_one_sheet_per_tab():

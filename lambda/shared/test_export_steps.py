@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 from shared.export_contract import Caller
 from shared.export_jobs import StaleExportError
 from shared.export_source_lists import CONFIG_LISTS
-from shared.export_source_routes import Paging, RouteList, RouteSource, columns
+from shared.export_source_routes import Paging, RouteList, RouteRequest, RouteSource, columns, route_event
 from shared.export_steps import (
     STALL_LIMIT,
     ExportPermissionError,
@@ -24,7 +24,7 @@ from shared.export_steps import (
     finalize,
     prepare,
 )
-from testing.clocks import JumpClock, SleepClock
+from testing.clocks import JumpClock
 from testing.export_fixtures import BUCKET, CHUNK_SECONDS, ExportHarness, citations_source, csv_lines
 from testing.export_source_fixtures import PagedRoute, numbered_items
 
@@ -173,11 +173,11 @@ class TestChunk:
             harness.run_chunk(export_id)
 
 
-def _route_harness(route: PagedRoute, clock: JumpClock, sleep=None, *, limit: int = 3) -> ExportHarness[RouteSource]:
+def _route_harness(route: PagedRoute, clock: JumpClock, *, limit: int = 3) -> ExportHarness[RouteSource]:
     route_list = RouteList(
         'Items', columns('name', 'rank'), 'stats-insights', '/api/items', 'items', Paging(limit=limit), matches={'name': 'name'},
     )
-    source = RouteSource('sources', (route_list,), params=('name',), invoker=route, **({'sleep': sleep} if sleep else {}))
+    source = RouteSource('sources', (route_list,), params=('name',), invoker=route)
     return ExportHarness(source, clock=clock)
 
 
@@ -210,14 +210,20 @@ class TestChunkEnd:
 
         assert [line[0] for line in csv_lines(data)[1:]] == [f'item-{index:03d}' for index in range(10)]
 
-    def test_a_view_job_computing_until_the_deadline_leaves_the_file_unwritten(self) -> None:
-        clock = SleepClock()
-        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=10_000), clock, sleep=clock.sleep)
+    def test_a_chunk_meeting_a_computing_view_job_asks_the_state_machine_to_wait(self) -> None:
+        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
         export_id = harness.start()
 
-        harness.run_chunk(export_id)
+        answer = chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
 
-        assert (harness.item(export_id).get('written'), harness.s3.uploads['upload-1']['parts']) == (None, {})
+        assert (answer['done'], answer['wait_seconds'], harness.item(export_id).get('stalls')) == (False, 2, 0)
+
+    def test_an_export_waiting_on_a_view_job_longer_than_the_stall_limit_still_completes(self) -> None:
+        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=STALL_LIMIT + 2), JumpClock())
+
+        data = harness.run('csv')
+
+        assert len(csv_lines(data)) == 4
 
 
 def _sparse_export() -> tuple[ExportHarness[RouteSource], str]:
@@ -367,3 +373,27 @@ class TestFail:
 
     def test_the_message_names_the_error_type(self) -> None:
         assert error_message({'Error': 'States.TaskFailed'}).startswith('The export failed (States.TaskFailed).')
+
+
+class TestPaidReadsCountAgainstTheOwner:
+    """An export's route reads name its owner, so the SEO router counts them against the owner's limit (tenet 4, D4)."""
+
+    def test_every_route_read_of_a_chunk_names_the_exports_owner(self) -> None:
+        owners: list[object] = []
+        route = PagedRoute(numbered_items(4))
+
+        def invoker(request):
+            owners.append(route_event(request)['requestContext']['authorizer']['claims'].get('custom:export_owner'))
+            return route(request)
+
+        route_list = RouteList('Items', columns('name', 'rank'), 'seo', '/api/items', 'items', Paging(limit=3))
+        harness = ExportHarness(RouteSource('sources', (route_list,), params=('name',), invoker=invoker))
+
+        harness.write_all(harness.start())
+
+        assert (len(owners) >= 2, set(owners)) == (True, {'sub-alice'})
+
+    def test_a_read_outside_an_export_names_no_owner(self) -> None:
+        request = RouteRequest('seo', '/api/items', '/api/items', {})
+
+        assert 'custom:export_owner' not in route_event(request)['requestContext']['authorizer']['claims']

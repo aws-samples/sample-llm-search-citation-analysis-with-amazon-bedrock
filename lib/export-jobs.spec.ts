@@ -47,9 +47,16 @@ describe('Export state machine', () => {
     expect(states.ExportChunk.next).toBe('AllRowsWritten');
     expect(states.AllRowsWritten).toMatchObject({
       type: 'Choice',
-      choices: [{ Variable: '$.done', BooleanEquals: true, Next: 'FinalizeExport' }],
+      choices: [
+        { Variable: '$.done', BooleanEquals: true, Next: 'FinalizeExport' },
+        { Variable: '$.wait_seconds', IsPresent: true, Next: 'WaitForViewJob' },
+      ],
       defaultState: 'ExportChunk',
     });
+  });
+
+  it('waits for a computing view job in the state machine, not in the worker, then writes the next chunk', () => {
+    expect(states.WaitForViewJob).toMatchObject({ type: 'Wait', secondsPath: '$.wait_seconds', next: 'ExportChunk' });
   });
 
   it('sends each step its action and the execution export id', () => {

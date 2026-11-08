@@ -15,7 +15,14 @@ import pytest
 
 from shared.export_source_lists import ALERTS, CONFIG_LISTS, KEYWORD_RESEARCH
 from shared.export_source_routes import ExportSourceError, RouteRequest, RouteSource
-from testing.export_source_fixtures import ADMIN, USER, PagedRoute, all_rows, resumed_from_every_row, row_values
+from testing.export_source_fixtures import (
+    ADMIN,
+    USER,
+    PagedRoute,
+    all_rows,
+    resumes_from_every_row,
+    row_values,
+)
 
 _JOB = {
     'id': 'job-1',
@@ -46,7 +53,7 @@ class Routes:
 
 
 def _over(source: RouteSource, invoker: Any) -> RouteSource:
-    return replace(source, invoker=invoker, sleep=lambda _seconds: None)
+    return replace(source, invoker=invoker)
 
 
 def _job_rows(params: dict[str, str]) -> list[tuple[str, tuple[Any, ...]]]:
@@ -113,11 +120,7 @@ def test_a_group_id_exports_that_groups_content_changes_instead():
 
 def test_alerts_resume_after_every_row_with_exactly_the_remaining_rows():
     source = _over(ALERTS, PagedRoute([{'id': f'a{index:03}'} for index in range(205)]))
-    rows = all_rows(source, {})
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, {}, rows)}
-
-    assert resumed == {index: row_values(rows[index + 1:]) for index in range(len(rows))}
+    assert resumes_from_every_row(source, {})
 
 
 @pytest.mark.parametrize(('name', 'path'), [

@@ -16,7 +16,7 @@ from shared import brand_mention_views
 from shared.export_source_mentions import BRAND_APPEARANCES, BRAND_MENTION_SUMMARY, PERSONA_RANKINGS, SENTIMENT_EXAMPLES
 from shared.export_source_routes import RouteSource
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
-from testing.export_source_fixtures import USER, all_rows, resumed_from_every_row, row_values
+from testing.export_source_fixtures import USER, all_rows, resumes_from_every_row, row_values
 from testing.full_list_fixtures import TenantRoutes, oracle_values, over_tenant, short_paged
 from testing.scale_data import ScaleSpec, group_id, keyword_text
 
@@ -117,11 +117,7 @@ _RESUME = {
 def test_resuming_after_every_row_yields_exactly_the_remaining_rows(tenant, source):
     params = _RESUME[source.view]
     paged = over_tenant(short_paged(source, _SHORT), TenantRoutes(tenant))
-    rows = all_rows(paged, params)
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(paged, params, rows)}
-
-    assert (len(rows) > _SHORT, resumed) == (True, {index: row_values(rows[index + 1:]) for index in range(len(rows))})
+    assert resumes_from_every_row(paged, params, _SHORT)
 
 
 def test_sentiment_examples_need_a_sentiment():

@@ -29,8 +29,8 @@ class SeoRoutes:
 
 
 def over(source: RouteSource, routes: SeoRoutes) -> RouteSource:
-    """``source`` reading from ``routes``, never sleeping."""
-    return replace(source, invoker=routes, sleep=lambda _seconds: None)
+    """``source`` reading from ``routes``."""
+    return replace(source, invoker=routes)
 
 
 def seo_geo_body() -> dict[str, Any]:

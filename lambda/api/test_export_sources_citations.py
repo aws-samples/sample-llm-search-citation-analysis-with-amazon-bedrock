@@ -16,7 +16,7 @@ import pytest
 from shared.export_source_citations import CITATIONS, CRAWL_HISTORY, SEARCHES, URL_BREAKDOWN
 from shared.export_source_routes import RouteSource
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
-from testing.export_source_fixtures import USER, PagedRoute, all_rows, resumed_from_every_row, row_values
+from testing.export_source_fixtures import USER, PagedRoute, all_rows, resumes_from_every_row, row_values
 from testing.full_list_fixtures import TenantRoutes, over_tenant, short_paged
 from testing.scale_data import ScaleSpec, group_id, keyword_text, market_id
 
@@ -93,11 +93,7 @@ def test_searches_of_one_keyword_are_only_that_keywords(tenant):
 def test_searches_resume_after_every_row_with_exactly_the_remaining_rows(tenant):
     params = {'keyword': keyword_text(1)}
     source = over_tenant(short_paged(SEARCHES, _SHORT), TenantRoutes(tenant))
-    rows = all_rows(source, params)
-
-    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, params, rows)}
-
-    assert (len(rows) > _SHORT, resumed) == (True, {index: row_values(rows[index + 1:]) for index in range(len(rows))})
+    assert resumes_from_every_row(source, params, _SHORT)
 
 
 def _crawls(count: int) -> list[dict[str, Any]]:
@@ -122,7 +118,7 @@ def test_every_row_of_a_moving_list_carries_a_unique_identity(tenant, source, pa
 
 def test_crawl_history_lists_every_crawl_without_the_page_text():
     route = PagedRoute(_crawls(1_234))
-    source = replace(CRAWL_HISTORY, invoker=route, sleep=lambda _seconds: None)
+    source = replace(CRAWL_HISTORY, invoker=route)
 
     rows = all_rows(source, {'url': 'https://example.com/a'})
 
@@ -130,7 +126,7 @@ def test_crawl_history_lists_every_crawl_without_the_page_text():
 
 
 def test_crawl_history_reads_the_content_length_from_the_metadata():
-    source = replace(CRAWL_HISTORY, invoker=PagedRoute(_crawls(3)), sleep=lambda _seconds: None)
+    source = replace(CRAWL_HISTORY, invoker=PagedRoute(_crawls(3)))
 
     assert [row.values[-1] for row in all_rows(source, {'url': 'https://example.com/a'})] == [0, 1, 2]
 

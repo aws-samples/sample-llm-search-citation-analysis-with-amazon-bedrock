@@ -6,6 +6,10 @@ a local search, a Lighthouse run). Each such request counts once against its cal
 ``SEO_PAID_REQUESTS_PER_DAY`` (default 100) the router answers 429 before the handler runs, so no call is made.
 A request answered from the cache still counts: the limit is on what a caller may ask for, not on what was billed.
 
+An export's reads (the export worker invokes this router as ``export-service``) count against the export's owner,
+named in the ``custom:export_owner`` claim of the worker's event; a user cannot set that claim (no such attribute
+exists in the user pool) and a signed-in user is never ``export-service``.
+
 The count is taken before the handler runs, so a request that then fails still counts. The MCP server's own
 ``seoCallsPerDay`` limit applies on top for MCP callers (their tool calls replay against this router).
 Admin-only paid work (rank checks, snapshots, site audits, Lighthouse batches) is not counted here: it is
@@ -20,12 +24,12 @@ from collections.abc import Callable
 from typing import Any
 
 from shared.api_response import api_response
-from shared.auth import get_caller_identity
+from shared.auth import get_caller_claims, get_caller_identity
 from shared.dynamodb_conditions import applied_conditionally
 from shared.seo_cache import cache_table
 from shared.utils import utc_now
 
-__all__ = ['DEFAULT_LIMIT', 'LIMIT_ENV', 'PAID_ROUTES', 'counter_key', 'is_paid', 'limit', 'limited', 'take']
+__all__ = ['DEFAULT_LIMIT', 'LIMIT_ENV', 'PAID_ROUTES', 'counter_key', 'is_paid', 'limit', 'limited', 'spender', 'take']
 
 LIMIT_ENV = 'SEO_PAID_REQUESTS_PER_DAY'
 DEFAULT_LIMIT = 100
@@ -77,12 +81,23 @@ def take(caller: str, table: Any = None) -> bool:
 
 Handler = Callable[[dict[str, Any], Any], dict[str, Any]]
 
+#: The export worker's caller identity and the claim naming the export's owner (``shared.export_source_routes``).
+EXPORT_SERVICE = 'export-service'
+EXPORT_OWNER_CLAIM = 'custom:export_owner'
+
+
+def spender(event: dict[str, Any]) -> str:
+    """Whom a paid request counts against: the caller, or the owner of the export the worker reads for."""
+    caller = get_caller_identity(event) or 'unknown'
+    owner = get_caller_claims(event).get(EXPORT_OWNER_CLAIM) if caller == EXPORT_SERVICE else None
+    return owner if isinstance(owner, str) and owner else caller
+
 
 def limited(dispatch: Handler) -> Handler:
     """``dispatch`` behind the daily limit: a paid one-off request past it answers 429 and is not dispatched."""
     def guarded(event: dict[str, Any], context: Any) -> dict[str, Any]:
         paid = is_paid(str(event.get('httpMethod') or ''), str(event.get('path') or ''))
-        if paid and not take(get_caller_identity(event) or 'unknown'):
+        if paid and not take(spender(event)):
             return api_response(429, {
                 'error': f'You have made {limit()} paid SEO requests today (UTC); the limit resets at midnight UTC',
                 'code': 'DAILY_LIMIT',

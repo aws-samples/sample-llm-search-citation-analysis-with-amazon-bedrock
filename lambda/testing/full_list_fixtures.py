@@ -90,8 +90,8 @@ def oracle_values(routes: TenantRoutes, route_list: RouteList, query: Mapping[st
 
 
 def over_tenant(source: RouteSource, routes: TenantRoutes) -> RouteSource:
-    """``source`` reading the tenant's routes, never sleeping (a 202 already ran its job)."""
-    return replace(source, invoker=routes, sleep=lambda _seconds: None)
+    """``source`` reading the tenant's routes (a 202 already ran its job)."""
+    return replace(source, invoker=routes)
 
 
 def short_paged(source: RouteSource, limit: int) -> RouteSource:
@@ -135,3 +135,16 @@ def without_build(tenant: EndToEndTenant) -> Generator[None]:
         yield
     finally:
         tenant.bucket.objects[key] = saved
+
+
+def answered_page(
+    tenant: EndToEndTenant, query: Mapping[str, str], token: str | None = None, *, handler: str, path: str,
+) -> dict[str, Any]:
+    """The 200 body of ``path`` at ``token``; a 202 runs the tenant's view jobs and asks once more."""
+    params = {**query, **({'next_token': token} if token else {})}
+    status, body = tenant.call(handler, path, params)
+    if status == 202:
+        tenant.run_jobs()
+        status, body = tenant.call(handler, path, params)
+    assert status == 200, body
+    return body

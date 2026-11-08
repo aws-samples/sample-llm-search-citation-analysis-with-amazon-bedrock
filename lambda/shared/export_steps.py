@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -48,6 +49,7 @@ from shared.export_contract import (
     export_object_key,
 )
 from shared.export_jobs import ExportJobs, StaleExportError, item_cursor, item_owner, item_writer_state
+from shared.export_source_routes import reading_for
 from shared.export_writers import (
     PART_BYTES,
     FileOutput,
@@ -182,12 +184,15 @@ def chunk(deps: ExportDeps, export_id: str, deadline: Deadline) -> dict[str, Any
     writer = open_writer(item['format'], source.sheets, output, state, pending, deps.sheet_rows)
     upload = _upload(deps, item)
     reading = _Reading(item_cursor(item))
-    rows = source.rows(dict(item.get('params') or {}), reading.cursor, deadline)
-    done = _write_rows(rows, reading, lambda row: (writer.write_row(row), upload.send_full_parts(output)), deadline)
+    # Paid reads count against the owner's own daily limit, not one shared service identity (tenet 4, D4).
+    with reading_for(str(item_owner(item).username)) as read:
+        rows = source.rows(dict(item.get('params') or {}), reading.cursor, deadline)
+        done = _write_rows(rows, reading, lambda row: (writer.write_row(row), upload.send_full_parts(output)), deadline)
     if done:
         writer.close()
         upload.send_rest(output)
-    progress = _Progress(writer.rows, writer.truncated_cells, reading.cursor, reading.written + reading.marks, done)
+    waiting = None if done else read.wait_seconds
+    progress = _Progress(writer.rows, writer.truncated_cells, reading.cursor, reading.written + reading.marks, done, waiting)
     return _checkpoint(deps, item, progress, output, upload, writer.checkpoint())
 
 
@@ -231,6 +236,8 @@ class _Progress:
     advanced: int
     """Rows written plus progress marks read: 0 is a stall."""
     done: bool
+    wait_seconds: float | None = None
+    """A view job the source reads is computing: wait this long before the next chunk (not a stall)."""
 
 
 def _checkpoint(
@@ -238,7 +245,8 @@ def _checkpoint(
     writer_checkpoint: tuple[dict[str, Any], bytes],
 ) -> dict[str, Any]:
     previous = int(item.get('chunks') or 0)
-    stalls = 0 if progress.advanced or progress.done else int(item.get('stalls') or 0) + 1
+    waiting = progress.wait_seconds is not None
+    stalls = 0 if progress.advanced or progress.done or waiting else int(item.get('stalls') or 0) + 1
     if stalls >= STALL_LIMIT:
         raise ExportStepError(f'export {item["export_id"]} made no progress in {stalls} chunks')
     changes: dict[str, Any] = {
@@ -260,7 +268,11 @@ def _checkpoint(
         _delete_checkpoint(deps.s3, deps.bucket, item, previous + 1)
         raise
     _delete_checkpoint(deps.s3, deps.bucket, item, previous)
-    return {'export_id': item['export_id'], 'done': progress.done}
+    answer: dict[str, Any] = {'export_id': item['export_id'], 'done': progress.done}
+    if waiting:
+        # The state machine's WaitForViewJob reads it: no Lambda runs while the job computes.
+        answer['wait_seconds'] = max(1, math.ceil(progress.wait_seconds or 0))
+    return answer
 
 
 def finalize(deps: ExportDeps, export_id: str) -> dict[str, Any]:

@@ -7,6 +7,7 @@ list; the templates read is a scan answered in several pages.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -15,7 +16,7 @@ import pytest
 from testing.content_studio_fixtures import load_content_studio_module
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
 from testing.events import api_gateway_event, parse_response
-from testing.full_list_fixtures import drain, without_build
+from testing.full_list_fixtures import answered_page, drain, without_build
 from testing.scale_data import ScaleSpec, group_id, market_id
 
 SPEC = ScaleSpec()
@@ -36,13 +37,7 @@ def no_seasonal_ideas() -> Any:
         yield
 
 
-def _ask(tenant: EndToEndTenant, query: Mapping[str, str], token: str | None = None) -> dict[str, Any]:
-    status, body = tenant.call(_HANDLER, _PATH, {**query, **({'next_token': token} if token else {})})
-    if status == 202:
-        tenant.run_jobs()
-        status, body = tenant.call(_HANDLER, _PATH, {**query, **({'next_token': token} if token else {})})
-    assert status == 200, body
-    return body
+_ask = partial(answered_page, handler=_HANDLER, path=_PATH)
 
 
 def _ids_dropped(ideas: list[dict[str, Any]]) -> list[dict[str, Any]]:

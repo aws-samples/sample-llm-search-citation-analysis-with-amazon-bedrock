@@ -7,8 +7,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.export_contract import Caller, ExportCursor, ExportRow, ExportRows, ExportRowSource, RowsEnd
-from shared.export_source_routes import RouteRequest
+from shared.export_contract import Caller, ExportCursor, ExportMark, ExportRow, ExportRows, ExportRowSource, RowsEnd
+from shared.export_source_routes import RouteRequest, reading_for
 from shared.request_deadline import Deadline
 from testing.clocks import JumpClock
 
@@ -24,21 +24,41 @@ def expired_deadline() -> Deadline:
     return Deadline(0, lambda: 1.0)
 
 
-def drained(rows: ExportRows) -> tuple[list[ExportRow], RowsEnd]:
-    """The rows a source's ``rows()`` yields (progress marks left out) and how it ended."""
-    yielded: list[ExportRow] = []
+#: Computing answers ``all_rows`` waits through before it calls the source stuck.
+VIEW_JOB_WAITS = 5
+
+
+def _drained_items(rows: ExportRows) -> tuple[list[ExportRow | ExportMark], RowsEnd]:
+    yielded: list[ExportRow | ExportMark] = []
     while True:
         try:
-            item = next(rows)
+            yielded.append(next(rows))
         except StopIteration as stop:
             return yielded, stop.value
-        if isinstance(item, ExportRow):
-            yielded.append(item)
+
+
+def drained(rows: ExportRows) -> tuple[list[ExportRow], RowsEnd]:
+    """The rows a source's ``rows()`` yields (progress marks left out) and how it ended."""
+    items, end = _drained_items(rows)
+    return [item for item in items if isinstance(item, ExportRow)], end
 
 
 def all_rows(source: ExportRowSource, params: Mapping[str, str], cursor: ExportCursor | None = None) -> list[ExportRow]:
-    """Every row ``source`` yields after ``cursor`` under a deadline that never runs out (it must say it finished)."""
-    rows, end = drained(source.rows(params, cursor, long_deadline()))
+    """
+    Every row ``source`` yields after ``cursor`` under a deadline that never runs out (it must say it finished).
+
+    A source stopping for a view job still computing is read again from its last cursor, as the export state
+    machine does after ``WaitForViewJob`` (the test routes already ran the job).
+    """
+    rows: list[ExportRow] = []
+    end = RowsEnd.STOPPED
+    for _attempt in range(VIEW_JOB_WAITS):
+        with reading_for(USER.sub) as read:
+            items, end = _drained_items(source.rows(params, cursor, long_deadline()))
+        rows += [item for item in items if isinstance(item, ExportRow)]
+        cursor = items[-1].cursor if items else cursor
+        if end is not RowsEnd.STOPPED or read.wait_seconds is None:
+            break
     assert end is RowsEnd.FINISHED, f'the source ended {end}'
     return rows
 
@@ -52,6 +72,16 @@ def resumed_from_every_row(source: ExportRowSource, params: Mapping[str, str], r
     for index, row in enumerate(rows):
         cursor = json.loads(json.dumps(row.cursor))
         yield index, all_rows(source, params, cursor)
+
+
+def resumes_from_every_row(source: ExportRowSource, params: Mapping[str, str], more_than: int | None = None) -> bool:
+    """
+    Whether reading ``source`` again from each row's cursor gives exactly the rows after it (no repeat, no skip),
+    and it yields more than ``more_than`` rows (when given: enough that the cursor crosses pages).
+    """
+    rows = all_rows(source, params)
+    resumed = {index: row_values(rest) for index, rest in resumed_from_every_row(source, params, rows)}
+    return (more_than is None or len(rows) > more_than) and resumed == {index: row_values(rows[index + 1:]) for index in range(len(rows))}
 
 
 @dataclass
@@ -98,6 +128,3 @@ def numbered_items(count: int) -> list[dict[str, Any]]:
     return [{'name': f'item-{index:03d}', 'rank': index + 1, 'tags': ['a', 'b'], 'kpis': {'rate': index / 10}} for index in range(count)]
 
 
-def counting_sleeps() -> tuple[list[float], Callable[[float], None]]:
-    waits: list[float] = []
-    return waits, waits.append

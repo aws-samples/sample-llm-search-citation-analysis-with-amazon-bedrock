@@ -462,8 +462,10 @@ function exportStep(
 
 /**
  * `CitationAnalysis-Export`: Prepare → ExportChunk until every row is
- * written → Finalize; anything that escapes a step runs MarkFailed (abort
- * the upload, mark the export failed) and fails the execution.
+ * written → Finalize; a chunk that met a view job still computing answers
+ * `wait_seconds` and the execution waits in `WaitForViewJob` before the next
+ * chunk. Anything that escapes a step runs MarkFailed (abort the upload,
+ * mark the export failed) and fails the execution.
  */
 function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfunctions.StateMachine {
   const markFailed = exportStep(scope, 'MarkExportFailed', worker, 'fail', { 'error.$': '$.error' });
@@ -480,8 +482,14 @@ function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfun
   for (const task of [prepare, chunk, finalize]) {
     task.addCatch(markFailed, { errors: ['States.ALL'], resultPath: '$.error' });
   }
+  // A view job the export reads is still computing: wait here (nothing is billed) instead of in the worker.
+  const waitForViewJob = new stepfunctions.Wait(scope, 'WaitForViewJob', {
+    time: stepfunctions.WaitTime.secondsPath('$.wait_seconds'),
+  });
+  waitForViewJob.next(chunk);
   const allRowsWritten = new stepfunctions.Choice(scope, 'AllRowsWritten')
     .when(stepfunctions.Condition.booleanEquals('$.done', true), finalize)
+    .when(stepfunctions.Condition.isPresent('$.wait_seconds'), waitForViewJob)
     .otherwise(chunk);
   const role = new iam.Role(scope, 'ExportStateMachineRole', {
     roleName: 'CitationAnalysis-ExportStateMachineRole',

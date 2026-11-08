@@ -58,7 +58,7 @@ def _history(count: int) -> list[dict[str, Any]]:
 
 def test_history_lists_every_piece_across_pages():
     route = PagedRoute(_history(230), list_key='history')
-    source = replace(CONTENT_HISTORY, invoker=route, sleep=lambda _seconds: None)
+    source = replace(CONTENT_HISTORY, invoker=route)
 
     rows = all_rows(source, {})
 

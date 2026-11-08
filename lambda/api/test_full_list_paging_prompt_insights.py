@@ -8,13 +8,14 @@ live, the body's first page and its tokens reach it.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 import pytest
 
 from shared.prompt_classification import TYPE_LISTS
 from testing.end_to_end_tenant import EndToEndTenant, built_tenant
-from testing.full_list_fixtures import drain, without_build
+from testing.full_list_fixtures import answered_page, drain, without_build
 from testing.scale_data import ScaleSpec, group_id, keyword_text, market_id
 
 SPEC = ScaleSpec()
@@ -33,13 +34,7 @@ def tenant() -> EndToEndTenant:
     return built_tenant(SPEC)
 
 
-def _ask(tenant: EndToEndTenant, query: Mapping[str, str], token: str | None = None) -> dict[str, Any]:
-    status, body = tenant.call(_HANDLER, _PATH, {**query, **({'next_token': token} if token else {})})
-    if status == 202:
-        tenant.run_jobs()
-        status, body = tenant.call(_HANDLER, _PATH, {**query, **({'next_token': token} if token else {})})
-    assert status == 200, body
-    return body
+_ask = partial(answered_page, handler=_HANDLER, path=_PATH)
 
 
 def _uncapped(tenant: EndToEndTenant, scope: Mapping[str, str], tab: str) -> list[Any]:
