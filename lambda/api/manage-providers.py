@@ -33,7 +33,12 @@ from shared.ai_clients import (
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
-from shared.config import enabled_without_config
+from shared.config import (
+    SEO_DAILY_CALL_LIMIT_ATTRIBUTE,
+    SEO_DAILY_CALL_LIMIT_MAX,
+    enabled_without_config,
+    seo_daily_call_limit,
+)
 from shared.dataforseo_client import BILLING_MESSAGE, DEFAULT_BASE_URL, response_error
 from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
@@ -369,6 +374,21 @@ def save_provider_enabled(provider_id: str, enabled: bool) -> bool:
         dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(**_enabled_update(provider_id, enabled))
     except Exception:
         logger.exception("Error saving provider config")
+        return False
+    return True
+
+
+def save_daily_call_limit(value: int) -> bool:
+    """Persist the daily limit of paid DataForSEO calls per user on the ``dataforseo`` row, leaving the rest alone."""
+    try:
+        dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(
+            Key={'provider_id': DATAFORSEO},
+            UpdateExpression='SET #limit = :limit, updated_at = :ts',
+            ExpressionAttributeNames={'#limit': SEO_DAILY_CALL_LIMIT_ATTRIBUTE},
+            ExpressionAttributeValues={':limit': value, ':ts': get_timestamp()},
+        )
+    except Exception:
+        logger.exception("Error saving the daily SEO call limit")
         return False
     return True
 
@@ -995,11 +1015,17 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             'type': info.get('type', PROVIDER_TYPE_LLM),
             **{field: info[field] for field in _PASSTHROUGH_FIELDS if field in info},
             **_key_state_fields(provider_id, config, secret_status),
+            **_limit_fields(provider_id, config),
             'last_updated': secret_status.get('last_updated'),
             **provider_health_fields(config),
         })
 
     return success_response({'providers': providers}, event)
+
+
+def _limit_fields(provider_id: str, config: Mapping[str, Any]) -> dict[str, Any]:
+    """DataForSEO: the daily limit of paid one-off calls per user that the SEO API enforces."""
+    return {'daily_call_limit': seo_daily_call_limit(config)} if provider_id == DATAFORSEO else {}
 
 
 def _key_state_fields(provider_id: str, config: Mapping[str, Any], secret_status: Mapping[str, Any]) -> dict[str, Any]:
@@ -1057,6 +1083,8 @@ class _ProviderUpdate:
     """The override to store when ``set_model``; ``None`` returns the provider to its default model."""
     proven: bool = False
     """A real call answered with the key, so the provider's health record gets a fresh success."""
+    daily_call_limit: int | None = None
+    """DataForSEO only: paid one-off calls each user may make per UTC day (0: none)."""
 
 
 def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate | dict:
@@ -1076,6 +1104,11 @@ def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate 
         update.api_key = api_key
     if 'enabled' in body:
         update.enabled = bool(body['enabled'])
+    if 'daily_call_limit' in body:
+        limit = _requested_daily_call_limit(provider_id, body['daily_call_limit'], event)
+        if isinstance(limit, dict):
+            return limit
+        update.daily_call_limit = limit
     if 'model' in body:
         if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
             return validation_error('The model of this provider cannot be changed', event, 'model')
@@ -1088,6 +1121,18 @@ def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate 
             )
         update.set_model, update.model = True, model
     return update
+
+
+def _requested_daily_call_limit(provider_id: str, value: object, event: dict) -> int | dict:
+    """The requested limit, or the 400 for a provider without one or a value outside 0 to the maximum."""
+    if provider_id != DATAFORSEO:
+        return validation_error('Only DataForSEO has a daily call limit', event, 'daily_call_limit')
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= SEO_DAILY_CALL_LIMIT_MAX:
+        return validation_error(
+            f'daily_call_limit is a whole number from 0 (paid calls off) to {SEO_DAILY_CALL_LIMIT_MAX}',
+            event, 'daily_call_limit',
+        )
+    return value
 
 
 def _failed_check(check: Mapping[str, Any], error: str, event: dict) -> dict:
@@ -1169,6 +1214,8 @@ def _save_update(update: _ProviderUpdate, event: dict) -> dict | None:
         saved.append('enabled')
     if update.set_model and not save_provider_model(update.provider_id, update.model):
         return _save_failure('Failed to save model', saved, event)
+    if update.daily_call_limit is not None and not save_daily_call_limit(update.daily_call_limit):
+        return _save_failure('Failed to save the daily call limit', saved, event)
     if update.proven:
         record_provider_success(dynamodb.Table(PROVIDER_CONFIG_TABLE), update.provider_id)
     return None
@@ -1224,7 +1271,7 @@ def _enable_probe(provider_id: str, api_key: str, config: dict) -> dict:
 @parse_json_body
 @_with_known_provider
 def handle_update_provider(event: dict, context: Any, provider_id: str, body: dict | None = None) -> dict:
-    """PUT /providers/{id} - Update provider configuration (enabled, API key, model).
+    """PUT /providers/{id} - Update provider configuration (enabled, API key, model; DataForSEO: daily call limit).
 
     Admin-only: this route writes Secrets Manager, and `configMgmtFunction`'s
     role holds prefix-wide read *and* write over every `citation-analysis/*`
@@ -1259,6 +1306,7 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
     return success_response({
         'id': provider_id,
         **_key_state_fields(provider_id, config, secret_status),
+        **_limit_fields(provider_id, config),
         **_model_fields(provider_id, config),
     }, event)
 

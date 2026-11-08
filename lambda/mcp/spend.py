@@ -41,6 +41,7 @@ from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN
 from shared.markets import keyword_market_id
 from shared.request_deadline import current_deadline
 from shared.research_agent import AGENT_DEFAULT_ROUNDS, AGENT_MAX_QUERIES_PER_ROUND
+from shared.seo_paid_routes import is_paid
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -54,8 +55,12 @@ PLAIN_KEYWORD_ENGINES = frozenset({'google_ai_overview'})
 SIGNALS_PROVIDER = 'serpapi'
 #: Keyword pages (1,000 rows scanned each) an estimate reads before it gives up counting.
 MAX_KEYWORD_PAGES = 20
-#: The UTC-day counter each family draws from.
-COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs', 'seo': 'seo_calls'}
+#: The UTC-day counter each family draws from here. ``seo`` has none: the SEO API counts every billed DataForSEO
+#: call of a paid lookup against the user's one daily limit, set in Settings, whatever client sent it
+#: (``shared.seo_spend_limit``), and an Admin's SEO job is confirmed on its own.
+COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs'}
+#: The free route answering the caller's paid DataForSEO calls today and the limit.
+SEO_DAILY_CALLS_PATH = '/api/seo/daily-calls'
 _RUNNING = 'RUNNING'
 
 
@@ -269,7 +274,6 @@ _DAILY_WHAT = {
     'run': 'analysis runs',
     'research': 'research or content jobs',
     'content': 'research or content jobs',
-    'seo': 'DataForSEO lookups or SEO jobs',
 }
 
 
@@ -300,14 +304,39 @@ class _Call:
 
 def _per_day(family: str) -> int:
     limits = state.limits()
-    return {'run': limits.runs_per_day, 'seo': limits.seo_calls_per_day}.get(family, limits.jobs_per_day)
+    return limits.runs_per_day if family == 'run' else limits.jobs_per_day
 
 
 def _limit_message(family: str) -> str:
     return f'Limit reached: {_per_day(family)} {_DAILY_WHAT[family]} per caller per UTC day (resets {state.next_reset()})'
 
 
+def _seo_limit_status(caller: Caller) -> JsonObject:
+    """The caller's shared daily budget of paid DataForSEO calls, as the SEO API counts it."""
+    calls = _read(caller, 'seo', SEO_DAILY_CALLS_PATH)
+    return {
+        'used_today': int(calls.get('used') or 0),
+        'per_day': int(calls.get('limit') or 0),
+        'remaining_today': int(calls.get('remaining') or 0),
+        'resets_at': str(calls.get('resets_at') or state.next_reset()),
+    }
+
+
+def _seo_blocker(route: Route, estimate: Estimate, limits: JsonObject) -> str | None:
+    """Why a paid lookup cannot start: it could make more calls than the caller has left today."""
+    if not is_paid(route.method, route.path):
+        return None
+    calls = int(estimate.counts.get('dataforseo_calls') or 0)
+    if calls <= limits['remaining_today']:
+        return None
+    return (f'Limit reached: this lookup can make {calls} paid DataForSEO call(s) and {limits["remaining_today"]} '
+            f'of the {limits["per_day"]} per user per UTC day are left (resets {limits["resets_at"]}; an Admin '
+            'sets the limit in Settings > AI Providers > SEO data)')
+
+
 def _limit_status(caller: Caller, family: str) -> JsonObject:
+    if family == 'seo':
+        return _seo_limit_status(caller)
     status: JsonObject = {
         'used_today': state.used_today(caller.sub, COUNTERS[family]),
         'per_day': _per_day(family),
@@ -335,10 +364,12 @@ def _estimate_result(call: _Call, estimate: Estimate, limits: JsonObject, token:
 def _estimate(call: _Call, route: Route, arguments: JsonObject) -> JsonObject:
     try:
         estimate = ESTIMATORS[call.family](call.caller, route, arguments)
+        limits = _limit_status(call.caller, call.family)
     except UpstreamError as error:
         return call.upstream(error, arguments)
-    limits = _limit_status(call.caller, call.family)
-    if estimate.blocker is None and limits['used_today'] >= limits['per_day']:
+    if estimate.blocker is None and call.family == 'seo':
+        estimate.blocker = _seo_blocker(route, estimate, limits)
+    elif estimate.blocker is None and limits['used_today'] >= limits['per_day']:
         estimate.blocker = _limit_message(call.family)
     if estimate.blocker is not None:
         call.audit('estimate_blocked', estimate.blocker)
@@ -393,19 +424,23 @@ def _run_refusal(caller: Caller, scope: JsonObject) -> str | None:
 
 
 def _spend(call: _Call, route: Route, arguments: JsonObject) -> JsonObject:
-    """Reserve today's use, replay the request, and give the use back when nothing started."""
-    counter = COUNTERS[call.family]
-    day = state.reserve(call.caller.sub, counter, _per_day(call.family))
+    """Reserve today's use, replay the request, and give the use back when nothing started.
+
+    An ``seo`` spend reserves nothing here: the SEO API counts its billed calls against the shared daily limit
+    and answers 429 ``DAILY_LIMIT`` past it.
+    """
+    counter = COUNTERS.get(call.family)
+    day = state.reserve(call.caller.sub, counter, _per_day(call.family)) if counter else ''
     if day is None:
         return call.refuse('limit_reached', _limit_message(call.family))
     answer = replay(call.tool_name, call.operation, route, call.caller, call.started)
     if isinstance(answer, Unanswered):
         # A request that may have started keeps today's use: the cautious answer for a spend.
-        if not answer.maybe_ran:
+        if counter and not answer.maybe_ran:
             state.release(call.caller.sub, counter, day)
         return answer.result
     status, body = answer
-    if not 200 <= status < 300:
+    if counter and not 200 <= status < 300:
         state.release(call.caller.sub, counter, day)
     elif call.family == 'run' and isinstance(body, dict) and body.get('execution_arn'):
         state.record_run(call.caller.sub, str(body['execution_arn']))

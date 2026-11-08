@@ -22,6 +22,13 @@ export function allow(grantee: iam.IGrantable, actions: string[], resources: str
   grantee.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({ actions, resources }));
 }
 
+/** {@link allow}, only when `conditions` hold (for example `dynamodb:LeadingKeys`, to reach some items only). */
+export function allowWhere(
+  grantee: iam.IGrantable, actions: string[], resources: string[], conditions: Record<string, unknown>
+): void {
+  grantee.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({ actions, resources, conditions }));
+}
+
 /** An imported provider API key secret `citation-analysis/<keyName>-key`; an admin creates it from the dashboard. */
 export function apiKeySecret(scope: Construct, id: string, keyName: string): secretsmanager.ISecret {
   return secretsmanager.Secret.fromSecretNameV2(scope, id, `citation-analysis/${keyName}-key`);

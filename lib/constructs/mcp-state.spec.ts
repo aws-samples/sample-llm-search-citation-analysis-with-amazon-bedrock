@@ -56,7 +56,7 @@ describe('grantTo', () => {
 
   it('passes the default limits as MCP_LIMITS', () => {
     expect(extractStateEnvVars(template).MCP_LIMITS).toBe(
-      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"seoCallsPerDay":50}'
+      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}'
     );
   });
 
@@ -70,7 +70,7 @@ describe('grantTo', () => {
 describe('readMcpLimits', () => {
   it('keeps the defaults without the context', () => {
     expect(limitsFromContext(undefined)).toStrictEqual({
-      runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50, seoCallsPerDay: 50,
+      runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50,
     });
   });
 
@@ -80,8 +80,9 @@ describe('readMcpLimits', () => {
     });
   });
 
-  it('accepts a daily limit of DataForSEO lookups and SEO jobs', () => {
-    expect(limitsFromContext({ seoCallsPerDay: 10 }).seoCallsPerDay).toBe(10);
+  it('refuses the removed seoCallsPerDay and names where the limit moved', () => {
+    expect(() => limitsFromContext({ seoCallsPerDay: 10 })).toThrow("'seoCallsPerDay' was removed: since 2.47.0");
+    expect(() => limitsFromContext({ seoCallsPerDay: 10 })).toThrow('Settings > AI Providers > SEO data');
   });
 
   it('accepts a JSON string from the command line', () => {

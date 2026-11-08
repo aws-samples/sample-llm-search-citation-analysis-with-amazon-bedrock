@@ -45,8 +45,8 @@ describe('CitationAnalysisMcpStack', () => {
     expect(policies).toContain('function:CitationAnalysis-SeoRouter"');
   });
 
-  it('gives the MCP server the default daily limit of DataForSEO lookups and SEO jobs', () => {
-    expect(JSON.stringify(extractLambdaEnvVars(template, 'CitationAnalysis-Mcp'))).toContain('\\"seoCallsPerDay\\":50');
+  it('gives the MCP server no SEO limit of its own: the SEO API counts every client against one', () => {
+    expect(JSON.stringify(extractLambdaEnvVars(template, 'CitationAnalysis-Mcp'))).not.toContain('seoCallsPerDay');
   });
 
   it('leaves the main stack without MCP resources', () => {

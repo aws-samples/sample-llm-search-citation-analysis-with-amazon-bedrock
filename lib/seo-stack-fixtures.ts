@@ -52,6 +52,8 @@ interface SeoStackSnapshot {
   aiOverviewS3Actions: string[];
   routerKeywordMetricsActions: string[];
   routerCacheActions: string[];
+  /** The router's statements on the ProviderConfig and McpState tables (the daily call limit and its audit). */
+  routerLimitStatements: unknown[];
   mainResourceCount: number;
   /** The main workflow's SearchAllProviders branch start states. */
   mainBranchStarts: unknown[];
@@ -169,6 +171,8 @@ export function synthesizeSeoStackSnapshot(): SeoStackSnapshot {
     aiOverviewS3Actions: roleActions(template, AI_OVERVIEW_SEARCH, 's3:'),
     routerKeywordMetricsActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoKeywordMetrics'),
     routerCacheActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoCache'),
+    routerLimitStatements: roleStatements(template, SEO_ROUTER).filter((statement) => /CitationAnalysis-(ProviderConfig|McpState)/
+      .test(JSON.stringify(resolvePath(statement, ['Resource'])))),
     mainResourceCount: resourceCount(mainTemplate),
     mainBranchStarts: branchStarts(mainTemplate),
     mainSearchTasks: searchTasks(mainTemplate),

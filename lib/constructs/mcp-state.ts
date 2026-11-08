@@ -25,8 +25,6 @@ export interface McpLimits {
   readonly jobsPerDay: number;
   /** Keywords one `start_run` may cover. */
   readonly maxRunKeywords: number;
-  /** DataForSEO lookups and SEO jobs (the `run_seo_*` and `start_seo_job` tools) a caller may start per UTC day. */
-  readonly seoCallsPerDay: number;
 }
 
 export const DEFAULT_MCP_LIMITS: McpLimits = {
@@ -34,8 +32,17 @@ export const DEFAULT_MCP_LIMITS: McpLimits = {
   runsPerDay: 5,
   jobsPerDay: 20,
   maxRunKeywords: 50,
-  seoCallsPerDay: 50,
 };
+
+/**
+ * Limits that moved out of `mcpLimits`, with where they went: synth names the new place instead of
+ * "unknown limit", so an old `cdk.json` says what to do.
+ */
+const MOVED_LIMITS: ReadonlyMap<string, string> = new Map([[
+  'seoCallsPerDay',
+  'since 2.47.0 one daily limit of paid DataForSEO calls per user covers the dashboard, the API and MCP; an Admin '
+    + 'sets it in Settings > AI Providers > SEO data. Remove it from mcpLimits',
+]]);
 
 /** The item operations `state.py` performs; no Scan and no batch writes. */
 const STATE_ACTIONS = [
@@ -71,6 +78,8 @@ function decodeJson(raw: string): unknown {
 }
 
 function limitValue(key: string, value: unknown): number {
+  const moved = MOVED_LIMITS.get(key);
+  if (moved !== undefined) throw new InvalidMcpLimitsError(`'${key}' was removed: ${moved}`);
   if (!(key in DEFAULT_MCP_LIMITS)) {
     throw new InvalidMcpLimitsError(`unknown limit '${key}' (known: ${Object.keys(DEFAULT_MCP_LIMITS).join(', ')})`);
   }

@@ -167,7 +167,8 @@ Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0`
 | `runsPerDay` | 5 | Analysis runs you can start per UTC day |
 | `jobsPerDay` | 20 | Research jobs and content briefs together, per UTC day |
 | `maxRunKeywords` | 50 | Keywords one `start_run` can cover; counted at the estimate and again at the start |
-| `seoCallsPerDay` | 50 | DataForSEO lookups and SEO jobs together (`run_seo_*`, `start_seo_job`), per UTC day |
+
+DataForSEO lookups (`run_seo_*`) have no MCP limit of their own: they draw on the one daily limit of paid DataForSEO calls per user that an Admin sets in Settings › AI Providers › SEO data (default 100, see [seo.md](seo.md#who-can-do-what)), the same budget the dashboard and the REST API use. `estimate_seo_*` shows that budget under `limits` and gives no token when the lookup could make more calls than are left. Past it, the SEO API answers 429 `DAILY_LIMIT`. Admin SEO jobs (`start_seo_job`) are confirmed with their price and not counted. `seoCallsPerDay` was removed in 2.47.0; an old value fails synth with a message saying where the limit moved.
 
 A refusal names the limit and, for the daily ones, when it resets (midnight UTC). The keyword cap is checked by counting the scope's active keywords page by page; the count stops as soon as it passes `maxRunKeywords`. If it cannot finish inside the request's time budget the start is refused ("The scope's keywords could not all be counted (too many, or the API was slow)"), because a spend is never started on a guess. A start that the API itself refuses gives the day's use back. A start that timed out keeps it, because the run may have started. Runs in flight that cannot be checked in time count as running.
 

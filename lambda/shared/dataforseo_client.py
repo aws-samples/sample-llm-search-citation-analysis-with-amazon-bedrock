@@ -178,11 +178,33 @@ def _log_call(record: _CallRecord) -> None:
         logger.warning('%s', line)
 
 
+#: Runs before each billed call (a POST: DataForSEO bills POSTs, its GETs are free) and raises
+#: ``DataForSeoError`` to refuse it; set by the SEO router's daily limit (``shared.seo_spend_limit``).
+_billed_call_guard: ContextVar[Callable[[str], None] | None] = ContextVar('dataforseo_billed_call_guard', default=None)
+
+
+@contextmanager
+def guarding_billed_calls(guard: Callable[[str], None]) -> Generator[None]:
+    """Every billed call made inside first passes ``guard(path)``, which raises to refuse it (nothing is sent)."""
+    token = _billed_call_guard.set(guard)
+    try:
+        yield
+    finally:
+        _billed_call_guard.reset(token)
+
+
+def _check_billed(method: str, path: str) -> None:
+    guard = _billed_call_guard.get()
+    if guard is not None and method == 'POST':
+        guard(path)
+
+
 @contextmanager
 def _logged_call(method: str, path: str) -> Generator[_CallRecord]:
     """The one structured log line of a call, with the error code of a failure."""
     record = _CallRecord(method, path, _monotonic())
     try:
+        _check_billed(method, path)
         yield record
     except DataForSeoError as error:
         record.error_code = error.code

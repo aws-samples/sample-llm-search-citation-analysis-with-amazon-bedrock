@@ -186,3 +186,25 @@ __all__ = [
     'top_level_error',
     'user_data_envelope',
 ]
+
+
+@dataclass
+class InMemorySpendCounter:
+    """The daily spend counters of ``CitationAnalysis-SeoCache`` (``shared.seo_spend_limit.take``), condition included."""
+
+    items: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def update_item(self, **kwargs: Any) -> None:
+        key = kwargs['Key']['cache_key']
+        values = kwargs['ExpressionAttributeValues']
+        calls = int(self.items.get(key, {}).get('calls', 0))
+        if calls >= values[':limit']:
+            raise conditional_check_failure('UpdateItem')
+        self.items[key] = {'cache_key': key, 'calls': calls + values[':one'], 'ttl': values[':ttl']}
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]:
+        item = self.items.get(kwargs['Key']['cache_key'])
+        return {'Item': item} if item else {}
+
+    def calls_of(self, user: str) -> int:
+        return sum(int(item['calls']) for key, item in self.items.items() if key.startswith(f'spend#{user}#'))

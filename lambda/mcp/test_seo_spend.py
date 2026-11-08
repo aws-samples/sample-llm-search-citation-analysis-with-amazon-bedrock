@@ -30,6 +30,13 @@ ESTIMATE_OF = {
     'start_seo_job': 'estimate_seo_job',
 }
 SERP_ANSWER = {'keyword': 'hotel coruña', 'items': [{'position': 1, 'url': 'https://example.com/'}], 'cached': False}
+DAILY_CALLS_PATH = '/api/seo/daily-calls'
+RESETS = '2026-10-08T00:00:00Z'
+
+
+def daily_calls(used: int, limit: int = 100) -> dict:
+    """The SEO API's answer about the caller's paid DataForSEO calls today."""
+    return {'used': used, 'limit': limit, 'remaining': max(limit - used, 0), 'resets_at': RESETS}
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +49,7 @@ def seo_router(monkeypatch, api) -> FakeRouters:
     fake.answer('POST', ESTIMATE_PATH, 200, {'keyword_count': 3, 'pairs': 6})
     fake.answer('POST', '/api/seo/rank-trackers/trk-1/runs', 202, {'run': {'run_id': 'run-1'}})
     fake.answer('GET', SNAPSHOT_PATH, 200, {'domains': [{'domain': 'example.com'}, {'domain': 'example.org'}]})
+    fake.answer('GET', DAILY_CALLS_PATH, 200, daily_calls(0))
     return fake
 
 
@@ -105,15 +113,10 @@ class TestLookupEstimates:
         assert sorted(data) == ['can_start', 'confirmation_token', 'dataforseo_calls', 'expires_at', 'limits',
                                 'notes', 'price_per_call']
 
-    def test_calls_no_api_when_estimating_a_lookup(self, seo_router, estimated):
+    def test_reads_only_the_free_daily_budget_when_estimating_a_lookup(self, seo_router, estimated):
         estimated('estimate_seo_keywords', SERP)
 
-        assert seo_router.events == []
-
-    def test_shows_the_seo_daily_limit_in_the_estimate(self, estimated):
-        assert estimated('estimate_seo_keywords', SERP)['limits'] == {
-            'used_today': 0, 'per_day': 50, 'resets_at': '2026-10-08T00:00:00Z',
-        }
+        assert [(event['httpMethod'], event['path']) for event in seo_router.events] == [('GET', DAILY_CALLS_PATH)]
 
 
 class TestLookupStarts:
@@ -148,33 +151,46 @@ class TestLookupStarts:
 
 
 class TestDailyLimit:
-    def test_refuses_the_second_lookup_when_one_per_day_is_allowed(self, spend, call, monkeypatch):
-        monkeypatch.setenv('MCP_LIMITS', json.dumps({'seoCallsPerDay': 1}))
-        token = confirmation_of(call('estimate_seo_keywords', SERP))
-        spend('run_seo_keywords', SERP)
+    """One budget for every client: the SEO API counts the calls, the MCP server only reads and passes it on."""
 
-        result = spend('run_seo_keywords', SERP, token=token)
+    def test_shows_the_shared_budget_the_seo_api_counts(self, estimated, seo_router):
+        seo_router.answer('GET', DAILY_CALLS_PATH, 200, daily_calls(40))
 
-        assert structured_error(result) == (
-            'Limit reached: 1 DataForSEO lookups or SEO jobs per caller per UTC day (resets 2026-10-08T00:00:00Z)'
-        )
+        assert estimated('estimate_seo_keywords', SERP)['limits'] == {
+            'used_today': 40, 'per_day': 100, 'remaining_today': 60, 'resets_at': RESETS,
+        }
 
-    def test_counts_each_started_lookup_in_the_seo_counter(self, spend, state_table):
-        spend('run_seo_keywords', SERP)
+    def test_gives_no_token_when_the_lookup_could_pass_todays_limit(self, estimated, seo_router):
+        seo_router.answer('GET', DAILY_CALLS_PATH, 200, daily_calls(100))
 
-        counter = state_table.partition(f'limit#{CALLER_SUB}')[0]
-        assert (counter['sk'], counter['used']) == ('seo_calls#2026-10-07', 1)
+        data = estimated('estimate_seo_keywords', SERP)
 
-    def test_gives_the_use_back_when_the_lookup_failed(self, seo_router, spend, state_table):
-        seo_router.answer('POST', '/api/seo/serp', 502, {'error': 'DataForSEO is unavailable, try again later'})
-        spend('run_seo_keywords', SERP)
+        assert (data['can_start'], data['reason']) == (False, (
+            'Limit reached: this lookup can make 1 paid DataForSEO call(s) and 0 of the 100 per user per UTC day '
+            f'are left (resets {RESETS}; an Admin sets the limit in Settings > AI Providers > SEO data)'
+        ))
 
-        assert state_table.partition(f'limit#{CALLER_SUB}')[0]['used'] == 0
-
-    def test_gives_no_token_when_todays_seo_calls_are_used_up(self, estimated, monkeypatch):
-        monkeypatch.setenv('MCP_LIMITS', json.dumps({'seoCallsPerDay': 0}))
+    def test_gives_no_token_when_an_admin_turned_paid_lookups_off(self, estimated, seo_router):
+        seo_router.answer('GET', DAILY_CALLS_PATH, 200, daily_calls(0, limit=0))
 
         assert estimated('estimate_seo_keywords', SERP)['can_start'] is False
+
+    def test_keeps_no_counter_of_its_own_for_a_lookup(self, spend, state_table):
+        spend('run_seo_keywords', SERP)
+
+        assert state_table.partition(f'limit#{CALLER_SUB}') == []
+
+    def test_passes_on_the_seo_apis_refusal_past_the_limit(self, seo_router, spend):
+        seo_router.answer('POST', '/api/seo/serp', 429, {'error': 'daily limit', 'code': 'DAILY_LIMIT'})
+
+        assert spend('run_seo_keywords', SERP)['structuredContent'] == {
+            'status': 429, 'error': 'daily limit', 'code': 'DAILY_LIMIT',
+        }
+
+    def test_lets_an_admin_job_start_whatever_the_lookup_budget(self, estimated, seo_router, admin):
+        seo_router.answer('GET', DAILY_CALLS_PATH, 200, daily_calls(100))
+
+        assert estimated('estimate_seo_job', RANK_RUN, admin)['can_start'] is True
 
 
 class TestJobs:

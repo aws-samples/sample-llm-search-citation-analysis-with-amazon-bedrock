@@ -5,6 +5,7 @@ Routes (every one behind the Cognito authorizer of ``CitationAnalysis-SeoApi``):
 - POST /api/seo/keywords/metrics, POST /api/seo/keywords/metrics/lookup -> seo-keyword-metrics handler
 - POST /api/seo/keywords/research, POST /api/seo/serp -> seo-keywords handler
 - GET  /api/seo/account -> seo-account handler (Admin)
+- GET  /api/seo/daily-calls -> seo-account handler (the caller's paid calls today and the limit)
 - GET  /api/seo/seo-geo -> seo-geo handler
 - /api/seo/local/... -> seo-local handler (business listings, local results, local jobs)
 - /api/seo/rank-trackers/... -> seo-rank-tracking handler
@@ -13,8 +14,8 @@ Routes (every one behind the Cognito authorizer of ``CitationAnalysis-SeoApi``):
 - /api/seo/audits/... -> seo-audits handler
 - /api/seo/lighthouse/..., /api/seo/indexnow/... -> seo-performance handler
 
-The paid one-off routes count against the caller's daily limit before they are dispatched
-(``shared.seo_spend_limit``): past it the answer is 429 ``DAILY_LIMIT`` and no DataForSEO call is made.
+Every billed DataForSEO call of a paid one-off route counts against the user's daily limit, set in Settings
+(``shared.seo_spend_limit``): the call that would pass it is not sent and the answer is 429 ``DAILY_LIMIT``.
 """
 
 import sys
@@ -31,6 +32,7 @@ ROUTE_MAP = {
     '/api/seo/keywords': 'seo-keywords.py',
     '/api/seo/serp': 'seo-keywords.py',
     '/api/seo/account': 'seo-account.py',
+    '/api/seo/daily-calls': 'seo-account.py',
     '/api/seo/seo-geo': 'seo-geo.py',
     '/api/seo/local': 'seo-local.py',
     '/api/seo/rank-trackers': 'seo-rank-tracking.py',
