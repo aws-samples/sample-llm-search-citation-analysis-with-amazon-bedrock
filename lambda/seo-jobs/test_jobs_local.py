@@ -10,7 +10,7 @@ import pytest
 from shared import dataforseo_business_tasks as business_tasks
 from shared import dataforseo_local_serp as local_serp
 from shared.dataforseo_client import DataForSeoError
-from testing.callback_fixtures import TASK_TOKEN, fake_callback_gates
+from testing.callback_fixtures import WAIT_HANDLE, fake_callback_gates
 from testing.local_seo_fixtures import (
     FAILED,
     GRID_REQUEST,
@@ -66,7 +66,7 @@ def post(jobs, memory, gates):
     """``post(kind)`` -> ``(answer, stored job)`` of one post step on a new job."""
     def run(kind='grid'):
         job = stored_job(memory, kind, GRID_REQUEST if kind == 'grid' else REVIEWS_REQUEST)
-        return jobs.post_step({'job_id': job['job_id'], 'task_token': TASK_TOKEN}), memory.job(job['job_id'])
+        return jobs.post_step({'job_id': job['job_id'], 'task_token': WAIT_HANDLE}), memory.job(job['job_id'])
 
     return run
 
@@ -101,9 +101,9 @@ class TestPost:
     def test_never_posts_again_when_the_job_already_holds_task_ids(self, jobs, memory, post_grid, gates):
         job = collecting_job(memory, 'grid', ALL_TAGS)
 
-        jobs.post_step({'job_id': job['job_id'], 'task_token': TASK_TOKEN})
+        jobs.post_step({'job_id': job['job_id'], 'task_token': WAIT_HANDLE})
 
-        assert (post_grid.call_count, [token for token, _answer in gates.released]) == (0, [TASK_TOKEN])
+        assert (post_grid.call_count, [token for token, _answer in gates.released]) == (0, [WAIT_HANDLE])
 
     def test_waits_for_one_callback_per_accepted_grid_point(self, post, post_grid, gates):
         post()
@@ -138,7 +138,7 @@ class TestPost:
 
     def test_raises_for_a_job_the_cache_does_not_hold(self, jobs, memory):
         with pytest.raises(jobs.MissingJobError, match='gone'):
-            jobs.post_step({'job_id': 'gone', 'task_token': TASK_TOKEN})
+            jobs.post_step({'job_id': 'gone', 'task_token': WAIT_HANDLE})
 
 
 class TestCollect:

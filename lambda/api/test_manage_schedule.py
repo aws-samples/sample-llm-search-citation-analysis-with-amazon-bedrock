@@ -653,32 +653,27 @@ class TestSnapshotKinds:
         assert (status, body['field']) == (400, 'kind')
         mock_scheduler.create_schedule.assert_not_called()
 
-    @pytest.mark.parametrize(('event', 'paid_call'), [
-        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots', 'confirm_paid': True}),
-                     mock_scheduler.create_schedule, id='create'),
-        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={'confirm_paid': True}, suffix='/run'),
-                     mock_stepfunctions.start_execution, id='run-now'),
+    @pytest.mark.parametrize('confirmed', [
+        pytest.param(False, id='without-confirm_paid'),
+        pytest.param(True, id='seo-stack-not-deployed'),
     ])
-    def test_refuses_a_snapshot_schedule_while_the_seo_stack_is_not_deployed(self, handler_module, event, paid_call):
-        mock_scheduler.get_schedule.return_value = snapshot_detail()
-        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
-
-        status = parse_response(handler_module.handler(event, {}))[0]
-
-        assert (status, paid_call.call_count) == (400, 0)
-
-    @pytest.mark.parametrize(('event', 'paid_call'), [
-        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots'}), mock_scheduler.create_schedule, id='create'),
-        pytest.param(id_event('PUT', 'sch-0d0d0d0d', body={'time': '05:00'}), mock_scheduler.update_schedule, id='update'),
-        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), mock_stepfunctions.start_execution,
-                     id='run-now'),
+    @pytest.mark.parametrize(('method', 'suffix', 'body', 'paid_call'), [
+        pytest.param('POST', '', {'kind': 'backlink_snapshots'}, mock_scheduler.create_schedule, id='create'),
+        pytest.param('PUT', '', {'time': '05:00'}, mock_scheduler.update_schedule, id='update'),
+        pytest.param('POST', '/run', {}, mock_stepfunctions.start_execution, id='run-now'),
     ])
-    def test_refuses_an_enabled_paid_schedule_without_the_acknowledgement(self, handler_module, event, paid_call):
+    def test_refuses_an_enabled_paid_schedule(self, handler_module, confirmed, method, suffix, body, paid_call):
+        """Without ``confirm_paid`` (field ``confirm_paid``), or when the SEO stack is gone (field ``kind``)."""
         mock_scheduler.get_schedule.return_value = snapshot_detail()
+        if confirmed:
+            mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
+        request = {**body, 'confirm_paid': True} if confirmed else body
+        event = make_event(method, body=request) if suffix == '' and method == 'POST' else id_event(
+            method, 'sch-0d0d0d0d', body=request, suffix=suffix)
 
-        status, body = parse_response(handler_module.handler(event, {}))
+        status, answer = parse_response(handler_module.handler(event, {}))
 
-        assert (status, body['field'], paid_call.call_count) == (400, 'confirm_paid', 0)
+        assert (status, answer['field'], paid_call.call_count) == (400, 'kind' if confirmed else 'confirm_paid', 0)
 
     def test_saves_a_disabled_snapshot_schedule_without_the_acknowledgement(self, handler_module):
         status = parse_response(handler_module.handler(

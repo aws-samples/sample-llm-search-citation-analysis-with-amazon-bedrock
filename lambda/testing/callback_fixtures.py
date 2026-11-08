@@ -11,8 +11,8 @@ import pytest
 
 from shared.dataforseo_callbacks import Arrival
 
-TASK_TOKEN = '-'.join(('step-functions', 'callback', '1'))
-"""A stand-in Step Functions task token."""
+WAIT_HANDLE = 'step-functions-wait-1'
+"""A stand-in for the Step Functions task token a ``waitForTaskToken`` task sends."""
 
 
 @dataclass
@@ -65,4 +65,4 @@ def fake_callback_gates(monkeypatch: pytest.MonkeyPatch, module: ModuleType) -> 
     return stub
 
 
-__all__ = ['TASK_TOKEN', 'GateStub', 'fake_callback_gates']
+__all__ = ['WAIT_HANDLE', 'GateStub', 'fake_callback_gates']

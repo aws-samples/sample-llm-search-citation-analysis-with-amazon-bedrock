@@ -15,7 +15,7 @@ import jobs_rank
 from shared.dataforseo_client import DataForSeoError
 from shared.rank_tracking_runs import begin_run, get_run, load_pairs, load_states
 from shared.rank_tracking_store import TrackedKeyword, get_tracker
-from testing.callback_fixtures import TASK_TOKEN, GateStub, fake_callback_gates
+from testing.callback_fixtures import WAIT_HANDLE, GateStub, fake_callback_gates
 from testing.rank_tracking_fixtures import (
     CODES,
     NOW,
@@ -56,7 +56,7 @@ def _start(table: RankTable, trigger: str = 'manual', **tracker_fields) -> dict:
 
 def _post(state: dict) -> dict:
     """``rank.post`` as the state machine's ``waitForTaskToken`` task invokes it."""
-    return jobs_rank.post({'step': 'rank.post', 'state': state, 'task_token': TASK_TOKEN})
+    return jobs_rank.post({'step': 'rank.post', 'state': state, 'task_token': WAIT_HANDLE})
 
 
 def _scheduled(table: RankTable) -> dict:
@@ -170,7 +170,7 @@ def test_post_moves_on_to_rechecks_when_nothing_was_queued(table, monkeypatch, g
 
     _scheduled(table)
 
-    assert [(token, state['next']) for token, state in gates.released] == [(TASK_TOKEN, 'retry')]
+    assert [(token, state['next']) for token, state in gates.released] == [(WAIT_HANDLE, 'retry')]
 
 
 def test_collect_leaves_a_task_still_running_unanswered_for_the_rechecks(table, monkeypatch, gates):
