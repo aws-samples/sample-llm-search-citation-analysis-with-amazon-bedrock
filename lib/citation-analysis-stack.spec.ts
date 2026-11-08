@@ -1301,6 +1301,11 @@ describe('Schedule routes (Schedules v2)', () => {
     expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
     expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
   });
+
+  it('gives ConfigMgmt the snapshot state machine ARNs that the snapshot schedule kinds target', () => {
+    expect(synthesized.configMgmtEnvVars).toHaveProperty('SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN');
+    expect(synthesized.configMgmtEnvVars).toHaveProperty('SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN');
+  });
 });
 
 describe('Sentiment examples route', () => {

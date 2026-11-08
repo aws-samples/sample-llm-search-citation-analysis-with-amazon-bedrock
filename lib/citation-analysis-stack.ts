@@ -2225,6 +2225,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     const schedulesResource = apiResource.addResource('schedules');
     route(schedulesResource, configMgmtFunction, 'GET', 'POST');
+    // GET /schedules?source=rank-trackers lists each rank tracker's own
+    // EventBridge schedule, read-only. A query parameter, not a sub-resource:
+    // the stack is at CloudFormation's 500-resource limit.
 
     // Schedules v2 (2.3.0): the path parameter is the generated `sch-<hex>` id
     // (the EventBridge schedule Name); the display name lives in Description.

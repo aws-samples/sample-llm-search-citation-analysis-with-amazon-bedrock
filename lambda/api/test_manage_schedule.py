@@ -67,6 +67,11 @@ def make_event(method, body=None, path_params=None, groups='Admin', path='/api/s
     return caller_event(method, path, resource=path, body=body, path_params=path_params, groups=groups)
 
 
+def rank_tracker_list_event():
+    """GET /api/schedules?source=rank-trackers as an Admin."""
+    return caller_event('GET', '/api/schedules', resource='/api/schedules', query={'source': 'rank-trackers'})
+
+
 def id_event(method, schedule_id, body=None, suffix='', groups='Admin'):
     return make_event(method, body=body, path_params={'id': schedule_id}, path=f'/api/schedules/{schedule_id}{suffix}', groups=groups)
 
@@ -673,7 +678,7 @@ class TestSnapshotKinds:
 
 
 class TestRankTrackerSchedules:
-    """GET /api/schedules/rank-trackers: the trackers' own one-time schedules, read-only, soonest first."""
+    """GET /api/schedules?source=rank-trackers: the trackers' own one-time schedules, read-only, soonest first."""
 
     def test_lists_each_trackers_next_check_soonest_first(self, handler_module):
         mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'rank-b'}, {'Name': 'rank-a'}]}
@@ -685,7 +690,7 @@ class TestRankTrackerSchedules:
         }
         mock_scheduler.get_schedule.side_effect = lambda Name, GroupName: details[Name]
 
-        status, body = parse_response(handler_module.handler(make_event('GET', path='/api/schedules/rank-trackers'), {}))
+        status, body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))
 
         assert status == 200
         assert [(item['tracker_id'], item['display_name'], item['next_run_at']) for item in body['schedules']] == [
@@ -696,6 +701,6 @@ class TestRankTrackerSchedules:
     def test_answers_an_empty_list_before_any_tracker_was_scheduled(self, handler_module):
         mock_scheduler.list_schedules.side_effect = SchedulerResourceNotFound()
 
-        status, body = parse_response(handler_module.handler(make_event('GET', path='/api/schedules/rank-trackers'), {}))
+        status, body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))
 
         assert (status, body['schedules']) == (200, [])

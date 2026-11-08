@@ -20,7 +20,7 @@ definition as a *v2 descriptor*::
 before 2.43.0), or one of the paid DataForSEO snapshot runs of the SEO stack (every owned and competitor domain;
 no keyword scope). A snapshot run happens only while its schedule exists, so nothing is bought until an Admin
 creates one (TENETS.md, tenets 7 and 8). The SEO stack's rank trackers schedule themselves, one EventBridge
-Scheduler schedule per tracker in ``citation-analysis-seo-rank``; ``GET /api/schedules/rank-trackers`` lists them
+Scheduler schedule per tracker in ``citation-analysis-seo-rank``; ``GET /api/schedules?source=rank-trackers`` lists them
 read-only so every planned paid run shows on one page.
 
 ParseKeywords resolves ``scope`` at run time, so a schedule that targets a
@@ -36,7 +36,7 @@ Routes (mutations are Admin-only):
     PUT    /api/schedules/{id}         full update (name, form, scope, enabled)
     DELETE /api/schedules/{id}
     POST   /api/schedules/{id}/run     start the schedule's run now
-    GET    /api/schedules/rank-trackers  the rank trackers' schedules (read-only; edited on the tracker)
+    GET    /api/schedules?source=rank-trackers  the rank trackers' schedules (read-only; edited on the tracker)
 """
 
 import json
@@ -88,6 +88,7 @@ KINDS: dict[str, tuple[str, str]] = {
 }
 SNAPSHOT_SCOPE_SUMMARY = 'every owned and competitor domain'
 RANK_TRACKER_SCHEDULE_GROUP = 'citation-analysis-seo-rank'
+RANK_TRACKER_SOURCE = 'rank-trackers'  # GET /api/schedules?source=rank-trackers
 KEYWORD_GROUPS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORD_GROUPS', 'CitationAnalysis-KeywordGroups')
 SCHEDULE_GROUP = 'citation-analysis-schedules'
 # GET /api/schedules pages: schedules per page, and GetSchedule calls in flight
@@ -476,10 +477,17 @@ def _list_schedules(event: dict[str, Any], limit: int, next_token: str | None) -
     }, event)
 
 
-@validate({'limit': optional_limit(default=SCHEDULE_PAGE_DEFAULT, max_val=SCHEDULE_PAGE_MAX), **CURSOR_QUERY_PARAM})
-def _get_handler(event: dict[str, Any], context: Any, limit: int, next_token: str | None = None) -> dict[str, Any]:
-    """GET /api/schedules (one page, ``limit`` / ``next_token``) or GET /api/schedules/{id}."""
+@validate({
+    'limit': optional_limit(default=SCHEDULE_PAGE_DEFAULT, max_val=SCHEDULE_PAGE_MAX),
+    'source': {'type': str, 'choices': [RANK_TRACKER_SOURCE]},
+    **CURSOR_QUERY_PARAM,
+})
+def _get_handler(event: dict[str, Any], context: Any, limit: int, next_token: str | None = None,
+                 source: str | None = None) -> dict[str, Any]:
+    """GET /api/schedules (one page, ``limit`` / ``next_token``), ?source=rank-trackers, or GET /api/schedules/{id}."""
     schedule_id = _path_id(event)
+    if not schedule_id and source == RANK_TRACKER_SOURCE:
+        return _rank_tracker_schedules(event)
     if not schedule_id:
         return _list_schedules(event, limit, next_token)
     detail = _get_detail(schedule_id)
@@ -725,8 +733,8 @@ def describe_tracker_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _rank_tracker_schedules(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /api/schedules/rank-trackers - the trackers' own schedules, read-only (each is edited on its tracker)."""
+def _rank_tracker_schedules(event: dict[str, Any]) -> dict[str, Any]:
+    """GET /api/schedules?source=rank-trackers - the trackers' own schedules, read-only (each is edited on its tracker)."""
     names: list[str] = []
     params: dict[str, Any] = {'GroupName': RANK_TRACKER_SCHEDULE_GROUP, 'MaxResults': 100}
     try:
@@ -753,7 +761,6 @@ def _rank_tracker_schedules(event: dict[str, Any], context: Any) -> dict[str, An
 
 @api_handler
 @route_handler({
-    ('GET', '/rank-trackers'): _rank_tracker_schedules,
     ('POST', '/run'): _run_schedule_handler,
     ('GET', None): _get_handler,
     ('POST', None): _create_schedule_handler,
