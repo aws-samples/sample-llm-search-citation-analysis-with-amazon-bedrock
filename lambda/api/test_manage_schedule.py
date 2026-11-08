@@ -653,22 +653,17 @@ class TestSnapshotKinds:
         assert (status, body['field']) == (400, 'kind')
         mock_scheduler.create_schedule.assert_not_called()
 
-    def test_refuses_a_snapshot_kind_when_the_seo_stack_is_not_deployed(self, handler_module):
-        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
-
-        status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': 'backlink_snapshots'}), {}))
-
-        assert (status, body['field']) == (400, 'kind')
-        mock_scheduler.create_schedule.assert_not_called()
-
-    def test_refuses_to_run_a_snapshot_schedule_now_when_the_seo_stack_is_gone(self, handler_module):
+    @pytest.mark.parametrize(('event', 'paid_call'), [
+        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots'}), mock_scheduler.create_schedule, id='create'),
+        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), mock_stepfunctions.start_execution, id='run-now'),
+    ])
+    def test_refuses_a_snapshot_schedule_while_the_seo_stack_is_not_deployed(self, handler_module, event, paid_call):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
         mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
 
-        status, _body = parse_response(handler_module.handler(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), {}))
+        status = parse_response(handler_module.handler(event, {}))[0]
 
-        assert status == 400
-        mock_stepfunctions.start_execution.assert_not_called()
+        assert (status, paid_call.call_count) == (400, 0)
 
     def test_an_update_keeps_the_kind_and_its_target(self, handler_module):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
