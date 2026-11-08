@@ -747,17 +747,19 @@ def describe_tracker_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
 def _rank_tracker_schedules(event: dict[str, Any]) -> dict[str, Any]:
     """GET /api/schedules?source=rank-trackers - the trackers' own schedules, read-only (each is edited on its tracker)."""
     names: list[str] = []
+    more = False
     params: dict[str, Any] = {'GroupName': RANK_TRACKER_SCHEDULE_GROUP, 'MaxResults': 100}
     try:
         while True:
             response = scheduler.list_schedules(**params)
             names.extend(summary['Name'] for summary in response.get('Schedules', []) if 'Name' in summary)
             token = response.get('NextToken')
+            more = bool(token)
             if not token or len(names) >= SCHEDULE_PAGE_MAX:
                 break
             params['NextToken'] = token
     except scheduler.exceptions.ResourceNotFoundException:
-        names = []  # The SEO stack (and its schedule group) is not deployed.
+        names, more = [], False  # The SEO stack (and its schedule group) is not deployed.
 
     def detail(name: str) -> Mapping[str, Any] | None:
         try:
@@ -768,7 +770,9 @@ def _rank_tracker_schedules(event: dict[str, Any]) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
         details = [item for item in pool.map(detail, names[:SCHEDULE_PAGE_MAX]) if item is not None]
     schedules = sorted((describe_tracker_schedule(item) for item in details), key=lambda item: item['next_run_at'] or '')
-    return success_response({'schedules': schedules, 'count': len(schedules)}, event)
+    # A read says when it was cut short (tenets 2 and 4): more trackers are scheduled than one answer lists.
+    truncated = len(names) > SCHEDULE_PAGE_MAX or more
+    return success_response({'schedules': schedules, 'count': len(schedules), 'truncated': truncated}, event)
 
 
 @api_handler

@@ -2,7 +2,9 @@ import {
   useEffect, useState
 } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchRankTrackerSchedules } from '../../api/executions';
+import {
+  fetchRankTrackerSchedules, type RankTrackerScheduleList as Listed
+} from '../../api/executions';
 import {
   getErrorMessage, isAbortError
 } from '../../infrastructure';
@@ -50,19 +52,25 @@ const RankTrackerRow = ({ schedule }: { readonly schedule: RankTrackerSchedule }
  * hidden while no tracker is scheduled.
  */
 export const RankTrackerScheduleList = () => {
-  const [schedules, setSchedules] = useState<RankTrackerSchedule[]>([]);
+  const [listed, setListed] = useState<Listed>({
+    schedules: [],
+    truncated: false,
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchRankTrackerSchedules(controller.signal)
-      .then(setSchedules)
+      .then(setListed)
       .catch((err: unknown) => {
         if (!isAbortError(err)) setError(getErrorMessage(err, 'schedules'));
       });
     return () => controller.abort();
   }, []);
 
+  const {
+    schedules, truncated 
+  } = listed;
   if (schedules.length === 0 && error === null) return null;
   return (
     <section aria-labelledby="rank-tracker-schedules" className="p-4 sm:p-6 border-t border-gray-200">
@@ -71,6 +79,7 @@ export const RankTrackerScheduleList = () => {
       {error === null ? (
         <ul className="space-y-2">
           {schedules.map((schedule) => <RankTrackerRow key={schedule.id} schedule={schedule} />)}
+          {truncated && <li className="text-xs text-gray-500">More trackers are scheduled than are listed here (the first 100).</li>}
         </ul>
       ) : <p className="text-sm text-red-700">{error}</p>}
     </section>

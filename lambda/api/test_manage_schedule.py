@@ -706,7 +706,17 @@ class TestRankTrackerSchedules:
         assert [(item['tracker_id'], item['display_name'], item['next_run_at']) for item in body['schedules']] == [
             ('b', 'Flights', '2026-11-09T04:30:00Z'), ('a', 'Hotels', '2026-11-10T05:12:00Z'),
         ]
-        assert mock_scheduler.list_schedules.call_args.kwargs['GroupName'] == 'citation-analysis-seo-rank'
+        assert (mock_scheduler.list_schedules.call_args.kwargs['GroupName'], body['truncated']) == (
+            'citation-analysis-seo-rank', False)
+
+    def test_says_when_more_trackers_are_scheduled_than_one_answer_lists(self, handler_module):
+        page = {'Schedules': [{'Name': f'rank-{index}'} for index in range(100)], 'NextToken': 'more'}
+        mock_scheduler.list_schedules.return_value = page
+        mock_scheduler.get_schedule.side_effect = lambda Name, GroupName: {'Name': Name, 'ScheduleExpression': ''}
+
+        body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))[1]
+
+        assert (body['count'], body['truncated']) == (100, True)
 
     def test_answers_an_empty_list_before_any_tracker_was_scheduled(self, handler_module):
         mock_scheduler.list_schedules.side_effect = SchedulerResourceNotFound()

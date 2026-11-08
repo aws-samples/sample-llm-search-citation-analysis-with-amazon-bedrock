@@ -651,8 +651,10 @@ def _aio_result(overview: AiOverviewResult) -> ProviderResult:
         "citations": list(overview.citations),
         "status": overview.status,
         "search_results": organic,
-        # The markdown is kept for rendering; the row's `response` is the plain prose brands are read from.
-        "raw_response": {"answer_markdown": overview.answer_markdown, "organic": organic},
+        # Bronze: DataForSEO's task result as returned (D2), so the overview's references can be read again (D3).
+        # The rendered markdown is kept beside it; the row's `response` is the plain prose brands are read from.
+        "raw_response": {"dataforseo_result": overview.raw_result},
+        "answer_markdown": overview.answer_markdown,
         "metadata": overview.metadata,
     }
 
@@ -1005,7 +1007,8 @@ def _store_raw_result(
         "citations": result.get("citations", []),
         "retrieved_urls": result.get("retrieved_urls", []),
         "brands": brand_data.get("brands", []),
-        "search_results": result.get("search_results", [])  # For search providers
+        "search_results": result.get("search_results", []),  # For search providers
+        **({"answer_markdown": result["answer_markdown"]} if result.get("answer_markdown") else {}),
     }
     return store_raw_response_to_s3(
         keyword=keyword,

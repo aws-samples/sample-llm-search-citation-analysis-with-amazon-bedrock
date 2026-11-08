@@ -74,13 +74,25 @@ export async function runSchedule(id: string): Promise<ScheduleRunResponse> {
   return apiPost<ScheduleRunResponse>(`/schedules/${encodeURIComponent(id)}/run`, {}, { allowStructured4xx: true });
 }
 
-interface RankTrackerSchedulesResponse {schedules?: RankTrackerSchedule[];}
+interface RankTrackerSchedulesResponse {
+  schedules?: RankTrackerSchedule[];
+  truncated?: boolean;
+}
 
 /** The rank trackers' own schedules (next check of each), soonest first; read-only here. */
-export async function fetchRankTrackerSchedules(signal?: AbortSignal): Promise<RankTrackerSchedule[]> {
+export interface RankTrackerScheduleList {
+  schedules: RankTrackerSchedule[];
+  /** More trackers are scheduled than one answer lists (100). */
+  truncated: boolean;
+}
+
+export async function fetchRankTrackerSchedules(signal?: AbortSignal): Promise<RankTrackerScheduleList> {
   const response = await apiGet<RankTrackerSchedulesResponse>('/schedules', {
     signal,
     params: { source: 'rank-trackers' },
   });
-  return response.schedules ?? [];
+  return {
+    schedules: response.schedules ?? [],
+    truncated: response.truncated === true,
+  };
 }

@@ -121,6 +121,12 @@ process.
     run instead of the safety timeout. A snapshot schedule is refused (400) while the SEO stack's state machines
     are not deployed, and the dashboard offers the snapshot kinds only where the SEO API is configured.
   - The README "Data" section lists the SEO tables and the `seo` bucket's key layout (D7).
+  - The Google AI Overviews raw object in `raw-responses` is DataForSEO's task result as returned
+    (`raw_api_response.dataforseo_result`), with the rendered markdown beside it under `extracted`, so the overview's
+    references can be read again (D2, D3).
+  - The callback URL answers 500 when resuming fails, so DataForSEO retries; the rank-tracker schedule list says
+    `truncated` past 100 trackers; a filtered Visibility view counts `unclassified_keywords` whose latest run
+    predates the branded flag; `CitationAnalysis-SeoKeywordMetrics` is documented as a cache of the latest values.
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).

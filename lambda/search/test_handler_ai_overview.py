@@ -32,10 +32,11 @@ _ORGANIC = (
                 title='Coruña guide', description='Where to stay'),
 )
 _METADATA = {'model': 'google-serp', 'latency_ms': 900, 'cost_usd': 0.004, 'attempts': 1}
+_RAW_RESULT = {'keyword': _KEYWORD, 'items': [{'type': 'ai_overview', 'items': [], 'references': []}]}
 _ANSWERED = AiOverviewResult(
     status='success', answer_markdown='Stay at Example Air Hotel.[[1]](https://example.com/riazor)',
     answer_text='Stay at Example Air Hotel.', citations=('https://example.com/riazor',),
-    organic=_ORGANIC, metadata=dict(_METADATA),
+    organic=_ORGANIC, metadata=dict(_METADATA), raw_result=_RAW_RESULT,
 )
 _NO_OVERVIEW = AiOverviewResult(
     status='no_answer', answer_markdown=None, answer_text='', citations=(), organic=_ORGANIC,
@@ -103,6 +104,13 @@ class TestRunner:
             'url': 'https://example.com/riazor', 'title': 'Riazor rooms', 'snippet': 'Sea view rooms',
             'position': 1, 'domain': 'example.com', 'rank_absolute': 2, 'source': 'google_ai_overview',
         }
+
+    def test_keeps_dataforseos_result_as_returned_for_the_raw_object_and_the_markdown_beside_it(self, search_handler, overview):
+        result = search_handler.query_google_ai_overview(_KEYWORD)
+
+        assert (result['raw_response'], result['answer_markdown']) == (
+            {'dataforseo_result': _RAW_RESULT}, 'Stay at Example Air Hotel.[[1]](https://example.com/riazor)',
+        )
 
     def test_labels_row_as_llm_answer_engine(self, search_handler, overview):
         result = search_handler.query_google_ai_overview(_KEYWORD)

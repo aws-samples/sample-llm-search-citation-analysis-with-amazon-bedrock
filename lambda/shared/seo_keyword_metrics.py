@@ -1,7 +1,7 @@
 """
 The ``CitationAnalysis-SeoKeywordMetrics`` table: search metrics per keyword and market.
 
-One row per ``(keyword_id, market_id)``; ``keyword_id`` is ``shared.utils.keyword_id``
+A cache of the latest values, not a measurement history: one row per ``(keyword_id, market_id)``; ``keyword_id`` is ``shared.utils.keyword_id``
 of the keyword text, the id of every keyword created since keyword identities. Keywords
 stored before that keep a random id, so readers join the two through
 ``load_keyword_metric_items``, which looks a keyword up under both. A refresh replaces the whole row: a metric the

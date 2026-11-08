@@ -83,3 +83,9 @@ class TestUnclassifiedPreviousRun:
         body = visibility_env.body({'keyword': 'hotel coruna spa', 'branded': 'neutral'})
 
         assert body['change_unclassified_keywords'] == 0
+
+    def test_counts_the_keywords_whose_latest_run_predates_the_flag_in_a_filtered_view(self, visibility_env):
+        filtered = visibility_env.body({'keyword': 'hotel coruna spa', 'branded': 'branded'})
+        every = visibility_env.body({'keyword': 'hotel coruna spa'})
+
+        assert (filtered['unclassified_keywords'], every['unclassified_keywords']) == (1, 0)

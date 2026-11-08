@@ -244,6 +244,12 @@ class TestAiOverviewSearch:
         assert result.citations == ('https://tracker.example.com/blog', 'https://analytics.example.org/docs')
         assert [item.domain for item in result.organic] == ['example.com']
 
+    def test_keeps_the_task_result_as_dataforseo_returned_it(self, fake):
+        returned = serp_result([organic_item(1, 'example.com'), _OVERVIEW])
+        fake.by_path = {ORGANIC_LIVE_PATH: task_result([returned])}
+
+        assert ai_overview_search('best tracker', LABS_US).raw_result == returned
+
     def test_records_the_row_metadata(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([_OVERVIEW])], cost=0.004, task_id='t-9')}
 

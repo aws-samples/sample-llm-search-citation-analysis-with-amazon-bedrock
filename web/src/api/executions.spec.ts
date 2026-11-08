@@ -152,17 +152,28 @@ describe('executions API', () => {
       };
       mockApiGet.mockResolvedValue({ schedules: [schedule] });
 
-      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual([schedule]);
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [schedule],
+        truncated: false,
+      });
       expect(mockApiGet).toHaveBeenCalledWith('/schedules', {
         signal: undefined,
         params: { source: 'rank-trackers' },
       });
     });
 
-    it('answers an empty list when the API sends none', async () => {
-      mockApiGet.mockResolvedValue({});
+    it('answers an empty list when the API sends none, and passes on a cut-short list', async () => {
+      mockApiGet.mockResolvedValueOnce({});
+      mockApiGet.mockResolvedValueOnce({ truncated: true });
 
-      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual([]);
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [],
+        truncated: false,
+      });
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [],
+        truncated: true,
+      });
     });
   });
 });

@@ -63,3 +63,10 @@ def test_refuses_a_malformed_pingback_without_reading_any_gate(callbacks, gate, 
 
 def test_refuses_other_methods(callbacks, gate):
     assert _ping(callbacks, {'gate': GATE, 'id': TASK}, method='DELETE')['statusCode'] == 405
+
+
+def test_answers_500_when_the_resume_fails_so_dataforseo_retries(callbacks, gate):
+    gate.arrival = Arrival(remaining=0, task_token='token', output='{}')
+    gate.release_if_due.side_effect = RuntimeError('throttled')
+
+    assert _ping(callbacks, {'gate': GATE, 'id': TASK})['statusCode'] == 500

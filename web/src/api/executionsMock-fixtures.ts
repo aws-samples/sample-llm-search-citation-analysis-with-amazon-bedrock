@@ -25,4 +25,7 @@ export const createSchedule = vi.fn<typeof CreateSchedule>();
 export const updateSchedule = vi.fn<typeof UpdateSchedule>();
 export const deleteSchedule = vi.fn<typeof DeleteSchedule>();
 export const runSchedule = vi.fn<typeof RunSchedule>();
-export const fetchRankTrackerSchedules = vi.fn<typeof FetchRankTrackerSchedules>(() => Promise.resolve([]));
+export const fetchRankTrackerSchedules = vi.fn<typeof FetchRankTrackerSchedules>(() => Promise.resolve({
+  schedules: [],
+  truncated: false,
+}));

@@ -489,7 +489,10 @@ describe('ScheduleManager kinds', () => {
     mockFetchSchedules.mockResolvedValue([]);
     mockCreateSchedule.mockResolvedValue(backlinkSchedule);
     mockRunSchedule.mockResolvedValue({ message: 'Weekly backlink snapshots started' });
-    mockFetchRankTrackerSchedules.mockResolvedValue([]);
+    mockFetchRankTrackerSchedules.mockResolvedValue({
+      schedules: [],
+      truncated: false,
+    });
     vi.mocked(isSeoApiConfigured).mockReturnValue(true);
   });
 
@@ -569,19 +572,23 @@ describe('ScheduleManager kinds', () => {
 
   describe('rank tracker checks', () => {
     it('lists each tracker\'s next check with a link to edit it on the tracker', async () => {
-      mockFetchRankTrackerSchedules.mockResolvedValue([{
-        id: 'rank-a',
-        tracker_id: 'a',
-        display_name: 'Hotels',
-        next_run_at: '2026-11-09T04:30:00Z',
-        enabled: true,
-      }]);
+      mockFetchRankTrackerSchedules.mockResolvedValue({
+        schedules: [{
+          id: 'rank-a',
+          tracker_id: 'a',
+          display_name: 'Hotels',
+          next_run_at: '2026-11-09T04:30:00Z',
+          enabled: true,
+        }],
+        truncated: true,
+      });
       renderManager();
 
       const section = await screen.findByRole('region', { name: 'Rank tracker checks' });
       expect(within(section).getByText('Hotels')).toBeInTheDocument();
       expect(within(section).getByRole('link', { name: 'Edit on the tracker' })).toHaveAttribute('href', trackerLink('a'));
       expect(within(section).queryByRole('button')).not.toBeInTheDocument();
+      expect(within(section).getByText(/the first 100/)).toBeInTheDocument();
     });
 
     it('stays hidden while no tracker is scheduled', async () => {

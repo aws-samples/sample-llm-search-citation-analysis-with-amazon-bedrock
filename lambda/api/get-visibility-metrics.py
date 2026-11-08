@@ -102,6 +102,8 @@ def scope_visibility(
         **scope_read_fields(scope_fields, skipped),
         'branded': branded,
         'change_unclassified_keywords': len(unclassified),
+        # Keywords whose latest run predates the flag: a filtered view reads their answers as neutral, so it says so.
+        'unclassified_keywords': len(_unclassified_keywords(latest_run)) if branded != 'all' else 0,
         'citations_configured': bool(owned_domains),
         **view,
     }

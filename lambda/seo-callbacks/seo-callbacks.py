@@ -51,7 +51,11 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     arrival = arrive(gate_id, task_id)
     # A repeated pingback (``arrival is None``) also tries: the first one may have failed to send the token.
     if arrival is None or arrival.remaining <= 0:
-        released = release_if_due(gate_id)
+        try:
+            released = release_if_due(gate_id)
+        except Exception:  # noqa: BLE001 (any failure: the claim is given back and DataForSEO retries)
+            logger.warning('callback gate could not resume its state machine; the next pingback retries')
+            return _answer(500)
         if released:
             logger.info('callback gate emptied; state machine resumed')
     return _answer(200)

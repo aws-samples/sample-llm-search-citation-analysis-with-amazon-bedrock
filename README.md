@@ -103,7 +103,7 @@ never expire (Silver); only caches, receipts, locks and crawl bookkeeping carry 
 
 | Table (`CitationAnalysis-…`) | Key | Holds |
 |---|---|---|
-| SeoKeywordMetrics | keyword_id / market_id | Search volume, CPC, difficulty and intent per keyword and market, replaced whole on each refresh (Silver) |
+| SeoKeywordMetrics | keyword_id / market_id | The latest search volume, CPC, difficulty and intent per keyword and market: a cache of DataForSEO's values, replaced whole on each refresh, not a history |
 | SeoCache | cache_key | Paid-answer cache (TTL per answer; payloads over 350 KB in the `seo` bucket), local SEO jobs, Lighthouse runs and IndexNow history (kept), DataForSEO callback gates (`callback#<id>`, 2-day TTL) |
 | SeoRankTracking | pk / sk, GSI1 | Trackers (`TRACKER#<id>` / `META`), their extra keywords (`KW#`), runs (`RUN#`), per-keyword state (`STATE#`) and each check's results (`RUN#<run>` / `PAIR#<keyword>#<device>`, history through GSI1) (Silver, kept); the run lock (`ACTIVE_RUN`, TTL) |
 | SeoDomainSnapshots | `<domain>#<market_id>` / snapshot_at | Each traffic snapshot's overview figures (Silver, kept); its ranked keywords are in the `seo` bucket |

@@ -93,6 +93,8 @@ class AiOverviewResult:
     citations: tuple[str, ...]
     organic: tuple[OrganicItem, ...]
     metadata: dict[str, Any]
+    raw_result: dict[str, Any] | None = None
+    """DataForSEO's task ``result[0]`` as returned (``None`` for a results page without results): the Bronze answer."""
 
 
 def _string(value: object) -> str:
@@ -272,4 +274,5 @@ def ai_overview_search(query: str, codes: MarketCodes) -> AiOverviewResult:
         citations=tuple(citations) if answered else (),
         organic=organic_items(serp_items(result)),
         metadata=metadata,
+        raw_result=result,
     )
