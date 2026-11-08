@@ -119,21 +119,25 @@ def _arrival(attributes: Mapping[str, Any]) -> Arrival:
                    output=str(attributes.get('output') or '{}'))
 
 
-def arrive(gate_id: str, task_id: str, table: Any = None) -> Arrival | None:
-    """Count ``task_id`` on the gate once; ``None`` for an unknown gate or a task already counted."""
+def _conditional_update(gate_id: str, table: Any, **update: Any) -> Arrival | None:
+    """Apply ``update`` to the gate; ``None`` when its condition does not hold."""
     try:
-        answer = (table or _table()).update_item(
-            Key={'cache_key': gate_key(gate_id)},
-            UpdateExpression='ADD remaining :minus_one, seen :task',
-            ConditionExpression='attribute_exists(cache_key) AND NOT contains(seen, :task_id)',
-            ExpressionAttributeValues={':minus_one': -1, ':task': {task_id}, ':task_id': task_id},
-            ReturnValues='ALL_NEW',
-        )
+        answer = table.update_item(Key={'cache_key': gate_key(gate_id)}, ReturnValues='ALL_NEW', **update)
     except ClientError as error:
         if is_conditional_check_failure(error):
             return None
         raise
     return _arrival(answer.get('Attributes') or {})
+
+
+def arrive(gate_id: str, task_id: str, table: Any = None) -> Arrival | None:
+    """Count ``task_id`` on the gate once; ``None`` for an unknown gate or a task already counted."""
+    return _conditional_update(
+        gate_id, table or _table(),
+        UpdateExpression='ADD remaining :minus_one, seen :task',
+        ConditionExpression='attribute_exists(cache_key) AND NOT contains(seen, :task_id)',
+        ExpressionAttributeValues={':minus_one': -1, ':task': {task_id}, ':task_id': task_id},
+    )
 
 
 def settle(gate_id: str, never_coming: int, table: Any = None) -> Arrival:
@@ -161,19 +165,12 @@ def release(task_token: str, output: str, states: Any = None) -> bool:
 
 def _claim(gate_id: str, table: Any) -> Arrival | None:
     """Mark an emptied gate released; ``None`` when it is unknown, not empty yet or already released."""
-    try:
-        answer = table.update_item(
-            Key={'cache_key': gate_key(gate_id)},
-            UpdateExpression='SET released = :yes',
-            ConditionExpression='attribute_exists(cache_key) AND remaining <= :zero AND attribute_not_exists(released)',
-            ExpressionAttributeValues={':yes': True, ':zero': 0},
-            ReturnValues='ALL_NEW',
-        )
-    except ClientError as error:
-        if is_conditional_check_failure(error):
-            return None
-        raise
-    return _arrival(answer.get('Attributes') or {})
+    return _conditional_update(
+        gate_id, table,
+        UpdateExpression='SET released = :yes',
+        ConditionExpression='attribute_exists(cache_key) AND remaining <= :zero AND attribute_not_exists(released)',
+        ExpressionAttributeValues={':yes': True, ':zero': 0},
+    )
 
 
 def release_if_due(gate_id: str, table: Any = None, states: Any = None) -> bool:

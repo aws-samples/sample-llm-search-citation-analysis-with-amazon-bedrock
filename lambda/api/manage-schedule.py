@@ -51,7 +51,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
-from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -410,10 +409,8 @@ def _state_machine_exists(arn: str) -> bool:
         return False
     try:
         stepfunctions.describe_state_machine(stateMachineArn=arn)
-    except ClientError as error:
-        if error.response.get('Error', {}).get('Code') == 'StateMachineDoesNotExist':
-            return False
-        raise
+    except stepfunctions.exceptions.StateMachineDoesNotExist:
+        return False
     return True
 
 

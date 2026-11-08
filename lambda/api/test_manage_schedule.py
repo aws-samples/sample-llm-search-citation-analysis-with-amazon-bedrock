@@ -19,13 +19,16 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.env import SCHEDULE_ENV
 from testing.events import parse_response
 from testing.module_loader import load_handler_module
+
+
+class StateMachineDoesNotExist(Exception):
+    """Stands in for ``stepfunctions.exceptions.StateMachineDoesNotExist``."""
 
 
 class SchedulerResourceNotFound(Exception):
@@ -126,6 +129,7 @@ def _reset_mocks():
     mock_stepfunctions.reset_mock()
     mock_groups_table.reset_mock()
     mock_scheduler.exceptions.ResourceNotFoundException = SchedulerResourceNotFound
+    mock_stepfunctions.exceptions.StateMachineDoesNotExist = StateMachineDoesNotExist
     mock_scheduler.exceptions.ConflictException = SchedulerConflict
     mock_scheduler.exceptions.ValidationException = SchedulerValidation
     # reset_mock() keeps side effects; clear them so one test's failure mode
@@ -650,8 +654,7 @@ class TestSnapshotKinds:
         mock_scheduler.create_schedule.assert_not_called()
 
     def test_refuses_a_snapshot_kind_when_the_seo_stack_is_not_deployed(self, handler_module):
-        mock_stepfunctions.describe_state_machine.side_effect = ClientError(
-            {'Error': {'Code': 'StateMachineDoesNotExist', 'Message': 'gone'}}, 'DescribeStateMachine')
+        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
 
         status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': 'backlink_snapshots'}), {}))
 
@@ -660,8 +663,7 @@ class TestSnapshotKinds:
 
     def test_refuses_to_run_a_snapshot_schedule_now_when_the_seo_stack_is_gone(self, handler_module):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
-        mock_stepfunctions.describe_state_machine.side_effect = ClientError(
-            {'Error': {'Code': 'StateMachineDoesNotExist', 'Message': 'gone'}}, 'DescribeStateMachine')
+        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
 
         status, _body = parse_response(handler_module.handler(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), {}))
 
