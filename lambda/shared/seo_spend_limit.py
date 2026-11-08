@@ -26,6 +26,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -45,7 +46,7 @@ from shared.utils import utc_now
 
 __all__ = [
     'DAILY_LIMIT_CODE', 'PAID_ROUTES', 'DailyCalls', 'counter_key', 'daily_calls', 'is_paid', 'limit', 'limited',
-    'spender', 'take',
+    'reserve_queued_calls', 'spender', 'take',
 ]
 
 logger = logging.getLogger(__name__)
@@ -84,16 +85,16 @@ def _today() -> str:
     return utc_now().strftime('%Y-%m-%d')
 
 
-def take(caller: str, allowed: int, table: Any = None) -> bool:
-    """Count one billed call for ``caller`` today; ``False`` (nothing counted) when ``allowed`` are already made."""
-    if allowed <= 0:
+def take(caller: str, allowed: int, table: Any = None, calls: int = 1) -> bool:
+    """Count ``calls`` billed calls for ``caller`` today, all or none; ``False`` when they do not fit in ``allowed``."""
+    if calls > allowed:
         return False
     return applied_conditionally(lambda: (table or _counter_table()).update_item(
         Key={'cache_key': counter_key(caller, _today())},
-        UpdateExpression='ADD calls :one SET #ttl = if_not_exists(#ttl, :ttl)',
-        ConditionExpression='attribute_not_exists(calls) OR calls < :limit',
+        UpdateExpression='ADD calls :calls SET #ttl = if_not_exists(#ttl, :ttl)',
+        ConditionExpression='attribute_not_exists(calls) OR calls <= :room',
         ExpressionAttributeNames={'#ttl': 'ttl'},
-        ExpressionAttributeValues={':one': 1, ':limit': allowed, ':ttl': int(time.time()) + COUNTER_TTL_S},
+        ExpressionAttributeValues={':calls': calls, ':room': allowed - calls, ':ttl': int(time.time()) + COUNTER_TTL_S},
     ))
 
 
@@ -131,7 +132,7 @@ def spender(event: dict[str, Any]) -> str:
 
 
 class _Meter:
-    """The billed calls of one request: each must pass ``take`` before it is sent."""
+    """The billed calls of one request: each must pass ``take`` before it is sent, or before it is queued."""
 
     def __init__(self, who: str, allowed: int) -> None:
         self.who = who
@@ -139,11 +140,32 @@ class _Meter:
         self.calls = 0
         self.refused = False
 
-    def __call__(self, path: str) -> None:
-        if not take(self.who, self.allowed):
+    def reserve(self, calls: int, what: str) -> None:
+        if calls <= 0:
+            return
+        if not take(self.who, self.allowed, calls=calls):
             self.refused = True
-            raise DataForSeoError(DAILY_LIMIT_CODE, f'Daily limit of {self.allowed} paid DataForSEO calls reached ({path})')
-        self.calls += 1
+            raise DataForSeoError(DAILY_LIMIT_CODE, f'Daily limit of {self.allowed} paid DataForSEO calls reached ({what})')
+        self.calls += calls
+
+    def __call__(self, path: str) -> None:
+        self.reserve(1, path)
+
+
+#: The meter of the paid request the router is serving, for work it queues instead of calling DataForSEO itself.
+_active_meter: ContextVar[_Meter | None] = ContextVar('seo_spend_meter', default=None)
+
+
+def reserve_queued_calls(calls: int, what: str) -> None:
+    """Count the billed DataForSEO calls a paid request queues for the jobs Lambda (a rank grid, a Lighthouse run).
+
+    The router makes no DataForSEO call for them, so the per-call guard never runs: they are counted here, all at
+    once, before the job starts. Raises ``DataForSeoError('DAILY_LIMIT')`` (answered 429) when they do not fit;
+    nothing is counted then. A no-op outside a paid request (an Admin's batch, a test).
+    """
+    meter = _active_meter.get()
+    if meter is not None:
+        meter.reserve(calls, what)
 
 
 def _audit(event: dict[str, Any], meter: _Meter, status: int) -> None:
@@ -164,9 +186,16 @@ def limited(dispatch: Handler) -> Handler:
         if not is_paid(str(event.get('httpMethod') or ''), str(event.get('path') or '')):
             return dispatch(event, context)
         meter = _Meter(spender(event), limit())
-        with guarding_billed_calls(meter):
-            response = dispatch(event, context)
-        _audit(event, meter, int(response.get('statusCode') or 0))
-        return response
+        token = _active_meter.set(meter)
+        status = 500
+        try:
+            with guarding_billed_calls(meter):
+                response = dispatch(event, context)
+            status = int(response.get('statusCode') or 0)
+            return response
+        finally:
+            # Also when a sub-handler raised: calls already let through are audited (500, as the caller sees it).
+            _active_meter.reset(token)
+            _audit(event, meter, status)
 
     return guarded

@@ -17,10 +17,11 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from shared import dataforseo_client
+from shared import dataforseo_client, seo_spend_limit
 from testing.dynamodb_stubs import conditional_check_failure
 
 TEST_LOGIN = 'api@example.com'
@@ -198,9 +199,9 @@ class InMemorySpendCounter:
         key = kwargs['Key']['cache_key']
         values = kwargs['ExpressionAttributeValues']
         calls = int(self.items.get(key, {}).get('calls', 0))
-        if calls >= values[':limit']:
+        if calls > values[':room']:
             raise conditional_check_failure('UpdateItem')
-        self.items[key] = {'cache_key': key, 'calls': calls + values[':one'], 'ttl': values[':ttl']}
+        self.items[key] = {'cache_key': key, 'calls': calls + values[':calls'], 'ttl': values[':ttl']}
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]:
         item = self.items.get(kwargs['Key']['cache_key'])
@@ -208,3 +209,27 @@ class InMemorySpendCounter:
 
     def calls_of(self, user: str) -> int:
         return sum(int(item['calls']) for key, item in self.items.items() if key.startswith(f'spend#{user}#'))
+
+
+@dataclass
+class DailyLimit:
+    """The daily-limit boundary of ``shared.seo_spend_limit``: the counters, the ProviderConfig row and the audit table."""
+
+    counter: InMemorySpendCounter
+    config: Any
+    audit: Any
+
+    def audit_items(self) -> list[dict[str, Any]]:
+        return [call.kwargs['Item'] for call in self.audit.put_item.call_args_list]
+
+
+def install_daily_limit(monkeypatch: pytest.MonkeyPatch, daily_call_limit: int | None) -> DailyLimit:
+    """Meter paid SEO requests against ``daily_call_limit`` (``None``: no row, the default) in memory."""
+    limit = DailyLimit(InMemorySpendCounter(), MagicMock(), MagicMock())
+    row = {'provider_id': 'dataforseo', 'daily_call_limit': daily_call_limit}
+    limit.config.get_item.return_value = {'Item': row} if daily_call_limit is not None else {}
+    monkeypatch.setattr(seo_spend_limit, '_counter_table', lambda: limit.counter)
+    monkeypatch.setattr(seo_spend_limit, '_config_table', lambda: limit.config)
+    monkeypatch.setattr(seo_spend_limit.boto3, 'resource', lambda _name: MagicMock(Table=lambda _table: limit.audit))
+    monkeypatch.setenv('DYNAMODB_TABLE_MCP_STATE', 'test-mcp-state')
+    return limit

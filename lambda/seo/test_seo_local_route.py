@@ -8,6 +8,8 @@ import pytest
 
 from shared import dataforseo_business as business
 from shared import dataforseo_local_serp as local_serp
+from shared import seo_spend_limit
+from testing.dataforseo_fixtures import install_daily_limit
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.local_seo_fixtures import (
@@ -152,6 +154,30 @@ class TestLocalSerp:
 
     def test_refuses_a_zoom_outside_4_to_18(self, call):
         assert call('POST', '/serp', body={'keyword': 'coffee', **NEAR, 'zoom': 19})[0] == 400
+
+
+class TestStartJobDailyLimit:
+    """A rank grid's billed tasks are posted by the jobs Lambda, so the router counts them before it starts."""
+
+    def start(self, local_module, limit, grid_size):
+        body = {'kind': 'grid', 'keyword': 'coffee', 'cid': CAFE_CID, 'grid_size': grid_size, **NEAR}
+        event = seo_event('POST', '/api/seo/local/jobs', body=body)
+        return parse_response(seo_spend_limit.limited(local_module.handler)(event, {}))
+
+    def test_counts_a_grid_jobs_points_before_it_starts(self, local_module, memory, start_execution, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 100)
+
+        status, _body = self.start(local_module, limit, 5)
+
+        assert (status, limit.counter.calls_of('admin@example.com'), start_execution.call_count) == (200, 25, 1)
+
+    def test_refuses_a_grid_past_the_limit_and_starts_nothing(self, local_module, memory, start_execution, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 20)
+
+        status, body = self.start(local_module, limit, 5)
+
+        assert (status, body['code'], limit.counter.calls_of('admin@example.com'), start_execution.call_count) == (
+            429, 'DAILY_LIMIT', 0, 0)
 
 
 class TestStartJob:

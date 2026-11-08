@@ -79,9 +79,13 @@ Each user may make at most 100 paid DataForSEO calls per UTC day for one-off loo
 **Settings › AI Providers › SEO data** (`0` turns paid lookups off). It is one limit for every client: the dashboard, a
 script on the REST API, AI assistants through MCP and the server exports all go through `CitationAnalysis-SeoRouter`,
 which counts each billed DataForSEO call (a lookup that makes three calls uses three; a cached answer uses none).
-The call that would pass the limit is not sent, and the request answers 429 `DAILY_LIMIT`. `GET /api/seo/daily-calls`
+The call that would pass the limit is not sent, and the request answers 429 `DAILY_LIMIT`. A paid lookup whose
+billed work the SEO jobs Lambda does later (a local rank grid: one task per grid point; a single Lighthouse run:
+one call) counts those calls when it is started, all at once, and is not started when they do not fit. `GET /api/seo/daily-calls`
 answers your calls today, the limit and when it resets. Every paid lookup writes an audit record (who, which route,
-how it ended, how many calls) to `CitationAnalysis-McpState`, kept 365 days. SEO jobs an Admin starts (rank checks,
+how it ended, how many calls) to `CitationAnalysis-McpState`, kept 365 days, and so does an Admin's change to the
+limit. That table belongs to the MCP stack, which `npm run deploy` deploys with the others; without it the
+records are not written (each failed write is logged). SEO jobs an Admin starts (rank checks,
 snapshots, site audits, Lighthouse batches) are not counted here: each is confirmed with its price. A paid
 snapshot schedule can only be saved enabled, or run now, with `confirm_paid: true` (the dashboard sends it after
 its confirmation).

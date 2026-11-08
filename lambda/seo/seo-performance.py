@@ -52,6 +52,7 @@ from shared.lighthouse_runs import (
     start_execution,
 )
 from shared.lighthouse_sample import MAX_SAMPLE_PAGES, is_measurable, select_sample
+from shared.seo_spend_limit import reserve_queued_calls
 from shared.site_audit_repository import AuditStore
 from shared.utils import get_timestamp
 
@@ -135,8 +136,12 @@ def start_single(event: dict[str, Any], _context: Any, *, url: str, device: str,
     if page is None:
         return seo_error(400, 'VALIDATION_ERROR', "url must be a public page on one of the brand's own domains",
                          event, 'url')
-    return _reuse_or_start(event, {'kind': 'single', 'url': page, 'device': device},
-                           lambda: new_run('single', [{'url': page, 'device': device}], _caller(event)))
+    def build() -> dict[str, Any]:
+        # The jobs Lambda makes the one billed Lighthouse call: count it now, before the run starts.
+        reserve_queued_calls(1, 'Lighthouse run')
+        return new_run('single', [{'url': page, 'device': device}], _caller(event))
+
+    return _reuse_or_start(event, {'kind': 'single', 'url': page, 'device': device}, build)
 
 
 def _sample(audit: dict[str, Any], store: AuditStore) -> list[str]:

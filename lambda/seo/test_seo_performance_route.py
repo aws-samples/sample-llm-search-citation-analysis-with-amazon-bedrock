@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
-from shared import indexnow, lighthouse_runs
+from shared import indexnow, lighthouse_runs, seo_spend_limit
+from testing.dataforseo_fixtures import install_daily_limit
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.indexnow_fixtures import SAMPLE_HEX_32 as KEY
@@ -60,6 +61,29 @@ def audited(api: Api) -> Api:
         api.store.put_page(AUDIT_ID, {'url': f'https://www.example.com{path}', 'status': 200,
                                       'fetch_class': fetch_class, 'is_html': True})
     return api
+
+
+class TestSingleLighthouseDailyLimit:
+    """The jobs Lambda makes the billed Lighthouse call, so the router counts it before the run starts."""
+
+    def start(self, api):
+        event = seo_event('POST', '/api/seo/lighthouse', body={'url': PAGE, 'device': 'desktop'})
+        return parse_response(seo_spend_limit.limited(api.module.handler)(event, {}))
+
+    def test_counts_one_call_for_a_single_run(self, api, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 100)
+
+        status, _body = self.start(api)
+
+        assert (status, limit.counter.calls_of('admin@example.com'), api.start_execution.call_count) == (202, 1, 1)
+
+    def test_refuses_a_run_when_paid_lookups_are_off(self, api, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 0)
+
+        status, body = self.start(api)
+
+        assert (status, body['code'], limit.counter.calls_of('admin@example.com'), api.start_execution.call_count) == (
+            429, 'DAILY_LIMIT', 0, 0)
 
 
 class TestSingleLighthouse:
