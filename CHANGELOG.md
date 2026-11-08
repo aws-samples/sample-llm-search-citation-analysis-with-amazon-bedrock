@@ -141,8 +141,10 @@ process.
   `^11.0.1` in both packages (GHSA-g3hv-75wg-m249). The copy bundled inside `aws-cdk-lib` (10.2.6, also in its
   latest release) cannot be overridden and stays until AWS CDK ships the fix. Knip 6.44 found the unused
   `CitationsView` re-export in `components/Citations/index.ts`, now removed.
-- CI: the pinned gitleaks, actionlint and zizmor downloads retry up to 5 times (15 s apart), so a GitHub releases 504
-  no longer fails the lint lane.
+- CI: the pinned gitleaks, actionlint and zizmor installs move to `scripts/install-ci-tools.sh`. Each still comes from
+  its GitHub release checked against a committed SHA-256; when the release download fails (GitHub answered 504 for
+  hours), the same version is installed from proxy.golang.org (verified by sum.golang.org) or from PyPI (a
+  hash-pinned wheel) instead of failing the lint lane.
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).
