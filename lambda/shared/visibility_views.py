@@ -31,7 +31,7 @@ from shared.kpi_engine import (
     kpi_trends,
     source_table,
 )
-from shared.kpi_tally import BrandPool, RunTally, tally_brand_table, tally_kpis, tally_mentions
+from shared.kpi_tally import BrandPool, RunTally, brands_truncated, tally_brand_table, tally_kpis, tally_mentions
 
 #: The format of each trend period: a calendar day, an ISO week (Monday to Sunday) or a calendar month.
 _PERIOD_FORMATS = {'day': '%Y-%m-%d', 'week': '%G-W%V', 'month': '%Y-%m'}
@@ -239,6 +239,8 @@ def trend_view(
     - ``keyword_trends``: each keyword's latest period and change, best visibility score first.
     - ``overall``: how many keywords improve, decline or hold on the visibility score.
     - ``brand_trends``: the tracked brand and its leading competitors per period.
+    - ``brands_truncated``: some run kept only its top brands (``shared.keyword_run_kpis.BRANDS_PER_RUN``, first-party
+      and tracked brands always), so a competitor outside them reads as not named in that run.
     """
     domains = list(owned_domains)
     per_keyword = {
@@ -272,6 +274,7 @@ def trend_view(
             'stable_count': directions.count('stable'),
         },
         'brand_trends': _brand_trends(series, series_kpis),
+        'brands_truncated': brands_truncated(run for periods in per_keyword.values() for bucket in periods.values() for run in bucket),
     }
 
 

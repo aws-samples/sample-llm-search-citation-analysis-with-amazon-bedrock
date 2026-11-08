@@ -17,8 +17,8 @@ the dashboard REST API into its own stack, stores one row of KPI counts per keyw
 complete, and takes the majors. It addresses the items 2.42.0 listed under "Not changed / known limits" as follows:
 
 - *minimatch on 10.x, majors deferred:* ESLint 10, TypeScript 6, vitest 5, React 19, Tailwind 4 and jsdom 31 are in
-  this release, and so is @vitest/eslint-plugin 1.6.28. TypeScript 7 and minimatch 11 remain blocked upstream (see
-  Known limits).
+  this release, and so is @vitest/eslint-plugin 1.6.28. minimatch is on the patched 11.x except under nx and
+  eslint-plugin-import-x (Security). TypeScript 7 remains blocked upstream (Known limits).
 - *Long KPI windows can be partial:* resolved. Trends, overview, group KPIs and insights read per-run KPI rows and
   return whole 365-day windows (`truncated_before: null`).
 - *Main stack at 499 of 500 resources:* resolved. The main stack has about 188 resources.
@@ -66,9 +66,10 @@ Deploying this release changes the dashboard API's URL. Read this before upgradi
 
 ### Changed
 
-- `minimatch` stays on the patched 11.x (GHSA-g3hv-75wg-m249) except under `eslint-plugin-import-x`, a lint-time
-  dependency that imports `makeRe`, which minimatch 11 removed: it keeps 10.2.6 (scoped override) until the plugin
-  supports 11. Its patterns come from the repository's ESLint config, not from input.
+- `minimatch` is on the patched 11.x (GHSA-g3hv-75wg-m249, by override) except under `nx` and
+  `eslint-plugin-import-x`, lint-time tools that call `makeRe`, which minimatch 11 removed: they keep 10.2.6 (scoped
+  overrides) until they support 11. Their glob patterns come from our own config. aws-cdk-lib bundles 10.2.6, which
+  no override reaches.
 - **Dashboard REST API stack.** The 106 routes are unchanged (method, function, authorizer). The API stack imports the
   fixed-name `CitationAnalysis-API-*` functions by ARN, the user pool, the distribution and the web bucket; the main
   stack imports nothing from it. Each of the 8 router Lambdas gets one wildcard invoke permission (18 permissions,
@@ -146,26 +147,25 @@ Deploying this release changes the dashboard API's URL. Read this before upgradi
 
 - **npm audit:** root 21 → 28 moderate, web 3 moderate, no high or critical. Every entry is minimatch
   GHSA-g3hv-75wg-m249; the new root entries are the new ESLint plugins that depend on minimatch.
-- **minimatch 11 is still blocked.** minimatch 11.0.4 exports no `makeRe`. nx 24.0.4 pins minimatch 10.2.5 and calls
-  `minimatch.makeRe`, eslint-plugin-import-x 4.17.1 declares `^9.0.3 || ^10.1.2` and imports `makeRe`, and
-  aws-cdk-lib bundles minimatch 10.2.6, which an override cannot reach. Dev-only: the glob patterns come from our own
-  config.
+- **minimatch 11 where it can run.** minimatch 11 exports no `makeRe`. nx 24 calls `minimatch.makeRe` and
+  eslint-plugin-import-x 4.17.1 imports it, so those two keep 10.2.6 by scoped override; everything else resolves the
+  patched 11.x. aws-cdk-lib bundles minimatch 10.2.6, which an override cannot reach. Dev-only: the glob patterns come
+  from our own config.
 
 ### Known limits
 
 - **TypeScript 7** is blocked upstream: typescript-eslint 8.72.1 peers `typescript >=4.8.4 <6.1.0`.
-- **minimatch 11** is blocked upstream (nx, eslint-plugin-import-x, aws-cdk-lib; see Security).
+- **minimatch 11** cannot reach nx, eslint-plugin-import-x or the copy aws-cdk-lib bundles (see Security).
 - **The ESLint plugin forks** stay until eslint-plugin-react and eslint-plugin-jsx-a11y release ESLint 10 support
   (#4022, #1081).
 - **@xstate/react 3.2.2** (through @aws-amplify/ui-react 6.15.7, which declares React 19) peers React ≤18. npm warns;
   the sign-in page renders identically.
-- **KPI history leaderboards** (`brand_trends`, `latest_brands`) see at most 25 brands per keyword run. There is no
-  per-persona split of the KPI rows.
+- **KPI history leaderboards** (`brand_trends`, `latest_brands`) see at most 25 brands per keyword run (first-party
+  and tracked competitors always kept); `brands_truncated` in `/api/trends` and the overview says when a run was cut,
+  and the Competitor Benchmark shows it. There is no per-persona split of the KPI rows.
 - **A missing KPI row** (failed write, or a keyword whose Deduplication step never ran) leaves that run out of history
   until the backfill runs again; the write-failure metric flags it. After an owned-domain change, windows are read
   raw, within the time budget, until the backfill runs again.
-- **The `config.json` BucketDeployment role** has CDK's default `s3:DeleteObject*` and `cloudfront:CreateInvalidation`
-  on `*`.
 - A `space-y-N` value not listed in `web/src/index.css` gets Tailwind 4 spacing.
 
 ## [2.43.0] - 2026-11-08

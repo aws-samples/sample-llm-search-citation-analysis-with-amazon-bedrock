@@ -11,44 +11,43 @@ tooling that is not bundled into the dashboard or the Lambda layers is not liste
 
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
-| [React](https://react.dev/) | 18.3.1 | MIT | UI framework |
-| [React DOM](https://react.dev/) | 18.3.1 | MIT | React renderer for web browsers |
-| [React Router](https://reactrouter.com/) (`react-router-dom`) | 7.18.2 | MIT | Client-side routing of the tabs and reports |
-| [AWS Amplify](https://docs.amplify.aws/) | 6.20.0 | Apache-2.0 | Cognito authentication |
-| [@aws-amplify/ui-react](https://ui.docs.amplify.aws/) | 6.15.5 | Apache-2.0 | Sign-in UI (`Authenticator`) |
-| [Chart.js](https://www.chartjs.org/) | 4.5.1 | MIT | Charts |
+| [React](https://react.dev/) | 19.3.1 | MIT | UI framework |
+| [React DOM](https://react.dev/) | 19.3.1 | MIT | React renderer for web browsers |
+| [React Router](https://reactrouter.com/) (`react-router-dom`) | 7.18.5 | MIT | Client-side routing of the tabs and reports |
+| [AWS Amplify](https://docs.amplify.aws/) | 6.22.2 | Apache-2.0 | Cognito authentication |
+| [@aws-amplify/ui-react](https://ui.docs.amplify.aws/) | 6.15.7 | Apache-2.0 | Sign-in UI (`Authenticator`) |
+| [Chart.js](https://www.chartjs.org/) | 4.6.1 | MIT | Charts |
 | [react-chartjs-2](https://react-chartjs-2.js.org/) | 5.3.1 | MIT | React wrapper for Chart.js |
 | [react-markdown](https://github.com/remarkjs/react-markdown) | 10.1.0 | MIT | Rendering Content Studio output |
 | [remark-gfm](https://github.com/remarkjs/remark-gfm) | 4.0.1 | MIT | GitHub-flavored Markdown (tables, lists) |
 | [remark-parse](https://github.com/remarkjs/remark/tree/main/packages/remark-parse) | 11.0.0 | MIT | Markdown parsing for the Word export |
 | [unified](https://github.com/unifiedjs/unified) | 11.0.5 | MIT | Markdown processing pipeline of the Word export |
-| [DOMPurify](https://github.com/cure53/DOMPurify) | 3.4.13 | MPL-2.0 OR Apache-2.0 | HTML sanitization |
+| [DOMPurify](https://github.com/cure53/DOMPurify) | 3.4.17 | MPL-2.0 OR Apache-2.0 | HTML sanitization |
 | [xlsx-js-style](https://github.com/gitbrent/xlsx-js-style) | 1.2.0 | Apache-2.0 | Excel export |
-| [docx](https://github.com/dolanmiu/docx) | 9.7.1 | MIT | Word export |
+| [docx](https://github.com/dolanmiu/docx) | 9.15.2 | MIT | Word export |
 | [FileSaver.js](https://github.com/eligrey/FileSaver.js) (`file-saver`) | 2.0.5 | MIT | Saving exported files in the browser |
 
 ### Build
 
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
-| [TypeScript](https://www.typescriptlang.org/) | 5.9.3 | Apache-2.0 | Type-checked source |
-| [Vite](https://vitejs.dev/) | 8.2.1 | MIT | Build tool and dev server |
-| [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react) | 6.0.5 | MIT | Vite plugin for React |
-| [Tailwind CSS](https://tailwindcss.com/) | 3.4.19 | MIT | Utility-first CSS framework |
-| [PostCSS](https://postcss.org/) | 8.5.26 | MIT | CSS transformation |
-| [Autoprefixer](https://github.com/postcss/autoprefixer) | 10.5.4 | MIT | Vendor prefixes |
-| [@types/react](https://www.npmjs.com/package/@types/react) | 18.3.31 | MIT | Type definitions for React |
-| [@types/react-dom](https://www.npmjs.com/package/@types/react-dom) | 18.3.7 | MIT | Type definitions for React DOM |
+| [TypeScript](https://www.typescriptlang.org/) | 6.0.3 | Apache-2.0 | Type-checked source |
+| [Vite](https://vitejs.dev/) | 8.3.6 | MIT | Build tool and dev server |
+| [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react) | 6.2.1 | MIT | Vite plugin for React |
+| [@tailwindcss/vite](https://tailwindcss.com/docs/installation/using-vite) | 4.3.4 | MIT | Tailwind CSS plugin for Vite |
+| [Tailwind CSS](https://tailwindcss.com/) | 4.3.4 | MIT | Utility-first CSS framework |
+| [@types/react](https://www.npmjs.com/package/@types/react) | 19.3.0 | MIT | Type definitions for React |
+| [@types/react-dom](https://www.npmjs.com/package/@types/react-dom) | 19.3.0 | MIT | Type definitions for React DOM |
 | [@types/file-saver](https://www.npmjs.com/package/@types/file-saver) | 2.0.7 | MIT | Type definitions for FileSaver.js |
 
 ## Infrastructure (`package.json`)
 
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
-| [AWS CDK library](https://aws.amazon.com/cdk/) (`aws-cdk-lib`) | 2.265.0 | Apache-2.0 | Infrastructure as code |
+| [AWS CDK library](https://aws.amazon.com/cdk/) (`aws-cdk-lib`) | 2.275.0 | Apache-2.0 | Infrastructure as code |
 | [constructs](https://github.com/aws/constructs) | 10.8.1 | Apache-2.0 | CDK construct model |
-| [AWS CDK CLI](https://aws.amazon.com/cdk/) (`aws-cdk`) | 2.1136.0 | Apache-2.0 | Synth and deploy |
-| [TypeScript](https://www.typescriptlang.org/) | 5.9.3 | Apache-2.0 | CDK app language |
+| [AWS CDK CLI](https://aws.amazon.com/cdk/) (`aws-cdk`) | 2.1148.0 | Apache-2.0 | Synth and deploy |
+| [TypeScript](https://www.typescriptlang.org/) | 6.0.3 | Apache-2.0 | CDK app language |
 
 ## Lambda functions (Python)
 

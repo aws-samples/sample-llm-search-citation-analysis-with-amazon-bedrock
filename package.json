@@ -83,6 +83,9 @@
     "zod@<4.6.6": "4.6.7",
     "eslint-plugin-import-x": {
       "minimatch": "^10.2.6"
+    },
+    "nx": {
+      "minimatch": "^10.2.6"
     }
   }
 }

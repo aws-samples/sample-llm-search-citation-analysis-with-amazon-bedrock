@@ -61,6 +61,26 @@ describe('bootstrapDashboard', () => {
   });
 });
 
+describe('bootstrapDashboard timed retries', () => {
+  it('stops looking on its own after its last timed retry, and the user can still retry', async () => {
+    vi.useFakeTimers();
+    const bootstrap = {
+      ...stubBootstrap(UNAVAILABLE, UNAVAILABLE, UNAVAILABLE),
+      timedRetriesLeft: 1,
+    };
+
+    await bootstrapDashboard(bootstrap);
+    await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS * 5);
+    const timed = bootstrap.loadConfig.mock.calls.length;
+    const calls = bootstrap.renderUnavailable.mock.calls;
+    calls[calls.length - 1][0]();
+    await vi.advanceTimersByTimeAsync(0);
+    vi.useRealTimers();
+
+    expect([timed, bootstrap.loadConfig.mock.calls.length]).toStrictEqual([2, 3]);
+  });
+});
+
 describe('main.tsx', () => {
   it('imports the app only dynamically, after the runtime config is loaded', () => {
     expect(mainSource).not.toMatch(/^import .* from '\.\/App';$/m);

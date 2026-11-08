@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from shared.kpi_engine import answers_from_rows, brand_kpis, brand_table
 from shared.kpi_tally import (
     RunTally,
+    brands_truncated,
     run_tallies,
     run_tally,
     tally_brand_table,
@@ -112,6 +113,17 @@ class TestBrandCap:
         tally = run_tally('k', '2026-09-01T06:00:00Z', answers_from_rows(self.ROWS), brand_cap=1)
 
         assert tally_brand_table([tally])[0]['share_of_voice'] == 25.0
+
+    def test_says_a_capped_run_cut_its_brands_and_an_uncapped_one_did_not(self):
+        capped = run_tally('k', '2026-09-01T06:00:00Z', answers_from_rows(self.ROWS), brand_cap=2)
+        whole = run_tally('k', '2026-09-01T06:00:00Z', answers_from_rows(self.ROWS))
+
+        assert (brands_truncated([whole, capped]), brands_truncated([whole])) == (True, False)
+
+    def test_caps_every_run_of_raw_answers_like_a_stored_row(self):
+        tallies = run_tallies('k', answers_from_rows(self.ROWS), brand_cap=3, tracked_brands=['nh'])
+
+        assert [[brand.name for brand in tally.brands] for tally in tallies] == [['Hotel Sol', 'Parador', 'NH']]
 
 
 class TestOwnedFingerprint:

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from shared.kpi_engine import TRENDED_KPIS, Answer, answers_from_rows
+from shared.kpi_tally import run_tallies
 from shared.visibility_views import (
     BRAND_TREND_COMPETITORS,
     BRANDS_LIMIT,
@@ -14,6 +15,7 @@ from shared.visibility_views import (
     PERIODS,
     SOURCES_LIMIT,
     period_key,
+    trend_view,
     visibility_view,
 )
 from testing.kpi_tally_fixtures import tallied_trend_view
@@ -301,6 +303,13 @@ class TestTrendView:
         answers = {'spa': [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(12)))]}
 
         assert (len(tallied_trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (10, 10)
+
+    def test_says_when_a_run_kept_only_its_top_brands(self):
+        answers = [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(4)))]
+        capped = {'spa': run_tallies('spa', answers, brand_cap=2)}
+
+        assert (trend_view(['spa'], capped, 'day')['brands_truncated'],
+                tallied_trend_view(['spa'], {'spa': answers}, 'day')['brands_truncated']) == (True, False)
 
     def test_follows_the_tracked_brand_per_period(self):
         tracked = tallied_trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['tracked']

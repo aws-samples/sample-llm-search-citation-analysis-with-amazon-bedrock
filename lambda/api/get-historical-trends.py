@@ -34,7 +34,7 @@ sys.path.insert(0, '/opt/python')
 from shared.answer_queries import history_since
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
-from shared.keyword_run_kpis import keyword_run_kpis_table
+from shared.keyword_run_kpis import keyword_run_kpis_table, tracked_brand_names
 from shared.kpi_engine import owned_domains_from
 from shared.scope_params import (
     SCOPE_KEYWORDS_CAP,
@@ -65,10 +65,11 @@ SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 
-def load_window_runs(keywords: list[str], since: str, owned_domains: list[str]) -> WindowRuns:
+def load_window_runs(keywords: list[str], since: str, owned_domains: list[str], tracked_brands: list[str] | None = None) -> WindowRuns:
     """Each keyword's run tallies from ``since`` on, read in parallel and bounded (``shared.scoped_reports.load_window_runs``)."""
     return load_scoped_window_runs(
         dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, since, owned_domains, rollups=keyword_run_kpis_table(dynamodb),
+        tracked_brands=tracked_brands or [],
     )
 
 
@@ -77,11 +78,13 @@ def _resolve_scope(scope: ReportScope | None) -> ReportScope:
     return all_active_scope(dynamodb.Table(KEYWORDS_TABLE)) if scope is None else scope
 
 
-def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_domains: list[str]) -> dict[str, Any]:
+def trends_for_scope(
+    scope: ReportScope | None, period: str, days: int, owned_domains: list[str], tracked_brands: list[str] | None = None,
+) -> dict[str, Any]:
     """The trend view of ``scope`` over the last ``days`` days (also behind ``/reports/overview``)."""
     keywords, scope_fields = capped_scope(_resolve_scope(scope), TREND_KEYWORDS_CAP)
     since = history_since(days)
-    window = load_window_runs(keywords, since, owned_domains)
+    window = load_window_runs(keywords, since, owned_domains, tracked_brands)
     read = window.read_keywords(keywords)
     return {
         **scope_read_fields(scope_fields, window.skipped),
@@ -111,5 +114,6 @@ def handler(
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
     if rejected:
         return rejected
-    owned_domains = owned_domains_from(get_brand_config())
-    return success_response(trends_for_scope(report_scope, period, days, owned_domains), event)
+    config = get_brand_config()
+    trends = trends_for_scope(report_scope, period, days, owned_domains_from(config), tracked_brand_names(config))
+    return success_response(trends, event)

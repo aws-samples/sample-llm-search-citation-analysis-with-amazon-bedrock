@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
@@ -73,9 +74,11 @@ export class CitationAnalysisApiStack extends cdk.Stack {
     // `prune: false` and `retainOnDelete: true`: the destination is the
     // whole dashboard bucket, so a prune or a delete-on-remove would take the
     // dashboard's own files with it.
+    const webBucket = s3.Bucket.fromBucketName(this, 'WebBucket', inputs.webBucket.bucketName);
     new s3deploy.BucketDeployment(this, 'DeployRuntimeConfig', {
       sources: [s3deploy.Source.jsonData(RUNTIME_CONFIG_OBJECT_KEY, { apiUrl })],
-      destinationBucket: s3.Bucket.fromBucketName(this, 'WebBucket', inputs.webBucket.bucketName),
+      destinationBucket: webBucket,
+      role: this.runtimeConfigRole(webBucket, inputs.distribution.distributionId),
       prune: false,
       retainOnDelete: true,
       contentType: 'application/json',
@@ -97,6 +100,32 @@ export class CitationAnalysisApiStack extends cdk.Stack {
       value: apiUrl,
       description: 'Base URL the dashboard calls, as written to config.json',
     });
+  }
+
+  /**
+   * The role of the `config.json` deployment, instead of CDK's default
+   * (`s3:DeleteObject*` on the whole web bucket, `cloudfront:CreateInvalidation`
+   * on `*`): read the CDK asset it copies, list the web bucket (the copy is an
+   * `s3 sync`), write `config.json` only, and invalidate this distribution only.
+   * Passed without policy updates, so CDK adds nothing to it.
+   */
+  private runtimeConfigRole(webBucket: s3.IBucket, distributionId: string): iam.IRole {
+    const role = new iam.Role(this, 'RuntimeConfigDeploymentRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description: 'Writes config.json to the web bucket and invalidates it on the dashboard distribution',
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
+    });
+    const assets = `arn:${this.partition}:s3:::cdk-*-assets-${this.account}-${this.region}`;
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [`${assets}/*`] }));
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:ListBucket'], resources: [webBucket.bucketArn, assets] }));
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:PutObject'], resources: [webBucket.arnForObjects(RUNTIME_CONFIG_OBJECT_KEY)],
+    }));
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ['cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation'],
+      resources: [`arn:${this.partition}:cloudfront::${this.account}:distribution/${distributionId}`],
+    }));
+    return role.withoutPolicyUpdates();
   }
 }
 

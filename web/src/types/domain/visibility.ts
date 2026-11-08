@@ -277,6 +277,11 @@ export interface HistoricalTrendsResponse {
     stable_count: number;
   };
   brand_trends: BrandTrends;
+  /**
+   * Some run kept only its top 25 brands (first-party and tracked brands always), so a competitor outside them
+   * reads as not named in that run. Absent before 2.44.0.
+   */
+  brands_truncated?: boolean;
   /** The run the bounded window read stopped at (the trend covers the runs after it); `null`/absent when read whole. */
   truncated_before?: string | null;
 }

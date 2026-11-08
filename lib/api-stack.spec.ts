@@ -6,7 +6,7 @@ import {
   extractApiStackSnapshot, permissionsOfFunction, synthesizeDashboardStacks
 } from './api-stack-fixtures';
 import {
-  COGNITO_AUTH, methodRouteLabels, resolvePath
+  COGNITO_AUTH, allowStatementsOfRole, methodRouteLabels, resolvePath, statementActions
 } from './citation-analysis-stack-fixtures';
 import { WILDCARD_PERMISSION_FUNCTION_KEYS } from './constructs/rest-api';
 
@@ -194,6 +194,19 @@ describe('Runtime config (config.json)', () => {
   it('serves config.json as JSON that browsers revalidate, and invalidates it on the distribution', () => {
     expect(resolvePath(runtimeConfig, ['SystemMetadata'])).toStrictEqual({ 'cache-control': 'no-cache', 'content-type': 'application/json' });
     expect(resolvePath(runtimeConfig, ['DistributionPaths'])).toStrictEqual([`/${RUNTIME_CONFIG_OBJECT_KEY}`]);
+  });
+
+  it('deploys with a role that can only write config.json and invalidate the dashboard distribution', () => {
+    const roles = stacks.apiTemplate.findResources('AWS::IAM::Role', {
+      Properties: { Description: 'Writes config.json to the web bucket and invalidates it on the dashboard distribution' },
+    });
+    const [roleId] = Object.keys(roles);
+    const actions = allowStatementsOfRole(stacks.apiTemplate, roleId).flatMap(statementActions).sort((a, b) => a.localeCompare(b));
+
+    expect(actions).toStrictEqual([
+      'cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation', 's3:GetObject', 's3:ListBucket', 's3:PutObject',
+    ]);
+    expect(JSON.stringify(allowStatementsOfRole(stacks.apiTemplate, roleId))).not.toContain('"Resource":"*"');
   });
 
   it('is left alone by the main stack web deployment, which neither uploads nor prunes it', () => {

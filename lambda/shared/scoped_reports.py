@@ -27,7 +27,7 @@ from typing import Any, NamedTuple
 
 from shared.answer_queries import query_keyword_rows_capped, query_keyword_run_rows
 from shared.group_kpi_history import keyword_run_histories
-from shared.keyword_run_kpis import StoredRuns, query_stored_runs
+from shared.keyword_run_kpis import BRANDS_PER_RUN, StoredRuns, query_stored_runs
 from shared.kpi_engine import answers_from_rows
 from shared.kpi_tally import RunTally, owned_fingerprint, run_tallies, run_tally
 from shared.request_deadline import Deadline, current_deadline
@@ -244,6 +244,12 @@ class _WindowRead:
     brands: bool
     several: bool
     budget: Deadline
+    tracked_brands: tuple[str, ...] = ()
+
+    @property
+    def tally_options(self) -> dict[str, Any]:
+        """A raw or re-tallied run keeps its brands as a stored row does, so a window counts every run the same way."""
+        return {'brand_cap': BRANDS_PER_RUN, 'tracked_brands': self.tracked_brands} if self.brands else {}
 
     @property
     def fingerprint(self) -> str:
@@ -264,7 +270,7 @@ def _rebuilt_runs(request: _WindowRead, keyword: str, timestamps: list[str]) -> 
         if request.budget.stop_reading('a stale keyword rollup'):
             return rebuilt, timestamp
         rows = query_keyword_run_rows(request.table, keyword, timestamp)
-        rebuilt.append(run_tally(keyword, timestamp, answers_from_rows(rows), request.owned_domains))
+        rebuilt.append(run_tally(keyword, timestamp, answers_from_rows(rows), request.owned_domains, **request.tally_options))
     return rebuilt, None
 
 
@@ -292,7 +298,8 @@ def _read_keyword_window(request: _WindowRead, keyword: str) -> _KeywordWindow |
         )
         if capped.stopped and request.several:
             return None
-        raw, raw_cut = run_tallies(keyword, answers_from_rows(capped.rows), request.owned_domains), capped.cut
+        raw = run_tallies(keyword, answers_from_rows(capped.rows), request.owned_domains, **request.tally_options)
+        raw_cut = capped.cut
     cut = _latest_cut(stored.cut, rebuilt_cut, raw_cut)
     runs = sorted((run for run in (*raw, *current, *rebuilt) if run.answers and (cut is None or run.timestamp > cut)), key=lambda run: run.timestamp)
     return _KeywordWindow(runs, cut)
@@ -308,6 +315,7 @@ def load_window_runs(
     until: str | None = None,
     max_rows: int | None = None,
     brands: bool = True,
+    tracked_brands: Iterable[str] = (),
 ) -> WindowRuns:
     """Each keyword's run tallies from ``since`` on (through the run ``until``), read in parallel and bounded.
 
@@ -317,7 +325,9 @@ def load_window_runs(
     written or backfilled) are read from its SearchResults rows in ``table``.
     A rollup counted against other owned domains than ``owned_domains`` is
     re-tallied from that run's rows. ``brands`` False leaves the brand counts
-    unread. Without ``rollups`` every run is read raw (2.42.0).
+    unread; with brands, raw and re-tallied runs keep ``BRANDS_PER_RUN`` brands
+    (``tracked_brands`` always) like a stored row, so one window never mixes
+    capped and uncapped runs. Without ``rollups`` every run is read raw (2.42.0).
 
     The raw part reads at most ``max_rows`` rows a keyword (default
     ``rows_per_keyword``), newest first. When a keyword's read is cut, every
@@ -340,6 +350,7 @@ def load_window_runs(
         brands=brands,
         several=len(keywords) > 1,
         budget=window_read_deadline(),
+        tracked_brands=tuple(tracked_brands),
     )
 
     def unread_or_empty(_keyword: str) -> _KeywordWindow | None:
