@@ -60,13 +60,14 @@ every market is combined).
    the API login and password. New accounts get $1 of free credit.
 2. Deploy: `npm run deploy` deploys every stack together, the SEO stack and the Google AI Overviews engine
    included. The analysis workflow always has the engine's branch (it calls
-   `CitationAnalysis-Search-google_ai_overview` by name); the engine makes no paid call until step 5.
+   `CitationAnalysis-Search-google_ai_overview` by name); the engine is off until step 5, so it makes no paid call before then.
 3. Rebuild the dashboard (`./scripts/build-web.sh` reads `SeoApiUrl` into `VITE_SEO_API_URL`). Without the SEO stack
    the SEO pages say "SEO data is not set up" and the SEO overview says the stack is not deployed.
 4. As an Admin, open **Settings › AI Providers › SEO data › DataForSEO**, enter the login and password and save. The
    login is checked with DataForSEO's free account endpoint, which also shows the balance on the card. The secret is
    stored as `citation-analysis/dataforseo-key`. Until then the SEO overview shows a "Set up SEO data" panel.
-5. Enable **Google AI Overviews** in Settings › AI Providers (it uses the DataForSEO login; it has no key of its own).
+5. Switch on **Google AI Overviews** in Settings › AI Providers. It uses the DataForSEO login and has no key of its own.
+   It stays off until you do, even with the login saved, because it bills one DataForSEO call per keyword and run.
 
 ## Who can do what
 

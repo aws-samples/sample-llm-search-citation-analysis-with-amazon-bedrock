@@ -33,6 +33,7 @@ from shared.ai_clients import (
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
+from shared.config import enabled_without_config
 from shared.dataforseo_client import BILLING_MESSAGE, DEFAULT_BASE_URL, response_error
 from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
@@ -327,10 +328,10 @@ def get_provider_config(provider_id: str) -> dict:
     try:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
         response = table.get_item(Key={'provider_id': provider_id})
-        return response.get('Item', {'provider_id': provider_id, 'enabled': True})
+        return response.get('Item', {'provider_id': provider_id, 'enabled': enabled_without_config(provider_id)})
     except Exception:
         logger.exception("Error getting provider config")
-        return {'provider_id': provider_id, 'enabled': True}
+        return {'provider_id': provider_id, 'enabled': enabled_without_config(provider_id)}
 
 
 def _enabled_update(provider_id: str, enabled: bool) -> dict[str, Any]:
@@ -993,7 +994,7 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             'docs_url': info['docs_url'],
             'type': info.get('type', PROVIDER_TYPE_LLM),
             **{field: info[field] for field in _PASSTHROUGH_FIELDS if field in info},
-            **_key_state_fields(config, secret_status),
+            **_key_state_fields(provider_id, config, secret_status),
             'last_updated': secret_status.get('last_updated'),
             **provider_health_fields(config),
         })
@@ -1001,10 +1002,10 @@ def handle_get_providers(event: dict, context: Any) -> dict:
     return success_response({'providers': providers}, event)
 
 
-def _key_state_fields(config: Mapping[str, Any], secret_status: Mapping[str, Any]) -> dict[str, Any]:
-    """Whether the provider is on, and whether (and with which masked key) its secret is set."""
+def _key_state_fields(provider_id: str, config: Mapping[str, Any], secret_status: Mapping[str, Any]) -> dict[str, Any]:
+    """Whether the provider is on (as the search Lambda reads it), and whether (and with which masked key) its secret is set."""
     return {
-        'enabled': config.get('enabled', True),
+        'enabled': bool(config.get('enabled', enabled_without_config(provider_id))),
         'configured': secret_status.get('has_value', False),
         'masked_key': secret_status.get('masked_key'),
     }
@@ -1257,7 +1258,7 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
 
     return success_response({
         'id': provider_id,
-        **_key_state_fields(config, secret_status),
+        **_key_state_fields(provider_id, config, secret_status),
         **_model_fields(provider_id, config),
     }, event)
 

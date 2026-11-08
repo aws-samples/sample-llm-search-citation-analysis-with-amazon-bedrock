@@ -175,12 +175,16 @@ describe('Main workflow and the Google AI Overviews engine (always deployed toge
       .toStrictEqual([LAMBDA_SERVICE_ERRORS, ['Lambda.TooManyRequestsException']]);
   });
 
-  it('answers no rows when the SEO stack is not deployed, and a failed provider row for any other failure', () => {
+  it('records a failed row naming the missing function when the SEO stack is not deployed', () => {
     expect(resolvePath(snapshot.mainSearchTasks.google_ai_overview, ['Catch'])).toStrictEqual([
       { ErrorEquals: ['Lambda.ResourceNotFoundException'], Next: 'NotDeployed-google_ai_overview' },
       { ErrorEquals: ['States.ALL'], Next: 'SearchFailed-google_ai_overview' },
     ]);
-    expect(resolvePath(snapshot.aiOverviewNotDeployedState, ['Result'])).toStrictEqual({ results: [] });
+    expect(resolvePath(snapshot.aiOverviewNotDeployedState, ['Result', 'results', '0'])).toMatchObject({
+      provider: 'google_ai_overview',
+      status: 'error',
+      error: 'CitationAnalysis-Search-google_ai_overview is not deployed',
+    });
   });
 
   it('keeps the States.TaskFailed retrier and the single failed-row catch on every other provider branch', () => {

@@ -104,8 +104,8 @@ export const GOOGLE_AI_OVERVIEW_PROVIDER: SearchProvider = {
 /**
  * The providers whose function another stack owns: Google AI Overviews, always. `npm run deploy` deploys every
  * stack together (`cdk deploy --all`), so the SEO stack's function exists by the time a run calls it. The engine
- * spends nothing until an Admin enters the DataForSEO login and enables it in Settings; until then its function
- * answers with no rows, like every disabled provider.
+ * stays off until an Admin switches it on in Settings (`OFF_UNTIL_ENABLED_PROVIDERS` in `lambda/shared/config.py`)
+ * and needs the DataForSEO login; until then its function answers no rows and spends nothing.
  */
 export const EXTERNAL_SEARCH_PROVIDERS: readonly SearchProvider[] = [GOOGLE_AI_OVERVIEW_PROVIDER];
 
@@ -305,12 +305,12 @@ function constructLabel(providerId: string): string {
 }
 
 /** The row a provider contributes when its Lambda failed after every retry. */
-function failedProviderResult(provider: SearchProvider): Record<string, unknown> {
+function failedProviderResult(provider: SearchProvider, error = 'provider Lambda failed'): Record<string, unknown> {
   return {
     provider: provider.id,
     provider_type: provider.type,
     status: 'error',
-    error: 'provider Lambda failed',
+    error,
     citations: [],
     citation_count: 0,
     query_prompt_id: 'default',
@@ -483,14 +483,17 @@ export class ProviderSearch extends Construct {
         backoffRate: 2.0,
       });
     }
-    // A function another stack owns and that is not there (only the main
-    // stack deployed, or the SEO stack removed) answers no rows, as a disabled
-    // provider does, instead of a failed row on every keyword.
+    // A function another stack owns and that is not there (that stack failed
+    // or was removed; `npm run deploy` deploys them together) is a failed call
+    // that names the missing function, so the run summary shows why the
+    // engine's answers are missing instead of dropping them unseen.
     if (external) {
       invoke.addCatch(
         new stepfunctions.Pass(this, `${label}NotDeployed`, {
           stateName: `NotDeployed-${provider.id}`,
-          result: stepfunctions.Result.fromObject({ results: [] }),
+          result: stepfunctions.Result.fromObject({
+            results: [failedProviderResult(provider, `${providerSearchFunctionName(provider.id)} is not deployed`)],
+          }),
         }),
         { errors: ['Lambda.ResourceNotFoundException'] }
       );

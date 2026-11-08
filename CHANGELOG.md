@@ -13,25 +13,27 @@ process.
 
 Google AI Overviews is part of every deployment. `npm run deploy` (`cdk deploy --all`) deploys the SEO stack and
 the engine's Lambda with the main stack, and the analysis workflow always has the engine's branch. The
-`-c seoEngine=true` flag and the second deploy it needed are gone.
+`-c seoEngine=true` flag and the second deploy it needed are gone. The engine is off until an Admin switches it on.
 
 ### Upgrade notes
 
 - **Deploy every stack together** (`npm run deploy`). A `seoEngine` value in `cdk.json` or on the command line is
   now ignored, and you can remove it.
-- **Nothing paid starts on its own.** Google AI Overviews only runs once the DataForSEO login is saved in Settings
-  › AI Providers › SEO data, and only while it is enabled there. Without the login, its function answers no rows.
-  If a deployment without the flag already has the DataForSEO login saved, Google AI Overviews is asked in the next
-  run, because an engine with no saved setting counts as enabled. Turn it off in Settings first if you don't want
-  that.
+- **Google AI Overviews is off until an Admin switches it on** in Settings › AI Providers, even with the DataForSEO
+  login saved. A deployment that had switched it on keeps it on.
 
 ### Changed
 
 - `lib/constructs/provider-search.ts`: `EXTERNAL_SEARCH_PROVIDERS` (Google AI Overviews) replaces
   `readExternalSearchProviders` and its CDK context flag. The `Search-google_ai_overview` branch catches
-  `Lambda.ResourceNotFoundException` into `NotDeployed-google_ai_overview`, which answers no rows. So a main stack
-  deployed without the SEO stack runs as before, instead of writing a failed Google row for every keyword. Any
-  other failure still becomes the failed provider row, and the branch still never re-runs a billed call.
+  `Lambda.ResourceNotFoundException` into `NotDeployed-google_ai_overview`. That writes the failed provider row
+  with the error `CitationAnalysis-Search-google_ai_overview is not deployed`, so the run summary says why the
+  engine's answers are missing. Any other failure still becomes the usual failed row, and the branch still never
+  re-runs a billed call.
+- **Google AI Overviews defaults to off** (`OFF_UNTIL_ENABLED_PROVIDERS` in `lambda/shared/config.py`). Every
+  other provider with no saved setting still counts as on. The search Lambda and the Settings card read the same
+  default, also for a config row that holds only health bookkeeping. Before, saving the DataForSEO login for the SEO
+  pages would have started one billed call per keyword on every run (TENETS.md, tenet 7: paid is opt-in).
 - README (workflow, deploy order, setup, CDK context table), `docs/seo.md` (Setup) and the architecture diagram
   no longer mention the flag.
 
