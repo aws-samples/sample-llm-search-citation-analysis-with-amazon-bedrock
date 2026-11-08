@@ -60,10 +60,15 @@ export function mockRankTrackingApi(): void {
   vi.mocked(createRankTracker).mockResolvedValue({ tracker: buildRankTracker() });
 }
 
-/** The view (in a router, for its Settings links) with `selectedMarketId` in the header (every market combined). */
-export function renderRankTracking(selectedMarketId: string | null = null): User {
+/**
+ * The view (in a router at `path`, for its Settings links and `?tracker=`) with `selectedMarketId` in the
+ * header (every market combined).
+ */
+export function renderRankTracking(selectedMarketId: string | null = null, path = '/seo/rank-tracking'): User {
   const user = userEvent.setup();
-  renderWithMarketSelection(<MemoryRouter><RankTrackingView /></MemoryRouter>, buildMarketSelectionMock({ selectedMarketId }));
+  renderWithMarketSelection(
+    <MemoryRouter initialEntries={[path]}><RankTrackingView /></MemoryRouter>, buildMarketSelectionMock({ selectedMarketId }),
+  );
   return user;
 }
 

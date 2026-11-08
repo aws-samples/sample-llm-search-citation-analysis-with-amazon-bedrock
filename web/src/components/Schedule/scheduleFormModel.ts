@@ -6,12 +6,16 @@ import {
   describeScopeMarkets, scopeMarketIds
 } from '../Markets/marketScope';
 import { marketName } from '../Markets/marketSelection';
+import { kindOf } from './scheduleKinds';
 
 /**
  * Pure helpers behind the schedule form: defaults, mapping a schedule into
  * form state and back into an API payload, client-side validation and the
  * human-readable summary shown on each schedule card.
  */
+
+/** Sets one field of the schedule form. */
+export type UpdateScheduleField = <K extends keyof ScheduleFormData>(field: K, value: ScheduleFormData[K]) => void;
 
 export const DAYS_OF_WEEK: readonly {
   value: string;
@@ -78,6 +82,7 @@ export function timezoneOptions(current: string): string[] {
 
 export function defaultScheduleFormData(): ScheduleFormData {
   return {
+    kind: 'analysis',
     display_name: '',
     frequency: 'daily',
     time: '09:00',
@@ -107,6 +112,7 @@ export function formDataFromSchedule(schedule: Schedule): ScheduleFormData {
   const defaults = defaultScheduleFormData();
   const form = schedule.form;
   return {
+    kind: kindOf(schedule),
     display_name: schedule.display_name,
     ...timingFromScheduleForm(form, defaults),
     timezone: form?.timezone ?? schedule.timezone ?? defaults.timezone,
@@ -135,11 +141,12 @@ export function validateScheduleFormData(formData: ScheduleFormData): string | n
       return `Day of month must be between 1 and ${MAX_DAY_OF_MONTH}`;
     }
   }
-  return scopeProblem(formData.scope);
+  return formData.kind === 'analysis' ? scopeProblem(formData.scope) : null;
 }
 
 export function toSchedulePayload(formData: ScheduleFormData): SchedulePayload {
   return {
+    kind: formData.kind,
     display_name: formData.display_name.trim(),
     frequency: formData.frequency,
     time: formData.time,
@@ -147,7 +154,7 @@ export function toSchedulePayload(formData: ScheduleFormData): SchedulePayload {
     day_of_week: formData.day_of_week,
     day_of_month: Number(formData.day_of_month) || 1,
     enabled: formData.enabled,
-    scope: formData.scope,
+    ...(formData.kind === 'analysis' ? { scope: formData.scope } : {}),
   };
 }
 

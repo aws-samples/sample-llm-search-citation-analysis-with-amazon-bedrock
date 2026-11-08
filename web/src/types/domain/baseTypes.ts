@@ -186,7 +186,13 @@ export interface ScheduleForm {
 }
 
 /**
- * An automated analysis schedule (EventBridge Scheduler).
+ * What a schedule starts: an analysis run (the default), or a weekly-style
+ * sweep of paid SEO snapshots of every owned and competitor domain.
+ */
+export type ScheduleKind = 'analysis' | 'domain_snapshots' | 'backlink_snapshots';
+
+/**
+ * An automated schedule (EventBridge Scheduler); `kind` says what it starts.
  *
  * `id` is the generated, immutable schedule name; `display_name` is what the
  * user typed. `scope` is resolved against the active keywords when the
@@ -206,10 +212,30 @@ export interface Schedule {
   /** Legacy keyword-text subset; empty for v2 schedules. */
   keywords?: string[];
   legacy: boolean;
+  /** Absent from answers before 2.43.0, which only had analysis schedules. */
+  kind?: ScheduleKind;
+  /** The API's one-line scope, e.g. "every owned and competitor domain" for snapshot kinds. */
+  scope_summary?: string;
+}
+
+/**
+ * A rank tracker's own one-time schedule (its next check), listed read-only
+ * on the Schedule page; the tracker form owns its frequency.
+ */
+export interface RankTrackerSchedule {
+  id: string;
+  tracker_id: string | null;
+  /** The tracker's name. */
+  display_name: string;
+  /** ISO-8601 UTC, or null when the expression could not be read. */
+  next_run_at: string | null;
+  enabled: boolean;
 }
 
 /** Form state for creating or editing a schedule. */
 export interface ScheduleFormData {
+  /** Fixed once created: another kind is another schedule. */
+  kind: ScheduleKind;
   display_name: string;
   frequency: ScheduleFrequency;
   time: string;

@@ -73,6 +73,19 @@ describe('RankTrackingView setup', () => {
     expect(screen.getByText('Market: Chile (Spanish)')).toBeInTheDocument();
   });
 
+  it('opens on the tracker named by ?tracker= (the Schedule page links)', async () => {
+    vi.mocked(fetchRankTrackers).mockResolvedValue(buildTrackerList({
+      trackers: [buildRankTracker(), buildRankTracker({
+        tracker_id: 'rt-second',
+        domain: 'second.example' 
+      })],
+    }));
+
+    renderRankTracking(null, '/seo/rank-tracking?tracker=rt-second');
+
+    await waitFor(() => expect(fetchRankResults).toHaveBeenLastCalledWith('rt-second', expect.any(String)));
+  });
+
   it('starts no paid run when the view opens', async () => {
     await renderWithResults();
 

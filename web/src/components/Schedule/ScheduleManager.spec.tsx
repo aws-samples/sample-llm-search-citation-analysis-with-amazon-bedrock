@@ -5,7 +5,9 @@ import {
   render, screen, waitFor, within 
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { ScheduleManager } from './ScheduleManager';
+import { trackerLink } from './RankTrackerScheduleList';
 import {
   GROUP_CORUNA,
   GROUP_MARINO,
@@ -24,19 +26,13 @@ vi.mock('../../infrastructure', async () => {
   };
 });
 
-vi.mock('../../api/executions', () => ({
-  fetchSchedules: vi.fn(),
-  createSchedule: vi.fn(),
-  updateSchedule: vi.fn(),
-  deleteSchedule: vi.fn(),
-  runSchedule: vi.fn(),
-}));
+vi.mock('../../api/executions', () => import('../../api/executionsMock-fixtures'));
 
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import {
-  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
+  createSchedule, deleteSchedule, fetchRankTrackerSchedules, fetchSchedules, runSchedule, updateSchedule 
 } from '../../api/executions';
 import type { Schedule } from '../../types';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
@@ -51,6 +47,7 @@ const mockDeleteSchedule = vi.mocked(deleteSchedule);
 const mockRunSchedule = vi.mocked(runSchedule);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
+const mockFetchRankTrackerSchedules = vi.mocked(fetchRankTrackerSchedules);
 
 const weeklySchedule = buildSchedule();
 
@@ -67,7 +64,7 @@ function mockAdmin(isAdmin: boolean) {
 
 function renderManager(schedules: Schedule[] = []) {
   const props = buildProps({ schedules });
-  render(<ScheduleManager {...props} />);
+  render(<MemoryRouter><ScheduleManager {...props} /></MemoryRouter>);
   return props;
 }
 
@@ -207,6 +204,7 @@ describe('ScheduleManager', () => {
       await submitCreateForm();
 
       expect(mockCreateSchedule).toHaveBeenCalledWith({
+        kind: 'analysis',
         display_name: 'Hotel Coruña — weekly',
         frequency: 'weekly',
         time: '09:00',
@@ -318,6 +316,7 @@ describe('ScheduleManager', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
 
       expect(mockUpdateSchedule).toHaveBeenCalledWith('sch-1a2b3c4d', {
+        kind: 'analysis',
         display_name: 'Hotel Coruña — weekly',
         frequency: 'weekly',
         time: '18:30',
@@ -448,5 +447,137 @@ describe('ScheduleManager admin-only controls', () => {
     renderManager([weeklySchedule]);
 
     expect(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' })).toBeInTheDocument();
+  });
+});
+
+// Schedule kinds (2.43.0): paid snapshot schedules next to analysis runs, and
+// the rank trackers' own schedules listed read-only.
+const backlinkSchedule: Schedule = buildSchedule({
+  id: 'sch-b1',
+  display_name: 'Weekly backlink snapshots',
+  kind: 'backlink_snapshots',
+  scope: null,
+  scope_summary: 'every owned and competitor domain',
+});
+
+/** Opens the create form, picks backlink snapshots and saves (disabled first when `enabled` is false). */
+async function renderBacklinkCreate({ enabled = true } = {}) {
+  renderManager();
+  await openCreateForm();
+  await userEvent.selectOptions(screen.getByLabelText('Runs'), 'backlink_snapshots');
+  if (!enabled) await userEvent.click(screen.getByLabelText(/^Enabled/));
+  await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+}
+
+/** Renders the backlink snapshot schedule and clicks its button named `<action> schedule Weekly backlink snapshots<suffix>`. */
+async function renderBacklinkCardAction(action: 'Run' | 'Edit', suffix = '') {
+  renderManager([backlinkSchedule]);
+  await userEvent.click(screen.getByRole('button', { name: `${action} schedule Weekly backlink snapshots${suffix}` }));
+}
+
+/** Answers the paid confirmation with the button named `name`. */
+async function renderAnswerToDialog(name: string) {
+  await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name }));
+}
+
+describe('ScheduleManager kinds', () => {
+  beforeEach(() => {
+    mockAdmin(true);
+    mockGroups([]);
+    mockFetchSchedules.mockResolvedValue([]);
+    mockCreateSchedule.mockResolvedValue(backlinkSchedule);
+    mockRunSchedule.mockResolvedValue({ message: 'Weekly backlink snapshots started' });
+    mockFetchRankTrackerSchedules.mockResolvedValue([]);
+  });
+
+  describe('snapshot schedules', () => {
+    it('names the paid calls and hides the keyword scope once a snapshot kind is picked', async () => {
+      renderManager();
+      await openCreateForm();
+
+      await userEvent.selectOptions(screen.getByLabelText('Runs'), 'domain_snapshots');
+
+      expect(screen.getByLabelText('Schedule name')).toHaveValue('Weekly domain snapshots');
+      expect(screen.getByText(/two paid DataForSEO calls per owned and competitor domain and market/)).toBeInTheDocument();
+      expect(screen.queryByText('Keywords to analyse')).not.toBeInTheDocument();
+    });
+
+    it('asks before saving an enabled paid schedule, naming its paid calls', async () => {
+      await renderBacklinkCreate();
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/one paid DataForSEO call per owned and competitor domain/)).toBeInTheDocument();
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('posts the snapshot kind and its default name without a scope once confirmed', async () => {
+      await renderBacklinkCreate();
+      await renderAnswerToDialog('Save');
+
+      await waitFor(() => expect(mockCreateSchedule).toHaveBeenCalledTimes(1));
+      const payload = mockCreateSchedule.mock.calls[0][0];
+      expect([payload.kind, payload.display_name, 'scope' in payload]).toStrictEqual(['backlink_snapshots', 'Weekly backlink snapshots', false]);
+    });
+
+    it('saves nothing when the paid confirmation is cancelled', async () => {
+      await renderBacklinkCreate();
+      await renderAnswerToDialog('Cancel');
+
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('saves a disabled snapshot schedule without asking: it never runs', async () => {
+      await renderBacklinkCreate({ enabled: false });
+
+      await waitFor(() => expect(mockCreateSchedule.mock.calls[0]?.[0].enabled).toBe(false));
+    });
+
+    it('marks a snapshot schedule as paid and shows what it covers', () => {
+      renderManager([backlinkSchedule]);
+
+      expect(screen.getByText('Paid')).toBeInTheDocument();
+      expect(screen.getByText('Backlink snapshots: every owned and competitor domain')).toBeInTheDocument();
+    });
+
+    it('asks before running a snapshot schedule now', async () => {
+      await renderBacklinkCardAction('Run', ' now');
+
+      expect(mockRunSchedule).not.toHaveBeenCalled();
+      await renderAnswerToDialog('Run');
+
+      await waitFor(() => expect(mockRunSchedule).toHaveBeenCalledWith('sch-b1'));
+    });
+
+    it('shows the kind without a picker when editing: a schedule keeps its kind', async () => {
+      await renderBacklinkCardAction('Edit');
+
+      expect(screen.queryByRole('combobox', { name: 'Runs' })).not.toBeInTheDocument();
+      expect(within(screen.getByRole('form', { name: 'Edit schedule' })).getByText('Backlink snapshots')).toBeInTheDocument();
+    });
+  });
+
+  describe('rank tracker checks', () => {
+    it('lists each tracker\'s next check with a link to edit it on the tracker', async () => {
+      mockFetchRankTrackerSchedules.mockResolvedValue([{
+        id: 'rank-a',
+        tracker_id: 'a',
+        display_name: 'Hotels',
+        next_run_at: '2026-11-09T04:30:00Z',
+        enabled: true,
+      }]);
+      renderManager();
+
+      const section = await screen.findByRole('region', { name: 'Rank tracker checks' });
+      expect(within(section).getByText('Hotels')).toBeInTheDocument();
+      expect(within(section).getByRole('link', { name: 'Edit on the tracker' })).toHaveAttribute('href', trackerLink('a'));
+      expect(within(section).queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('stays hidden while no tracker is scheduled', async () => {
+      renderManager();
+
+      await waitFor(() => expect(mockFetchRankTrackerSchedules).toHaveBeenCalledTimes(1));
+      expect(screen.queryByRole('region', { name: 'Rank tracker checks' })).not.toBeInTheDocument();
+    });
   });
 });

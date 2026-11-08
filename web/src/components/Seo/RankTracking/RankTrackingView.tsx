@@ -6,10 +6,12 @@
  * of the market (or of one keyword group). While the market has none, Admins get the one-click "Track your
  * rankings" card. Admins create, edit, archive and run trackers; everyone reads.
  * Nothing paid happens on mount, focus or retry: a check runs on schedule or on a confirmed click.
+ * `?tracker=<id>` (the Schedule page's links) opens on that tracker.
  */
 import {
   useMemo, useState
 } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   competitorDomainEntries, type CompetitorDomain
 } from '../../../api/brandSettings';
@@ -133,7 +135,8 @@ function ConfiguredRankTracking() {
     selectedMarketId, catalog 
   } = useMarketSelection();
   const list = useRankTrackerList(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('tracker'));
   const [editing, setEditing] = useState<Editing>(null);
   const [archiving, setArchiving] = useState<RankTracker | null>(null);
   const [trackingCompetitors, setTrackingCompetitors] = useState(false);

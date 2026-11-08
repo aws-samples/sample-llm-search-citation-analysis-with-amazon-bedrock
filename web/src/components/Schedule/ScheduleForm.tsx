@@ -7,15 +7,16 @@ import {
   keywordsInMarkets, scopeMarketIds, withMarketIds
 } from '../Markets/marketScope';
 import {
-  DAYS_OF_WEEK, MAX_DAY_OF_MONTH, isScheduleFrequency, timezoneOptions
+  DAYS_OF_WEEK, MAX_DAY_OF_MONTH, isScheduleFrequency, timezoneOptions, type UpdateScheduleField
 } from './scheduleFormModel';
+import { ScheduleKindField } from './ScheduleKindField';
 
 export type ScheduleFormMode = 'create' | 'edit';
 
 interface ScheduleFormProps {
   mode: ScheduleFormMode;
   formData: ScheduleFormData;
-  updateFormField: <K extends keyof ScheduleFormData>(field: K, value: ScheduleFormData[K]) => void;
+  updateFormField: UpdateScheduleField;
   onSubmit: () => void;
   onCancel: () => void;
   saving: boolean;
@@ -50,6 +51,8 @@ export const ScheduleForm = ({
       <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">{legacyNotice}</p>
     )}
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <ScheduleKindField editable={mode === 'create'} formData={formData} updateFormField={updateFormField}
+        inputClassName={INPUT_CLASS} />
       <FormField label="Schedule name" htmlFor="schedule-display-name">
         <input
           id="schedule-display-name"
@@ -144,12 +147,14 @@ export const ScheduleForm = ({
           Enabled (a disabled schedule keeps its settings but never runs)
         </label>
       </div>
-      <ScheduleScopeField
-        scope={formData.scope}
-        onChange={(scope) => updateFormField('scope', scope)}
-        keywords={keywords}
-        groups={groups}
-      />
+      {formData.kind === 'analysis' && (
+        <ScheduleScopeField
+          scope={formData.scope}
+          onChange={(scope) => updateFormField('scope', scope)}
+          keywords={keywords}
+          groups={groups}
+        />
+      )}
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
       <button

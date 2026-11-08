@@ -21,6 +21,7 @@ function AdminControls({
   readonly domains: number;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const closeConfirm = () => setConfirming(false);
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button size="sm" disabled={snapshots.busy || domains === 0} onClick={() => setConfirming(true)}>Snapshot now</Button>
@@ -28,7 +29,7 @@ function AdminControls({
       {snapshots.notice !== null && <output className="text-sm text-gray-600">{snapshots.notice}</output>}
       <ConfirmModal
         isOpen={confirming}
-        onClose={() => setConfirming(false)}
+        onClose={closeConfirm}
         onConfirm={() => void snapshots.snapshotNow()}
         title="Snapshot now?"
         message={`This starts ${callCount(domains)}, one per domain. Continue?`}
