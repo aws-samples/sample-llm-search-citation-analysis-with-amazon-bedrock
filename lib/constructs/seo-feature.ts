@@ -10,6 +10,9 @@ import { monthLogGroup } from './api-functions';
 import type { SeoRoutes } from './seo-api';
 import { citationAnalysisTable } from './tables';
 
+/** The SEO jobs function's name (state machines and the rank tracker schedules invoke it). */
+export const SEO_JOBS_FUNCTION_NAME = 'CitationAnalysis-SeoJobs';
+
 /**
  * What a SEO feature construct (`lib/constructs/seo-<feature>.ts`) builds on.
  *

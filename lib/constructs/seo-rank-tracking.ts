@@ -1,11 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
 import type * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as events from 'aws-cdk-lib/aws-events';
-import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import type * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
-import { SeoFeatureConstruct, stringKey } from './seo-feature';
+import { SEO_JOBS_FUNCTION_NAME, SeoFeatureConstruct, stringKey } from './seo-feature';
 
 /** The rank check state machine's name; its ARN is built from it so the functions can start it without a cycle. */
 export const RANK_CHECK_STATE_MACHINE_NAME = 'CitationAnalysis-SeoRankCheck';
@@ -16,7 +15,6 @@ const TABLE_NAME = 'CitationAnalysis-SeoRankTracking';
 const STATE_MACHINE_TIMEOUT = cdk.Duration.hours(3);
 /** The jobs function's own limit: a step never outlives it. */
 const STEP_TIMEOUT = cdk.Duration.minutes(15);
-const SCHEDULE_RATE = cdk.Duration.minutes(15);
 
 /** A string partition key and sort key. */
 function stringKeys(partition: string, sort: string): { partitionKey: dynamodb.Attribute; sortKey: dynamodb.Attribute } {
@@ -29,7 +27,11 @@ type Routes = Record<string, stepfunctions.IChainable>;
 /**
  * Rank tracking: the `CitationAnalysis-SeoRankTracking` table, the
  * `CitationAnalysis-SeoRankCheck` state machine that runs one check of a
- * tracker, and the 15-minute EventBridge rule that starts scheduled checks.
+ * tracker, and the `citation-analysis-seo-rank` schedule group. Each
+ * scheduled tracker has its own one-time EventBridge Scheduler schedule at its
+ * next slot (`rank-<tracker id>`), which invokes the jobs function with
+ * `{"step": "rank.due"}`; the router writes it when a tracker is saved, and
+ * `rank.due` moves it after each run. Nothing runs between checks.
  *
  * Every task invokes the SEO jobs function with `{"step": "rank.<name>",
  * "state": <the small run state>}`; each step answers the state with `next`,
@@ -46,10 +48,7 @@ export class SeoRankTracking extends SeoFeatureConstruct {
       tableName: TABLE_NAME,
       ...stringKeys('pk', 'sk'),
       timeToLiveAttribute: 'ttl',
-      globalSecondaryIndexes: [
-        { indexName: 'GSI1', ...stringKeys('gsi1pk', 'gsi1sk') },
-        { indexName: 'GSI2', ...stringKeys('gsi2pk', 'gsi2sk') },
-      ],
+      globalSecondaryIndexes: [{ indexName: 'GSI1', ...stringKeys('gsi1pk', 'gsi1sk') }],
     }, { batchWrites: true, deletes: true }); // deletes: the run lock on release, a keyword an Admin removes from a tracker
 
     const stateMachineArn = cdk.Stack.of(this).formatArn({
@@ -64,16 +63,7 @@ export class SeoRankTracking extends SeoFeatureConstruct {
     }
 
     this.rankCheckStateMachine();
-
-    new events.Rule(this, 'ScheduleRule', {
-      ruleName: 'CitationAnalysis-SeoRankTrackingTick',
-      description: 'Starts the rank checks of due rank trackers',
-      schedule: events.Schedule.rate(SCHEDULE_RATE),
-      targets: [new targets.LambdaFunction(jobs, {
-        event: events.RuleTargetInput.fromObject({ step: 'rank.tick' }),
-        retryAttempts: 0,
-      })],
-    });
+    this.trackerSchedules();
 
     this.serve(
       ['rank-trackers', ['GET', 'POST']],
@@ -85,6 +75,45 @@ export class SeoRankTracking extends SeoFeatureConstruct {
       ['rank-trackers/{trackerId}/history', ['GET']],
       ['rank-trackers/{trackerId}/trend', ['GET']],
     );
+  }
+
+  /**
+   * The group of the trackers' own schedules, the role EventBridge Scheduler
+   * invokes the jobs function with, and the router's and the jobs function's
+   * rights to write those schedules (and only those).
+   */
+  private trackerSchedules(): void {
+    const { router, jobs } = this.props;
+    const stack = cdk.Stack.of(this);
+    new scheduler.CfnScheduleGroup(this, 'TrackerScheduleGroup', { name: RANK_TRACKER_SCHEDULE_GROUP });
+    const role = new iam.Role(this, 'TrackerSchedulerRole', {
+      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com', {
+        conditions: { StringEquals: { 'aws:SourceAccount': stack.account } },
+      }),
+      description: 'Rank tracker schedules: invoke the SEO jobs function with rank.due',
+    });
+    // Built from the name: the jobs function cannot carry its own ARN (a template cycle).
+    const jobsArn = stack.formatArn({
+      service: 'lambda',
+      resource: 'function',
+      resourceName: SEO_JOBS_FUNCTION_NAME,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    });
+    role.addToPolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [jobsArn] }));
+    const schedules = stack.formatArn({
+      service: 'scheduler',
+      resource: 'schedule',
+      resourceName: `${RANK_TRACKER_SCHEDULE_GROUP}/rank-*`,
+    });
+    for (const fn of [router, jobs]) {
+      fn.addEnvironment('RANK_TRACKER_TARGET_ARN', jobsArn);
+      fn.addEnvironment('RANK_TRACKER_SCHEDULER_ROLE_ARN', role.roleArn);
+      fn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['scheduler:CreateSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule'],
+        resources: [schedules],
+      }));
+      fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['iam:PassRole'], resources: [role.roleArn] }));
+    }
   }
 
   /** One jobs-function task; `retry` = free step, retried on Lambda service errors. */

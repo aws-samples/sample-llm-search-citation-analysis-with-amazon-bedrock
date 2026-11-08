@@ -1,4 +1,4 @@
-"""Tests for the scheduler tick."""
+"""Tests for ``rank.due``: a tracker's own schedule fires, its check starts and the schedule moves on."""
 
 from __future__ import annotations
 
@@ -8,16 +8,24 @@ import pytest
 
 from shared import rank_tracking_scheduler
 from shared.rank_tracking_runs import begin_run
-from shared.rank_tracking_scheduler import tick
+from shared.rank_tracking_scheduler import run_due
 from shared.rank_tracking_store import TrackedKeyword, Tracker, get_tracker
 from testing.rank_tracking_fixtures import NOW, RankTable, stored_tracker, tracker
+from testing.scheduler_stub import SchedulerStub
 
 DUE = '2026-10-05T06:00:00.000000Z'
 NEXT_WEEK = '2026-10-12T06:00:00.000000Z'
+NAME = 'rank-rt-example'
 
 
 class StartFailedError(RuntimeError):
     """The state machine refused to start."""
+
+
+@pytest.fixture(autouse=True)
+def _scheduler_env(monkeypatch):
+    monkeypatch.setenv('RANK_TRACKER_TARGET_ARN', 'arn:aws:lambda:us-east-1:123456789012:function:SeoJobs')
+    monkeypatch.setenv('RANK_TRACKER_SCHEDULER_ROLE_ARN', 'arn:aws:iam::123456789012:role/RankScheduler')
 
 
 @pytest.fixture
@@ -35,74 +43,103 @@ def table():
     return memory
 
 
+@pytest.fixture
+def scheduler():
+    return SchedulerStub()
+
+
 def _stored(table: RankTable) -> Tracker:
     stored = get_tracker(table, 'rt-example')
     assert stored is not None
     return stored
 
 
-def _tick(table: RankTable, start: MagicMock | None = None) -> tuple[dict[str, int], str | None]:
-    """``(summary, next_check_at)`` after one tick."""
-    summary = tick(table, MagicMock(), start or MagicMock(), NOW)
-    return summary, _stored(table).next_check_at
+def _due(table: RankTable, scheduler: SchedulerStub, start: MagicMock | None = None) -> tuple[str, str | None]:
+    """``(outcome, next_check_at)`` after the tracker's schedule fired once."""
+    summary = run_due(table, MagicMock(), start or MagicMock(), 'rt-example', NOW, scheduler)
+    return summary['outcome'], _stored(table).next_check_at
 
 
-def test_starts_a_due_tracker_and_advances_it_from_its_slot(table, keywords):
+def test_starts_a_due_tracker_and_advances_it_from_its_slot(table, keywords, scheduler):
     start = MagicMock()
 
-    assert (*_tick(table, start), start.call_count) == ({'started': 1}, NEXT_WEEK, 1)
+    assert (*_due(table, scheduler, start), start.call_count) == ('started', NEXT_WEEK, 1)
 
 
-def test_leaves_a_tracker_whose_slot_is_later_alone(keywords):
+def test_moves_the_schedule_to_the_next_slot_after_starting(table, keywords, scheduler):
+    _due(table, scheduler)
+
+    assert (scheduler.expression(NAME), scheduler.target_input(NAME)) == (
+        'at(2026-10-12T06:00:00)', {'step': 'rank.due', 'tracker_id': 'rt-example'},
+    )
+
+
+def test_moves_the_schedule_to_a_later_slot_without_running(keywords, scheduler):
     later = RankTable()
     stored_tracker(later, next_check_at='2026-10-05T09:00:00.000000Z')
+    start = MagicMock()
 
-    assert tick(later, MagicMock(), MagicMock(), NOW) == {}
+    outcome = run_due(later, MagicMock(), start, 'rt-example', NOW, scheduler)['outcome']
+
+    assert (outcome, start.call_count, scheduler.expression(NAME)) == ('not_due', 0, 'at(2026-10-05T09:00:00)')
 
 
-def test_ignores_an_archived_or_manual_tracker(keywords):
+@pytest.mark.parametrize('overrides', [{'is_active': False}, {'schedule': 'manual'}])
+def test_deletes_the_schedule_of_an_archived_or_manual_tracker(keywords, scheduler, overrides):
     idle = RankTable()
-    stored_tracker(idle, tracker_id='a', is_active=False, next_check_at=DUE)
-    stored_tracker(idle, tracker_id='b', schedule='manual', next_check_at=DUE)
+    stored_tracker(idle, next_check_at=DUE, **overrides)
+    scheduler.create_schedule(Name=NAME, GroupName='citation-analysis-seo-rank')
 
-    assert tick(idle, MagicMock(), MagicMock(), NOW) == {}
+    outcome = run_due(idle, MagicMock(), MagicMock(), 'rt-example', NOW, scheduler)['outcome']
+
+    assert (outcome, scheduler.expression(NAME)) == ('not_scheduled', None)
 
 
-def test_advances_a_tracker_without_keywords_and_records_why(table, keywords):
+def test_deletes_the_schedule_of_a_tracker_that_is_gone(keywords, scheduler):
+    scheduler.create_schedule(Name=NAME, GroupName='citation-analysis-seo-rank')
+
+    outcome = run_due(RankTable(), MagicMock(), MagicMock(), 'rt-example', NOW, scheduler)['outcome']
+
+    assert (outcome, scheduler.expression(NAME)) == ('not_scheduled', None)
+
+
+def test_advances_a_tracker_without_keywords_and_records_why(table, keywords, scheduler):
     keywords.return_value = []
 
-    _tick(table)
+    _due(table, scheduler)
 
     assert (_stored(table).next_check_at, _stored(table).last_skip_reason) == (NEXT_WEEK, 'no_keywords')
 
 
-def test_puts_the_slot_back_when_a_run_is_still_active(table, keywords):
+def test_puts_the_slot_back_and_fires_again_later_when_a_run_is_still_active(table, keywords, scheduler):
     begin_run(table, MagicMock(), tracker(), 'manual', NOW)
 
-    assert _tick(table) == ({'already_running': 1}, DUE)
+    assert (*_due(table, scheduler), scheduler.expression(NAME)) == ('already_running', DUE, 'at(2026-10-05T08:15:00)')
 
 
-def test_keeps_the_schedule_advanced_when_the_state_machine_does_not_start(table, keywords):
-    assert _tick(table, MagicMock(side_effect=StartFailedError('down'))) == ({'start_failed': 1}, NEXT_WEEK)
+def test_keeps_the_schedule_advanced_when_the_state_machine_does_not_start(table, keywords, scheduler):
+    outcome = _due(table, scheduler, MagicMock(side_effect=StartFailedError('down')))
+
+    assert (outcome, scheduler.expression(NAME)) == (('start_failed', NEXT_WEEK), 'at(2026-10-12T06:00:00)')
 
 
-def test_leaves_the_tracker_due_when_reading_its_keywords_fails(table, keywords):
+def test_leaves_the_tracker_due_and_fires_again_later_when_reading_its_keywords_fails(table, keywords, scheduler):
     keywords.side_effect = StartFailedError('keywords table down')
 
-    assert _tick(table) == ({'error': 1}, DUE)
+    assert (*_due(table, scheduler), scheduler.expression(NAME)) == ('error', DUE, 'at(2026-10-05T08:15:00)')
 
 
-def test_skips_a_tracker_edited_since_the_tick_read_it(table, keywords, monkeypatch):
+def test_reports_a_claim_lost_to_an_edit(table, keywords, scheduler, monkeypatch):
     edited = tracker(next_check_at=DUE, version=0)
-    monkeypatch.setattr(rank_tracking_scheduler, 'due_trackers', lambda _table, _now: [edited])
+    monkeypatch.setattr(rank_tracking_scheduler, 'get_tracker', MagicMock(side_effect=[edited, _stored(table)]))
 
-    assert _tick(table)[0] == {'claim_lost': 1}
+    assert run_due(table, MagicMock(), MagicMock(), 'rt-example', NOW, scheduler)['outcome'] == 'claim_lost'
 
 
-def test_starts_the_scheduled_run_on_the_queue(table, keywords):
+def test_starts_the_scheduled_run_on_the_queue(table, keywords, scheduler):
     start = MagicMock()
 
-    _tick(table, start)
+    _due(table, scheduler, start)
 
     run_id = start.call_args.args[0]
     assert table.get_item(Key={'pk': 'TRACKER#rt-example', 'sk': f'RUN#{run_id}'})['Item']['method'] == 'queued'

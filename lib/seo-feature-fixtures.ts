@@ -106,14 +106,6 @@ export function keyLabels(schema: unknown): string[] {
   );
 }
 
-/** An EventBridge rule's schedule expression and its first target's input. */
-export function ruleScheduleAndInput(rule: unknown): { ruleSchedule: unknown; ruleInput: unknown } {
-  return {
-    ruleSchedule: resolvePath(rule, ['Properties', 'ScheduleExpression']),
-    ruleInput: resolvePath(rule, ['Properties', 'Targets', '0', 'Input']),
-  };
-}
-
 /** `read` of each Task state, by state name. */
 function taskValues<T>(states: Record<string, unknown>, read: (state: unknown) => T): Record<string, T> {
   return Object.fromEntries(Object.entries(states)

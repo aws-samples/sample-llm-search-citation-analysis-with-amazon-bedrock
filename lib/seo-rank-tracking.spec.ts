@@ -31,9 +31,9 @@ describe('rank tracking API routes', () => {
 });
 
 describe('CitationAnalysis-SeoRankTracking table', () => {
-  it('keys items on pk and sk with two secondary indexes', () => {
+  it('keys items on pk and sk with one secondary index (the tracker list; no index of due trackers)', () => {
     expect(snapshot.keys).toStrictEqual(['pk HASH', 'sk RANGE']);
-    expect(snapshot.indexNames).toStrictEqual(['GSI1', 'GSI2']);
+    expect(snapshot.indexNames).toStrictEqual(['GSI1']);
   });
 
   it('expires lock items on the ttl attribute', () => {
@@ -103,9 +103,27 @@ describe('CitationAnalysis-SeoRankCheck state machine', () => {
   });
 });
 
-describe('rank tracking schedule', () => {
-  it('runs the scheduler tick every 15 minutes', () => {
-    expect(snapshot.ruleSchedule).toBe('rate(15 minutes)');
-    expect(snapshot.ruleInput).toBe('{"step":"rank.tick"}');
+describe('rank tracker schedules', () => {
+  it('holds each tracker\'s own schedule in one group and runs no polling rule', () => {
+    expect(snapshot.scheduleGroups).toStrictEqual(['citation-analysis-seo-rank']);
+    expect(snapshot.ruleNames).toStrictEqual([]);
+  });
+
+  it('lets the router and the jobs function create, move and delete the trackers\' schedules only', () => {
+    const actions = ['scheduler:CreateSchedule', 'scheduler:DeleteSchedule', 'scheduler:UpdateSchedule'];
+
+    expect(snapshot.routerScheduleActions).toStrictEqual(actions);
+    expect(snapshot.jobsScheduleActions).toStrictEqual(actions);
+  });
+
+  it('lets EventBridge Scheduler only invoke the jobs function', () => {
+    expect(snapshot.schedulerRoleJobsActions).toStrictEqual(['lambda:InvokeFunction']);
+  });
+
+  it('names the schedules\' target and role in both functions\' environments', () => {
+    const keys = ['RANK_TRACKER_TARGET_ARN', 'RANK_TRACKER_SCHEDULER_ROLE_ARN'];
+
+    expect(keys.filter((key) => !(key in snapshot.routerEnv))).toStrictEqual([]);
+    expect(keys.filter((key) => !(key in snapshot.jobsEnv))).toStrictEqual([]);
   });
 });

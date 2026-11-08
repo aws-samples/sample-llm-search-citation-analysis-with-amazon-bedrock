@@ -1,55 +1,48 @@
-"""The scheduler tick: start the rank checks of due trackers (an EventBridge rule runs it every 15 minutes).
+"""``rank.due``: start the scheduled check of one tracker when its own schedule fires.
 
-Per tick at most ``DUE_PER_TICK`` trackers, oldest slot first (``GSI2``). For each one:
+Each scheduled tracker has a one-time EventBridge Scheduler schedule at its slot (``shared.rank_tracking_timer``).
+When it fires:
 
-1. The next slot is computed from the due slot (``shared.rank_tracking_schedule``), never from now, so a late
-   tick does not shift the schedule.
-2. A tracker without keywords is advanced with ``last_skip_reason='no_keywords'`` and not run.
-3. The tracker is claimed by writing the next slot conditioned on the version that was read. Losing that
-   race means another tick or an edit got there first: the tracker is skipped.
-4. The run is started (``begin_run``). If another run is still active, the claim is undone (the slot goes back
-   to the due value) so the tracker is picked up again next tick. If the state machine cannot be started the
-   schedule stays advanced, so an outage does not make every tracker due again at once.
+1. A tracker that is gone, archived or ``manual`` gets its schedule deleted and is not run. A tracker whose slot
+   is still ahead (it was edited after the schedule fired) gets its schedule moved to that slot.
+2. The next slot is computed from the due slot (``shared.rank_tracking_schedule``), never from now, so a late
+   fire does not shift the schedule.
+3. A tracker without keywords is advanced with ``last_skip_reason='no_keywords'`` and not run.
+4. The tracker is claimed by writing the next slot conditioned on the version that was read. Losing that race
+   means an edit got there first: the edit has already moved the schedule.
+5. The run is started (``begin_run``). If another run is still active, the claim is undone (the slot goes back
+   to the due value) and the schedule fires again ``BUSY_RETRY`` later. If the state machine cannot be started
+   the schedule stays advanced, so an outage does not make the tracker due again at once.
 
-Any error before the claim leaves the tracker untouched and due: its slot is the schedule's anchor, and writing
-it on an error would move every failing tracker to the same new time.
+An error before the claim leaves the tracker due: its slot is the schedule's anchor. The schedule then fires
+again ``BUSY_RETRY`` later instead of never.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
-
-from boto3.dynamodb.conditions import Key
 
 from shared.rank_tracking_runs import StartExecution, begin_run
 from shared.rank_tracking_schedule import format_timestamp, next_check_at, parse_timestamp
 from shared.rank_tracking_store import (
-    DUE_INDEX_KEY,
     StaleWriteError,
     Tracker,
+    get_tracker,
     put_tracker,
     resolve_run_keywords,
 )
+from shared.rank_tracking_timer import MIN_LEAD, scheduled_time, sync_schedule
 
-__all__ = ['DUE_PER_TICK', 'due_trackers', 'tick']
+__all__ = ['BUSY_RETRY', 'run_due']
 
 logger = logging.getLogger(__name__)
 
-DUE_PER_TICK = 50
-
-
-def due_trackers(table: Any, now: datetime) -> list[Tracker]:
-    answer = table.query(
-        IndexName='GSI2',
-        KeyConditionExpression=Key('gsi2pk').eq(DUE_INDEX_KEY) & Key('gsi2sk').lte(f'{format_timestamp(now)}#~'),
-        ScanIndexForward=True, Limit=DUE_PER_TICK,
-    )
-    return [Tracker.from_item(item) for item in answer.get('Items') or []]
+BUSY_RETRY = timedelta(minutes=15)
+_RETRIED = frozenset({'already_running', 'error'})
 
 
 def _advanced(tracker: Tracker, now: datetime, skip_reason: str | None) -> Tracker:
@@ -60,43 +53,47 @@ def _advanced(tracker: Tracker, now: datetime, skip_reason: str | None) -> Track
 
 
 def _start(table: Any, start_execution: StartExecution, tracker: Tracker, now: datetime) -> str:
-    """Claim and start one due tracker; the outcome name for the tick summary."""
+    """Claim and start one due tracker; the outcome name."""
     claimed = put_tracker(table, _advanced(tracker, now, None), tracker.version)
     try:
         run, _blocking = begin_run(table, start_execution, claimed, 'scheduled', now)
     except Exception:
-        logger.exception('rank.tick could not start tracker %s', tracker.tracker_id)
+        logger.exception('rank.due could not start tracker %s', tracker.tracker_id)
         return 'start_failed'
     if run is not None:
         return 'started'
     try:
         put_tracker(table, replace(claimed, next_check_at=tracker.next_check_at), claimed.version)
     except StaleWriteError:
-        logger.info('rank.tick could not restore tracker %s after a busy run', tracker.tracker_id)
+        logger.info('rank.due could not restore tracker %s after a busy run', tracker.tracker_id)
     return 'already_running'
 
 
-def _handle(table: Any, keywords_table: Any, start_execution: StartExecution, tracker: Tracker,
+def _handle(table: Any, keywords_table: Any, start_execution: StartExecution, tracker: Tracker | None,
             now: datetime) -> str:
-    if not tracker.is_active or tracker.schedule == 'manual':
+    slot = scheduled_time(tracker)
+    if tracker is None or slot is None:
         return 'not_scheduled'
+    if slot > now + MIN_LEAD:
+        return 'not_due'
     if not resolve_run_keywords(table, keywords_table, tracker):
         put_tracker(table, _advanced(tracker, now, 'no_keywords'), tracker.version)
         return 'no_keywords'
     return _start(table, start_execution, tracker, now)
 
 
-def tick(table: Any, keywords_table: Any, start_execution: StartExecution, now: datetime) -> dict[str, int]:
-    """Start the due trackers' runs; the count of each outcome."""
-    outcomes: Counter[str] = Counter()
-    for tracker in due_trackers(table, now):
-        try:
-            outcomes[_handle(table, keywords_table, start_execution, tracker, now)] += 1
-        except StaleWriteError:
-            outcomes['claim_lost'] += 1
-        except Exception:
-            logger.exception('rank.tick left tracker %s due after an error', tracker.tracker_id)
-            outcomes['error'] += 1
-    summary = dict(outcomes)
-    logger.info('%s', json.dumps({'event': 'rank_tracking_scheduler_summary', **summary}))
+def run_due(table: Any, keywords_table: Any, start_execution: StartExecution, tracker_id: str, now: datetime,
+            scheduler: Any = None) -> dict[str, Any]:
+    """Start the tracker's check when it is due and move its schedule; the outcome and the next fire time."""
+    try:
+        outcome = _handle(table, keywords_table, start_execution, get_tracker(table, tracker_id), now)
+    except StaleWriteError:
+        outcome = 'claim_lost'
+    except Exception:
+        logger.exception('rank.due left tracker %s due after an error', tracker_id)
+        outcome = 'error'
+    retry_at = now + BUSY_RETRY if outcome in _RETRIED else None
+    fires = sync_schedule(get_tracker(table, tracker_id), now, tracker_id=tracker_id, at=retry_at, client=scheduler)
+    summary = {'tracker_id': tracker_id, 'outcome': outcome, 'next_fire_at': format_timestamp(fires) if fires else None}
+    logger.info('%s', json.dumps({'event': 'rank_tracking_due', **summary}))
     return summary

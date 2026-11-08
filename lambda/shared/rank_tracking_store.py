@@ -3,9 +3,9 @@
 Items of a tracker's partition ``TRACKER#<tracker_id>``:
 
 - ``META``: the tracker (domain, market, devices, depth, schedule, keyword scope and group, schedule state). Listed through
-  ``GSI1`` (``TRACKERS`` / ``<created_at>#<tracker_id>``); due trackers through the sparse ``GSI2``
-  (``DUE`` / ``<next_check_at>#<tracker_id>``), whose keys exist only while the tracker is active and scheduled.
-  Every write is conditioned on the ``version`` it read, so the scheduler's claim and an edit never overwrite
+  ``GSI1`` (``TRACKERS`` / ``<created_at>#<tracker_id>``). A scheduled tracker's next check is its own
+  EventBridge Scheduler schedule (``shared.rank_tracking_timer``), so no index looks for due trackers.
+  Every write is conditioned on the ``version`` it read, so the ``rank.due`` claim and an edit never overwrite
   each other: the second writer sees a conflict and re-reads.
 - ``KW#<keyword_id>``: an extra keyword added by hand. The tracker's own keywords come from Settings > Keywords
   at run time, by its ``keyword_scope``: ``all`` = every active keyword of the tracker's market (keywords without
@@ -40,7 +40,6 @@ from shared.utils import normalize_keyword
 
 __all__ = [
     'DEVICE_CHOICES',
-    'DUE_INDEX_KEY',
     'KEYWORD_SCOPES',
     'LIST_SCOPE',
     'MAX_KEYWORDS',
@@ -76,7 +75,6 @@ LIST_SCOPE = 'list'
 """The scope a tracker stored before ``keyword_scope`` reads as when it has no group: its extra keywords only."""
 DEVICE_CHOICES = ('desktop', 'mobile', 'both')
 TRACKERS_INDEX_KEY = 'TRACKERS'
-DUE_INDEX_KEY = 'DUE'
 
 
 class StaleWriteError(Exception):
@@ -158,8 +156,6 @@ class Tracker:
         item: dict[str, Any] = {key: value for key, value in asdict(self).items() if value is not None}
         item.update(pk=tracker_pk(self.tracker_id), sk='META', gsi1pk=TRACKERS_INDEX_KEY,
                     gsi1sk=f'{self.created_at}#{self.tracker_id}')
-        if self.is_active and self.schedule != 'manual' and self.next_check_at:
-            item.update(gsi2pk=DUE_INDEX_KEY, gsi2sk=f'{self.next_check_at}#{self.tracker_id}')
         return item
 
 

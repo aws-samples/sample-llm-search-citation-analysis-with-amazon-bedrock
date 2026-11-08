@@ -181,11 +181,20 @@ def test_finalize_never_resurrects_a_run_that_already_failed(table, monkeypatch)
 
 
 def test_registers_every_rank_step():
-    assert sorted(jobs_rank.STEPS) == ['rank.collect', 'rank.fail', 'rank.finalize', 'rank.live', 'rank.plan_retry',
-                                       'rank.post', 'rank.prepare', 'rank.tick']
+    assert sorted(jobs_rank.STEPS) == ['rank.collect', 'rank.due', 'rank.fail', 'rank.finalize', 'rank.live',
+                                       'rank.plan_retry', 'rank.post', 'rank.prepare']
 
 
 def test_reads_the_run_state_a_state_machine_task_sends(table):
     state = _start(table)
 
     assert jobs_rank.STEPS['rank.prepare']({'step': 'rank.prepare', 'state': state})['next'] == 'live'
+
+
+def test_due_runs_the_fired_trackers_check(table, monkeypatch):
+    run_due = MagicMock(return_value={'outcome': 'started'})
+    monkeypatch.setattr(jobs_rank, 'run_due', run_due)
+
+    jobs_rank.STEPS['rank.due']({'step': 'rank.due', 'tracker_id': 'rt-example'})
+
+    assert (run_due.call_args.args[0], run_due.call_args.args[3], run_due.call_args.args[4]) == (table, 'rt-example', NOW)

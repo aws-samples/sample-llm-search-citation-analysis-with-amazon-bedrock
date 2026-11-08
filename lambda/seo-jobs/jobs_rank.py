@@ -19,7 +19,8 @@ state machine goes:
 - ``rank.finalize``: store what each answer means, the keyword state and the summary; end the run as
   ``completed`` / ``partial`` / ``failed`` and free the tracker.
 - ``rank.fail``: the state machine's catch-all; fails a still-active run and frees the tracker.
-- ``rank.tick``: the scheduler (``shared.rank_tracking_scheduler``), run by an EventBridge rule.
+- ``rank.due``: one tracker's own EventBridge Scheduler schedule fired (``shared.rank_tracking_scheduler``): start
+  its check when due and move the schedule to the next slot.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from shared.rank_tracking_runs import (
 )
 from shared.rank_tracking_runtime import UnknownMarketError, keywords_table, market_codes_for, start_execution
 from shared.rank_tracking_schedule import format_timestamp
-from shared.rank_tracking_scheduler import tick
+from shared.rank_tracking_scheduler import run_due
 from shared.rank_tracking_store import (
     StaleWriteError,
     Tracker,
@@ -207,8 +208,8 @@ def fail(event: dict[str, Any]) -> dict[str, Any]:
     return _stop(event, 'WORKFLOW_FAILED', 'The rank check stopped unexpectedly.')
 
 
-def scheduler_tick(_event: dict[str, Any]) -> dict[str, Any]:
-    return tick(rank_table(), keywords_table(), start_execution, utc_now())
+def tracker_due(event: dict[str, Any]) -> dict[str, Any]:
+    return run_due(rank_table(), keywords_table(), start_execution, str(event['tracker_id']), utc_now())
 
 
 Step = Callable[[dict[str, Any]], dict[str, Any]]
@@ -231,5 +232,5 @@ STEPS: dict[str, Step] = {
     'rank.plan_retry': _from_state_machine(plan_retry),
     'rank.finalize': _from_state_machine(finalize),
     'rank.fail': _from_state_machine(fail),
-    'rank.tick': scheduler_tick,
+    'rank.due': tracker_due,
 }

@@ -741,11 +741,12 @@ def _rank_tracker_schedules(event: dict[str, Any]) -> dict[str, Any]:
         while True:
             response = scheduler.list_schedules(**params)
             names.extend(summary['Name'] for summary in response.get('Schedules', []) if 'Name' in summary)
-            if not response.get('NextToken') or len(names) >= SCHEDULE_PAGE_MAX:
+            token = response.get('NextToken')
+            if not token or len(names) >= SCHEDULE_PAGE_MAX:
                 break
-            params['NextToken'] = response['NextToken']
+            params['NextToken'] = token
     except scheduler.exceptions.ResourceNotFoundException:
-        names = []  # No tracker has ever been scheduled: the group does not exist yet.
+        names = []  # The SEO stack (and its schedule group) is not deployed.
 
     def detail(name: str) -> Mapping[str, Any] | None:
         try:

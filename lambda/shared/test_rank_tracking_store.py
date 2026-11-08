@@ -62,9 +62,8 @@ def test_derives_a_different_tracker_id_in_another_market():
     assert tracker_id_for('example.com', 'global') != tracker_id_for('example.com', 'cl-es')
 
 
-def test_writes_a_due_index_entry_only_for_an_active_scheduled_tracker():
-    assert ('gsi2sk' in tracker().to_item(), 'gsi2sk' in tracker(schedule='manual').to_item(),
-            'gsi2sk' in tracker(is_active=False).to_item()) == (True, False, False)
+def test_writes_no_due_index_entry_the_trackers_own_schedules_replace_it():
+    assert 'gsi2sk' not in tracker().to_item()
 
 
 def test_increments_the_version_on_each_write():

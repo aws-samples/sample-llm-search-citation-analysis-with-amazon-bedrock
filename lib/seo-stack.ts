@@ -13,12 +13,11 @@ import {
 } from './constructs/provider-search';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import { SeoApi } from './constructs/seo-api';
-import { type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
+import { SEO_JOBS_FUNCTION_NAME, type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
 import { seoFeatures } from './seo-features';
 import { pythonFunction } from './constructs/api-functions';
 
-/** The SEO jobs function's name (state machines invoke it). */
-export const SEO_JOBS_FUNCTION_NAME = 'CitationAnalysis-SeoJobs';
+export { SEO_JOBS_FUNCTION_NAME };
 import { citationAnalysisTable } from './constructs/tables';
 
 /**

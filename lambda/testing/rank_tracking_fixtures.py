@@ -30,7 +30,7 @@ NOW_TEXT = '2026-10-05T08:00:00.000000Z'
 CODES = MarketCodes(location_code=2840, language_code='en', keyword_data='labs')
 
 _MISSING = object()
-_INDEX_KEYS = {'GSI1': ('gsi1pk', 'gsi1sk'), 'GSI2': ('gsi2pk', 'gsi2sk'), None: ('pk', 'sk')}
+_INDEX_KEYS = {'GSI1': ('gsi1pk', 'gsi1sk'), None: ('pk', 'sk')}
 
 
 def _name(operand: Any) -> str:

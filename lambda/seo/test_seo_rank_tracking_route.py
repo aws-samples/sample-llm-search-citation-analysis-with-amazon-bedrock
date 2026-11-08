@@ -8,9 +8,11 @@ import pytest
 
 from shared.rank_tracking_runs import save_items
 from shared.rank_tracking_store import get_tracker, keyword_id_for, tracker_id_for
+from shared.rank_tracking_timer import sync_schedule
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.rank_tracking_fixtures import NOW, NOW_TEXT, KeywordsTable, RankTable, stored_tracker
+from testing.scheduler_stub import SchedulerStub
 from testing.seo_fixtures import SEO_DIR, SEO_ENV, seo_event
 
 rank_module = handler_fixture(SEO_DIR, 'seo-rank-tracking.py', 'seo_rank_tracking_under_test', env=SEO_ENV)
@@ -27,10 +29,14 @@ class Api:
         self.table = RankTable()
         self.keywords = KeywordsTable()
         self.start = MagicMock()
+        self.scheduler = SchedulerStub()
+
+    def _sync(self, tracker, now):
+        return sync_schedule(tracker, now, client=self.scheduler)
 
     def call(self, method: str, path: str, *, body=None, query=None, groups: str = 'Admin') -> tuple[int, dict]:
         with patch.multiple(self.module, rank_table=lambda: self.table, keywords_table=lambda: self.keywords,
-                            start_execution=self.start, utc_now=lambda: NOW):
+                            start_execution=self.start, utc_now=lambda: NOW, sync_schedule=self._sync):
             return parse_response(self.module.handler(seo_event(method, path, body=body, query=query, groups=groups), {}))
 
 
@@ -87,6 +93,30 @@ def test_schedules_a_new_weekly_tracker_and_leaves_a_manual_one_unscheduled(api)
     manual = api.call('POST', BASE, body={'domain': 'example.org', 'schedule': 'manual'})[1]['tracker']
 
     assert (weekly['next_check_at'][:10], manual['next_check_at']) == ('2026-10-12', None)
+
+
+def test_gives_a_new_weekly_tracker_its_own_schedule_at_its_slot_and_a_manual_one_none(api):
+    weekly = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
+    manual = api.call('POST', BASE, body={'domain': 'example.org', 'schedule': 'manual'})[1]['tracker']
+
+    expression = api.scheduler.expression(f"rank-{weekly['tracker_id']}")
+    assert (expression[:13], api.scheduler.expression(f"rank-{manual['tracker_id']}")) == ('at(2026-10-12', None)
+
+
+def test_deletes_the_trackers_schedule_when_it_is_switched_to_manual(api):
+    created = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
+
+    api.call('PUT', f"{BASE}/{created['tracker_id']}", body={'schedule': 'manual'})
+
+    assert api.scheduler.schedules == {}
+
+
+def test_deletes_the_trackers_schedule_when_it_is_archived(api):
+    created = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
+
+    api.call('DELETE', f"{BASE}/{created['tracker_id']}")
+
+    assert api.scheduler.schedules == {}
 
 
 def test_lists_active_trackers_with_the_brand_domains(api):

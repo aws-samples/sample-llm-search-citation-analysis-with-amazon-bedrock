@@ -18,7 +18,8 @@ never made here: the route takes the tracker's lock and starts the ``CitationAna
 (live checks run in the jobs function, beyond the API's 29 s limit) and answers 202 with the run and its worst-case
 cost (the checks plus two queued re-check rounds). A tracker is one (domain, market); creating it again while it
 is active answers 409 ``TRACKER_EXISTS``, while it is archived reactivates it. An edit that races another write
-answers 409 ``CONFLICT``.
+answers 409 ``CONFLICT``. Creating, editing and archiving a tracker move its own EventBridge Scheduler schedule
+(``shared.rank_tracking_timer``) to its next slot, or delete it when the tracker is archived or ``manual``.
 
 A tracker's keywords are the Settings keywords of its ``keyword_scope`` (``all``: every active keyword of its
 market, the default; ``group``: one keyword group), resolved at every read and run, plus optional extra keywords
@@ -85,6 +86,7 @@ from shared.rank_tracking_store import (
     select_run_keywords,
     tracker_id_for,
 )
+from shared.rank_tracking_timer import sync_schedule
 from shared.utils import utc_now
 
 Handler = Callable[..., dict[str, Any]]
@@ -139,6 +141,12 @@ def _scheduled_slot(schedule: str) -> str | None:
 def _store(tracker: Tracker) -> Tracker:
     """Write ``tracker`` over the version it was read at; a lost race raises ``StaleWriteError`` (409)."""
     return put_tracker(rank_table(), tracker, tracker.version)
+
+
+def _scheduled(stored: Tracker) -> Tracker:
+    """``stored`` after its own EventBridge schedule was moved to its slot (or deleted: archived, manual)."""
+    sync_schedule(stored, utc_now())
+    return stored
 
 
 def _resolving_tracker(func: Handler, *, active_only: bool) -> Handler:
@@ -248,7 +256,7 @@ def handle_create(event: dict[str, Any], _context: Any, *, body: dict[str, Any],
         return refusal
     added = add_keywords(rank_table(), tracker_id, keywords, now)
     tracker = replace(tracker, keyword_count=len(list_keywords(rank_table(), tracker_id)))
-    stored = put_tracker(rank_table(), tracker, existing.version if existing else None)
+    stored = _scheduled(put_tracker(rank_table(), tracker, existing.version if existing else None))
     return success_response({'tracker': _tracker_body(stored), 'keywords_added': added}, event, 201)
 
 
@@ -296,14 +304,14 @@ def handle_update(event: dict[str, Any], _context: Any, *, body: dict[str, Any],
     refusal = refusal or _scope_refusal(edited, event)
     if refusal is not None:
         return refusal
-    stored = _store(edited)
+    stored = _scheduled(_store(edited))
     return success_response({'tracker': _with_latest_run(stored)}, event)
 
 
 @require_group(ADMIN_GROUP)
 @with_tracker()
 def handle_archive(event: dict[str, Any], _context: Any, *, tracker: Tracker, **_kwargs: Any) -> dict[str, Any]:
-    stored = _store(replace(tracker, is_active=False, updated_at=_now_text()))
+    stored = _scheduled(_store(replace(tracker, is_active=False, updated_at=_now_text())))
     return success_response({'tracker': _tracker_body(stored)}, event)
 
 
