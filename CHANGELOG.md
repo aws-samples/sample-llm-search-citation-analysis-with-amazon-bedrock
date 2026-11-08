@@ -66,6 +66,9 @@ Deploying this release changes the dashboard API's URL. Read this before upgradi
 
 ### Changed
 
+- `minimatch` stays on the patched 11.x (GHSA-g3hv-75wg-m249) except under `eslint-plugin-import-x`, a lint-time
+  dependency that imports `makeRe`, which minimatch 11 removed: it keeps 10.2.6 (scoped override) until the plugin
+  supports 11. Its patterns come from the repository's ESLint config, not from input.
 - **Dashboard REST API stack.** The 106 routes are unchanged (method, function, authorizer). The API stack imports the
   fixed-name `CitationAnalysis-API-*` functions by ARN, the user pool, the distribution and the web bucket; the main
   stack imports nothing from it. Each of the 8 router Lambdas gets one wildcard invoke permission (18 permissions,
