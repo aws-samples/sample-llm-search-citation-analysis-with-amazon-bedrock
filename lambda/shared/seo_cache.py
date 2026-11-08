@@ -43,9 +43,14 @@ _EMPTY_LIST_FIELDS = ('rows', 'items')
 
 
 @functools.cache
-def _table() -> Any:
-    """The cache table (one per warm container; tests replace this function)."""
+def cache_table() -> Any:
+    """``CitationAnalysis-SeoCache`` (one per warm container): the cache, and the callback gates and spend counters."""
     return boto3.resource('dynamodb').Table(resolve_table_env('DYNAMODB_TABLE_SEO_CACHE'))
+
+
+def _table() -> Any:
+    """The cache table (tests replace this function)."""
+    return cache_table()
 
 
 @functools.cache

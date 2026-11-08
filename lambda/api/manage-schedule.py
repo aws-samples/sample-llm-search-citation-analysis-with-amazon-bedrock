@@ -61,8 +61,8 @@ from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offs
 from shared.decorators import (
     RouteNotHandledError,
     api_handler,
-    optional_limit,
     json_object_body,
+    optional_limit,
     parse_json_body,
     route_handler,
     validate,

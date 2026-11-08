@@ -36,7 +36,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.dynamodb_conditions import is_conditional_check_failure
-from shared.env_vars import resolve_table_env
+from shared.seo_cache import cache_table
 
 __all__ = [
     'CALLBACK_URL_ENV',
@@ -65,9 +65,8 @@ _TASK_ID = re.compile(r'[A-Za-z0-9-]{1,64}')
 _GONE_TOKEN_CODES = frozenset({'TaskTimedOut', 'TaskDoesNotExist', 'InvalidToken'})
 
 
-@functools.cache
 def _table() -> Any:
-    return boto3.resource('dynamodb').Table(resolve_table_env('DYNAMODB_TABLE_SEO_CACHE'))
+    return cache_table()
 
 
 @functools.cache

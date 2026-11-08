@@ -22,12 +22,8 @@ import sys
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from typing import Any
-
-from shared.api_response import api_response
-from shared.auth import get_caller_identity
 from shared.consolidated_router import route_map_handler
-from shared.seo_spend_limit import is_paid, limit, take
+from shared.seo_spend_limit import limited
 
 ROUTE_MAP = {
     # Before its parent so `/keywords/metrics...` never reaches the research handler.
@@ -46,14 +42,4 @@ ROUTE_MAP = {
     '/api/seo/indexnow': 'seo-performance.py',
 }
 
-_dispatch = route_map_handler(__file__, ROUTE_MAP, __name__)
-
-
-def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    method, path = str(event.get('httpMethod') or ''), str(event.get('path') or '')
-    if is_paid(method, path) and not take(get_caller_identity(event) or 'unknown'):
-        return api_response(429, {
-            'error': f'You have made {limit()} paid SEO requests today (UTC); the limit resets at midnight UTC',
-            'code': 'DAILY_LIMIT',
-        }, event)
-    return _dispatch(event, context)
+handler = limited(route_map_handler(__file__, ROUTE_MAP, __name__))

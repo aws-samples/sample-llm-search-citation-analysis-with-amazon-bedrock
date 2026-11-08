@@ -14,18 +14,18 @@ confirmed per request and limited by who may start it.
 
 from __future__ import annotations
 
-import functools
 import os
 import time
+from collections.abc import Callable
 from typing import Any
 
-import boto3
-
+from shared.api_response import api_response
+from shared.auth import get_caller_identity
 from shared.dynamodb_conditions import applied_conditionally
-from shared.env_vars import resolve_table_env
+from shared.seo_cache import cache_table
 from shared.utils import utc_now
 
-__all__ = ['DEFAULT_LIMIT', 'LIMIT_ENV', 'PAID_ROUTES', 'counter_key', 'is_paid', 'limit', 'take']
+__all__ = ['DEFAULT_LIMIT', 'LIMIT_ENV', 'PAID_ROUTES', 'counter_key', 'is_paid', 'limit', 'limited', 'take']
 
 LIMIT_ENV = 'SEO_PAID_REQUESTS_PER_DAY'
 DEFAULT_LIMIT = 100
@@ -42,9 +42,8 @@ PAID_ROUTES = frozenset({
 _PREFIX = '/api/seo/'
 
 
-@functools.cache
 def _table() -> Any:
-    return boto3.resource('dynamodb').Table(resolve_table_env('DYNAMODB_TABLE_SEO_CACHE'))
+    return cache_table()
 
 
 def limit() -> int:
@@ -74,3 +73,20 @@ def take(caller: str, table: Any = None) -> bool:
         ExpressionAttributeNames={'#ttl': 'ttl'},
         ExpressionAttributeValues={':one': 1, ':limit': limit(), ':ttl': int(time.time()) + COUNTER_TTL_S},
     ))
+
+
+Handler = Callable[[dict[str, Any], Any], dict[str, Any]]
+
+
+def limited(dispatch: Handler) -> Handler:
+    """``dispatch`` behind the daily limit: a paid one-off request past it answers 429 and is not dispatched."""
+    def guarded(event: dict[str, Any], context: Any) -> dict[str, Any]:
+        paid = is_paid(str(event.get('httpMethod') or ''), str(event.get('path') or ''))
+        if paid and not take(get_caller_identity(event) or 'unknown'):
+            return api_response(429, {
+                'error': f'You have made {limit()} paid SEO requests today (UTC); the limit resets at midnight UTC',
+                'code': 'DAILY_LIMIT',
+            }, event)
+        return dispatch(event, context)
+
+    return guarded

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared import seo_spend_limit
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.seo_fixtures import SEO_DIR, SEO_ENV, seo_event
@@ -46,9 +47,12 @@ class TestDailyLimit:
 
     def call(self, router, method, path, allowed):
         take, dispatch = MagicMock(return_value=allowed), MagicMock(return_value={'statusCode': 200, 'body': '{}'})
-        with patch.object(router, 'take', take), patch.object(router, '_dispatch', dispatch):
-            status, body = parse_response(router.handler(seo_event(method, path), {}))
+        with patch.object(seo_spend_limit, 'take', take):
+            status, body = parse_response(seo_spend_limit.limited(dispatch)(seo_event(method, path), {}))
         return status, body, take, dispatch
+
+    def test_puts_the_whole_router_behind_the_limit(self, router):
+        assert router.handler.__qualname__.startswith('limited.')
 
     def test_counts_a_paid_lookup_and_dispatches_it(self, router):
         status, _body, take, dispatch = self.call(router, 'POST', '/api/seo/keywords/research', True)
