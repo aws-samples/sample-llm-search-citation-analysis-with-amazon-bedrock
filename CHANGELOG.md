@@ -130,6 +130,12 @@ process.
   - Saving an enabled snapshot schedule or running one now requires `confirm_paid: true` server-side (the dashboard
     sends it after its confirmation). A site audit sleeps at most 3 s inside a step; a longer 429 pause becomes the
     state machine's wait. KPI alerts leave a pair unevaluated when any of the previous run's reads failed.
+  - Every new answer row records `citations_version` (2: cited sources only, read pages in `retrieved_urls`),
+    beside `branded_version`, so a later figure can tell which citation rule a row was stored under (D2, D3).
+  - The paid one-off SEO routes count against a per-caller daily limit in the SEO router
+    (`shared/seo_spend_limit.py`, 100 a UTC day, `SEO_PAID_REQUESTS_PER_DAY`); past it they answer 429 and make no
+    DataForSEO call (tenet 4).
+  - A snapshot schedule can be disabled after the SEO stack is gone; run-now refuses a body that is not a JSON object.
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).

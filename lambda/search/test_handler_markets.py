@@ -421,6 +421,11 @@ class TestBrandedRows:
         row = _stored_rows(storage)[0]
         assert (row['branded'], row['branded_version']) == (True, 1)
 
+    def test_records_the_citation_rule_each_answer_row_was_stored_under(self, storage):
+        storage.store(_llm_result())
+
+        assert _stored_rows(storage)[0]['citations_version'] == 2
+
     def test_marks_an_answer_to_a_query_naming_no_tracked_brand_neutral(self, storage):
         storage.store({**_llm_result(), 'query': 'best airline from Santiago'})
 

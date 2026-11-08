@@ -77,6 +77,8 @@ function rankCheckGrants(template: Template, functionName: string): RankCheckGra
 
 const TRACKER_SCHEDULES = `${RANK_TRACKER_SCHEDULE_GROUP}/rank-*`;
 
+const SCHEDULER_PRINCIPAL = 'scheduler.amazonaws.com';
+
 /** The logical id of the role only EventBridge Scheduler can assume (the rank tracker schedules' role). */
 function schedulerRoleId(template: Template): string {
   const roles = template.findResources('AWS::IAM::Role');
@@ -84,7 +86,7 @@ function schedulerRoleId(template: Template): string {
     const statements = resolvePath(roles[id], ['Properties', 'AssumeRolePolicyDocument', 'Statement']);
     return (Array.isArray(statements) ? statements : []).map((statement) => resolvePath(statement, ['Principal', 'Service']));
   };
-  return Object.keys(roles).find((id) => principals(id).includes('scheduler.amazonaws.com')) ?? '';
+  return Object.keys(roles).find((id) => principals(id).some((principal) => principal === SCHEDULER_PRINCIPAL)) ?? '';
 }
 
 function namesOf(template: Template, type: string, property: string): string[] {

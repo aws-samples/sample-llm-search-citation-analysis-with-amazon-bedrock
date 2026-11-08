@@ -62,6 +62,7 @@ from shared.decorators import (
     RouteNotHandledError,
     api_handler,
     optional_limit,
+    json_object_body,
     parse_json_body,
     route_handler,
     validate,
@@ -650,7 +651,9 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         form = _parse_form(_form_fields(body), base=current.get('form'))
         scope = _validate_scope_request(_scope_to_update(body, current)) if kind == 'analysis' else None
         enabled = _validate_enabled(body.get('enabled'), current['enabled'])
-        _validate_kind(kind)
+        # Disabling (or editing a disabled) snapshot schedule works even once the SEO stack is gone.
+        if enabled:
+            _validate_kind(kind)
         _require_paid_confirmation(kind, body, enabled)
     except _InvalidRequest as exc:
         return exc.response(event)
@@ -683,7 +686,7 @@ def _delete_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, A
 
 
 @require_group(ADMIN_GROUP)
-@parse_json_body
+@json_object_body
 def _run_schedule_handler(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
     """POST /api/schedules/{id}/run — start an analysis now with the schedule's scope.
 

@@ -12,6 +12,9 @@ Routes (every one behind the Cognito authorizer of ``CitationAnalysis-SeoApi``):
 - /api/seo/backlinks/... -> seo-backlinks handler
 - /api/seo/audits/... -> seo-audits handler
 - /api/seo/lighthouse/..., /api/seo/indexnow/... -> seo-performance handler
+
+The paid one-off routes count against the caller's daily limit before they are dispatched
+(``shared.seo_spend_limit``): past it the answer is 429 ``DAILY_LIMIT`` and no DataForSEO call is made.
 """
 
 import sys
@@ -19,7 +22,12 @@ import sys
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
+from typing import Any
+
+from shared.api_response import api_response
+from shared.auth import get_caller_identity
 from shared.consolidated_router import route_map_handler
+from shared.seo_spend_limit import is_paid, limit, take
 
 ROUTE_MAP = {
     # Before its parent so `/keywords/metrics...` never reaches the research handler.
@@ -38,4 +46,14 @@ ROUTE_MAP = {
     '/api/seo/indexnow': 'seo-performance.py',
 }
 
-handler = route_map_handler(__file__, ROUTE_MAP, __name__)
+_dispatch = route_map_handler(__file__, ROUTE_MAP, __name__)
+
+
+def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    method, path = str(event.get('httpMethod') or ''), str(event.get('path') or '')
+    if is_paid(method, path) and not take(get_caller_identity(event) or 'unknown'):
+        return api_response(429, {
+            'error': f'You have made {limit()} paid SEO requests today (UTC); the limit resets at midnight UTC',
+            'code': 'DAILY_LIMIT',
+        }, event)
+    return _dispatch(event, context)

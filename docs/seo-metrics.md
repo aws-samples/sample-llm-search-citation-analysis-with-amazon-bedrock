@@ -49,3 +49,11 @@ SEO strong = organic position 10 or better. GEO strong = AI mention rate 50% or 
 | No data | No analysis run with a Google AI Overviews result yet, or no successful AI answer in it. |
 
 Rows are sorted by search volume (largest first, unknown last), so the largest opportunities lead.
+
+## Reproducibility
+
+Keyword search metrics (volume, CPC, difficulty, intent) are stored as the latest DataForSEO values per keyword
+and market (`CitationAnalysis-SeoKeywordMetrics`), replaced on each refresh. A report that uses them shows the
+values of its last refresh, so the same report read later can show different volumes; no history of them is kept.
+Positions (rank tracking) and traffic snapshots are kept per check and per snapshot, so those figures are
+reproducible.

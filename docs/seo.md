@@ -68,6 +68,12 @@ Every signed-in user can read every SEO page and run one-off lookups (a domain o
 results page, a business profile). Anything that creates, changes, deletes or schedules recurring paid work (rank
 trackers and their keywords, snapshot schedules, site audits, batches) is for Admins.
 
+Each user may make at most 100 paid one-off lookups per UTC day through the API (`SEO_PAID_REQUESTS_PER_DAY` on
+`CitationAnalysis-SeoRouter`); past it the API answers 429 `DAILY_LIMIT` and makes no DataForSEO call. A lookup
+answered from the cache still counts. MCP callers also have the MCP server's own `seoCallsPerDay` limit. A paid
+snapshot schedule can only be saved enabled, or run now, with `confirm_paid: true` (the dashboard sends it after
+its confirmation).
+
 ## Prices
 
 DataForSEO bills per call; your account is billed directly. The figures below are list prices the code estimates

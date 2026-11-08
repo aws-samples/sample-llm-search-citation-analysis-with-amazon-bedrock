@@ -98,6 +98,10 @@ def get_extraction_config() -> dict[str, Any]:
 # Environment variables
 DYNAMODB_TABLE_SEARCH_RESULTS = search_results_table_name()
 RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
+#: The citation rule an answer row was stored under (D2, D3). 2: only the sources the answer cites count
+#: (``citations``), the pages an engine only read are ``retrieved_urls``, and Perplexity and Claude are asked to
+#: cite (2.43.0). Rows without the field predate it and counted every source the engine returned.
+CITATIONS_VERSION = 2
 # Provider config table. Default mirrors the CDK resource name so a bootstrap
 # deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (
@@ -983,6 +987,7 @@ def _result_item(
         item["retrieved_urls"] = list(result.get("retrieved_urls") or [])
         item["branded"] = bool(is_branded and is_branded(str(result.get("query") or keyword)))
         item["branded_version"] = BRANDED_MATCHER_VERSION
+        item["citations_version"] = CITATIONS_VERSION
     if s3_uri:
         item["raw_response_s3_uri"] = s3_uri
     metadata = result.get("metadata", {})

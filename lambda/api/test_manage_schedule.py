@@ -675,6 +675,22 @@ class TestSnapshotKinds:
 
         assert (status, answer['field'], paid_call.call_count) == (400, 'kind' if confirmed else 'confirm_paid', 0)
 
+    def test_disables_a_snapshot_schedule_after_the_seo_stack_is_gone(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
+
+        status = parse_response(handler_module.handler(id_event('PUT', 'sch-0d0d0d0d', body={'enabled': False}), {}))[0]
+
+        assert (status, mock_scheduler.update_schedule.call_args.kwargs['State']) == (200, 'DISABLED')
+
+    def test_refuses_a_run_now_body_that_is_not_an_object(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        event = {**id_event('POST', 'sch-0d0d0d0d', suffix='/run'), 'body': '[]'}
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert (status, body['field']) == (400, 'body')
+
     def test_saves_a_disabled_snapshot_schedule_without_the_acknowledgement(self, handler_module):
         status = parse_response(handler_module.handler(
             make_event('POST', body={'kind': 'backlink_snapshots', 'enabled': False}), {}))[0]

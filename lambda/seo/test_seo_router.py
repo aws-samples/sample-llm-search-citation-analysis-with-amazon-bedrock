@@ -39,3 +39,27 @@ def test_answers_404_for_a_path_outside_the_seo_api(router):
 
 def test_every_routed_file_exists(router):
     assert [name for name in router.ROUTE_MAP.values() if not os.path.isfile(os.path.join(SEO_DIR, name))] == []
+
+
+class TestDailyLimit:
+    """The paid one-off routes count against the caller's UTC day before they are dispatched (tenet 4)."""
+
+    def call(self, router, method, path, allowed):
+        take, dispatch = MagicMock(return_value=allowed), MagicMock(return_value={'statusCode': 200, 'body': '{}'})
+        with patch.object(router, 'take', take), patch.object(router, '_dispatch', dispatch):
+            status, body = parse_response(router.handler(seo_event(method, path), {}))
+        return status, body, take, dispatch
+
+    def test_counts_a_paid_lookup_and_dispatches_it(self, router):
+        status, _body, take, dispatch = self.call(router, 'POST', '/api/seo/keywords/research', True)
+
+        assert (status, take.call_count, dispatch.call_count) == (200, 1, 1)
+
+    def test_answers_429_and_makes_no_call_past_the_limit(self, router):
+        status, body, _take, dispatch = self.call(router, 'POST', '/api/seo/serp', False)
+
+        assert (status, body['code'], dispatch.call_count) == (429, 'DAILY_LIMIT', 0)
+
+    @pytest.mark.parametrize(('method', 'path'), [('GET', '/api/seo/seo-geo'), ('POST', '/api/seo/keywords/metrics/lookup')])
+    def test_does_not_count_a_free_route(self, router, method, path):
+        assert self.call(router, method, path, False)[2].call_count == 0
