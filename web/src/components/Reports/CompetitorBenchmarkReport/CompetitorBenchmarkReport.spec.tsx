@@ -114,13 +114,16 @@ describe('Competitor Benchmark brands over time', () => {
       .toBe('Share of voice of your brand and its leading competitors, per day over the last 30 days.');
   });
 
-  it.each([
-    [true, 1],
-    [false, 0],
-  ])('says each run keeps its top 25 brands only when a run was capped (%s)', (truncated, notes) => {
-    renderBenchmark(reportWithTrends({ brands_truncated: truncated }));
+  it('says each run keeps its top 25 brands when a run was capped', () => {
+    renderBenchmark(reportWithTrends({ brands_truncated: true }));
 
-    expect(within(sectionTitled('Brands over time')).queryAllByText(/keeps its top 25 brands/)).toHaveLength(notes);
+    expect(within(sectionTitled('Brands over time')).getByText(/keeps its top 25 brands/)).toBeInTheDocument();
+  });
+
+  it('says nothing about the brand cap when no run was capped', () => {
+    renderBenchmark(reportWithTrends({ brands_truncated: false }));
+
+    expect(within(sectionTitled('Brands over time')).queryByText(/keeps its top 25 brands/)).not.toBeInTheDocument();
   });
 
   it('charts weekly points over a 90-day period', () => {
