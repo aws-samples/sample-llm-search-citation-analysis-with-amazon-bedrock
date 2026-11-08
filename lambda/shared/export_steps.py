@@ -25,6 +25,13 @@ corrupting the file:
 A chunk whose deadline ends before it writes a row or reads on past one
 (an ``ExportMark``) ``STALL_LIMIT`` times in a row fails the export instead
 of looping for ever.
+
+A chunk stopped by a view job still computing answers the job's run
+(``view_job``); the state machine waits for the job's ``view-job.finished``
+event (``wait_view_job``, ``shared.export_view_job_wait``) and runs the next
+chunk once. When that wait times out (an event lost), the next chunk is told
+the job (``timed_out_job``) and fails the export if it still computes
+(``ViewJobTimeoutError``).
 """
 
 from __future__ import annotations
@@ -50,6 +57,7 @@ from shared.export_contract import (
 )
 from shared.export_jobs import ExportJobs, StaleExportError, item_cursor, item_owner, item_writer_state
 from shared.export_source_routes import reading_for
+from shared.export_view_job_wait import ViewJobRun
 from shared.export_writers import (
     PART_BYTES,
     FileOutput,
@@ -72,6 +80,10 @@ _MISSING_UPLOAD = frozenset({'NoSuchUpload', '404', 'NoSuchKey'})
 
 class ExportStepError(RuntimeError):
     """The job is not in a state this step can run from (the state machine then runs ``MarkFailed``)."""
+
+
+class ViewJobTimeoutError(ExportStepError):
+    """The view job the export waited on still computes after the wait timed out (its event was lost or it died)."""
 
 
 class ExportPermissionError(ExportStepError):
@@ -171,8 +183,13 @@ def _resume_output(deps: ExportDeps, item: Mapping[str, Any]) -> tuple[FileOutpu
     return FileOutput(bytearray(buffer), int(item['bytes'])), pending
 
 
-def chunk(deps: ExportDeps, export_id: str, deadline: Deadline) -> dict[str, Any]:
-    """Write rows from the checkpoint until ``deadline`` or the end of the source; ``{done}`` says which."""
+def chunk(deps: ExportDeps, export_id: str, deadline: Deadline, timed_out_job: str | None = None) -> dict[str, Any]:
+    """
+    Write rows from the checkpoint until ``deadline`` or the end of the source; ``{done}`` says which.
+
+    ``timed_out_job``: the view job whose wait timed out before this chunk;
+    meeting it still computing fails the export (``ViewJobTimeoutError``).
+    """
     item = _item(deps, export_id)
     if item['status'] != 'running':
         raise ExportStepError(f'export {export_id} is {item["status"]}, not running')
@@ -188,11 +205,13 @@ def chunk(deps: ExportDeps, export_id: str, deadline: Deadline) -> dict[str, Any
     with reading_for(str(item_owner(item).username)) as read:
         rows = source.rows(dict(item.get('params') or {}), reading.cursor, deadline)
         done = _write_rows(rows, reading, lambda row: (writer.write_row(row), upload.send_full_parts(output)), deadline)
+    waiting = None if done else read.view_job
+    if waiting is not None and waiting.job_id == timed_out_job:
+        raise ViewJobTimeoutError(f'view job {waiting.job_id} still computes after the export waited for it')
     if done:
         writer.close()
         upload.send_rest(output)
-    waiting = None if done else read.wait_seconds
-    progress = _Progress(writer.rows, writer.truncated_cells, reading.cursor, reading.written + reading.marks, done, waiting)
+    progress = _Progress(writer.rows, writer.truncated_cells, reading.cursor, reading.written + reading.marks, done, waiting, read.wait_seconds)
     return _checkpoint(deps, item, progress, output, upload, writer.checkpoint())
 
 
@@ -236,8 +255,10 @@ class _Progress:
     advanced: int
     """Rows written plus progress marks read: 0 is a stall."""
     done: bool
+    view_job: ViewJobRun | None = None
+    """A view job the source reads is computing: wait for its event before the next chunk (not a stall)."""
     wait_seconds: float | None = None
-    """A view job the source reads is computing: wait this long before the next chunk (not a stall)."""
+    """How long the job's answer asked to wait, for executions started before 2.49.0."""
 
 
 def _checkpoint(
@@ -245,7 +266,7 @@ def _checkpoint(
     writer_checkpoint: tuple[dict[str, Any], bytes],
 ) -> dict[str, Any]:
     previous = int(item.get('chunks') or 0)
-    waiting = progress.wait_seconds is not None
+    waiting = progress.view_job is not None
     stalls = 0 if progress.advanced or progress.done or waiting else int(item.get('stalls') or 0) + 1
     if stalls >= STALL_LIMIT:
         raise ExportStepError(f'export {item["export_id"]} made no progress in {stalls} chunks')
@@ -269,8 +290,10 @@ def _checkpoint(
         raise
     _delete_checkpoint(deps.s3, deps.bucket, item, previous)
     answer: dict[str, Any] = {'export_id': item['export_id'], 'done': progress.done}
-    if waiting:
-        # The state machine's WaitForViewJob reads it: no Lambda runs while the job computes.
+    if progress.view_job is not None:
+        # WaitForViewJob registers a task token against this run and the execution pauses until the job's event.
+        answer['view_job'] = progress.view_job.answer()
+        # Executions started before 2.49.0 still loop through a Wait state on it. Remove in the next minor release.
         answer['wait_seconds'] = max(1, math.ceil(progress.wait_seconds or 0))
     return answer
 

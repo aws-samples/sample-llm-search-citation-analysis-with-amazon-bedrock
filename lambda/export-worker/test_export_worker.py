@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared import request_deadline
+from testing.export_fakes import FakeStepFunctions
 from testing.export_fixtures import ExportHarness, citations_source, export_handler_fixture
 
 worker = export_handler_fixture(__file__, 'handler.py', 'export_worker_handler')
@@ -68,6 +69,66 @@ class TestDispatch:
     def test_refuses_an_event_without_an_export_id(self, worker: ModuleType) -> None:
         with pytest.raises(ValueError, match='needs an action and an export_id'):
             worker.handler({'action': 'chunk'}, _FULL_LAMBDA)
+
+
+_RUN = {'id': 'job-1', 'started_at': '2026-11-06T08:00:00Z'}
+
+
+@pytest.fixture
+def sfn(worker: ModuleType) -> Iterator[FakeStepFunctions]:
+    fake = FakeStepFunctions()
+    with patch.object(worker, '_sfn', return_value=fake):
+        yield fake
+
+
+def _waiting(worker: ModuleType, **event: Any) -> Any:
+    """The worker invoked by WaitForViewJob for ``_RUN`` with ``token-a`` (``event`` overrides)."""
+    return worker.handler({'action': 'wait_view_job', 'export_id': 'exp-1', 'view_job': _RUN, 'task_token': 'token-a', **event}, _FULL_LAMBDA)
+
+
+def _finished(worker: ModuleType, status: str = 'done') -> Any:
+    """The worker invoked by the ViewJobFinishedRule for ``_RUN``."""
+    return worker.handler({'action': 'view_job_finished', 'job_id': _RUN['id'], 'started_at': _RUN['started_at'], 'status': status}, _FULL_LAMBDA)
+
+
+@pytest.mark.usefixtures('harness')
+class TestViewJobWait:
+    def test_wait_view_job_registers_the_task_token_against_the_run(self, worker: ModuleType, sfn: FakeStepFunctions) -> None:
+        answer = _waiting(worker)
+
+        assert (answer['waiting'], sfn.succeeded) == (True, [])
+
+    def test_the_finished_event_resumes_the_waiting_export(self, worker: ModuleType, sfn: FakeStepFunctions) -> None:
+        _waiting(worker)
+
+        _finished(worker)
+
+        assert sfn.succeeded == ['token-a']
+
+    def test_the_failed_event_fails_the_waiting_export(self, worker: ModuleType, sfn: FakeStepFunctions) -> None:
+        _waiting(worker)
+
+        _finished(worker, 'failed')
+
+        assert [failure['error'] for failure in sfn.failed] == ['ViewJobFailed']
+
+    @pytest.mark.usefixtures('sfn')
+    def test_wait_view_job_refuses_an_event_without_its_run_or_token(self, worker: ModuleType) -> None:
+        with pytest.raises(ValueError, match='its run and a task token'):
+            _waiting(worker, task_token=None)
+
+    @pytest.mark.usefixtures('sfn')
+    def test_the_finished_event_needs_the_run(self, worker: ModuleType) -> None:
+        with pytest.raises(ValueError, match='job_id and a started_at'):
+            worker.handler({'action': 'view_job_finished', 'job_id': 'job-1', 'status': 'done'}, _FULL_LAMBDA)
+
+    def test_the_chunk_after_a_timed_out_wait_is_told_the_job(self, worker: ModuleType, harness: ExportHarness) -> None:
+        export_id = harness.queue('csv')
+        _steps(worker, export_id, 'prepare')
+        with patch.object(worker.export_steps, 'chunk', return_value={'done': True}) as chunk:
+            worker.handler({'action': 'chunk', 'export_id': export_id, 'timed_out_job': 'job-1'}, _FULL_LAMBDA)
+
+        assert chunk.call_args.args[3] == 'job-1'
 
 
 class TestChunkDeadline:

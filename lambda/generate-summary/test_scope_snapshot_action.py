@@ -127,6 +127,19 @@ def test_a_view_job_runs_the_job_it_names(ran_view_job):
     assert ran_view_job.args == ('s3', 'keywords-bucket', 'job-7')
 
 
+def test_a_view_job_publishes_its_outcome_to_eventbridge(actions, ran_view_job):
+    assert ran_view_job.kwargs['notify'] is actions.publish_view_job_finished
+
+
+def test_the_outcome_goes_to_the_default_bus_as_view_job_finished(actions):
+    events = MagicMock()
+    events.put_events.return_value = {'FailedEntryCount': 0}
+    with patch.object(actions.boto3, 'client', return_value=events) as client:
+        actions.publish_view_job_finished('job-7', '2026-11-06T08:00:00Z', 'done')
+
+    assert (client.call_args.args, events.put_events.call_args.kwargs['Entries'][0]['DetailType']) == (('events',), 'view-job.finished')
+
+
 def test_a_view_job_computes_with_every_routes_computation(ran_view_job):
     assert {'trends', 'reports-overview', 'group-kpis', 'visibility', 'recommendations', 'brand-mentions'} <= set(ran_view_job.kwargs['computers'])
 

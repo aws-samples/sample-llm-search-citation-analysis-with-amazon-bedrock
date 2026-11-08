@@ -10,13 +10,14 @@ import pytest
 from botocore.exceptions import ClientError
 
 from shared.export_contract import Caller
-from shared.export_jobs import StaleExportError
+from shared.export_jobs import StaleExportError, summary
 from shared.export_source_lists import CONFIG_LISTS
 from shared.export_source_routes import Paging, RouteList, RouteRequest, RouteSource, columns, route_event
 from shared.export_steps import (
     STALL_LIMIT,
     ExportPermissionError,
     ExportStepError,
+    ViewJobTimeoutError,
     abort_upload,
     chunk,
     error_message,
@@ -27,6 +28,9 @@ from shared.export_steps import (
 from testing.clocks import JumpClock
 from testing.export_fixtures import BUCKET, CHUNK_SECONDS, ExportHarness, citations_source, csv_lines
 from testing.export_source_fixtures import PagedRoute, numbered_items
+
+#: The run ``PagedRoute`` answers ``202 computing`` for.
+_VIEW_JOB_RUN = {'id': 'job-1', 'started_at': '2026-11-06T08:00:00Z'}
 
 
 @pytest.fixture
@@ -210,13 +214,25 @@ class TestChunkEnd:
 
         assert [line[0] for line in csv_lines(data)[1:]] == [f'item-{index:03d}' for index in range(10)]
 
-    def test_a_chunk_meeting_a_computing_view_job_asks_the_state_machine_to_wait(self) -> None:
+    def test_a_chunk_meeting_a_computing_view_job_names_the_run_the_state_machine_waits_for(self) -> None:
         harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
         export_id = harness.start()
 
         answer = chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
 
-        assert (answer['done'], answer['wait_seconds'], harness.item(export_id).get('stalls')) == (False, 2, 0)
+        assert (answer['done'], answer['view_job'], harness.item(export_id).get('stalls')) == (False, _VIEW_JOB_RUN, 0)
+
+    def test_an_export_waiting_on_a_view_job_reads_as_running_with_its_progress(self) -> None:
+        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
+        export_id = harness.start()
+        chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+
+        assert {key: summary(harness.item(export_id))[key] for key in ('status', 'rows')} == {'status': 'running', 'rows': 0}
+
+    def test_a_chunk_meeting_a_computing_view_job_keeps_the_wait_executions_started_before_2_49_take(self) -> None:
+        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
+
+        assert chunk(harness.deps, harness.start(), JumpClock().deadline(CHUNK_SECONDS))['wait_seconds'] == 2
 
     def test_an_export_waiting_on_a_view_job_longer_than_the_stall_limit_still_completes(self) -> None:
         harness = _route_harness(PagedRoute(numbered_items(3), computing_first=STALL_LIMIT + 2), JumpClock())
@@ -224,6 +240,44 @@ class TestChunkEnd:
         data = harness.run('csv')
 
         assert len(csv_lines(data)) == 4
+
+
+class TestAfterATimedOutViewJobWait:
+    """The view-job.finished event was lost: WaitForViewJob timed out and ExportChunkAfterViewJobWait runs once."""
+
+    @staticmethod
+    def _waited(computing: int) -> tuple[ExportHarness[RouteSource], str]:
+        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=computing), JumpClock())
+        export_id = harness.start()
+        chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+        return harness, export_id
+
+    @staticmethod
+    def _after_wait(harness: ExportHarness[RouteSource], export_id: str, timed_out_job: str = 'job-1') -> dict[str, Any]:
+        return chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS), timed_out_job=timed_out_job)
+
+    def test_the_same_job_still_computing_fails_the_chunk_and_the_export_names_the_lost_wait(self) -> None:
+        harness, export_id = self._waited(computing=2)
+        with pytest.raises(ViewJobTimeoutError) as raised:
+            self._after_wait(harness, export_id)
+
+        fail(harness.deps, export_id, {'Error': type(raised.value).__name__, 'Cause': 'x'})
+
+        assert (harness.item(export_id)['status'], 'ViewJobTimeoutError' in harness.item(export_id)['error']) == ('failed', True)
+
+    def test_a_job_that_finished_meanwhile_lets_the_export_write_every_row(self) -> None:
+        harness, export_id = self._waited(computing=1)
+
+        answer = self._after_wait(harness, export_id)
+
+        assert (answer['done'], harness.item(export_id)['rows']) == (True, 3)
+
+    def test_another_job_computing_is_waited_for_again(self) -> None:
+        harness, export_id = self._waited(computing=2)
+
+        answer = self._after_wait(harness, export_id, timed_out_job='job-0')
+
+        assert answer['view_job'] == _VIEW_JOB_RUN
 
 
 def _sparse_export() -> tuple[ExportHarness[RouteSource], str]:

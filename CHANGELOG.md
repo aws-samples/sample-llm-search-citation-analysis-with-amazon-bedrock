@@ -9,6 +9,49 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.49.0] - 2026-11-09
+
+An export that meets a view job still computing resumes on the job's `view-job.finished` event instead of waiting
+and checking again (#214, tenet 8).
+
+### Upgrade notes
+
+- The deploy adds the EventBridge rule `CitationAnalysis-ViewJobFinished` on the default bus and its permission to
+  invoke `CitationAnalysis-ExportWorker`. Nothing to configure, and no fixed cost: EventBridge bills each event.
+- Exports already running when you deploy finish on the definition they started with: their chunks still answer
+  `wait_seconds` for the old `WaitForViewJob` Wait state. That field goes in the next minor release.
+
+### Changed
+
+- **View jobs publish `view-job.finished`** (`lambda/shared/view_job_events.py`). Once a job's outcome is stored,
+  GenerateSummary puts `{job_id, started_at, status}` on the default bus (source `citation-analysis.view-jobs`),
+  with `status` `done` or `failed`. A result that could not be stored also counts as `failed`. A refused publish is
+  logged and does not fail the job. GenerateSummary may put events on the default bus under that source only.
+- **The export waits on a task token** (`lambda/shared/export_view_job_wait.py`). A chunk that meets a `202
+  computing` answer now returns the job's run (`view_job: {id, started_at}`). The state machine's `WaitForViewJob`
+  is a `waitForTaskToken` task: the worker adds the task token to a waiter item for that run in the Exports table
+  (`view-job#<job>#<started_at>`, no owner, 24-hour TTL) and the execution pauses. No state runs and no chunk
+  re-asks the route while the job computes. The rule invokes the worker, which sends every waiting token back:
+  task success runs the next chunk once, and task failure `ViewJobFailed` fails the export.
+  - Several exports can wait on one run: the item holds up to 100 tokens, appended with a put conditioned on the
+    item's revision. The same write checks whether the run already finished, so a job that finished before the
+    token was registered resumes (or fails) the export at once.
+  - The run is keyed by `started_at`, so the end of a failed run never resumes an export waiting on the job's next
+    run.
+  - An event delivered twice sends again harmlessly, and tokens whose task already ended (timed out, cancelled)
+    are skipped. Another Step Functions error raises, so EventBridge retries the event.
+  - The worker may answer task tokens (`states:SendTaskSuccess`, `states:SendTaskFailure`) of the export state
+    machine only. It still reads and writes the Exports table with `GetItem` and `PutItem` only.
+- **A lost event fails the export within a bounded time.** `WaitForViewJob` times out after 960 s (a view job runs
+  at most 900 s, and a computing status that old counts as dead). `ExportChunkAfterViewJobWait` then runs the
+  chunk once more with the job's id: it goes on if the job finished, waits again for another job, and fails the
+  export with `ViewJobTimeoutError` if the same job still computes.
+- A `202 computing` answer without its job now fails the export instead of waiting on nothing.
+- While it waits, the export stays `running` with its progress in `GET /api/exports` and `GET /api/exports/{id}`.
+  MCP has no export operations, so nothing changes there.
+- TENETS.md drops `WaitForViewJob` from the tenet 8 gaps, and the README's `CitationAnalysis-Export` entry describes
+  the event-driven wait.
+
 ## [2.48.1] - 2026-11-09
 
 A test fix: the citation gap rollup property test failed on `main` for a keyword with six gaps. No shipped code

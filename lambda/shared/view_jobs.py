@@ -19,7 +19,9 @@ or a scope change asks a new question. Under ``shared.scope_snapshot.JOBS_PREFIX
   of the scope (``artifacts_result``), which the route's builder serves and
   pages exactly like a published build (cursors name ``job_build_id``). A
   route without a job, params it cannot answer, or a failure mark the job
-  ``failed``; the next GET starts it again.
+  ``failed``; the next GET starts it again. Once the outcome is stored, the
+  job calls ``notify`` (GenerateSummary publishes ``view-job.finished``,
+  ``shared.view_job_events``), so an export waiting on it resumes.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -48,6 +50,7 @@ from shared.snapshot_store import (
     keyword_fingerprint,
     utc_iso,
 )
+from shared.view_job_events import STATUS_DONE, FinishedStatus
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,7 @@ logger = logging.getLogger(__name__)
 JOB_STALE_SECONDS = 900
 READ_WORKERS = 64
 STATUS_COMPUTING = 'computing'
-STATUS_FAILED = 'failed'
+STATUS_FAILED: Final = 'failed'
 
 #: The key of a stored result that holds artifacts (``artifacts_result``) rather than a body.
 ARTIFACTS_RESULT = 'artifacts'
@@ -245,14 +248,29 @@ def builder_jobs(builders: Mapping[str, ArtifactBuilder[Any]]) -> dict[str, JobC
     return {name: body_job(builder) for name, builder in builders.items()}
 
 
+JobNotify = Callable[[str, str, FinishedStatus], object]
+"""Told ``(job id, the run's started_at, done | failed)`` once a job's outcome is stored."""
+
+
+def _no_notify(_job: str, _started_at: str, _status: FinishedStatus) -> None:
+    return None
+
+
 def run_view_job(
     s3: Any, bucket: str, job: str, *, computers: Mapping[str, JobCompute],
-    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    now: Callable[[], datetime] = lambda: datetime.now(UTC), notify: JobNotify = _no_notify,
 ) -> dict[str, Any]:
-    """Compute job ``job`` (its status names the question) with the ``computers`` entry of its route; the job's summary."""
+    """
+    Compute job ``job`` (its status names the question) with the ``computers`` entry of its route; the job's summary.
+
+    ``notify`` hears the outcome after it is stored: ``done`` after the
+    result, ``failed`` after the failed status, and ``failed`` when the result
+    could not be stored (the status is cleared, so the next GET starts the job again).
+    """
     status = read_status(s3, bucket, job)
     if status is None or status.get('status') != STATUS_COMPUTING:
         return {'job_id': job, 'status': 'skipped'}
+    started_at = str(status.get('started_at'))
     request = JobRequest(str(status['route']), dict(status.get('params') or {}), scope_from_document(status['scope']))
     compute = computers.get(request.route)
     try:
@@ -265,13 +283,16 @@ def run_view_job(
     except _JOB_ERRORS as error:
         logger.warning('View job %s (%s) failed: %s', job, request.route, error)
         _put_status(s3, bucket, job, {**status, 'status': STATUS_FAILED, 'message': f'The view could not be computed ({type(error).__name__})'})
+        notify(job, started_at, STATUS_FAILED)
         return {'job_id': job, 'status': STATUS_FAILED, 'error': type(error).__name__}
     try:
         s3.put_object(Bucket=bucket, Key=job_result_key(job), Body=payload, ContentType='application/gzip')
     except (ClientError, BotoCoreError):
         logger.exception('View job %s: result not stored', job)
         clear_status(s3, bucket, job)
+        notify(job, started_at, STATUS_FAILED)
         raise
+    notify(job, started_at, STATUS_DONE)
     return {'job_id': job, 'status': 'done', 'route': request.route, 'keywords': len(request.report_scope.keywords)}
 
 
@@ -282,6 +303,7 @@ __all__ = [
     'STATUS_FAILED',
     'JobCompute',
     'JobContext',
+    'JobNotify',
     'JobRequest',
     'MemoryArtifacts',
     'artifacts_job',

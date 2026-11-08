@@ -48,7 +48,7 @@ def all_rows(source: ExportRowSource, params: Mapping[str, str], cursor: ExportC
     Every row ``source`` yields after ``cursor`` under a deadline that never runs out (it must say it finished).
 
     A source stopping for a view job still computing is read again from its last cursor, as the export state
-    machine does after ``WaitForViewJob`` (the test routes already ran the job).
+    machine does after ``WaitForViewJob`` hears the job finished (the test routes already ran the job).
     """
     rows: list[ExportRow] = []
     end = RowsEnd.STOPPED
@@ -57,7 +57,7 @@ def all_rows(source: ExportRowSource, params: Mapping[str, str], cursor: ExportC
             items, end = _drained_items(source.rows(params, cursor, long_deadline()))
         rows += [item for item in items if isinstance(item, ExportRow)]
         cursor = items[-1].cursor if items else cursor
-        if end is not RowsEnd.STOPPED or read.wait_seconds is None:
+        if end is not RowsEnd.STOPPED or read.view_job is None:
             break
     assert end is RowsEnd.FINISHED, f'the source ended {end}'
     return rows

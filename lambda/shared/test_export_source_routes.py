@@ -26,6 +26,7 @@ from shared.export_source_routes import (
     route_event,
     router_client_config,
 )
+from shared.export_view_job_wait import ViewJobRun
 from testing.clocks import JumpClock
 from testing.export_source_fixtures import (
     ADMIN,
@@ -91,13 +92,27 @@ def test_resuming_after_any_row_yields_exactly_the_remaining_rows(count: int, pa
     assert resumes_from_every_row(source, {})
 
 
-def test_a_computing_answer_stops_the_reads_and_asks_for_its_wait_instead_of_sleeping() -> None:
+def test_a_computing_answer_stops_the_reads_and_names_the_view_job_run_instead_of_sleeping() -> None:
     route = PagedRoute(numbered_items(2), computing_first=1)
 
     with reading_for('alice') as read:
         rows, end = drained(_source(route).rows({}, None, long_deadline()))
 
-    assert (rows, end, read.wait_seconds, len(route.requests)) == ([], RowsEnd.STOPPED, 1.5, 1)
+    assert (rows, end, read.view_job, len(route.requests)) == ([], RowsEnd.STOPPED, ViewJobRun('job-1', '2026-11-06T08:00:00Z'), 1)
+
+
+def test_a_computing_answer_keeps_its_wait_for_executions_started_before_2_49() -> None:
+    with reading_for('alice') as read:
+        drained(_source(PagedRoute(numbered_items(2), computing_first=1)).rows({}, None, long_deadline()))
+
+    assert read.wait_seconds == 1.5
+
+
+def test_a_computing_answer_without_its_view_job_fails_the_export() -> None:
+    source = replace(_source(PagedRoute([])), invoker=fixed_answer(202, {'status': 'computing', 'retry_after_ms': 1500}))
+
+    with reading_for('alice'), pytest.raises(ExportSourceError, match='without its view job'):
+        drained(source.rows({}, None, long_deadline()))
 
 
 def test_the_next_read_after_the_wait_reads_the_list() -> None:
@@ -109,7 +124,7 @@ def test_the_next_read_after_the_wait_reads_the_list() -> None:
     with reading_for('alice') as read:
         rows, end = drained(source.rows({}, None, long_deadline()))
 
-    assert (len(rows), end, read.wait_seconds) == (2, RowsEnd.FINISHED, None)
+    assert (len(rows), end, read.view_job) == (2, RowsEnd.FINISHED, None)
 
 
 def test_rows_stop_without_error_when_the_deadline_has_passed() -> None:
