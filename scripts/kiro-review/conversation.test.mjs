@@ -145,7 +145,11 @@ test('the commenters to look up are the distinct humans, without bots or the rev
       body: 'i' 
     }],
   )
-  assert.deepEqual(list, ['ana', 'bob', 'cid'])
+  assert.deepEqual([...list].sort(), ['ana', 'bob', 'cid'])
+  const crowd = Array.from({ length: MAX_ENTRIES + 20 }, (_, i) => comment(`u${i}`, 'NONE', 'x', new Date(Date.UTC(2026, 10, 8, 0, i)).toISOString()))
+  const capped = commenters(crowd, [], [])
+  assert.equal(capped.length, MAX_ENTRIES)
+  assert.equal(capped[0], `u${MAX_ENTRIES + 19}`, 'newest first')
 })
 
 test('a file path with a newline cannot start a forged heading', () => {

@@ -52,10 +52,14 @@ export function roleOf(entry, prAuthor = '', maintainers = new Set()) {
 
 const capped = (text, max) => (text.length > max ? `${text.slice(0, max)}\n[truncated at ${max} characters]` : text)
 
-/** The distinct human commenters, so the workflow can ask GitHub which of them have write access. */
+/**
+ * The distinct human commenters the workflow asks GitHub about (one API call each): the authors of the newest
+ * MAX_ENTRIES entries, newest first, so a busy or spammed pull request cannot run up the token's request budget.
+ */
 export function commenters(issueComments, reviews, reviewComments) {
-  const all = [...issueComments, ...reviews, ...reviewComments]
-  return [...new Set(all.filter((e) => roleOf(e) === 'contributor').map((e) => e.user?.login).filter(Boolean))].sort()
+  const newest = entries(issueComments, reviews, reviewComments).reverse()
+  const logins = newest.filter((e) => roleOf(e) === 'contributor').map((e) => e.user?.login).filter(Boolean)
+  return [...new Set(logins)].slice(0, MAX_ENTRIES)
 }
 
 /** One entry per comment, review and inline comment that says something, oldest first. */
