@@ -123,4 +123,5 @@ class TestPreviousRunLikeForLike:
     def test_compares_every_keyword_of_the_previous_run_when_all_were_read(self, worker_module):
         comparison = self.comparison(worker_module, {'hotel spa': _PREVIOUS_MENTION, 'hotel pool': []})
 
-        assert comparison is not None and comparison.state == 'comparable'
+        assert comparison is not None
+        assert comparison.state == 'comparable'

@@ -88,7 +88,8 @@ def test_a_run_stored_before_the_branded_flag_has_no_filtered_slices() -> None:
     flagged_part = partial_kpi.build([classified], PartialConfig())
     old_part = partial_kpi.build([classified, unflagged], PartialConfig())
 
-    assert flagged_part is not None and old_part is not None
+    assert flagged_part is not None
+    assert old_part is not None
     assert (sorted(flagged_part['slices']), sorted(old_part['slices'])) == (
         ['_all', '_all@neutral', 'default', 'default@neutral'], ['_all', 'default'],
     )
