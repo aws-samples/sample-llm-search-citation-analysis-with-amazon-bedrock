@@ -39,6 +39,27 @@ const capped = (text, max) => {
   return value.length > max ? `${value.slice(0, max)}\n\n[truncated at ${max} characters]` : value
 }
 
+/** A triage footer line as posted (`<sub>Triage: ...`) or as an echo of it after HTML escaping (`&lt;sub>Triage: ...`). */
+const FOOTER_LINE = /^(?:<|&lt;)sub>Triage:/
+
+/**
+ * `text` without the frame this workflow adds to a reply: the marker, the banner and the `---` + footer lines. Earlier
+ * replies reach the triager without it, and a frame the triager copies into its answer is dropped, so a comment
+ * carries exactly one banner and one footer.
+ */
+export function withoutFrame(text) {
+  const lines = text.replaceAll(MARKER, '').split('\n').filter((line) => line.trim() !== BANNER)
+  const kept = []
+  for (const line of lines) {
+    if (FOOTER_LINE.test(line.trim())) {
+      while (kept.length > 0 && ['', '---'].includes(kept.at(-1).trim())) kept.pop()
+      continue
+    }
+    kept.push(line)
+  }
+  return kept.join('\n').trim()
+}
+
 /** True for a comment this workflow posted (by the Actions bot, starting with the marker). */
 export function isTriageReply(comment) {
   return comment?.user?.login === BOT && typeof comment.body === 'string' && comment.body.startsWith(MARKER)
@@ -61,7 +82,7 @@ export function threadMarkdown(issue, comments) {
   if (comments.length > recent.length) lines.push('', `(${comments.length - recent.length} older comments omitted)`)
   for (const comment of recent) {
     const who = isTriageReply(comment) ? '[kiro]' : (comment.user?.login ?? 'unknown')
-    const text = isTriageReply(comment) ? comment.body.slice(MARKER.length) : comment.body
+    const text = isTriageReply(comment) ? withoutFrame(comment.body) : comment.body
     lines.push('', `## Comment by ${who}`, '', capped(text, MAX_COMMENT).trim() || '(empty)')
   }
   return `${lines.join('\n')}\n`
@@ -95,7 +116,7 @@ export function buildIssueComment(parsed) {
   if (parsed === null) {
     return `${MARKER}\n${BANNER}\n\nThe triage did not produce a usable answer this time. A maintainer will look at this issue.\n`
   }
-  let reply = sanitize(parsed.reply)
+  let reply = sanitize(withoutFrame(parsed.reply))
   if (reply.length > MAX_REPLY) reply = `${reply.slice(0, MAX_REPLY)}\n\n_(reply truncated)_`
   const judgment = parsed.tenets === 'n/a' ? '' : ` · Tenets: **${parsed.tenets}**`
   const footer = `<sub>Triage: **${parsed.label}**${judgment}. Judged against TENETS.md, README.md and CONTRIBUTING.md (\`scripts/kiro-issue/\`). Reply here to continue; edit the issue to update the request.</sub>`
