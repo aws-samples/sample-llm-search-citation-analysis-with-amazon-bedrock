@@ -2112,54 +2112,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     const auth = new Auth(this, 'Auth', {urls: ['http://localhost:5173'], // Temporary - updated below after CloudFront creation
     });
 
-    // Visibility & Insights API Routes
-    // (Handled by consolidated StatsInsightsFunction)
-    // ========================================
-
-    const visibilityResource = apiResource.addResource('visibility');
-    route(visibilityResource, statsInsightsFunction, 'GET');
-    // The answers behind one sentiment count of the Sentiment report.
-    route(visibilityResource.addResource('sentiment-examples'), statsInsightsFunction, 'GET');
-
-    route(apiResource.addResource('prompt-insights'), statsInsightsFunction, 'GET');
-    route(apiResource.addResource('citation-gaps'), statsInsightsFunction, 'GET');
-
-    const recommendationsResource = apiResource.addResource('recommendations');
-    route(recommendationsResource, statsInsightsFunction, 'GET');
-
-    // POST /recommendations/{id}/status — set the action-tracking state
-    // (new / in_progress / done / wontfix) for a given recommendation.
-    // GET /recommendations/{id}/status — read the current state.
-    // Both routed to the consolidated stats-insights Lambda which loads
-    // recommendation-status.py via the ROUTE_MAP prefix match.
-    route(recommendationsResource.addResource('{id}').addResource('status'), statsInsightsFunction, 'GET', 'POST');
-
-    route(apiResource.addResource('trends'), statsInsightsFunction, 'GET');
-
-    // Reports aggregator endpoints. /reports/overview returns the
-    // cross-keyword executive-summary rollup; /reports/competitor
-    // returns the per-competitor rollup (outranked keywords,
-    // exclusive citation sources, prioritised outreach list).
-    // Both are routed to the consolidated stats-insights Lambda so
-    // they share the warm container with /trends, /recommendations,
-    // /visibility, and /citation-gaps which they compose.
-    const reportsResource = apiResource.addResource('reports');
-    route(reportsResource.addResource('overview'), statsInsightsFunction, 'GET');
-    route(reportsResource.addResource('competitor'), statsInsightsFunction, 'GET');
-    // Per-run KPI history of a keyword group (the per-hotel report).
-    route(reportsResource.addResource('group-kpis'), statsInsightsFunction, 'GET');
-    const reportInsightsResource = reportsResource.addResource('insights');
-    route(reportInsightsResource, statsInsightsFunction, 'GET');
-    // Admin only, enforced in the handler (`@require_group`): spends one Bedrock call.
-    route(reportInsightsResource.addResource('regenerate'), statsInsightsFunction, 'POST');
-
-    // Persona Rankings API Route
-    route(apiResource.addResource('persona-rankings'), getPersonaRankingsFunction, 'GET');
-
-    // Self-Reflection API Routes
-    route(apiResource.addResource('self-reflection'), selfReflectionFunction, 'POST', 'GET');
-
-=======
     // ========================================
     // Content Studio API
     // ========================================
