@@ -80,7 +80,7 @@ jobs:
         run: |
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o "/tmp/${tarball}" "${base}/${tarball}"
           echo "${GITLEAKS_SHA256}  /tmp/${tarball}" | sha256sum --check --strict -
           mkdir -p "$HOME/.local/bin"
           tar -xzf "/tmp/${tarball}" -C "$HOME/.local/bin" gitleaks
@@ -99,11 +99,11 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL -o "/tmp/${al}" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${al}"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o "/tmp/${al}" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${al}"
           echo "${ACTIONLINT_SHA256}  /tmp/${al}" | sha256sum --check --strict -
           tar -xzf "/tmp/${al}" -C "$HOME/.local/bin" actionlint
           zz="zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          curl -sSfL -o "/tmp/${zz}" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${zz}"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o "/tmp/${zz}" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${zz}"
           echo "${ZIZMOR_SHA256}  /tmp/${zz}" | sha256sum --check --strict -
           tar -xzf "/tmp/${zz}" -C "$HOME/.local/bin" zizmor
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
