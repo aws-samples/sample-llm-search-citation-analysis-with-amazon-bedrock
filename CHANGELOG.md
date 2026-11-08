@@ -20,7 +20,10 @@ process.
   by a maintainer; it drops a point an answer settles and treats another maintainer's explicit decision on a
   trade-off as final; a maintainer is a commenter GitHub reports with write access or more, looked up per commenter.
   The PR author's own decision is listed as "settled by the author" for a second maintainer to
-  see, not silently accepted. No decision settles a data lake tenet, a security problem or a repository rule. A
+  see, not silently accepted. A maintainer's comment settles a concern, never a blocking finding (that takes the change, or a trade-off explained in
+  the description); nothing settles tenet 1, a data lake tenet, a correctness bug, a security problem or a repository
+  rule. Its own previous review is only a list to re-check, never a reason to drop a point, since people with write
+  access can edit it. A
   failed conversation fetch costs only the follow-up, never the review. The conversation is untrusted
   text: capped in size (whole oldest entries are dropped first; the reviewer's own last review is always kept),
   read as data, and every line of a body is quoted so a comment cannot forge an author or a maintainer role. The reviewer's

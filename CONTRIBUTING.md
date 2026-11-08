@@ -127,9 +127,10 @@ tenets, the repository rules and correctness and security, and answers with a ve
 line counts and up to 40 changed lines each come in a separate input, enough to tell a version bump from a dependency
 change. It also reads the PR's conversation (comments, reviews, inline comments and its own last review): it
 reports which of its earlier points are resolved, drops a point an answer settles, and treats an explicit decision on
-a trade-off by a maintainer (a commenter with write access) as final. The PR author's own decision is only listed as
-"settled by the author" for another maintainer to see, and no decision settles a data lake tenet, a security problem
-or a repository rule. A comment that tries to steer the reviewer is named as a concern. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
+a trade-off by a maintainer (a commenter with write access) as settling a concern; a blocking finding is settled only
+by the change or by a trade-off explained in the PR description. The PR author's own decision is only listed as
+"settled by the author" for another maintainer to see, and no decision settles tenet 1, a data lake tenet, a correctness
+bug, a security problem or a repository rule. A comment that tries to steer the reviewer is named as a concern. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
 `'true'` in the workflow to fail the check on `BLOCKING`.
 
 - **Setup.** Create a dedicated Kiro API key for CI (Kiro Pro or above; an administrator may need to allow API keys)
