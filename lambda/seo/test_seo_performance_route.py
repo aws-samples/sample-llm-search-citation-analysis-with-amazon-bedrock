@@ -66,33 +66,37 @@ def audited(api: Api) -> Api:
 class TestSingleLighthouseDailyLimit:
     """The jobs Lambda makes the billed Lighthouse call, so the router counts it before the run starts."""
 
-    def start(self, api):
+    def start(self, api, monkeypatch, daily_call_limit, *, start_fails=False):
+        """``(status, body, calls counted today)`` of one single run under ``daily_call_limit``."""
+        limit = install_daily_limit(monkeypatch, daily_call_limit)
+        if start_fails:
+            api.start_execution.side_effect = ClientError({'Error': {'Code': 'ExecutionLimitExceeded'}}, 'StartExecution')
         event = seo_event('POST', '/api/seo/lighthouse', body={'url': PAGE, 'device': 'desktop'})
-        return parse_response(seo_spend_limit.limited(api.module.handler)(event, {}))
+        status, body = parse_response(seo_spend_limit.limited(api.module.handler)(event, {}))
+        return status, body, limit.counter.calls_of('admin@example.com')
 
     def test_counts_one_call_for_a_single_run(self, api, monkeypatch):
-        limit = install_daily_limit(monkeypatch, 100)
+        status, _body, counted = self.start(api, monkeypatch, 100)
 
-        status, _body = self.start(api)
-
-        assert (status, limit.counter.calls_of('admin@example.com'), api.start_execution.call_count) == (202, 1, 1)
+        assert (status, counted, api.start_execution.call_count) == (202, 1, 1)
 
     def test_refuses_a_run_when_paid_lookups_are_off(self, api, monkeypatch):
-        limit = install_daily_limit(monkeypatch, 0)
+        status, body, counted = self.start(api, monkeypatch, 0)
 
-        status, body = self.start(api)
-
-        assert (status, body['code'], limit.counter.calls_of('admin@example.com'), api.start_execution.call_count) == (
-            429, 'DAILY_LIMIT', 0, 0)
-
+        assert (status, body['code'], counted, api.start_execution.call_count) == (429, 'DAILY_LIMIT', 0, 0)
 
     def test_gives_the_call_back_when_the_run_cannot_start(self, api, monkeypatch):
-        limit = install_daily_limit(monkeypatch, 100)
-        api.start_execution.side_effect = ClientError({'Error': {'Code': 'ExecutionLimitExceeded'}}, 'StartExecution')
+        status, _body, counted = self.start(api, monkeypatch, 100, start_fails=True)
 
-        status, _body = self.start(api)
+        assert (status, counted) == (502, 0)
 
-        assert (status, limit.counter.calls_of('admin@example.com')) == (502, 0)
+    def test_still_answers_the_failed_start_when_giving_the_call_back_fails(self, api, monkeypatch):
+        monkeypatch.setattr(seo_spend_limit, 'give_back', MagicMock(
+            side_effect=ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException'}}, 'UpdateItem')))
+
+        status, body, counted = self.start(api, monkeypatch, 100, start_fails=True)
+
+        assert (status, body['code'], counted) == (502, 'INTERNAL_ERROR', 1)
 
 
 class TestSingleLighthouse:

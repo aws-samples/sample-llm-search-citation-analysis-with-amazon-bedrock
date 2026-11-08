@@ -123,9 +123,9 @@ def _reuse_or_start(event: dict[str, Any], receipt: dict[str, Any], build: Calla
         start_execution(run)
     except (ClientError, BotoCoreError, KeyError) as error:
         logger.warning('lighthouse run %s could not start: %s', run['run_id'], type(error).__name__)
+        fail_run(run, START_FAILED_MESSAGE)
         # Nothing ran, so nothing is billed: the call counted for it goes back to the user's day.
         release_queued_calls()
-        fail_run(run, START_FAILED_MESSAGE)
         remember_run(run)
         return seo_error(502, 'INTERNAL_ERROR', START_FAILED_MESSAGE, event)
     return success_response({'run': run_view(run), 'reused': False}, event, 202)

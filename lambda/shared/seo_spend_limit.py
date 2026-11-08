@@ -194,10 +194,16 @@ def reserve_queued_calls(calls: int, what: str) -> None:
 def release_queued_calls() -> None:
     """Give back the calls ``reserve_queued_calls`` counted in this request: the job did not start, nothing is billed."""
     meter = _active_meter.get()
-    if meter is not None and meter.queued:
+    if meter is None or not meter.queued:
+        return
+    try:
         give_back(meter.who, meter.queued)
-        meter.calls -= meter.queued
-        meter.queued = 0
+    except (BotoCoreError, ClientError):
+        # Best effort: keeping the count only costs the user calls, and the failed start must still be answered.
+        logger.exception('Could not give %s queued SEO calls back; they stay counted today', meter.queued)
+        return
+    meter.calls -= meter.queued
+    meter.queued = 0
 
 
 def _audit(event: dict[str, Any], meter: _Meter, status: int) -> None:
