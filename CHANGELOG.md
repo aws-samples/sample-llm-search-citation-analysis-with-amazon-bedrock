@@ -18,7 +18,8 @@ process.
     the bundled boto3/botocore 1.43.98 → 1.43.123 and s3transfer 0.19.2 → 0.19.3. AgentCore 1.25.2 needs
     boto3/botocore ≥ 1.43.115. The layer build's import check asserts the new SDK version.
   - Shared layer: beautifulsoup4 ≥ 4.15.0 and tzdata ≥ 2026.6.
-  - Function requirements: boto3 ≥ 1.43.123.
+  - The function `requirements.txt` files keep their boto3 floors. These functions run the Lambda runtime's boto3
+    (1.42.x on Python 3.12), not a bundled one, and each file now says so.
   - Dev tools: pytest ≥ 9.2.0, hypothesis ≥ 6.170.14, ruff 0.15.11 → 0.17.3, and boto3-stubs 1.43.123.
 - Ruff 0.17 adds two checks. Implicitly concatenated strings in a list or tuple are now wrapped in parentheses
   (ISC004). The scope snapshot build logs a skipped builder's error with `logger.error(..., exc_info=error)`,
