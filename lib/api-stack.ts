@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
+import { ManagedPolicy, PolicyStatement, Role, ServicePrincipal, type IRole } from 'aws-cdk-lib/aws-iam';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
-import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
@@ -109,19 +109,19 @@ export class CitationAnalysisApiStack extends cdk.Stack {
    * `s3 sync`), write `config.json` only, and invalidate this distribution only.
    * Passed without policy updates, so CDK adds nothing to it.
    */
-  private runtimeConfigRole(webBucket: s3.IBucket, distributionId: string): iam.IRole {
-    const role = new iam.Role(this, 'RuntimeConfigDeploymentRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+  private runtimeConfigRole(webBucket: s3.IBucket, distributionId: string): IRole {
+    const role = new Role(this, 'RuntimeConfigDeploymentRole', {
+      assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       description: 'Writes config.json to the web bucket and invalidates it on the dashboard distribution',
-      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
+      managedPolicies: [ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')],
     });
     const assets = `arn:${this.partition}:s3:::cdk-*-assets-${this.account}-${this.region}`;
-    role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [`${assets}/*`] }));
-    role.addToPolicy(new iam.PolicyStatement({ actions: ['s3:ListBucket'], resources: [webBucket.bucketArn, assets] }));
-    role.addToPolicy(new iam.PolicyStatement({
+    role.addToPolicy(new PolicyStatement({ actions: ['s3:GetObject'], resources: [`${assets}/*`] }));
+    role.addToPolicy(new PolicyStatement({ actions: ['s3:ListBucket'], resources: [webBucket.bucketArn, assets] }));
+    role.addToPolicy(new PolicyStatement({
       actions: ['s3:PutObject'], resources: [webBucket.arnForObjects(RUNTIME_CONFIG_OBJECT_KEY)],
     }));
-    role.addToPolicy(new iam.PolicyStatement({
+    role.addToPolicy(new PolicyStatement({
       actions: ['cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation'],
       resources: [`arn:${this.partition}:cloudfront::${this.account}:distribution/${distributionId}`],
     }));
