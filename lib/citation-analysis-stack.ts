@@ -44,6 +44,7 @@ import { citationAnalysisBucket } from './constructs/buckets';
 import {
   allow, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
+import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
 
 /**
@@ -2402,6 +2403,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+        // An Admin's change to the daily limit of paid DataForSEO calls is audited there (D4; by name).
+        DYNAMODB_TABLE_MCP_STATE: MCP_STATE_TABLE_NAME,
         ...webSearchEnv,
         DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
         DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
@@ -2500,6 +2503,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // /api/markets: the market list lives in BrandConfig; the in-use check scans Keywords.
     brandConfigTable.grantReadWriteData(configMgmtFunction);
     keywordsTable.grantReadData(configMgmtFunction);
+    grantAuditPut(this, configMgmtFunction);
     allow(configMgmtFunction, ['sns:ListSubscriptionsByTopic', 'sns:Publish', 'sns:Subscribe'], [kpiAlertsTopic.topicArn]);
     allow(configMgmtFunction, ['sns:Unsubscribe'], [`${kpiAlertsTopic.topicArn}:*`]);
     kpiAlertsKey.grantEncryptDecrypt(configMgmtFunction);

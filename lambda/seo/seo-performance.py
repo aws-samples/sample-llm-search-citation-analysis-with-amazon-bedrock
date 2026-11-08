@@ -52,6 +52,7 @@ from shared.lighthouse_runs import (
     start_execution,
 )
 from shared.lighthouse_sample import MAX_SAMPLE_PAGES, is_measurable, select_sample
+from shared.seo_spend_limit import release_queued_calls, reserve_queued_calls
 from shared.site_audit_repository import AuditStore
 from shared.utils import get_timestamp
 
@@ -123,6 +124,8 @@ def _reuse_or_start(event: dict[str, Any], receipt: dict[str, Any], build: Calla
     except (ClientError, BotoCoreError, KeyError) as error:
         logger.warning('lighthouse run %s could not start: %s', run['run_id'], type(error).__name__)
         fail_run(run, START_FAILED_MESSAGE)
+        # Nothing ran, so nothing is billed: the call counted for it goes back to the user's day.
+        release_queued_calls()
         remember_run(run)
         return seo_error(502, 'INTERNAL_ERROR', START_FAILED_MESSAGE, event)
     return success_response({'run': run_view(run), 'reused': False}, event, 202)
@@ -135,8 +138,12 @@ def start_single(event: dict[str, Any], _context: Any, *, url: str, device: str,
     if page is None:
         return seo_error(400, 'VALIDATION_ERROR', "url must be a public page on one of the brand's own domains",
                          event, 'url')
-    return _reuse_or_start(event, {'kind': 'single', 'url': page, 'device': device},
-                           lambda: new_run('single', [{'url': page, 'device': device}], _caller(event)))
+    def build() -> dict[str, Any]:
+        # The jobs Lambda makes the one billed Lighthouse call: count it now, before the run starts.
+        reserve_queued_calls(1, 'Lighthouse run')
+        return new_run('single', [{'url': page, 'device': device}], _caller(event))
+
+    return _reuse_or_start(event, {'kind': 'single', 'url': page, 'device': device}, build)
 
 
 def _sample(audit: dict[str, Any], store: AuditStore) -> list[str]:

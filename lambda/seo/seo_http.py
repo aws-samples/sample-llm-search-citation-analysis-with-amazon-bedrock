@@ -54,6 +54,8 @@ ERROR_STATUS: dict[str, int] = {
     'BILLING_ISSUE': 502,
     'VALIDATION_ERROR': 400,
     'INTERNAL_ERROR': 502,
+    # A billed call past the user's daily limit (``shared.seo_spend_limit``); nothing was sent.
+    'DAILY_LIMIT': 429,
 }
 
 ERROR_MESSAGES: dict[str, str] = {
@@ -64,6 +66,8 @@ ERROR_MESSAGES: dict[str, str] = {
     'BILLING_ISSUE': 'The DataForSEO account balance is too low',
     'VALIDATION_ERROR': 'DataForSEO rejected the request',
     'INTERNAL_ERROR': 'DataForSEO returned an unexpected error',
+    'DAILY_LIMIT': ('You have reached today\'s limit of paid DataForSEO calls (an Admin sets it in Settings > '
+                    'AI Providers > SEO data); it resets at midnight UTC'),
 }
 
 #: Codes added to the answers of the shared decorators that carry none.

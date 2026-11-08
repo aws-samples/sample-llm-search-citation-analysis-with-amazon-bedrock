@@ -1,7 +1,10 @@
 """Configuration for Lambda functions."""
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
+from typing import Any
 
 
 def _integer_env(name: str, default: int, *, minimum: int) -> int:
@@ -59,6 +62,23 @@ PLAIN_KEYWORD_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW
 #: otherwise on). Google AI Overviews bills one DataForSEO call per keyword and run, and it shares the DataForSEO
 #: login with the SEO pages, so saving that login must not start the spend (TENETS.md, tenet 7: paid is opt-in).
 OFF_UNTIL_ENABLED_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW})
+
+
+#: The DataForSEO credential's ProviderConfig row, and the attribute on it holding the daily limit of paid
+#: DataForSEO calls per user (an Admin sets it in Settings > AI Providers > SEO data; ``shared.seo_spend_limit``).
+DATAFORSEO_PROVIDER = 'dataforseo'
+SEO_DAILY_CALL_LIMIT_ATTRIBUTE = 'daily_call_limit'
+SEO_DAILY_CALL_LIMIT_DEFAULT = 100
+#: The highest limit Settings accepts.
+SEO_DAILY_CALL_LIMIT_MAX = 100_000
+
+
+def seo_daily_call_limit(row: Mapping[str, Any] | None) -> int:
+    """The limit a ``dataforseo`` ProviderConfig row sets: its value from 0 (paid calls off) up, else the default."""
+    value = (row or {}).get(SEO_DAILY_CALL_LIMIT_ATTRIBUTE)
+    if isinstance(value, bool) or not isinstance(value, int | Decimal) or value != int(value):
+        return SEO_DAILY_CALL_LIMIT_DEFAULT
+    return min(max(int(value), 0), SEO_DAILY_CALL_LIMIT_MAX)
 
 
 def enabled_without_config(provider_id: str) -> bool:

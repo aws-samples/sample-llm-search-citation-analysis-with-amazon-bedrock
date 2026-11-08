@@ -34,13 +34,14 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from shared.spend_audit import audit_item, put_audit
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 TOKEN_TTL = timedelta(minutes=5)
 #: A start that crashed mid-way frees the caller's lock after this long.
 LOCK_TTL = timedelta(minutes=1)
-AUDIT_TTL = timedelta(days=365)
 RUN_RECORD_TTL = timedelta(days=7)
 #: Started runs checked for "still running", newest first.
 RECENT_RUNS = 10
@@ -84,7 +85,6 @@ class Limits:
     runs_per_day: int = 5
     jobs_per_day: int = 20
     max_run_keywords: int = 50
-    seo_calls_per_day: int = 50
 
 
 _LIMIT_KEYS = {
@@ -92,7 +92,6 @@ _LIMIT_KEYS = {
     'runsPerDay': 'runs_per_day',
     'jobsPerDay': 'jobs_per_day',
     'maxRunKeywords': 'max_run_keywords',
-    'seoCallsPerDay': 'seo_calls_per_day',
 }
 
 
@@ -288,18 +287,4 @@ def record_audit(caller_sub: str, tool: str, operation: str, outcome: str, reaso
     """One audit record (365-day TTL) for a write or spend call; best effort, and skipped without a state table."""
     if not os.environ.get('MCP_STATE_TABLE'):
         return
-    now = utc_now()
-    item: dict[str, Any] = {
-        'pk': f'audit#{caller_sub}',
-        'sk': f'{_iso(now)}#{operation}#{secrets.token_hex(4)}',
-        'tool': tool,
-        'operation': operation,
-        'outcome': outcome,
-        'ttl': _epoch(now + AUDIT_TTL),
-    }
-    if reason:
-        item['reason'] = reason
-    try:
-        table().put_item(Item=item)
-    except (BotoCoreError, ClientError):
-        logger.exception('Could not write the audit record of %s', operation)
+    put_audit(table(), audit_item(caller_sub, tool, operation, outcome, utc_now(), reason=reason or None))

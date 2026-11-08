@@ -7,11 +7,12 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import { claudeInvokeModelStatement } from './constructs/bedrock-invoke';
-import { allow, apiKeySecret, lambdaServiceRole } from './constructs/permissions';
+import { allow, allowWhere, apiKeySecret, lambdaServiceRole } from './constructs/permissions';
 import {
   GOOGLE_AI_OVERVIEW_PROVIDER, providerSearchEnvironment, providerSearchFunction, type ProviderSearchResourceNames
 } from './constructs/provider-search';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
+import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { SeoApi } from './constructs/seo-api';
 import { SeoCallbacks } from './constructs/seo-callbacks';
 import { SEO_JOBS_FUNCTION_NAME, type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
@@ -149,6 +150,7 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       allow(fn, ['s3:GetObject', 's3:PutObject'], [seoBucket.arnForObjects('*')]);
     }
     ssm.StringParameter.fromStringParameterName(this, 'CorsOriginParam', CORS_ORIGIN_PARAMETER).grantRead(router);
+    this.grantDailyCallLimit(router, mainTables.providerConfig);
     // DataForSEO calls back when a queued task is ready, resuming the waiting rank check or local SEO job.
     jobs.addEnvironment('DATAFORSEO_CALLBACK_URL', new SeoCallbacks(this, 'DataForSeoCallbacks', { sharedLayer, cacheTable, jobs }).url);
 
@@ -168,6 +170,21 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       value: this.seoApi.api.url,
       description: 'SEO API Gateway URL (the dashboard calls <SeoApiUrl>api/seo/...)',
     }).overrideLogicalId('SeoApiUrl');
+  }
+
+  /**
+   * The router's daily limit on paid one-off DataForSEO calls (`shared/seo_spend_limit.py`): it reads the
+   * limit an Admin sets in Settings from the `dataforseo` ProviderConfig row only, and writes one audit record
+   * per paid request to the MCP stack's state table (by name; `npm run deploy` deploys both). Put only, keyed to
+   * `audit#` items: it never reads, updates or deletes one (TENETS.md, tenet 6 and D4).
+   */
+  private grantDailyCallLimit(router: lambda.Function, providerConfig: dynamodb.ITable): void {
+    router.addEnvironment('DYNAMODB_TABLE_PROVIDER_CONFIG', MAIN_TABLES.providerConfig);
+    router.addEnvironment('DYNAMODB_TABLE_MCP_STATE', MCP_STATE_TABLE_NAME);
+    allowWhere(router, ['dynamodb:GetItem'], [providerConfig.tableArn], {
+      'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['dataforseo'] },
+    });
+    grantAuditPut(this, router);
   }
 
   /**

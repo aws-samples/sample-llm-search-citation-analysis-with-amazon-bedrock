@@ -297,7 +297,7 @@ describe('MCP function', () => {
       MCP_API_FUNCTIONS: `{"keyword-mgmt":"${REF}","config-mgmt":"${REF}"}`,
       MCP_PINNED_TOOLS: 'list_providers,get_dashboard_stats',
       MCP_STATE_TABLE: REF,
-      MCP_LIMITS: '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"seoCallsPerDay":50}',
+      MCP_LIMITS: '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}',
     });
   });
 

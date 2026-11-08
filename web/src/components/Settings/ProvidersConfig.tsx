@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import type { ProviderConfig } from '../../hooks/useProviderConfig';
+import type {
+  ProviderConfig, ProviderUpdate 
+} from '../../hooks/useProviderConfig';
 import { RefreshIcon } from '../ui';
 import { ProvidersConfigSkeleton } from './ProvidersConfigSkeleton';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { SeoDailyCallLimit } from './SeoDailyCallLimit';
 import {
   ProviderCard, type ProviderCardControls
 } from './ProviderCard';
@@ -14,10 +17,7 @@ import {
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
   readonly loading: boolean;
-  readonly onUpdate: (providerId: string, updates: {
-    enabled?: boolean;
-    api_key?: string 
-  }) => Promise<boolean>;
+  readonly onUpdate: (providerId: string, updates: ProviderUpdate) => Promise<boolean>;
   readonly onRefresh: () => Promise<void>;
   /**
    * The reason the last update was refused, in the server's words
@@ -28,6 +28,10 @@ export interface ProvidersConfigProps {
   /** Threaded from the parent, which already resolved membership. */
   readonly isAdmin: boolean;
 }
+
+const DATAFORSEO_PROVIDER_ID = 'dataforseo';
+/** What the server answers when an Admin has not set the limit (`lambda/shared/config.py`). */
+const DEFAULT_SEO_DAILY_CALL_LIMIT = 100;
 
 export const ProvidersConfig = ({
   providers, loading, onUpdate, onRefresh, updateError = null, isAdmin 
@@ -103,6 +107,7 @@ export const ProvidersConfig = ({
   );
 
   const groups = groupProviders(withBorrowedCredentials(providers));
+  const dataForSeo = groups.seo.find((provider) => provider.id === DATAFORSEO_PROVIDER_ID);
 
   // Only the first load: a refresh keeps the cards (and any open editor) in place.
   if (loading && providers.length === 0) {
@@ -131,6 +136,13 @@ export const ProvidersConfig = ({
             <p className="text-xs text-gray-600 mt-1">Search volume, keyword difficulty and Google results pages for the SEO views and the Google AI Overviews engine.</p>
           </div>
           {groups.seo.map(renderCard)}
+          {dataForSeo !== undefined && (
+            <SeoDailyCallLimit
+              limit={dataForSeo.daily_call_limit ?? DEFAULT_SEO_DAILY_CALL_LIMIT}
+              isAdmin={isAdmin}
+              onSave={(limit) => onUpdate(dataForSeo.id, { daily_call_limit: limit })}
+            />
+          )}
         </section>
       )}
 

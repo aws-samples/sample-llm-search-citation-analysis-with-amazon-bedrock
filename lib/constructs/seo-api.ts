@@ -46,6 +46,7 @@ const SEO_ROUTES: SeoRoutes = [
   ['keywords/metrics/lookup', ['POST']],
   ['serp', ['POST']],
   ['account', ['GET']],
+  ['daily-calls', ['GET']],
   ['seo-geo', ['GET']],
 ];
 

@@ -244,3 +244,58 @@ def test_enables_dataforseo_without_probe_when_switched_on(providers_api, aws, p
     status, _ = _put(providers_api, 'dataforseo', {'enabled': True})
 
     assert (status, probe.call_count) == (200, 0)
+
+
+class TestDailyCallLimit:
+    """Settings > AI Providers > SEO data: the paid one-off DataForSEO calls each user may make per UTC day."""
+
+    def test_lists_the_default_of_100_until_an_admin_sets_one(self, providers_api, aws):
+        assert _listed(providers_api, 'dataforseo')['daily_call_limit'] == 100
+
+    def test_lists_the_limit_an_admin_set(self, providers_api, aws):
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'dataforseo', 'daily_call_limit': 250}}
+
+        assert _listed(providers_api, 'dataforseo')['daily_call_limit'] == 250
+
+    def test_lists_no_limit_on_any_other_provider(self, providers_api, aws):
+        assert 'daily_call_limit' not in _listed(providers_api, 'google_ai_overview')
+
+    @pytest.mark.parametrize('value', [0, 100, 100_000])
+    def test_saves_a_limit_from_zero_to_the_maximum_on_the_dataforseo_row_only(self, providers_api, aws, value):
+        status, _body = _put(providers_api, 'dataforseo', {'daily_call_limit': value})
+
+        update = aws.table.update_item.call_args.kwargs
+        assert (status, update['Key'], update['ExpressionAttributeValues'][':limit']) == (
+            200, {'provider_id': 'dataforseo'}, value,
+        )
+
+    @pytest.mark.parametrize('value', [-1, 100_001, 2.5, True, '50', None])
+    def test_refuses_a_limit_that_is_not_a_whole_number_in_range(self, providers_api, aws, value):
+        status, body = _put(providers_api, 'dataforseo', {'daily_call_limit': value})
+
+        assert (status, body.get('field'), aws.table.update_item.called) == (400, 'daily_call_limit', False)
+
+    def test_refuses_a_limit_on_another_provider(self, providers_api, aws):
+        status, body = _put(providers_api, 'google_ai_overview', {'daily_call_limit': 10})
+
+        assert (status, body['error']) == (400, 'Only DataForSEO has a daily call limit')
+
+    def test_lets_only_an_admin_set_it(self, providers_api, aws):
+        event = caller_event('PUT', '/api/providers/dataforseo', body={'daily_call_limit': 10_000},
+                             path_params={'id': 'dataforseo'}, groups=None, caller='viewer@example.com')
+
+        status, _body = invoke(providers_api, event)
+
+        assert (status, aws.table.update_item.called) == (403, False)
+
+    def test_audits_who_changed_the_limit_and_from_what(self, providers_api, aws, monkeypatch):
+        monkeypatch.setenv('DYNAMODB_TABLE_MCP_STATE', 'test-mcp-state')
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'dataforseo', 'daily_call_limit': 100}}
+
+        _put(providers_api, 'dataforseo', {'daily_call_limit': 40})
+
+        audit = aws.table.put_item.call_args.kwargs['Item']
+        assert {key: audit[key] for key in ('pk', 'tool', 'operation', 'outcome', 'previous_limit', 'limit')} == {
+            'pk': 'audit#admin@example.com', 'tool': 'settings', 'operation': 'PUT /api/providers/dataforseo',
+            'outcome': 'saved', 'previous_limit': 100, 'limit': 40,
+        }

@@ -123,6 +123,12 @@ class TestOverview:
         assert (answer.status, answer.body['summary'], answer.body['history_failed'], answer.put_cached.call_args.args[4]) \
             == (200, SUMMARY_ROW, True, 900)
 
+    def test_keeps_the_paid_summary_and_caches_nothing_when_the_daily_limit_stops_the_history(self, overview):
+        answer = overview({'target': 'example.com'}, history=DataForSeoError('DAILY_LIMIT', 'limit'))
+
+        assert (answer.status, answer.body['summary'], answer.body['history_failed'], answer.body['history_limit_reached'],
+                answer.put_cached.called) == (200, SUMMARY_ROW, True, True, False)
+
     @pytest.mark.parametrize('target', ['my_site.com', 'example.com/a?b=1'])
     def test_refuses_an_unusable_target_before_any_paid_call(self, overview, target):
         answer = overview({'target': target, 'scope': 'exact_url'})

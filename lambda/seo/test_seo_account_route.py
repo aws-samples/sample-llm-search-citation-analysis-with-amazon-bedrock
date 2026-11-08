@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from shared.dataforseo_client import DataForSeoError
+from shared.seo_spend_limit import DailyCalls
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.seo_fixtures import SEO_DIR, SEO_ENV, seo_event
@@ -57,3 +58,13 @@ def test_refuses_a_user_who_is_not_an_admin(account_module):
     call = Account(account_module, groups='Users')
 
     assert (call.status, call.body['code'], call.summary.call_count) == (403, 'FORBIDDEN', 0)
+
+
+def test_answers_any_signed_in_user_their_paid_calls_today_and_the_limit(account_module):
+    calls = MagicMock(return_value=DailyCalls(used=12, limit=100, resets_at='2026-11-09T00:00:00Z'))
+    with patch.object(account_module, 'daily_calls', calls):
+        status, body = parse_response(account_module.handler(seo_event('GET', '/api/seo/daily-calls', groups='Users'), {}))
+
+    assert (status, body, calls.call_args.args) == (
+        200, {'used': 12, 'limit': 100, 'remaining': 88, 'resets_at': '2026-11-09T00:00:00Z'}, ('admin@example.com',),
+    )

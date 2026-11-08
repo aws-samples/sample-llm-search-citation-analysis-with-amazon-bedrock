@@ -36,12 +36,13 @@ const FEATURE_PREFIXES = ['/api/seo/audits', '/api/seo/backlinks', '/api/seo/dom
   '/api/seo/insights', '/api/seo/lighthouse', '/api/seo/local', '/api/seo/rank-trackers'];
 
 describe('CitationAnalysis-SeoApi', () => {
-  it('serves the six base SEO routes; each feature spec pins its own routes', () => {
+  it('serves the seven base SEO routes; each feature spec pins its own routes', () => {
     const baseRoutes = snapshot.routes.filter(
       (route) => !FEATURE_PREFIXES.some((prefix) => route.split(' ')[1].startsWith(prefix))
     );
     expect(baseRoutes).toStrictEqual([
       'GET /api/seo/account',
+      'GET /api/seo/daily-calls',
       'GET /api/seo/seo-geo',
       'POST /api/seo/keywords/metrics',
       'POST /api/seo/keywords/metrics/lookup',
@@ -111,13 +112,31 @@ describe('CitationAnalysis-SeoRouter', () => {
     });
   });
 
-  it('reads only the main-stack tables its handlers read', () => {
+  it('reads only the main-stack tables its handlers read, plus the daily call limit and its audit', () => {
     expect(snapshot.routerMainTables).toStrictEqual([
       'CitationAnalysis-BrandConfig',
       'CitationAnalysis-Keywords',
+      'CitationAnalysis-McpState',
+      'CitationAnalysis-ProviderConfig',
       'CitationAnalysis-RecommendationStatus',
       'CitationAnalysis-SearchResults',
     ]);
+  });
+
+  it('reads only the dataforseo row of ProviderConfig, and only puts audit items in McpState (tenet 6, D4)', () => {
+    expect(snapshot.routerLimitStatements.map((statement) => [
+      resolvePath(statement, ['Action']), resolvePath(statement, ['Condition']),
+    ])).toStrictEqual([
+      ['dynamodb:GetItem', { 'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['dataforseo'] } }],
+      ['dynamodb:PutItem', { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['audit#*'] } }],
+    ]);
+  });
+
+  it('names the ProviderConfig and audit tables the daily call limit uses', () => {
+    expect(snapshot.routerEnv).toMatchObject({
+      DYNAMODB_TABLE_PROVIDER_CONFIG: 'CitationAnalysis-ProviderConfig',
+      DYNAMODB_TABLE_MCP_STATE: 'CitationAnalysis-McpState',
+    });
   });
 
   it('does not name the Citations table, which no SEO handler reads', () => {

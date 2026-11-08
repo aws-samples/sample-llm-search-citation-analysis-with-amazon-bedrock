@@ -1,5 +1,6 @@
 """
-SEO account API: ``GET /api/seo/account`` (Admin) - whether DataForSEO is configured, its login and balance.
+SEO account API: ``GET /api/seo/account`` (Admin) - whether DataForSEO is configured, its login and balance;
+``GET /api/seo/daily-calls`` (any signed-in user) - the caller's paid DataForSEO calls today and the limit.
 
 The balance is read on demand from the free ``GET /v3/appendix/user_data`` (``account_summary``); nothing is
 stored: there are no spend caps by design, so the app keeps no balance or ledger of its own. Without a DataForSEO key the answer is a 200 ``configured: false``, not an
@@ -17,6 +18,7 @@ from seo_http import seo_route
 from shared.api_response import success_response
 from shared.auth import ADMIN_GROUP, require_group
 from shared.dataforseo_client import DataForSeoError, account_summary, configured_credentials
+from shared.seo_spend_limit import daily_calls, spender
 
 NOT_CONFIGURED: dict[str, Any] = {'configured': False, 'login': None, 'balance_usd': None}
 
@@ -46,4 +48,12 @@ def handle_account(event: dict[str, Any], _context: Any, *_args: Any, **_kwargs:
     }, event)
 
 
-handler = seo_route({('GET', '/account'): handle_account})
+def handle_daily_calls(event: dict[str, Any], _context: Any, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    """GET /api/seo/daily-calls - ``{used, limit, remaining, resets_at}`` of the caller's paid one-off calls today."""
+    calls = daily_calls(spender(event))
+    return success_response({
+        'used': calls.used, 'limit': calls.limit, 'remaining': calls.remaining, 'resets_at': calls.resets_at,
+    }, event)
+
+
+handler = seo_route({('GET', '/account'): handle_account, ('GET', '/daily-calls'): handle_daily_calls})

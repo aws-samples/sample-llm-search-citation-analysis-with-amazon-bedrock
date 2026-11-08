@@ -58,6 +58,8 @@ export interface BacklinksOverviewResponse extends BacklinksTargetEcho {
   readonly history_available: boolean;
   readonly history_includes_subdomains: boolean;
   readonly history_failed: boolean;
+  /** The history call was not sent: the caller's daily limit of paid DataForSEO calls was reached (2.47.0). */
+  readonly history_limit_reached?: boolean;
   readonly cached: boolean;
   readonly fetched_at: string;
 }

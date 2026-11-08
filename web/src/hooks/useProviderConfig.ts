@@ -38,6 +38,16 @@ export interface ProviderConfig extends ProviderHealthRecord, ProviderCredential
   last_updated: string | null;
   /** `iam` providers need no key; absent means `api_key`. */
   auth?: ProviderAuth;
+  /** DataForSEO only: paid one-off DataForSEO calls each user may make per UTC day (0: none). */
+  daily_call_limit?: number;
+}
+
+/** What one `PUT /providers/{id}` may change. */
+export interface ProviderUpdate {
+  enabled?: boolean;
+  api_key?: string;
+  /** DataForSEO only, Admin only: 0 to 100,000. */
+  daily_call_limit?: number;
 }
 
 export type ProviderAuth = 'iam' | 'api_key';
@@ -47,10 +57,7 @@ interface UseProviderConfigReturn {
   loading: boolean;
   error: string | null;
   refreshProviders: () => Promise<void>;
-  updateProvider: (providerId: string, updates: {
-    enabled?: boolean;
-    api_key?: string;
-  }) => Promise<boolean>;
+  updateProvider: (providerId: string, updates: ProviderUpdate) => Promise<boolean>;
 }
 
 class ProviderFetchError extends Error {
@@ -128,10 +135,7 @@ export function useProviderConfig(): UseProviderConfigReturn {
 
   const updateProvider = useCallback(async (
     providerId: string,
-    updates: {
-      enabled?: boolean;
-      api_key?: string;
-    }
+    updates: ProviderUpdate
   ): Promise<boolean> => {
     try {
       const response = await authenticatedFetch(`${API_BASE_URL}/providers/${providerId}`, {

@@ -74,6 +74,7 @@ from shared.dataforseo_backlinks import (
 )
 from shared.dataforseo_client import DataForSeoError
 from shared.decorators import json_object_body, validate
+from shared.seo_spend_limit import DAILY_LIMIT_CODE
 from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
@@ -148,10 +149,15 @@ def subfolder_summary(target: BacklinksTarget) -> dict[str, Any]:
 
 
 def fresh_overview(target: BacklinksTarget) -> dict[str, Any]:
-    """Call DataForSEO and cache the answer; a failed history keeps the paid summary and is cached briefly."""
+    """Call DataForSEO and cache the answer; a failed history keeps the paid summary and is cached briefly.
+
+    A history the caller's daily limit stopped (``DAILY_LIMIT``: the call was never sent) keeps the paid summary
+    too, says so, and is not cached: a user with calls left must get the whole overview.
+    """
     trends: list[dict[str, Any]] = []
     new_lost: list[dict[str, Any]] = []
     history_failed = False
+    limit_reached = False
     if target.scope == 'subfolder':
         summary: dict[str, Any] | None = subfolder_summary(target)
     else:
@@ -162,10 +168,13 @@ def fresh_overview(target: BacklinksTarget) -> dict[str, Any]:
         except DataForSeoError as error:
             logger.warning('seo.backlinks.history-failed code=%s', error.code)
             history_failed = True
+            limit_reached = error.code == DAILY_LIMIT_CODE
     payload = {
         'summary': summary, 'trends': trends, 'new_lost_trends': new_lost, 'history_failed': history_failed,
         'fetched_at': get_timestamp(),
     }
+    if limit_reached:
+        return {**payload, 'history_limit_reached': True}
     ttl = PARTIAL_OVERVIEW_TTL_SECONDS if history_failed else None
     OVERVIEW_CACHE.put(target_params(target), payload, ttl_seconds=ttl)
     return payload
@@ -196,6 +205,7 @@ def handle_overview(event: dict[str, Any], _context: Any, *, target: str, scope:
         'history_available': has_history(resolved),
         'history_includes_subdomains': has_history(resolved),
         'history_failed': bool(payload.get('history_failed')),
+        'history_limit_reached': bool(payload.get('history_limit_reached')),
         'fetched_at': payload.get('fetched_at'),
         'estimated_cost_usd': 0.0 if cached is not None else overview_cost_usd(resolved),
         'cached': cached is not None,

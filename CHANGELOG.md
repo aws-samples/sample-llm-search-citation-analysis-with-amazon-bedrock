@@ -9,6 +9,48 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.47.0] - 2026-11-08
+
+One daily limit of paid DataForSEO calls per user, set in Settings, for every client (#212).
+
+### Upgrade notes
+
+- **Remove `seoCallsPerDay` from `-c mcpLimits` (or `cdk.json`) if you set it.** Synth now refuses it, with a
+  message saying where the limit moved. The `SEO_PAID_REQUESTS_PER_DAY` variable is no longer read.
+- The limit starts at **100 paid DataForSEO calls per user per UTC day**. An Admin changes it in Settings › AI
+  Providers › SEO data.
+
+### Changed
+
+- **One limit, counted in DataForSEO calls** (`lambda/shared/seo_spend_limit.py`). Before, the SEO API counted 100
+  *requests* per user per day, and MCP had its own `seoCallsPerDay` (50 lookups or jobs). Now the SEO router counts
+  each billed DataForSEO call of a paid one-off lookup, whatever client sent it: the dashboard, a script on the REST
+  API, MCP (its tools replay against the router) and the server exports (counted against the export's owner).
+  - A lookup that makes three calls uses three; a cached answer uses none.
+  - The DataForSEO client checks the limit before each billed call (`guarding_billed_calls` in
+    `shared/dataforseo_client.py`). The call that would pass it is not sent, and the request answers 429
+    `DAILY_LIMIT`.
+  - A lookup whose billed work the SEO jobs Lambda does later counts it when it is started, all at once: a local
+    rank grid one call per grid point, a single Lighthouse run one call. It is not started when they do not fit,
+    and a job that then fails to start gives its calls back (nothing was billed).
+  - `0` turns paid lookups off. Admin SEO jobs (rank checks, snapshots, site audits, Lighthouse batches) are not
+    counted; each is confirmed with its price.
+- **The limit is set in Settings** › AI Providers › SEO data (`daily_call_limit` on the `dataforseo` ProviderConfig
+  row, 0 to 100,000; `PUT /api/providers/dataforseo`, Admin only). Everyone sees it there. The router may read only
+  that row.
+- **`GET /api/seo/daily-calls`** (any signed-in user) answers your calls today, the limit, what is left and when
+  it resets. MCP's `estimate_seo_*` shows that budget under `limits` and gives no confirmation token when the lookup
+  could make more calls than are left. MCP keeps no SEO counter of its own.
+- **Every paid one-off SEO request writes an audit record** to `CitationAnalysis-McpState` (365 days): who, which
+  route, the HTTP status it answered, how many billed calls it made and, when the limit refused a call, why. The
+  router may only put `audit#` items there. MCP and the router build the record with the same code
+  (`shared/spend_audit.py`). An Admin's change to the limit is audited the same way (who, when, the limit before
+  and after; `tool: settings`). This narrows the D4 gap in TENETS.md.
+- **A backlinks overview whose history the limit stopped** keeps the paid summary and answers 200 with
+  `history_failed: true` and `history_limit_reached: true`. It is not cached, so a user with calls left gets the
+  whole overview. The Backlinks page says the daily limit was reached instead of asking for a retry.
+- README, `docs/seo.md` (Who can do what) and `docs/mcp.md` (Limits per user) describe the shared limit.
+
 ## [2.46.0] - 2026-11-08
 
 Google AI Overviews is part of every deployment. `npm run deploy` (`cdk deploy --all`) deploys the SEO stack and
