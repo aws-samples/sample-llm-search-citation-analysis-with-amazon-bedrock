@@ -79,13 +79,19 @@ manual check, and at most $0.90 per scheduled check (about $3.60 a month weekly)
 
 ## Schedule
 
-- A scheduler runs every 15 minutes and starts the checks of trackers whose next slot has passed (up to 50 per run).
+- Each scheduled tracker has its own one-time EventBridge Scheduler schedule at its next slot (`rank-<tracker id>`
+  in the `citation-analysis-seo-rank` group). Saving, archiving or switching a tracker to manual moves or deletes it;
+  each check moves it to the next slot. Nothing runs between checks. Operations > Schedule lists these schedules
+  read-only, with a link back to the tracker.
 - The first slot of a new schedule is at a random time between 04:00 and 09:59 UTC, so checks spread over the
   morning: tomorrow (daily), in seven days (weekly), or on the last day of this month (monthly).
 - Later slots follow the first one exactly, even when a check started late, so the schedule never drifts.
 - Editing a tracker keeps its slot unless the schedule itself changes.
-- A tracker without keywords is skipped until its next slot. A tracker with a check still running is picked up again
-  15 minutes later.
+- A tracker without keywords is skipped until its next slot. A tracker with a check still running (or whose start
+  failed before it was claimed) is tried again 15 minutes later.
+- A scheduled check queues its searches with DataForSEO and waits for DataForSEO to call back when each one is ready
+  (`pingback_url`, `lambda/seo-callbacks`); nothing polls the queue. If a callback has not come 35 minutes after the
+  post, the check reads every queued search once anyway, and a search still running then goes to the re-check rounds.
 - One check runs per tracker at a time. A manual check answers at once and runs in the background; the page shows its
   progress and refreshes the results when it ends.
 

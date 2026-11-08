@@ -42,11 +42,11 @@ process.
     check. [docs/seo-rank-tracking.md](docs/seo-rank-tracking.md).
   - **Domain Overview and estimated traffic** (`/seo/domain`): organic keywords, estimated traffic and its value,
     position buckets, top keywords and pages and SERP competitors of any domain, subdomain, subfolder or URL
-    (about $0.03 per analysis); weekly traffic snapshots of your and your competitors' domains, and SEO
+    (about $0.03 per analysis); traffic snapshots of your and your competitors' domains (a Schedule, below), and SEO
     recommendations built on the SEO vs GEO rows (`GET /api/seo/insights`). [docs/seo-domain.md](docs/seo-domain.md).
   - **Backlinks** (`/seo/backlinks`): totals and a year of history, links, referring domains, anchors, new and lost
-    links and top pages of a target (overview about $0.06); weekly authority snapshots of the tracked domains,
-    switched on by an Admin. [docs/seo-backlinks.md](docs/seo-backlinks.md).
+    links and top pages of a target (overview about $0.06); authority snapshots of the tracked domains, on a
+    Schedule. [docs/seo-backlinks.md](docs/seo-backlinks.md).
   - **Local SEO** (`/seo/local`): Google business listings near a point, Google Business Profiles with reviews,
     updates and questions, Maps and Local Finder results with your business's position, and a 3 × 3 to 7 × 7 local
     rank grid run in DataForSEO's queue. [docs/seo-local.md](docs/seo-local.md).
@@ -94,9 +94,28 @@ process.
   - SEO measurements are records, not cache, so they are kept (D2, D5): domain and backlink snapshots, site audits
     (the audit, pages, issues and link summary) and Lighthouse runs no longer expire. Only crawl bookkeeping (a site
     audit's URL queue, 90 days) and true caches, receipts and locks keep a TTL. The snapshot tables have no TTL.
-  - The weekly domain snapshot of every owned and competitor domain is paid, so it is **off by default**: an Admin
-    turns it on in the Domain Overview after a confirmation (`GET`/`PUT /api/seo/domains/snapshots/schedule`, stored
-    with who and when), like the backlink snapshots. An Admin's one-off snapshot runs whatever the setting.
+  - **Recurring SEO snapshots are Schedules** (Operations › Schedule, `lambda/api/manage-schedule.py`): a schedule's
+    new `kind` is `analysis` (the default and every existing schedule), `domain_snapshots` or `backlink_snapshots`,
+    each one EventBridge Scheduler schedule that starts the snapshot state machine for every owned and competitor
+    domain. Saving an enabled snapshot schedule, or running one now, asks first and names its paid calls. Nothing
+    runs, or costs anything, until an Admin creates one; there is no always-on weekly rule and no on/off setting.
+  - **Each rank tracker has its own schedule**: a one-time EventBridge Scheduler schedule at its next slot
+    (`rank-<tracker id>`, group `citation-analysis-seo-rank`) invokes the jobs function with `rank.due`, which starts
+    the check and moves the schedule to the next slot; saving, archiving or switching a tracker to manual moves or
+    deletes it. It replaces a 15-minute rule that looked for due trackers, and the table's due index (`GSI2`).
+    Operations › Schedule lists the trackers' next checks read-only (`GET /api/schedules?source=rank-trackers`),
+    each linking to its tracker (`/seo/rank-tracking?tracker=<id>`).
+  - **DataForSEO calls back instead of being polled**: the post step of a rank check and of a local SEO job is a
+    `waitForTaskToken` task. It opens a callback gate (`shared/dataforseo_callbacks.py`) and posts every task with
+    the gate's `pingback_url`; the public `CitationAnalysis-SeoCallbacks` function URL counts each callback once and
+    the last one resumes the state machine, which then collects the results with free `task_get` calls. If a
+    callback has not come in time (35 minutes for a rank check, 25 for a local job) the run collects once anyway.
+    The Wait / `task_get` loops are gone. The callback function holds no DataForSEO credentials and may only update
+    gate items and send task success (SECURITY.md).
+  - **SEO working objects have their own bucket** (`citation-analysis-seo-<account>`, `SEO_BUCKET`): oversized
+    cache payloads, Lighthouse reports, domain-snapshot keywords (written once per snapshot time) and robots.txt
+    copies. The SEO stack no longer writes to the raw-responses bucket except the AI Overviews answers, so it stays
+    write-once Bronze (D2).
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).
@@ -107,9 +126,8 @@ process.
     `branded_version`, the matcher rule that set its flag (D2, D3).
   - The AI Overviews search role may only put raw answers under `raw-responses/` (no S3 delete), and the SEO keyword
     metrics and cache tables are granted per action without `DeleteItem`.
-  - Tenet 8 (events, no polling): the SEO stack's clock-driven rules, its four bounded dashboard polling hooks and its
-    DataForSEO `task_get` polling are recorded in the tenet 8 gap of `TENETS.md`, as is its overwritable cache under
-    `seo/` in the raw-responses bucket (D2); moving them to events is tracked in #208.
+  - Tenet 8 (events, no polling): the SEO stack's four bounded dashboard polling hooks are recorded in the tenet 8 gap
+    of `TENETS.md`; moving them to AppSync Events is tracked in #208.
   - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
 
 - `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit

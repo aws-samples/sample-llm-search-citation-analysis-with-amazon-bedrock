@@ -22,13 +22,14 @@ What the deployed stack does, as defined in `lib/citation-analysis-stack.ts`, `l
 
 ### Network exposure
 
-The only inbound endpoints are the CloudFront distribution (dashboard), the API Gateway REST API (`prod` stage) and the Cognito user pool endpoints. There is no VPC, no Lambda function URL and no public S3 bucket. The crawler's Bedrock AgentCore browser uses the public network mode to reach cited pages (outbound only).
+The only inbound endpoints are the CloudFront distribution (dashboard), the API Gateway REST API (`prod` stage) and the Cognito user pool endpoints. The optional SEO stack adds its own REST API (`CitationAnalysis-SeoApi`, Cognito-authorized) and one Lambda function URL without sign-in, `CitationAnalysis-SeoCallbacks`, which DataForSEO calls when a queued task is ready (see below). There is no VPC and no public S3 bucket. The crawler's Bedrock AgentCore browser uses the public network mode to reach cited pages (outbound only).
 
 - **CloudFront:** redirects HTTP to HTTPS and reads the web bucket through Origin Access Control. It uses the default `*.cloudfront.net` certificate (no custom domain). The response headers policy sets:
   - `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';`
   - `Strict-Transport-Security` for one year, including subdomains
   - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-XSS-Protection: 1; mode=block`
 - **API Gateway:** the stage throttle is 100 requests per second with a burst of 200. A usage plan with the same throttle and a 10,000 requests/day quota is attached to the stage; quotas are counted per API key and no method requires one. Most API Lambdas are capped at the 29-second integration timeout.
+- **DataForSEO callbacks (SEO stack):** the function URL takes `?gate=<id>&id=<task id>`. The gate id is 32 random bytes, written per post and expiring after two days, and it is the only way to reach a gate. The function validates both parameters, answers every well-formed request the same way whether its gate exists or not, holds no DataForSEO credentials, and may only update `callback#` items of `CitationAnalysis-SeoCache` (an IAM `dynamodb:LeadingKeys` condition) and send task success to the rank check and local SEO job state machines. A repeated callback is counted once. Someone holding a gate id could at most resume that job early; it then collects its results with free `task_get` calls and leaves unfinished tasks to the re-check rounds.
 - **CORS:** API Gateway answers preflight requests for any origin, without credentials. Lambda responses allow only the CloudFront origin, read from the SSM parameter `/citation-analysis/cors-origin` (plus `localhost:3000` and `localhost:5173` when deployed with `-c dev=true`). If the parameter cannot be read, the response carries an empty `Access-Control-Allow-Origin`. Gateway error responses (401, 403, 504, 5xx) also name only the CloudFront origin (`*` in dev mode).
 
 ### AWS WAF
@@ -44,7 +45,7 @@ Before exposing a production deployment, consider adding:
 ### Data protection
 
 - **DynamoDB:** every table uses AWS-managed encryption, point-in-time recovery and a `RETAIN` removal policy.
-- **S3:** every bucket (keywords, screenshots, raw responses, web, access logs) uses S3-managed encryption, blocks all public access, rejects non-TLS requests and is retained on stack deletion. Versioning is off. Server access logs go to `citation-analysis-access-logs-<account>` and expire after 90 days. Screenshots move to Infrequent Access after 90 days and are not deleted.
+- **S3:** every bucket (keywords, screenshots, raw responses, web, access logs, and the SEO stack's `seo`) uses S3-managed encryption, blocks all public access, rejects non-TLS requests and is retained on stack deletion. Versioning is off. Server access logs go to `citation-analysis-access-logs-<account>` and expire after 90 days. Screenshots move to Infrequent Access after 90 days and are not deleted.
 - **Messaging:** the KPI alerts SNS topic is encrypted with the AWS-managed key `alias/aws/sns`, and the Content Studio SQS queue uses SQS-managed encryption and requires TLS.
 - **Logging:** application Lambda log groups keep 30 days. API Gateway publishes per-method CloudWatch metrics but writes no access or execution logs, and data tracing (full request and response bodies) is deliberately off.
 

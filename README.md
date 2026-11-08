@@ -98,7 +98,7 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | RecommendationStatus | recommendation_id | Action Center item status (TTL) |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
 
-S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
+S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). The SEO stack adds `seo` (its oversized cache payloads, Lighthouse reports, domain-snapshot keywords and robots.txt copies), so `raw-responses` holds only the providers' answers. KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
 
 ### API and hosting
 
@@ -249,7 +249,7 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
 
 6. **Operations > Run Analysis.** Pick a keyword group, tick keywords, or leave everything unticked to run all active keywords, then **Start Analysis**.
 
-7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection, with **Run now**.
+7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, with **Run now**. An analysis run is scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection. With the SEO stack deployed, a schedule can instead take paid **domain traffic** or **backlink snapshots** of every owned and competitor domain; saving or running one asks first and names its paid calls. The page also lists each rank tracker's next check, read-only (a tracker's frequency is set on the tracker).
 
 8. **Settings > Alerts** (optional). After every run the KpiAlerts step compares each keyword group's KPIs with its previous complete run and raises alerts for a mention-rate drop, a loss of average position, a competitor entering the top positions, a keyword that stops naming you, and a visibility gain after a content change you recorded. Alerts appear on the Dashboard and can be emailed.
 

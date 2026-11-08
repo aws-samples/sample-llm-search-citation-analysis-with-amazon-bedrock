@@ -27,12 +27,14 @@ cell. If DataForSEO picked a zoom per point, some points would come back empty a
 
 ## Queued work
 
-Reviews, updates and rank grids run in DataForSEO's priority queue. One click buys the tasks, then the page checks
-every 5 seconds until the results arrive, usually within a minute. Checking is free. Asking for the same reviews,
-updates or grid again within an hour collects the tasks already bought and does not buy them again. For a grid
-this holds even when you change which business to look for. If DataForSEO has not finished after about seven
-minutes, the page says so, and asking again collects the results at no extra cost. If every grid point fails, the
-next request buys fresh searches.
+Reviews, updates and rank grids run in DataForSEO's priority queue. One click buys the tasks; DataForSEO calls back
+when each task is ready (`pingback_url`, `lambda/seo-callbacks`), and the job then collects the results for free,
+usually within a minute. Nothing polls DataForSEO's queue; the page checks the job every 5 seconds until it ends.
+Asking for the same reviews, updates or grid again within an hour collects the tasks already bought and does not
+buy them again. For a grid this holds even when you change which business to look for. If a callback has not come
+after 25 minutes, the job collects once anyway; a task still running then leaves the job timed out, the page says
+so, and asking again collects the results at no extra cost. If every grid point fails, the next request buys fresh
+searches.
 
 A bought task is never posted twice. DataForSEO bills when a task is posted, so a failed post is not retried.
 
