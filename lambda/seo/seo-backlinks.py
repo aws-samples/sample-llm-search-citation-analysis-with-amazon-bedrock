@@ -44,6 +44,7 @@ sys.path.insert(0, '/opt/python')
 import boto3
 from seo_export import EXPORT_SCHEMA, ExportWindowError, export_pricing, row_window
 from seo_http import CachePolicy, brand_config, seo_error, seo_route, validation_errors
+from seo_schedule import schedule_setter
 
 from shared.api_response import success_response
 from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
@@ -106,8 +107,6 @@ TABLE_SCHEMA: dict[str, dict[str, Any]] = {
     **EXPORT_SCHEMA,
 }
 BACKLINKS_EXPORT = export_pricing(BACKLINKS_TASK_USD, BACKLINKS_ROW_USD)
-SCHEDULE_SCHEMA: dict[str, dict[str, Any]] = {'enabled': {'required': True, 'type': bool}}
-
 Handler = Callable[..., dict[str, Any]]
 
 
@@ -315,13 +314,8 @@ def handle_snapshot_now(event: dict[str, Any], _context: Any, *_args: Any, **_kw
     }, event, status_code=202)
 
 
-@require_group(ADMIN_GROUP)
-@json_object_body
-@validate(SCHEDULE_SCHEMA)
-def handle_schedule(event: dict[str, Any], _context: Any, *, enabled: bool, **_request: Any) -> dict[str, Any]:
-    """PUT /api/seo/backlinks/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly snapshot on or off."""
-    set_schedule(snapshots_table(), enabled=enabled, updated_by=get_caller_identity(event), updated_at=get_timestamp())
-    return success_response({'schedule_enabled': enabled}, event)
+#: PUT /api/seo/backlinks/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly snapshot on or off.
+handle_schedule = schedule_setter(lambda **choice: set_schedule(snapshots_table(), **choice))
 
 
 TABLE_ROUTES = {'backlinks': '/rows', 'referring_domains': '/referring-domains', 'top_pages': '/top-pages'}

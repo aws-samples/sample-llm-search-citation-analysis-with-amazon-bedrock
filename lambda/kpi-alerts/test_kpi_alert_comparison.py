@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, KPI_VERSION
 from shared.request_deadline import Deadline
 from testing.dynamodb_stubs import fake_dynamodb_resource
@@ -65,15 +67,11 @@ class TestStoredComparison:
 
         assert run.comparison['state'] == 'no_previous'
 
-    def test_reads_the_previous_runs_rows_at_its_snapshot_time(self, worker_module):
+    def test_reads_the_previous_runs_rows_at_its_snapshot_time_within_the_time_budget(self, worker_module):
         run = WorkerRun(worker_module, _CURRENT_MENTION, _PREVIOUS_MENTION, _PREVIOUS_SNAPSHOT)
 
-        assert run.load_rows.call_args_list[-1].args[:2] == (['hotel spa'], _PREVIOUS)
-
-    def test_reads_the_previous_run_within_the_time_budget(self, worker_module):
-        run = WorkerRun(worker_module, _CURRENT_MENTION, _PREVIOUS_MENTION, _PREVIOUS_SNAPSHOT)
-
-        assert run.load_rows.call_args_list[-1].args[2] is not None
+        keywords, timestamp, deadline = run.load_rows.call_args_list[-1].args
+        assert (keywords, timestamp, deadline is not None) == (['hotel spa'], _PREVIOUS, True)
 
     def test_records_a_comparable_comparison_with_its_matched_cells(self, worker_module):
         run = WorkerRun(worker_module, _CURRENT_MENTION, _PREVIOUS_MENTION, _PREVIOUS_SNAPSHOT)
@@ -109,14 +107,13 @@ class TestPreviousRunWithinTheBudget:
             pair=None, name='Group One', keywords=self.GROUP_KEYWORDS, rows=[], tracked_competitors=[],
         )
 
-    def test_is_none_when_the_deadline_ran_out_before_every_keyword_was_read(self, worker_module):
+    @pytest.mark.parametrize(('seconds_left', 'expected'), [
+        (0, None),  # the deadline ran out before every keyword was read: no comparison with part of the past
+        (60, _PREVIOUS_MENTION),  # a failed read with time left adds no rows
+    ])
+    def test_reads_the_previous_run_like_for_like(self, worker_module, seconds_left, expected):
         partly = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': None})
         with patch.object(worker_module, '_load_run_rows', partly):
-            assert worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(0)) is None
+            rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(seconds_left))
 
-    def test_a_failed_read_with_time_left_adds_no_rows(self, worker_module):
-        partly = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': None})
-        with patch.object(worker_module, '_load_run_rows', partly):
-            rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(60))
-
-        assert rows == _PREVIOUS_MENTION
+        assert rows == expected

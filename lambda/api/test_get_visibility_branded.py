@@ -67,6 +67,8 @@ class TestUnclassifiedPreviousRun:
     def test_a_row_without_the_branded_flag_is_unclassified(self):
         old, new = answer_from_row(result('hotel coruna spa', 'openai', [_HOTEL])), answer_from_row(_branded(result('x', 'openai', [])))
 
+        assert old is not None
+        assert new is not None
         assert (old.branded_classified, new.branded_classified) == (False, True)
 
     def test_names_the_keywords_whose_run_predates_the_flag(self, visibility):

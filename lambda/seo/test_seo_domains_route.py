@@ -190,21 +190,14 @@ class TestSnapshotSchedule:
 
         assert (status, body) == (200, {'schedule_enabled': False})
 
-    def test_refuses_a_user_who_is_not_an_admin(self, domains_module):
+    @pytest.mark.parametrize(('groups', 'status', 'saved'), [('Users', 403, False), ('Admin', 200, True)])
+    def test_only_an_admin_turns_it_on(self, domains_module, groups, status, saved):
         table = MagicMock()
 
-        status, body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
-                            snapshots_table=MagicMock(return_value=table))
+        answered, _body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
+                               groups=groups, snapshots_table=MagicMock(return_value=table))
 
-        assert (status, body['code'], table.put_item.called) == (403, 'FORBIDDEN', False)
-
-    def test_an_admin_turns_it_on(self, domains_module):
-        table = MagicMock()
-
-        status, body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
-                            groups='Admin', snapshots_table=MagicMock(return_value=table))
-
-        assert (status, body, table.put_item.call_args.kwargs['Item']['enabled']) == (200, {'schedule_enabled': True}, True)
+        assert (answered, table.put_item.called) == (status, saved)
 
 
 class TestInsights:

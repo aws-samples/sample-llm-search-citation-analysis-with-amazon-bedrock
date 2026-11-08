@@ -415,15 +415,11 @@ class TestRawResponseKey:
 
 
 class TestBrandedRows:
-    def test_marks_an_answer_to_a_query_naming_a_first_party_brand_branded(self, storage):
+    def test_marks_an_answer_to_a_query_naming_a_first_party_brand_branded_with_its_matcher_version(self, storage):
         storage.store({**_llm_result(), 'query': 'Is Altiplano a good airline?'})
 
-        assert _stored_rows(storage)[0]['branded'] is True
-
-    def test_records_the_matcher_version_that_decided_the_flag(self, storage):
-        storage.store({**_llm_result(), 'query': 'Is Altiplano a good airline?'})
-
-        assert _stored_rows(storage)[0]['branded_version'] == 1
+        row = _stored_rows(storage)[0]
+        assert (row['branded'], row['branded_version']) == (True, 1)
 
     def test_marks_an_answer_to_a_query_naming_no_tracked_brand_neutral(self, storage):
         storage.store({**_llm_result(), 'query': 'best airline from Santiago'})

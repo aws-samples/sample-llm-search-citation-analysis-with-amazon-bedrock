@@ -22,6 +22,7 @@ from typing import Any, Literal
 import boto3
 from boto3.dynamodb.conditions import Key
 
+from shared import snapshot_schedule
 from shared.backlinks_target import is_registrable_host
 from shared.dynamo_decimal import convert_floats_to_decimal, plain
 from shared.env_vars import resolve_table_env
@@ -121,13 +122,12 @@ def latest_snapshot_at(table: Any, domain: str) -> str | None:
     return str(items[0]['snapshot_at']) if items else None
 
 
+SCHEDULE_KEY = {'domain': SETTINGS_DOMAIN, 'snapshot_at': SCHEDULE_SORT_KEY}
+
+
 def schedule_enabled(table: Any) -> bool:
-    item = table.get_item(Key={'domain': SETTINGS_DOMAIN, 'snapshot_at': SCHEDULE_SORT_KEY}).get('Item') or {}
-    return item.get('enabled') is True
+    return snapshot_schedule.schedule_enabled(table, SCHEDULE_KEY)
 
 
-def set_schedule(table: Any, *, enabled: bool, updated_by: str | None, updated_at: str) -> None:
-    table.put_item(Item={
-        'domain': SETTINGS_DOMAIN, 'snapshot_at': SCHEDULE_SORT_KEY, 'enabled': enabled,
-        'updated_by': updated_by or 'unknown', 'updated_at': updated_at,
-    })
+def set_schedule(table: Any, **choice: Any) -> None:
+    snapshot_schedule.set_schedule(table, SCHEDULE_KEY, **choice)

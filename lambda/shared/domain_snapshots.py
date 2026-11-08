@@ -22,6 +22,7 @@ measured clicks.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from shared import snapshot_schedule
 from shared.bounded_reads import newest_items
 from shared.dataforseo_domain import DomainOverview, RankedKeyword, domain_overview, ranked_keywords
 from shared.dataforseo_domain_scope import ResearchTarget
@@ -209,22 +211,14 @@ def take_snapshot(
     return {'status': 'stored', 'keywords': len(keywords)}
 
 
-SETTINGS_PK = '#settings'
-SCHEDULE_SORT_KEY = 'schedule'
+#: The weekly sweep's setting (``#`` never starts a domain, so no snapshot uses this key).
+SCHEDULE_KEY = {'pk': '#settings', 'snapshot_at': 'schedule'}
 
 
-def schedule_enabled(table: Any) -> bool:
-    """Whether an Admin turned the weekly sweep on (off when never set)."""
-    item = table.get_item(Key={'pk': SETTINGS_PK, 'snapshot_at': SCHEDULE_SORT_KEY}).get('Item') or {}
-    return item.get('enabled') is True
-
-
-def set_schedule(table: Any, *, enabled: bool, updated_by: str | None, updated_at: str) -> None:
-    """Record an Admin's choice, with who made it and when."""
-    table.put_item(Item={
-        'pk': SETTINGS_PK, 'snapshot_at': SCHEDULE_SORT_KEY, 'enabled': enabled,
-        'updated_by': updated_by or 'unknown', 'updated_at': updated_at,
-    })
+#: ``schedule_enabled(table)``: whether an Admin turned the weekly sweep on (off when never set).
+schedule_enabled = functools.partial(snapshot_schedule.schedule_enabled, key=SCHEDULE_KEY)
+#: ``set_schedule(table, enabled=, updated_by=, updated_at=)``: record an Admin's choice.
+set_schedule = functools.partial(snapshot_schedule.set_schedule, key=SCHEDULE_KEY)
 
 
 def distinct_domains(domains: Sequence[str]) -> list[str]:

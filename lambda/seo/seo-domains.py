@@ -68,9 +68,10 @@ from seo_domain_requests import (
 from seo_export import EXPORT_SCHEMA, RowWindow, export_pricing, row_window
 from seo_geo_data import SCOPE_QUERY_SCHEMA, load_seo_geo
 from seo_http import MARKET_ID_FIELD, CachePolicy, dynamodb_table, keyword_list, seo_error, seo_route
+from seo_schedule import schedule_setter
 
 from shared.api_response import api_response, success_response
-from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
+from shared.auth import ADMIN_GROUP, require_group
 from shared.dataforseo_domain import (
     Page,
     domain_overview,
@@ -308,21 +309,13 @@ def handle_take_snapshot(event: dict[str, Any], _context: Any, *, domain: str, m
     }, event)
 
 
-SCHEDULE_SCHEMA: dict[str, dict[str, Any]] = {'enabled': {'required': True, 'type': bool}}
-
-
 def handle_get_schedule(event: dict[str, Any], _context: Any, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
     """GET /api/seo/domains/snapshots/schedule - whether the weekly sweep is on."""
     return success_response({'schedule_enabled': schedule_enabled(snapshots_table())}, event)
 
 
-@require_group(ADMIN_GROUP)
-@json_object_body
-@validate(SCHEDULE_SCHEMA)
-def handle_set_schedule(event: dict[str, Any], _context: Any, *, enabled: bool, **_request: Any) -> dict[str, Any]:
-    """PUT /api/seo/domains/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly sweep on or off."""
-    set_schedule(snapshots_table(), enabled=enabled, updated_by=get_caller_identity(event), updated_at=get_timestamp())
-    return success_response({'schedule_enabled': enabled}, event)
+#: PUT /api/seo/domains/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly sweep on or off.
+handle_set_schedule = schedule_setter(lambda **choice: set_schedule(snapshots_table(), **choice))
 
 
 # ---------------------------------------------------------------------------
