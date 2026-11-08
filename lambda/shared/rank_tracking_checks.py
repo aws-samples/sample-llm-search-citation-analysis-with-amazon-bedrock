@@ -6,11 +6,12 @@ fails leaves the pair unanswered (``error``); the re-check rounds pick it up thr
 
 - Live (manual runs): ``KEYWORDS_PER_BATCH`` keywords at a time, all their devices in parallel, results stored
   per batch. A step stops after ``LIVE_STEP_BUDGET_S`` and the state machine calls it again for the rest.
-- Queued (scheduled runs and every re-check round): ``task_post`` in chunks of 100. A failed post does not stop
-  the others (earlier chunks are already paid for and must be collected).
-- Collect: free ``task_get`` of at most ``TASK_GETS_PER_COLLECT`` queued tasks per step,
-  ``TASK_GET_CONCURRENCY`` at a time. Running tasks stay queued for the next poll; after the last poll they
-  are left unanswered (``TASK_TIMEOUT``) for the re-check rounds.
+- Queued (scheduled runs and every re-check round): ``task_post`` in chunks of 100, each task with the round's
+  ``pingback_url`` (``shared.dataforseo_callbacks``). A failed post does not stop the others (earlier chunks are
+  already paid for and must be collected).
+- Collect: once DataForSEO has called back for every queued task (or the wait timed out), free ``task_get`` of at
+  most ``TASK_GETS_PER_COLLECT`` queued tasks per step, ``TASK_GET_CONCURRENCY`` at a time. A task still running
+  then is left unanswered (``TASK_TIMEOUT``) for the re-check rounds.
 
 Login, balance and configuration failures (``FATAL_CODES``) end the checking at once: every later call would
 fail the same way.
@@ -44,7 +45,6 @@ from shared.utils import utc_now
 __all__ = [
     'FATAL_CODES',
     'KEYWORDS_PER_BATCH',
-    'QUEUED_WAITS_S',
     'TASK_GETS_PER_COLLECT',
     'CheckProgress',
     'collect_queued',
@@ -59,8 +59,6 @@ LIVE_STEP_BUDGET_S = 600.0
 """Leaves the 15-minute jobs function room to store the last batch."""
 TASK_GETS_PER_COLLECT = 500
 TASK_GET_CONCURRENCY = 25
-QUEUED_WAITS_S = (240, 120, 120, 120, 120, 180)
-"""Waits before each poll: cumulative 4, 6, 8, 10, 12 and 15 minutes after posting (the queue averages ~5)."""
 FATAL_CODES = frozenset({'NOT_CONFIGURED', 'AUTH_FAILED', 'BILLING_ISSUE'})
 
 _clock = time.monotonic
@@ -130,13 +128,14 @@ def run_live(table: Any, tracker: Tracker, codes: MarketCodes, pairs: Sequence[M
     return CheckProgress(remaining=0)
 
 
-def _post_chunk(table: Any, tracker: Tracker, codes: MarketCodes, chunk: Sequence[Mapping[str, Any]]) -> str | None:
+def _post_chunk(table: Any, tracker: Tracker, codes: MarketCodes, chunk: Sequence[Mapping[str, Any]],
+                pingback_url: str | None) -> str | None:
     """Post one chunk; the error code when the whole post failed."""
     sent = _mark_sent(table, chunk)
     tasks = [rank_task(str(pair['keyword']), codes, str(pair['device']), tracker.depth, tracker.domain,
                        tag=pair_tag(str(pair['keyword_id']), str(pair['device']))) for pair in sent]
     try:
-        posted = post_tasks(POST_PATH, tasks)
+        posted = post_tasks(POST_PATH, tasks, pingback_url=pingback_url)
     except DataForSeoError as error:
         logger.warning('rank.post failed: code=%s status=%s', error.code, error.provider_status)
         _fail_all(table, sent, error.code)
@@ -150,12 +149,13 @@ def _post_chunk(table: Any, tracker: Tracker, codes: MarketCodes, chunk: Sequenc
     return None
 
 
-def post_pending(table: Any, tracker: Tracker, codes: MarketCodes, pairs: Sequence[Mapping[str, Any]]) -> CheckProgress:
+def post_pending(table: Any, tracker: Tracker, codes: MarketCodes, pairs: Sequence[Mapping[str, Any]],
+                 pingback_url: str | None = None) -> CheckProgress:
     """Queue every ``pending`` pair, 100 per post; a failed post does not stop the next one."""
     pending = [pair for pair in pairs if pair.get('status') == 'pending']
     chunks = [pending[start:start + MAX_TASKS_PER_POST] for start in range(0, len(pending), MAX_TASKS_PER_POST)]
     for index, chunk in enumerate(chunks):
-        code = _post_chunk(table, tracker, codes, chunk)
+        code = _post_chunk(table, tracker, codes, chunk, pingback_url)
         if code in FATAL_CODES:
             _fail_all(table, [pair for rest in chunks[index + 1:] for pair in rest], str(code))
             return CheckProgress(remaining=0, fatal_code=code)
@@ -178,9 +178,9 @@ def _collected(pair: Mapping[str, Any], outcome: TaskOutcome, domain: str) -> di
     return None
 
 
-def collect_queued(table: Any, tracker: Tracker, pairs: Sequence[Mapping[str, Any]], last_poll: bool,
+def collect_queued(table: Any, tracker: Tracker, pairs: Sequence[Mapping[str, Any]], last_poll: bool = True,
                    read: Callable[[str], TaskOutcome] = _read_task) -> CheckProgress:
-    """Read up to ``TASK_GETS_PER_COLLECT`` queued tasks; after the ``last_poll`` the unfinished are dropped."""
+    """Read up to ``TASK_GETS_PER_COLLECT`` queued tasks; on the ``last_poll`` the unfinished are dropped."""
     queued = [pair for pair in pairs if pair.get('status') == 'queued' and pair.get('task_id')]
     batch = queued[:TASK_GETS_PER_COLLECT]
     with ThreadPoolExecutor(max_workers=TASK_GET_CONCURRENCY) as pool:

@@ -11,10 +11,16 @@ export const RANK_CHECK_STATE_MACHINE_NAME = 'CitationAnalysis-SeoRankCheck';
 /** One EventBridge Scheduler schedule per scheduled tracker lives in this group (`rank-<tracker id>`). */
 export const RANK_TRACKER_SCHEDULE_GROUP = 'citation-analysis-seo-rank';
 const TABLE_NAME = 'CitationAnalysis-SeoRankTracking';
-/** Longer than the longest run (1000 keywords x 2 devices live, then two queued rounds of 15-minute polling). */
+/** Longer than the longest run (1000 keywords x 2 devices live, then three queued rounds of at most 35 minutes). */
 const STATE_MACHINE_TIMEOUT = cdk.Duration.hours(3);
 /** The jobs function's own limit: a step never outlives it. */
 const STEP_TIMEOUT = cdk.Duration.minutes(15);
+/**
+ * Posting (at most the jobs function's 15 minutes), then waiting for DataForSEO's
+ * callbacks (the standard queue answers in about 5 minutes); past it the run
+ * collects once anyway.
+ */
+const POST_AND_CALLBACKS_TIMEOUT = cdk.Duration.minutes(35);
 
 /** A string partition key and sort key. */
 function stringKeys(partition: string, sort: string): { partitionKey: dynamodb.Attribute; sortKey: dynamodb.Attribute } {
@@ -35,11 +41,14 @@ type Routes = Record<string, stepfunctions.IChainable>;
  *
  * Every task invokes the SEO jobs function with `{"step": "rank.<name>",
  * "state": <the small run state>}`; each step answers the state with `next`,
- * which a Choice follows. The paid steps (`rank.live`, `rank.post`) are never
- * retried: DataForSEO bills a call even when its answer is lost, so a retry
- * could pay twice. The free steps retry Lambda service errors, and `rank.collect`
- * (free polling) also retries its own errors. Any failure runs `rank.fail`,
- * which fails the run and frees the tracker.
+ * which a Choice follows. `PostTasks` is a `waitForTaskToken` task: it queues
+ * the tasks behind a callback gate and resumes when DataForSEO has called back
+ * for every one (`SeoCallbacks`), or collects once anyway when the wait times
+ * out. Nothing polls the queue. The paid steps (`rank.live`, `rank.post`) are
+ * never retried: DataForSEO bills a call even when its answer is lost, so a
+ * retry could pay twice. The free steps retry Lambda service errors, and
+ * `rank.collect` (free) also retries its own errors. Any other failure runs
+ * `rank.fail`, which fails the run and frees the tracker.
  */
 export class SeoRankTracking extends SeoFeatureConstruct {
   protected build(): void {
@@ -144,20 +153,25 @@ export class SeoRankTracking extends SeoFeatureConstruct {
 
     const prepare = catching(this.step('Prepare', 'rank.prepare', true));
     const live = catching(this.step('LiveChecks', 'rank.live', false));
-    const post = catching(this.step('PostTasks', 'rank.post', false));
     const collect = catching(this.step('CollectTasks', 'rank.collect', true));
     collect.addRetry({ errors: ['States.TaskFailed'], maxAttempts: 2, interval: cdk.Duration.seconds(10) });
+    const post = this.jobsTask('PostTasks', {
+      step: 'rank.post', 'state.$': '$', task_token: stepfunctions.JsonPath.taskToken,
+    }, {
+      integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+      retryOnServiceExceptions: false,
+      timeout: POST_AND_CALLBACKS_TIMEOUT,
+    });
+    // A callback that never came: collect once anyway (the input state is kept).
+    post.addCatch(collect, { errors: ['States.Timeout'], resultPath: stepfunctions.JsonPath.DISCARD });
+    catching(post);
     const planRetry = catching(this.step('PlanRetry', 'rank.plan_retry', true));
     const finalize = catching(this.step('Finalize', 'rank.finalize', true));
-    const wait = new stepfunctions.Wait(this, 'WaitForTasks', {
-      time: stepfunctions.WaitTime.secondsPath('$.wait_seconds'),
-    });
 
     prepare.next(this.choice('AfterPrepare', { stop: done, live, queued: post }));
     live.next(this.choice('AfterLive', { live, retry: planRetry, finalize }));
-    post.next(this.choice('AfterPost', { wait, retry: planRetry, finalize }));
-    wait.next(collect);
-    collect.next(this.choice('AfterCollect', { collect, wait, retry: planRetry }));
+    post.next(this.choice('AfterPost', { collect, retry: planRetry, finalize }));
+    collect.next(this.choice('AfterCollect', { collect, retry: planRetry }));
     planRetry.next(this.choice('AfterPlanRetry', { queued: post, finalize }));
     finalize.next(done);
 

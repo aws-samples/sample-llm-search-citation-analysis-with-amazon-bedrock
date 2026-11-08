@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { LAMBDA_SERVICE_ERRORS, resolvePath } from './citation-analysis-stack-fixtures';
 import {
-  TTL_ON_TTL_ATTRIBUTE, taskRetriers
+  TTL_ON_TTL_ATTRIBUTE, catchTargets, taskRetriers
 } from './seo-feature-fixtures';
 import { sharedTableActions } from './constructs/seo-feature';
 import { PAID_STATES, synthesizeRankTrackingSnapshot } from './seo-rank-tracking-fixtures';
@@ -55,11 +55,12 @@ describe('CitationAnalysis-SeoRankTracking table', () => {
 });
 
 describe('CitationAnalysis-SeoRankCheck state machine', () => {
-  it('lets the router and the jobs function only start the rank check state machine, never touch its executions', () => {
-    const startOnly = [{ actions: ['states:StartExecution'], onStateMachine: true }];
+  it('lets the router only start the rank check state machine, and the jobs function also resume its post step', () => {
+    const start = { actions: ['states:StartExecution'], onStateMachine: true };
 
-    expect(snapshot.routerRankCheckGrants).toStrictEqual(startOnly);
-    expect(snapshot.jobsRankCheckGrants).toStrictEqual(startOnly);
+    expect(snapshot.routerRankCheckGrants).toStrictEqual([start]);
+    // SendTaskSuccess names the rank and the local SEO state machines (`SeoCallbacks`).
+    expect(snapshot.jobsRankCheckGrants).toStrictEqual([{ actions: ['states:SendTaskSuccess'], onStateMachine: false }, start]);
   });
 
   it('never retries the paid live check or task post steps', () => {
@@ -80,22 +81,26 @@ describe('CitationAnalysis-SeoRankCheck state machine', () => {
     expect(taskRetriers(snapshot.states).CollectTasks).toStrictEqual([LAMBDA_SERVICE_ERRORS, ['States.TaskFailed']]);
   });
 
-  it('bounds every task by the jobs function timeout', () => {
-    const timeouts = Object.values(snapshot.states)
-      .filter((state) => resolvePath(state, ['Type']) === 'Task')
-      .map((state) => resolvePath(state, ['TimeoutSeconds']));
+  it('bounds every task by the jobs function timeout, and the post by 35 minutes for DataForSEO\'s callbacks', () => {
+    const timeouts = Object.fromEntries(Object.entries(snapshot.states)
+      .filter(([, state]) => resolvePath(state, ['Type']) === 'Task')
+      .map(([name, state]) => [name, resolvePath(state, ['TimeoutSeconds'])]));
 
-    expect(new Set(timeouts)).toStrictEqual(new Set([900]));
+    expect(timeouts).toStrictEqual({
+      Prepare: 900, LiveChecks: 900, PostTasks: 2100, CollectTasks: 900, PlanRetry: 900, Finalize: 900, FailRun: 900,
+    });
   });
 
-  it('fails the run through the fail step when any task throws', () => {
-    const catchTargets = PAID_STATES.map((name) => resolvePath(snapshot.states[name], ['Catch', '0', 'Next']));
-
-    expect(catchTargets).toStrictEqual(['FailRun', 'FailRun']);
+  it('fails the run through the fail step when any task throws; a post whose callbacks never came collects once', () => {
+    expect(PAID_STATES.map((name) => catchTargets(snapshot.states[name]))).toStrictEqual([
+      ['FailRun'], ['States.Timeout -> CollectTasks', 'FailRun'],
+    ]);
   });
 
-  it('waits for queued tasks for the seconds each step chooses', () => {
-    expect(resolvePath(snapshot.states.WaitForTasks, ['SecondsPath'])).toBe('$.wait_seconds');
+  it('waits for DataForSEO\'s callbacks on a task token instead of polling', () => {
+    expect(resolvePath(snapshot.states.PostTasks, ['Resource'])).toContain('lambda:invoke.waitForTaskToken');
+    expect(resolvePath(snapshot.states.PostTasks, ['Parameters', 'Payload', 'task_token.$'])).toBe('$$.Task.Token');
+    expect(Object.values(snapshot.states).filter((state) => resolvePath(state, ['Type']) === 'Wait')).toStrictEqual([]);
   });
 
   it('stops a run after three hours at most', () => {

@@ -24,10 +24,10 @@ def post_tasks(monkeypatch):
 
 
 class TestPost:
-    def test_posts_reviews_at_high_priority(self, post_tasks):
-        tasks.post_reviews(TASK)
+    def test_posts_reviews_at_high_priority_with_the_pingback_url(self, post_tasks):
+        tasks.post_reviews(TASK, pingback_url='https://cb.example/?gate=g&id=$id')
 
-        assert post_tasks.call_args.kwargs == {'priority': 2}
+        assert post_tasks.call_args.kwargs == {'priority': 2, 'pingback_url': 'https://cb.example/?gate=g&id=$id'}
 
     def test_sends_the_native_cid_field_for_reviews(self, post_tasks):
         tasks.post_reviews(TASK, 'lowest_rating')

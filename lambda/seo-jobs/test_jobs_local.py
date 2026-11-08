@@ -10,6 +10,7 @@ import pytest
 from shared import dataforseo_business_tasks as business_tasks
 from shared import dataforseo_local_serp as local_serp
 from shared.dataforseo_client import DataForSeoError
+from testing.callback_fixtures import TASK_TOKEN, fake_callback_gates
 from testing.local_seo_fixtures import (
     FAILED,
     GRID_REQUEST,
@@ -42,6 +43,11 @@ def memory(monkeypatch):
 
 
 @pytest.fixture
+def gates(jobs, monkeypatch):
+    return fake_callback_gates(monkeypatch, jobs)
+
+
+@pytest.fixture
 def post_grid(monkeypatch):
     stub = MagicMock(return_value=posted(ALL_TAGS))
     monkeypatch.setattr(local_serp, 'post_grid_tasks', stub)
@@ -49,11 +55,11 @@ def post_grid(monkeypatch):
 
 
 @pytest.fixture
-def post(jobs, memory):
+def post(jobs, memory, gates):
     """``post(kind)`` -> ``(answer, stored job)`` of one post step on a new job."""
     def run(kind='grid'):
         job = stored_job(memory, kind, GRID_REQUEST if kind == 'grid' else REVIEWS_REQUEST)
-        return jobs.post_step({'job_id': job['job_id']}), memory.job(job['job_id'])
+        return jobs.post_step({'job_id': job['job_id'], 'task_token': TASK_TOKEN}), memory.job(job['job_id'])
 
     return run
 
@@ -85,12 +91,34 @@ class TestPost:
 
         assert (answer['done'], stored['status'], len(stored['pending'])) == (False, 'collecting', 9)
 
-    def test_never_posts_again_when_the_job_already_holds_task_ids(self, jobs, memory, post_grid):
+    def test_never_posts_again_when_the_job_already_holds_task_ids(self, jobs, memory, post_grid, gates):
         job = collecting_job(memory, 'grid', ALL_TAGS)
 
-        jobs.post_step({'job_id': job['job_id']})
+        jobs.post_step({'job_id': job['job_id'], 'task_token': TASK_TOKEN})
 
-        post_grid.assert_not_called()
+        assert (post_grid.call_count, [token for token, _answer in gates.released]) == (0, [TASK_TOKEN])
+
+    def test_waits_for_one_callback_per_accepted_grid_point(self, post, post_grid, gates):
+        post()
+
+        (gate_id,) = gates.gates
+        assert (gates.only_gate['remaining'], gates.released, post_grid.call_args.kwargs['pingback_url']) == (
+            9, [], f'https://callbacks.example/?gate={gate_id}&id=$id')
+
+    def test_does_not_wait_for_a_point_refused_at_post_time(self, post, monkeypatch, gates):
+        accepted = {tag: task for tag, task in ALL_TAGS.items() if tag != '4'}
+        monkeypatch.setattr(local_serp, 'post_grid_tasks', MagicMock(return_value=posted(accepted, {'4': 'Invalid Field'})))
+
+        post()
+
+        assert gates.only_gate['remaining'] == 8
+
+    def test_resumes_at_once_after_a_failed_post(self, post, monkeypatch, gates):
+        monkeypatch.setattr(business_tasks, 'post_reviews', MagicMock(side_effect=DataForSeoError('BILLING_ISSUE', 'low')))
+
+        post('reviews')
+
+        assert gates.released[0][1]['done'] is True
 
     def test_marks_rejected_points_failed_at_post_time(self, post, monkeypatch):
         accepted = {tag: task for tag, task in ALL_TAGS.items() if tag != '4'}
@@ -107,7 +135,7 @@ class TestPost:
 
     def test_raises_for_a_job_the_cache_does_not_hold(self, jobs, memory):
         with pytest.raises(jobs.MissingJobError, match='gone'):
-            jobs.post_step({'job_id': 'gone'})
+            jobs.post_step({'job_id': 'gone', 'task_token': TASK_TOKEN})
 
 
 class TestCollect:
@@ -116,20 +144,15 @@ class TestCollect:
 
         assert (stored['status'], stored['results']['summary']['histogram']['5']) == ('completed', 1)
 
-    def test_keeps_collecting_while_a_task_is_pending(self, collect):
-        answer, _stored = collect('updates', PENDING, attempt=3)
+    def test_times_out_keeping_the_task_ids_when_a_task_is_still_running(self, collect):
+        answer, stored = collect('updates', PENDING)
 
-        assert (answer['done'], answer['attempt']) == (False, 4)
-
-    def test_times_out_after_the_last_attempt_keeping_the_task_ids(self, jobs, collect):
-        stored = collect('updates', PENDING, attempt=jobs.MAX_COLLECT_ATTEMPTS - 1)[1]
-
-        assert (stored['status'], stored['tasks']) == ('timed_out', {'business': 't'})
+        assert (answer['done'], stored['status'], stored['tasks']) == (True, 'timed_out', {'business': 't'})
 
     def test_leaves_a_task_pending_when_its_free_task_get_fails(self, collect):
         stored = collect('reviews', DataForSeoError('UPSTREAM_UNAVAILABLE', 'x'))[1]
 
-        assert stored['pending'] == ['business']
+        assert (stored['pending'], stored['status']) == (['business'], 'timed_out')
 
     def test_fails_a_reviews_job_whose_task_failed(self, collect):
         assert collect('reviews', FAILED)[1]['status'] == 'failed'

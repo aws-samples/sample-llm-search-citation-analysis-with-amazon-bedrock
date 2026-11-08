@@ -50,7 +50,7 @@ describe('CitationAnalysis-SeoLighthouse', () => {
   });
 
   it('marks the run failed when the measure step crashes', () => {
-    expect(snapshot.taskCatchTargets).toStrictEqual({ Measure: 'Fail', Fail: undefined });
+    expect(snapshot.taskCatchTargets).toStrictEqual({ Measure: ['Fail'], Fail: [] });
   });
 
   it('measures again until the step answers done', () => {

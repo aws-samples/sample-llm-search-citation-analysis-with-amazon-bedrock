@@ -160,6 +160,16 @@ export interface RoutedJobSnapshot {
   wiring: RoutedJobWiring;
 }
 
+/** Where each catcher of a state goes, in order: its target, prefixed `"<error> -> "` unless it catches `States.ALL`. */
+export function catchTargets(state: unknown): string[] {
+  const catchers = resolvePath(state, ['Catch']);
+  return (Array.isArray(catchers) ? catchers : []).map((catcher) => {
+    const errors = (resolvePath(catcher, ['ErrorEquals']) as string[]).join(',');
+    const next = String(resolvePath(catcher, ['Next']));
+    return errors === 'States.ALL' ? next : `${errors} -> ${next}`;
+  });
+}
+
 function routedJobWiringOf(template: Template, stateMachineName: string): RoutedJobWiring {
   const machineId = findStateMachineLogicalId(template, stateMachineName);
   const { routerEnv } = sharedFunctionEnvironments(template);
@@ -182,7 +192,7 @@ export function synthesizeRoutedJobSnapshot(template: Template, stateMachineName
     timeoutSeconds: resolvePath(definition, ['TimeoutSeconds']),
     taskRetriers: taskRetriers(states),
     taskTimeouts: taskValues(states, (state) => resolvePath(state, ['TimeoutSeconds'])),
-    taskCatchTargets: taskValues(states, (state) => resolvePath(state, ['Catch', '0', 'Next'])),
+    taskCatchTargets: taskValues(states, catchTargets),
     wiring: routedJobWiringOf(template, stateMachineName),
   };
 }

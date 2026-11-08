@@ -1,7 +1,7 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { LAMBDA_SERVICE_ERRORS } from './citation-analysis-stack-fixtures';
+import { LAMBDA_SERVICE_ERRORS, resolvePath } from './citation-analysis-stack-fixtures';
 import { routedJobWiring } from './seo-feature-fixtures';
 import { synthesizeSeoLocalSnapshot } from './seo-local-fixtures';
 
@@ -35,16 +35,20 @@ describe('CitationAnalysis-SeoLocalJob', () => {
     expect(snapshot.taskRetriers.Collect).toStrictEqual([LAMBDA_SERVICE_ERRORS]);
   });
 
-  it('gives post, collect and fail the jobs function\'s whole 15 minutes', () => {
-    expect(snapshot.taskTimeouts).toStrictEqual({ Post: 900, Collect: 900, Fail: 900 });
+  it('gives collect and fail the jobs function\'s 15 minutes, and post 25 for the post and DataForSEO\'s callbacks', () => {
+    expect(snapshot.taskTimeouts).toStrictEqual({ Post: 1500, Collect: 900, Fail: 900 });
   });
 
-  it('waits ten seconds between collections', () => {
-    expect(snapshot.states.WaitForResults).toStrictEqual({ Type: 'Wait', Seconds: 10, Next: 'Collect' });
+  it('waits for DataForSEO\'s callbacks on a task token instead of polling', () => {
+    expect(resolvePath(snapshot.states.Post, ['Resource'])).toContain('lambda:invoke.waitForTaskToken');
+    expect(resolvePath(snapshot.states.Post, ['Parameters', 'Payload', 'task_token.$'])).toBe('$$.Task.Token');
+    expect(Object.values(snapshot.states).filter((state) => resolvePath(state, ['Type']) === 'Wait')).toStrictEqual([]);
   });
 
-  it('marks the job failed when post or collect crashes', () => {
-    expect(snapshot.taskCatchTargets).toStrictEqual({ Post: 'Fail', Collect: 'Fail', Fail: undefined });
+  it('collects once when no callback came in time, and marks the job failed when post or collect crashes', () => {
+    expect(snapshot.taskCatchTargets).toStrictEqual({
+      Post: ['States.Timeout -> Collect', 'Fail'], Collect: ['Fail'], Fail: [],
+    });
   });
 
   it('stops the whole execution after an hour', () => {

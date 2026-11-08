@@ -15,6 +15,7 @@ import jobs_rank
 from shared.dataforseo_client import DataForSeoError
 from shared.rank_tracking_runs import begin_run, get_run, load_pairs, load_states
 from shared.rank_tracking_store import TrackedKeyword, get_tracker
+from testing.callback_fixtures import TASK_TOKEN, GateStub, fake_callback_gates
 from testing.rank_tracking_fixtures import (
     CODES,
     NOW,
@@ -41,6 +42,11 @@ def table(monkeypatch):
     return memory
 
 
+@pytest.fixture
+def gates(monkeypatch) -> GateStub:
+    return fake_callback_gates(monkeypatch, jobs_rank)
+
+
 def _start(table: RankTable, trigger: str = 'manual', **tracker_fields) -> dict:
     tracker = stored_tracker(table, devices='desktop', **tracker_fields)
     run, _blocking = begin_run(table, MagicMock(), tracker, trigger, NOW)
@@ -48,9 +54,14 @@ def _start(table: RankTable, trigger: str = 'manual', **tracker_fields) -> dict:
     return {'tracker_id': tracker.tracker_id, 'run_id': run['run_id']}
 
 
+def _post(state: dict) -> dict:
+    """``rank.post`` as the state machine's ``waitForTaskToken`` task invokes it."""
+    return jobs_rank.post({'step': 'rank.post', 'state': state, 'task_token': TASK_TOKEN})
+
+
 def _scheduled(table: RankTable) -> dict:
-    """A scheduled run, prepared and with its pairs queued as task ``t-1``."""
-    return jobs_rank.post(jobs_rank.prepare(_start(table, trigger='scheduled')))
+    """A scheduled run, prepared and posted: what ``rank.post`` answered."""
+    return _post(jobs_rank.prepare(_start(table, trigger='scheduled')))
 
 
 def _run(table: RankTable, state: dict) -> dict:
@@ -114,46 +125,63 @@ def test_finalize_records_the_check_on_the_tracker_and_frees_it(table, monkeypat
         '2026-10-05T08:00:00.000000Z', True)
 
 
-def test_a_first_check_miss_is_rechecked_through_the_queue(table, monkeypatch):
+def test_a_first_check_miss_is_rechecked_through_the_queue(table, monkeypatch, gates):
     fake_live_checks(monkeypatch, position=None)
     fake_task_posts(monkeypatch, {'kw-a#desktop': 't-1'})
     fake_task_polls(monkeypatch, 'completed', serp_result(organic(12, 'example.com')))
 
     state = jobs_rank.plan_retry(jobs_rank.live(jobs_rank.prepare(_start(table))))
-    state = jobs_rank.collect(jobs_rank.post(state))
+    _post(state)
+    state = jobs_rank.collect(gates.resumed_state())
     jobs_rank.finalize(state)
 
     assert (state['round'], load_states(table, 'rt-example')['kw-a']['desktop']['position']) == (1, 12)
 
 
-def test_post_waits_four_minutes_before_the_first_poll(table, monkeypatch):
+def test_post_waits_for_the_callbacks_of_the_queued_tasks(table, monkeypatch, gates):
     fake_task_posts(monkeypatch, {'kw-a#desktop': 't-1'})
 
-    state = _scheduled(table)
+    answer = _scheduled(table)
 
-    assert (state['next'], state['wait_index'], state['wait_seconds']) == ('wait', 0, 240)
+    assert (answer, gates.only_gate['remaining'], gates.resumed_state()['next'], gates.released) == (
+        {'queued': 1}, 1, 'collect', [])
 
 
-def test_post_moves_on_to_rechecks_when_nothing_was_queued(table, monkeypatch):
+def test_post_sends_the_gate_url_with_every_task(table, monkeypatch, gates):
+    post = fake_task_posts(monkeypatch, {'kw-a#desktop': 't-1'})
+
+    _scheduled(table)
+
+    (gate_id,) = gates.gates
+    assert post.call_args.kwargs['pingback_url'] == f'https://callbacks.example/?gate={gate_id}&id=$id'
+
+
+def test_post_resumes_at_once_when_every_callback_came_before_it_answered(table, monkeypatch, gates):
+    fake_task_posts(monkeypatch, {'kw-a#desktop': 't-1'})
+    gates.arrived_early = 1
+
+    _scheduled(table)
+
+    assert gates.released[0][1]['next'] == 'collect'
+
+
+def test_post_moves_on_to_rechecks_when_nothing_was_queued(table, monkeypatch, gates):
     fake_task_posts(monkeypatch)
 
-    assert _scheduled(table)['next'] == 'retry'
+    _scheduled(table)
+
+    assert [(token, state['next']) for token, state in gates.released] == [(TASK_TOKEN, 'retry')]
 
 
-def test_collect_waits_for_the_next_poll_while_tasks_run(table, monkeypatch):
+def test_collect_leaves_a_task_still_running_unanswered_for_the_rechecks(table, monkeypatch, gates):
     fake_task_posts(monkeypatch, {'kw-a#desktop': 't-1'})
     fake_task_polls(monkeypatch, 'pending')
+    _scheduled(table)
 
-    state = jobs_rank.collect(_scheduled(table))
+    state = jobs_rank.collect(gates.resumed_state())
 
-    assert (state['next'], state['wait_index'], state['wait_seconds']) == ('wait', 1, 120)
-
-
-def test_collect_moves_on_to_rechecks_after_the_last_poll(table, monkeypatch):
-    fake_task_polls(monkeypatch, 'pending')
-    state = jobs_rank.prepare(_start(table, trigger='scheduled'))
-
-    assert jobs_rank.collect({**state, 'wait_index': 5})['next'] == 'retry'
+    pair_errors = [pair.get('error_code') for pair in load_pairs(table, state['run_id'])]
+    assert (state['next'], pair_errors) == ('retry', ['TASK_TIMEOUT'])
 
 
 def test_stops_rechecking_after_two_rounds(table):

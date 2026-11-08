@@ -126,9 +126,9 @@ def grid_task_bodies(keyword: str, points: Sequence[tuple[float, float]], zoom: 
     ]
 
 
-def post_grid_tasks(bodies: list[dict[str, Any]]) -> dataforseo_tasks.PostedTasks:
-    """Post every grid point in one billed request (never re-sent)."""
-    return dataforseo_tasks.post_tasks(MAPS_TASK_POST_PATH, bodies, priority=HIGH_PRIORITY)
+def post_grid_tasks(bodies: list[dict[str, Any]], pingback_url: str | None = None) -> dataforseo_tasks.PostedTasks:
+    """Post every grid point in one billed request (never re-sent); each calls ``pingback_url`` when ready."""
+    return dataforseo_tasks.post_tasks(MAPS_TASK_POST_PATH, bodies, priority=HIGH_PRIORITY, pingback_url=pingback_url)
 
 
 def collect_grid_task(task_id: str) -> dataforseo_tasks.TaskOutcome:

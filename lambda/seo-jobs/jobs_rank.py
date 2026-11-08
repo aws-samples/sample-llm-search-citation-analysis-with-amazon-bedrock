@@ -1,6 +1,6 @@
 """Rank tracking steps of the SEO jobs function (``rank.*``), run by ``CitationAnalysis-SeoRankCheck``.
 
-The state machine carries only ``{tracker_id, run_id, round, wait_index, wait_seconds, next}``; keywords, pairs
+The state machine carries only ``{tracker_id, run_id, round, next}``; keywords, pairs
 and results stay in DynamoDB (Step Functions caps state at 256 KiB). A task sends it as
 ``{"step": "rank.<name>", "state": {...}}``; every step returns that small state with ``next`` naming where the
 state machine goes:
@@ -10,10 +10,13 @@ state machine goes:
   the run running. ``next`` = ``live`` (manual runs) or ``queued`` (scheduled runs).
 - ``rank.live``: live checks (paid; never retried by the state machine). ``next`` = ``live`` while pairs remain
   after the step's time budget, ``finalize`` after a login / balance failure, else ``retry``.
-- ``rank.post``: queue the pending pairs (paid; never retried). ``next`` = ``wait`` (with the first wait) or
-  ``retry`` when nothing was queued, ``finalize`` after a login / balance failure.
-- ``rank.collect``: free polls. ``next`` = ``collect`` (more than one step's worth queued), ``wait`` (with the
-  next wait) or ``retry`` after the last poll.
+- ``rank.post``: a ``waitForTaskToken`` task. Opens a callback gate (``shared.dataforseo_callbacks``), queues the
+  pending pairs with the gate's ``pingback_url`` (paid; never retried) and returns; the state machine resumes when
+  DataForSEO has called back for every queued task, with ``next`` = ``collect``. It resumes at once with ``retry``
+  when nothing was queued and ``finalize`` after a login / balance failure. When a pingback never comes the
+  wait times out and the state machine collects anyway.
+- ``rank.collect``: free ``task_get`` of the queued pairs, once. ``next`` = ``collect`` (more than one step's
+  worth queued) or ``retry``; a task still running is left unanswered for the re-check rounds.
 - ``rank.plan_retry``: choose the pairs to re-check (``shared.rank_tracking_retry``); ``next`` = ``queued``
   for another round, else ``finalize``.
 - ``rank.finalize``: store what each answer means, the keyword state and the summary; end the run as
@@ -25,15 +28,17 @@ state machine goes:
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
+from shared.dataforseo_callbacks import new_gate_id, open_gate, pingback_url, release, settle
 from shared.dataforseo_locations import UnsupportedMarketError
 from shared.dataforseo_rank import RETRY_ROUNDS
-from shared.rank_tracking_checks import QUEUED_WAITS_S, CheckProgress, collect_queued, post_pending, run_live
+from shared.rank_tracking_checks import CheckProgress, collect_queued, post_pending, run_live
 from shared.rank_tracking_finalize import finalize_pairs
 from shared.rank_tracking_retry import retry_keywords, run_outcome
 from shared.rank_tracking_runs import (
@@ -70,7 +75,7 @@ class MissingTrackerError(LookupError):
 
 
 def _state(event: dict[str, Any], next_step: str, **changes: Any) -> dict[str, Any]:
-    keys = ('tracker_id', 'run_id', 'round', 'wait_index', 'wait_seconds')
+    keys = ('tracker_id', 'run_id', 'round')
     state = {key: event[key] for key in keys if key in event}
     state.setdefault('round', 0)
     return {**state, **changes, 'next': next_step}
@@ -122,25 +127,37 @@ def live(event: dict[str, Any]) -> dict[str, Any]:
     return _state(event, 'live' if progress.remaining else 'retry')
 
 
+def _queued(table: Any, run_id: str) -> int:
+    return sum(1 for pair in load_pairs(table, run_id) if pair.get('status') == 'queued')
+
+
 def post(event: dict[str, Any]) -> dict[str, Any]:
-    if _checked(event, post_pending).fatal_code:
-        return _state(event, 'finalize')
-    if not any(pair.get('status') == 'queued' for pair in load_pairs(rank_table(), str(event['run_id']))):
-        return _state(event, 'retry')
-    return _state(event, 'wait', wait_index=0, wait_seconds=QUEUED_WAITS_S[0])
+    """Queue the pending pairs behind a callback gate; the state machine waits on ``task_token`` until it empties."""
+    state, task_token = event['state'], str(event['task_token'])
+    table = rank_table()
+    tracker = _tracker(state)
+    pairs = load_pairs(table, str(state['run_id']))
+    expected = sum(1 for pair in pairs if pair.get('status') == 'pending')
+    gate_id = new_gate_id()
+    open_gate(gate_id, expected, task_token, _state(state, 'collect'))
+    progress = post_pending(table, tracker, market_codes_for(tracker.market_id), pairs, pingback_url(gate_id))
+    queued = _queued(table, str(state['run_id']))
+    if progress.fatal_code or not queued:
+        resumed = _state(state, 'finalize' if progress.fatal_code else 'retry')
+        release(task_token, json.dumps(resumed))
+        return resumed
+    gate = settle(gate_id, expected - queued)
+    if gate.remaining <= 0:
+        release(task_token, gate.output)
+    logger.info('rank.post queued=%d awaiting callbacks', queued)
+    return {'queued': queued}
 
 
 def collect(event: dict[str, Any]) -> dict[str, Any]:
     tracker = _tracker(event)
     table = rank_table()
-    wait_index = int(event.get('wait_index') or 0)
-    last_poll = wait_index >= len(QUEUED_WAITS_S) - 1
-    progress = collect_queued(table, tracker, load_pairs(table, str(event['run_id'])), last_poll)
-    if progress.capped:
-        return _state(event, 'collect')
-    if progress.remaining and not last_poll:
-        return _state(event, 'wait', wait_index=wait_index + 1, wait_seconds=QUEUED_WAITS_S[wait_index + 1])
-    return _state(event, 'retry')
+    progress = collect_queued(table, tracker, load_pairs(table, str(event['run_id'])))
+    return _state(event, 'collect' if progress.capped else 'retry')
 
 
 def plan_retry(event: dict[str, Any]) -> dict[str, Any]:
@@ -227,7 +244,7 @@ def _from_state_machine(step: Step) -> Step:
 STEPS: dict[str, Step] = {
     'rank.prepare': _from_state_machine(prepare),
     'rank.live': _from_state_machine(live),
-    'rank.post': _from_state_machine(post),
+    'rank.post': post,
     'rank.collect': _from_state_machine(collect),
     'rank.plan_retry': _from_state_machine(plan_retry),
     'rank.finalize': _from_state_machine(finalize),

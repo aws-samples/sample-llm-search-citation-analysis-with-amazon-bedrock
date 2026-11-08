@@ -73,6 +73,15 @@ def test_sends_every_task_in_one_body_with_the_priority_when_given(monkeypatch):
     assert json.loads(transport.calls[0].body or b'[]') == [{'keyword': 'x', 'tag': 'a', 'priority': 2}]
 
 
+def test_sets_the_pingback_url_on_every_task_when_given(monkeypatch):
+    transport = install_transport(monkeypatch, _post_answer(_entry('a'), _entry('b')))
+
+    post_tasks(POST_PATH, [{'tag': 'a'}, {'tag': 'b'}], pingback_url='https://cb.example/?gate=g&id=$id')
+
+    sent = json.loads(transport.calls[0].body or b'[]')
+    assert [task['pingback_url'] for task in sent] == ['https://cb.example/?gate=g&id=$id'] * 2
+
+
 @pytest.mark.parametrize(('failure', 'message'), [((500, 'oops'), 'HTTP 500'), (TimeoutError('slow'), 'timed out')])
 def test_never_retries_a_failed_post(monkeypatch, failure, message):
     transport = install_transport(monkeypatch, failure, _post_answer(_entry('a')))

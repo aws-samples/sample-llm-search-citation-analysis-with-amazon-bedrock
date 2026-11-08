@@ -119,12 +119,21 @@ def _read_entries(entries: object, tags: Sequence[str]) -> PostedTasks:
     return PostedTasks(accepted=accepted, rejected=rejected, cost_usd=round(cost, 6))
 
 
-def post_tasks(path: str, tasks: list[dict[str, Any]], *, priority: int | None = None) -> PostedTasks:
-    """POST ``tasks`` (1..100, each with a unique ``tag``) to a ``.../task_post`` path; never retried (billed)."""
+def post_tasks(path: str, tasks: list[dict[str, Any]], *, priority: int | None = None,
+               pingback_url: str | None = None) -> PostedTasks:
+    """POST ``tasks`` (1..100, each with a unique ``tag``) to a ``.../task_post`` path; never retried (billed).
+
+    ``pingback_url`` is set on every task: DataForSEO calls it when the task is ready (``shared.dataforseo_callbacks``).
+    """
     if not 1 <= len(tasks) <= MAX_TASKS_PER_POST:
         raise ValueError(f'a task_post takes 1 to {MAX_TASKS_PER_POST} tasks, got {len(tasks)}')
     tags = _tags(tasks)
-    sent = [{**task, 'priority': priority} if priority is not None else task for task in tasks]
+    extra: dict[str, Any] = {}
+    if priority is not None:
+        extra['priority'] = priority
+    if pingback_url is not None:
+        extra['pingback_url'] = pingback_url
+    sent = [{**task, **extra} for task in tasks]
 
     def read(envelope: dict[str, Any]) -> EnvelopeReading[PostedTasks]:
         posted = _read_entries(envelope.get('tasks'), tags)

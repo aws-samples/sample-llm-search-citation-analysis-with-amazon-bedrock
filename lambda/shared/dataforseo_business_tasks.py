@@ -65,9 +65,9 @@ def updates_body(task: BusinessTask) -> dict[str, Any]:
             'language_code': task.language_code, 'depth': task.depth, 'tag': TASK_TAG}
 
 
-def _post_one(path: str, body: dict[str, Any]) -> tuple[str, float]:
+def _post_one(path: str, body: dict[str, Any], pingback_url: str | None) -> tuple[str, float]:
     """``(task_id, cost_usd)`` of one posted task; a refused entry raises with the cost it was billed."""
-    posted = dataforseo_tasks.post_tasks(path, [body], priority=HIGH_PRIORITY)
+    posted = dataforseo_tasks.post_tasks(path, [body], priority=HIGH_PRIORITY, pingback_url=pingback_url)
     task_id = posted.accepted.get(TASK_TAG)
     if task_id is None:
         message = posted.rejected.get(TASK_TAG) or 'DataForSEO did not accept the task'
@@ -75,12 +75,12 @@ def _post_one(path: str, body: dict[str, Any]) -> tuple[str, float]:
     return task_id, posted.cost_usd
 
 
-def post_reviews(task: BusinessTask, sort_by: str = 'newest') -> tuple[str, float]:
-    return _post_one(REVIEWS_POST_PATH, reviews_body(task, sort_by))
+def post_reviews(task: BusinessTask, sort_by: str = 'newest', pingback_url: str | None = None) -> tuple[str, float]:
+    return _post_one(REVIEWS_POST_PATH, reviews_body(task, sort_by), pingback_url)
 
 
-def post_updates(task: BusinessTask) -> tuple[str, float]:
-    return _post_one(UPDATES_POST_PATH, updates_body(task))
+def post_updates(task: BusinessTask, pingback_url: str | None = None) -> tuple[str, float]:
+    return _post_one(UPDATES_POST_PATH, updates_body(task), pingback_url)
 
 
 def _texts_of(row: Mapping[str, Any], *fields: str) -> dict[str, str | None]:

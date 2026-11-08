@@ -13,6 +13,7 @@ import {
 } from './constructs/provider-search';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import { SeoApi } from './constructs/seo-api';
+import { SeoCallbacks } from './constructs/seo-callbacks';
 import { SEO_JOBS_FUNCTION_NAME, type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
 import { seoFeatures } from './seo-features';
 import { pythonFunction } from './constructs/api-functions';
@@ -142,6 +143,8 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       allow(fn, ['s3:GetObject', 's3:PutObject'], [rawResponsesBucket.arnForObjects(SEO_OBJECT_PREFIX)]);
     }
     ssm.StringParameter.fromStringParameterName(this, 'CorsOriginParam', CORS_ORIGIN_PARAMETER).grantRead(router);
+    // DataForSEO calls back when a queued task is ready, resuming the waiting rank check or local SEO job.
+    jobs.addEnvironment('DATAFORSEO_CALLBACK_URL', new SeoCallbacks(this, 'DataForSeoCallbacks', { sharedLayer, cacheTable, jobs }).url);
 
     const featureProps: SeoFeatureProps = {
       router, jobs, sharedLayer, environment, rawResponsesBucket, mainTables,
