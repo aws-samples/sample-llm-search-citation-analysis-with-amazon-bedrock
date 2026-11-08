@@ -14,13 +14,19 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...fs, readdirSync: vi.fn(fs.readdirSync) };
 });
 
+/** More than a coarse kernel clock tick (4 ms at 250 Hz, 10 ms at 100 Hz). */
+const FILE_CLOCK_LAG_MS = 50;
+
 describe('cleanup-synth-output teardown', () => {
   afterEach(() => {
     vi.mocked(readdirSync).mockRestore();
   });
 
-  it('removes a cdk.out folder created during the run', () => {
+  it('removes a cdk.out folder created during the run', async () => {
     const teardown = setup();
+    // File times come from the kernel's coarse clock, which can lag Date.now() by a few milliseconds on Linux:
+    // create the folder once that clock is past the run's start, as a stack synthesized during a run is.
+    await new Promise((resolve) => { setTimeout(resolve, FILE_CLOCK_LAG_MS); });
     const name = `cdk.out-cleanup-spec-${process.pid}-${Date.now()}`;
     const created = join(tmpdir(), name);
     mkdirSync(created);
