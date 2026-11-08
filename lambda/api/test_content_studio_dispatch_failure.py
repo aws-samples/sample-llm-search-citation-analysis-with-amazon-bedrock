@@ -455,18 +455,18 @@ class TestGenerateContentPrompt:
         ('not-a-known-angle', _DEFAULT_OPENING),
         (
             'differentiation',
-            f'Create a differentiated content piece for the keyword {_KEYWORD_TAG} '
-            'that positions <brand>Hotel Sol</brand> uniquely.',
+            (f'Create a differentiated content piece for the keyword {_KEYWORD_TAG} '
+            'that positions <brand>Hotel Sol</brand> uniquely.'),
         ),
         (
             'thought_leadership',
-            f'Create thought leadership content for the keyword {_KEYWORD_TAG} '
-            "to maintain <brand>Hotel Sol</brand>'s #1 position.",
+            (f'Create thought leadership content for the keyword {_KEYWORD_TAG} '
+            "to maintain <brand>Hotel Sol</brand>'s #1 position."),
         ),
         (
             'reputation_management',
-            f'Create positive, trust-building content for the keyword {_KEYWORD_TAG} '
-            "to improve <brand>Hotel Sol</brand>'s sentiment.",
+            (f'Create positive, trust-building content for the keyword {_KEYWORD_TAG} '
+            "to improve <brand>Hotel Sol</brand>'s sentiment."),
         ),
         ('evergreen', f'Create comprehensive evergreen content for {_KEYWORD_TAG} that will rank year-round.'),
     ])

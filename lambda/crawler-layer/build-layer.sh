@@ -99,7 +99,7 @@ if [ "$BUILT_WITH_DOCKER" = true ]; then
         -e AWS_ACCESS_KEY_ID=smoke \
         -e AWS_SECRET_ACCESS_KEY=smoke \
         public.ecr.aws/lambda/python:3.12 \
-        -c "import boto3, botocore, inspect, os; from bedrock_agentcore.tools.browser_client import BrowserClient; from playwright.sync_api import sync_playwright; size = sum(os.path.getsize(os.path.join(root, name)) for root, _, names in os.walk('/opt/python') for name in names); assert size < 250 * 1024 * 1024, f'crawler layer is {size} bytes'; assert boto3.__version__ == '1.43.98'; assert botocore.__version__ == '1.43.98'; client = BrowserClient(region='us-west-2'); required = {'identifier', 'name', 'session_timeout_seconds'}; assert required <= set(inspect.signature(client.start).parameters); assert callable(client.generate_ws_headers); assert callable(client.stop); assert sync_playwright"
+        -c "import boto3, botocore, inspect, os; from bedrock_agentcore.tools.browser_client import BrowserClient; from playwright.sync_api import sync_playwright; size = sum(os.path.getsize(os.path.join(root, name)) for root, _, names in os.walk('/opt/python') for name in names); assert size < 250 * 1024 * 1024, f'crawler layer is {size} bytes'; assert boto3.__version__ == '1.43.123'; assert botocore.__version__ == '1.43.123'; client = BrowserClient(region='us-west-2'); required = {'identifier', 'name', 'session_timeout_seconds'}; assert required <= set(inspect.signature(client.start).parameters); assert callable(client.generate_ws_headers); assert callable(client.stop); assert sync_playwright"
 else
     echo "Skipping Lambda-runtime import smoke test because Docker is unavailable"
 fi
