@@ -114,6 +114,7 @@ def handler(
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
     if rejected:
         return rejected
-    config = get_brand_config()
-    trends = trends_for_scope(report_scope, period, days, owned_domains_from(config), tracked_brand_names(config))
-    return success_response(trends, event)
+    brands = get_brand_config()
+    return success_response(
+        trends_for_scope(report_scope, period, days, owned_domains_from(brands), tracked_brand_names(brands)), event,
+    )

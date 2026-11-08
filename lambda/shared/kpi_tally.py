@@ -273,26 +273,17 @@ def run_tally(
     )
 
 
-def run_tallies(
-    keyword: str,
-    answers: Iterable[Answer],
-    owned_domains: Iterable[str] = (),
-    *,
-    brand_cap: int | None = None,
-    tracked_brands: Iterable[str] = (),
-) -> list[RunTally]:
+def run_tallies(keyword: str, answers: Iterable[Answer], owned_domains: Iterable[str] = (), **brand_options: Any) -> list[RunTally]:
     """One tally per run of one keyword's ``answers``, oldest run first; answers without a timestamp are dropped.
 
-    ``brand_cap`` and ``tracked_brands`` keep the brands of each run as ``run_tally`` does.
+    ``brand_options`` (``brand_cap``, ``tracked_brands``) keep the brands of each run as ``run_tally`` does.
     """
     domains = list(owned_domains)
-    tracked = list(tracked_brands)
     runs: dict[str, list[Answer]] = defaultdict(list)
     for answer in answers:
         if answer.timestamp:
             runs[answer.timestamp].append(answer)
-    return [run_tally(keyword, timestamp, runs[timestamp], domains, brand_cap=brand_cap, tracked_brands=tracked)
-            for timestamp in sorted(runs)]
+    return [run_tally(keyword, timestamp, runs[timestamp], domains, **brand_options) for timestamp in sorted(runs)]
 
 
 def brands_truncated(runs: Iterable[RunTally]) -> bool:
