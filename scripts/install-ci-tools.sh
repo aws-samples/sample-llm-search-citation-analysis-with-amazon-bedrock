@@ -44,10 +44,10 @@ release() {
 # The Go module proxy and checksum database verify the module; GOTOOLCHAIN=auto fetches the Go version the
 # module asks for the same way.
 go_install() {
-  local module="$1" version="$2"
+  local module="$1" version="$2" ldflags="${3:-}"
   printf 'install-ci-tools: installing %s@v%s from proxy.golang.org (checked against sum.golang.org)\n' "$module" "$version"
-  GOBIN="$BIN" GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
-    go install "${module}@v${version}"
+  CGO_ENABLED=0 GOBIN="$BIN" GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+    go install -ldflags "$ldflags" "${module}@v${version}"
 }
 
 install_gitleaks() {
@@ -55,7 +55,8 @@ install_gitleaks() {
   if release "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}" "$GITLEAKS_SHA256"; then
     tar -xzf "/tmp/${tarball}" -C "$BIN" gitleaks
   else
-    go_install "$GITLEAKS_MODULE" "$GITLEAKS_VERSION"
+    # The release build stamps its version the same way (gitleaks' Makefile).
+    go_install "$GITLEAKS_MODULE" "$GITLEAKS_VERSION" "-X=${GITLEAKS_MODULE}/version.Version=v${GITLEAKS_VERSION}"
   fi
 }
 
