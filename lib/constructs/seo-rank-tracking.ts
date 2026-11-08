@@ -9,6 +9,8 @@ import { SeoFeatureConstruct, stringKey } from './seo-feature';
 
 /** The rank check state machine's name; its ARN is built from it so the functions can start it without a cycle. */
 export const RANK_CHECK_STATE_MACHINE_NAME = 'CitationAnalysis-SeoRankCheck';
+/** One EventBridge Scheduler schedule per scheduled tracker lives in this group (`rank-<tracker id>`). */
+export const RANK_TRACKER_SCHEDULE_GROUP = 'citation-analysis-seo-rank';
 const TABLE_NAME = 'CitationAnalysis-SeoRankTracking';
 /** Longer than the longest run (1000 keywords x 2 devices live, then two queued rounds of 15-minute polling). */
 const STATE_MACHINE_TIMEOUT = cdk.Duration.hours(3);

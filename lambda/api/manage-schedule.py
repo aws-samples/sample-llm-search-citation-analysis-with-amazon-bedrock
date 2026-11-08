@@ -12,8 +12,16 @@ definition as a *v2 descriptor*::
       "display_name": "Hotel Coruña — weekly",
       "form": {"frequency": "weekly", "time": "09:00", "timezone": "Europe/Madrid",
                "day_of_week": "MON", "day_of_month": 1},
-      "scope": {"mode": "all"} | {"mode": "groups", "group_ids": [...]} | {"mode": "keywords", "keyword_ids": [...]}
+      "scope": {"mode": "all"} | {"mode": "groups", "group_ids": [...]} | {"mode": "keywords", "keyword_ids": [...]},
+      "kind": "analysis" | "domain_snapshots" | "backlink_snapshots"
     }
+
+``kind`` says what the schedule starts (``KINDS``): an analysis run (the default, and every schedule written
+before 2.43.0), or one of the paid DataForSEO snapshot runs of the SEO stack (every owned and competitor domain;
+no keyword scope). A snapshot run happens only while its schedule exists, so nothing is bought until an Admin
+creates one (TENETS.md, tenets 7 and 8). The SEO stack's rank trackers schedule themselves, one EventBridge
+Scheduler schedule per tracker in ``citation-analysis-seo-rank``; ``GET /api/schedules/rank-trackers`` lists them
+read-only so every planned paid run shows on one page.
 
 ParseKeywords resolves ``scope`` at run time, so a schedule that targets a
 keyword group runs whatever keywords are in the group when it fires. Schedules
@@ -27,7 +35,8 @@ Routes (mutations are Admin-only):
     GET    /api/schedules/{id}
     PUT    /api/schedules/{id}         full update (name, form, scope, enabled)
     DELETE /api/schedules/{id}
-    POST   /api/schedules/{id}/run     start an analysis now with the schedule's scope
+    POST   /api/schedules/{id}/run     start the schedule's run now
+    GET    /api/schedules/rank-trackers  the rank trackers' schedules (read-only; edited on the tracker)
 """
 
 import json
@@ -71,6 +80,14 @@ dynamodb = boto3.resource('dynamodb')
 
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 SCHEDULE_ROLE_ARN = os.environ['SCHEDULE_ROLE_ARN']
+#: What each kind of schedule starts: its state machine ARN and the name a new schedule of it gets.
+KINDS: dict[str, tuple[str, str]] = {
+    'analysis': (STATE_MACHINE_ARN, 'Scheduled analysis'),
+    'domain_snapshots': (os.environ.get('SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN', ''), 'Domain traffic snapshots'),
+    'backlink_snapshots': (os.environ.get('SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN', ''), 'Backlink snapshots'),
+}
+SNAPSHOT_SCOPE_SUMMARY = 'every owned and competitor domain'
+RANK_TRACKER_SCHEDULE_GROUP = 'citation-analysis-seo-rank'
 KEYWORD_GROUPS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORD_GROUPS', 'CitationAnalysis-KeywordGroups')
 SCHEDULE_GROUP = 'citation-analysis-schedules'
 # GET /api/schedules pages: schedules per page, and GetSchedule calls in flight
@@ -86,7 +103,6 @@ MAX_DISPLAY_NAME_LENGTH = 100
 MAX_TIMEZONE_LENGTH = 50
 # 29-31 would silently skip the months that lack that day.
 MAX_DAY_OF_MONTH = 28
-DEFAULT_DISPLAY_NAME = 'Scheduled analysis'
 DEFAULT_FORM: dict[str, Any] = {
     'frequency': 'daily',
     'time': '09:00',
@@ -212,12 +228,14 @@ def parse_cron(expression: str, timezone: str) -> dict[str, Any] | None:
 # Descriptor: what is stored in Target.Input and what the API returns
 # =============================================================================
 
-def _target_input(schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any]) -> str:
+def _target_input(schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any] | None,
+                  kind: str = 'analysis') -> str:
     return json.dumps({
         'schedule_id': schedule_id,
         'display_name': display_name,
         'form': form,
         'scope': scope,
+        'kind': kind,
     })
 
 
@@ -253,10 +271,12 @@ def describe_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
     form = None
     display_name = name
 
+    kind = str(parsed.get('kind') or 'analysis') if parsed else 'analysis'
     if parsed and not legacy:
         display_name = str(parsed.get('display_name') or detail.get('Description') or name).strip() or name
         form, _error, _field = validate_form(parsed.get('form') or {}) if isinstance(parsed.get('form'), dict) else (None, None, None)
-        scope, _scope_error = validate_scope(parsed.get('scope'))
+        if kind == 'analysis':
+            scope, _scope_error = validate_scope(parsed.get('scope'))
     elif parsed and parsed.get('source') == 'dynamodb':
         scope = {'mode': 'all'}
     elif parsed and isinstance(parsed.get('keywords'), list):
@@ -264,6 +284,10 @@ def describe_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
 
     if form is None:
         form = parse_cron(expression, timezone)
+    if kind == 'analysis':
+        scope_summary = describe_scope(scope) if scope else (f'{len(keywords)} keyword(s)' if keywords else 'unknown scope')
+    else:
+        scope_summary = SNAPSHOT_SCOPE_SUMMARY
 
     return {
         'id': name,
@@ -275,7 +299,8 @@ def describe_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
         'timezone': timezone,
         'form': form,
         'scope': scope,
-        'scope_summary': describe_scope(scope) if scope else (f'{len(keywords)} keyword(s)' if keywords else 'unknown scope'),
+        'scope_summary': scope_summary,
+        'kind': kind,
         'keywords': keywords,
         'legacy': legacy,
         'description': detail.get('Description', ''),
@@ -377,6 +402,16 @@ def _validate_scope_request(value: Any) -> dict[str, Any]:
     return scope
 
 
+def _validate_kind(value: Any) -> str:
+    """A known kind whose state machine is deployed (``analysis`` when absent)."""
+    kind = 'analysis' if value is None else value
+    if not isinstance(kind, str) or kind not in KINDS:
+        raise _InvalidRequest(f"kind must be one of: {', '.join(KINDS)}", 'kind')
+    if not KINDS[kind][0]:
+        raise _InvalidRequest(f'{kind} schedules need the SEO stack, which is not deployed', 'kind')
+    return kind
+
+
 def _validate_enabled(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -453,7 +488,8 @@ def _get_handler(event: dict[str, Any], context: Any, limit: int, next_token: st
     return success_response(describe_schedule(detail), event)
 
 
-def _write_schedule(action: str, schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any], enabled: bool) -> None:
+def _write_schedule(action: str, schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any] | None,
+                    enabled: bool, kind: str = 'analysis') -> None:
     """CreateSchedule or UpdateSchedule with the full v2 definition (UpdateSchedule is a full replace)."""
     call = scheduler.create_schedule if action == 'create' else scheduler.update_schedule
     call(
@@ -465,14 +501,15 @@ def _write_schedule(action: str, schedule_id: str, display_name: str, form: dict
         Description=display_name,
         FlexibleTimeWindow={'Mode': 'OFF'},
         Target={
-            'Arn': STATE_MACHINE_ARN,
+            'Arn': KINDS[kind][0],
             'RoleArn': SCHEDULE_ROLE_ARN,
-            'Input': _target_input(schedule_id, display_name, form, scope),
+            'Input': _target_input(schedule_id, display_name, form, scope, kind),
         },
     )
 
 
-def _written_detail(schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any], enabled: bool) -> dict[str, Any]:
+def _written_detail(schedule_id: str, display_name: str, form: dict[str, Any], scope: dict[str, Any] | None, enabled: bool,
+                    kind: str = 'analysis') -> dict[str, Any]:
     """What GetSchedule would return for the definition just written."""
     return {
         'Name': schedule_id,
@@ -480,7 +517,7 @@ def _written_detail(schedule_id: str, display_name: str, form: dict[str, Any], s
         'ScheduleExpression': build_cron(form),
         'ScheduleExpressionTimezone': form['timezone'],
         'State': 'ENABLED' if enabled else 'DISABLED',
-        'Target': {'Input': _target_input(schedule_id, display_name, form, scope)},
+        'Target': {'Input': _target_input(schedule_id, display_name, form, scope, kind)},
     }
 
 
@@ -488,13 +525,14 @@ def _written_view(
     schedule_id: str,
     display_name: str,
     form: dict[str, Any],
-    scope: dict[str, Any],
+    scope: dict[str, Any] | None,
     enabled: bool,
     *,
     message: str,
+    kind: str = 'analysis',
 ) -> dict[str, Any]:
     """The API view of the schedule just written, with the confirmation ``message``."""
-    return {**describe_schedule(_written_detail(schedule_id, display_name, form, scope, enabled)), 'message': message}
+    return {**describe_schedule(_written_detail(schedule_id, display_name, form, scope, enabled, kind)), 'message': message}
 
 
 @require_group(ADMIN_GROUP)
@@ -507,9 +545,11 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         )
 
     try:
-        display_name = _validate_display_name(body.get('display_name', body.get('name')), DEFAULT_DISPLAY_NAME)
+        kind = _validate_kind(body.get('kind'))
+        display_name = _validate_display_name(body.get('display_name', body.get('name')), KINDS[kind][1])
         form = _parse_form(_form_fields(body))
-        scope = _validate_scope_request(body.get('scope') or {'mode': 'all'})
+        # A snapshot run covers every owned and competitor domain: it has no keyword scope.
+        scope = _validate_scope_request(body.get('scope') or {'mode': 'all'}) if kind == 'analysis' else None
         enabled = _validate_enabled(body.get('enabled'), True)
     except _InvalidRequest as exc:
         return exc.response(event)
@@ -518,7 +558,7 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     schedule_id = _new_schedule_id()
     for _attempt in range(2):
         try:
-            _write_schedule('create', schedule_id, display_name, form, scope, enabled)
+            _write_schedule('create', schedule_id, display_name, form, scope, enabled, kind)
             break
         except scheduler.exceptions.ConflictException:
             # 32 random bits; a collision is a retry, not an error.
@@ -528,9 +568,9 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     else:
         return api_response(409, {'error': 'Could not allocate a schedule id, please retry'}, event)
 
-    logger.info('Created schedule %s (%r, %s)', schedule_id, display_name, describe_scope(scope))
+    logger.info('Created %s schedule %s (%r)', kind, schedule_id, display_name)
     return success_response(
-        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule created successfully'),
+        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule created successfully', kind=kind),
         event,
         201,
     )
@@ -568,24 +608,26 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         return not_found_response(resource='Schedule', event=event)
     current = describe_schedule(detail)
 
+    kind = current['kind']  # A schedule keeps its kind; another kind is another schedule.
     try:
         display_name = _validate_display_name(body.get('display_name', body.get('name')), current['display_name'])
         form = _parse_form(_form_fields(body), base=current.get('form'))
-        scope = _validate_scope_request(_scope_to_update(body, current))
+        scope = _validate_scope_request(_scope_to_update(body, current)) if kind == 'analysis' else None
         enabled = _validate_enabled(body.get('enabled'), current['enabled'])
+        _validate_kind(kind)
     except _InvalidRequest as exc:
         return exc.response(event)
 
     try:
-        _write_schedule('update', schedule_id, display_name, form, scope, enabled)
+        _write_schedule('update', schedule_id, display_name, form, scope, enabled, kind)
     except scheduler.exceptions.ResourceNotFoundException:
         return not_found_response(resource='Schedule', event=event)
     except scheduler.exceptions.ValidationException as exc:
         return validation_error(_validation_exception_message(exc), event)
 
-    logger.info('Updated schedule %s (%s, %s)', log_text(schedule_id), log_text(display_name), log_text(describe_scope(scope)))
+    logger.info('Updated %s schedule %s (%s)', kind, log_text(schedule_id), log_text(display_name))
     return success_response(
-        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule updated successfully'),
+        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule updated successfully', kind=kind),
         event,
     )
 
@@ -617,6 +659,8 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
     if not detail:
         return not_found_response(resource='Schedule', event=event)
     schedule = describe_schedule(detail)
+    if schedule['kind'] != 'analysis':
+        return _run_snapshots_now(event, schedule)
 
     execution_input: dict[str, Any] = {
         'schedule_id': schedule_id,
@@ -646,8 +690,70 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
     }, event, 202)
 
 
+def _run_snapshots_now(event: dict[str, Any], schedule: dict[str, Any]) -> dict[str, Any]:
+    """Start a snapshot schedule's run now (paid; the dashboard confirms first), as a timed run would."""
+    try:
+        arn = KINDS[_validate_kind(schedule['kind'])][0]
+    except _InvalidRequest as exc:
+        return exc.response(event)
+    execution_name = f'schedule-run-{get_timestamp_compact()}-{secrets.token_hex(2)}'
+    response = stepfunctions.start_execution(
+        stateMachineArn=arn, name=execution_name,
+        input=json.dumps({'schedule_id': schedule['id'], 'kind': schedule['kind'], 'triggered_by': 'schedule-run-now'}),
+    )
+    logger.info('Started %s for %s schedule %s', execution_name, schedule['kind'], log_text(schedule['id']))
+    return success_response({
+        'execution_arn': response['executionArn'],
+        'execution_name': execution_name,
+        'schedule_id': schedule['id'],
+        'scope_summary': schedule['scope_summary'],
+        'message': f"{schedule['display_name']} started ({schedule['scope_summary']})",
+    }, event, 202)
+
+
+def describe_tracker_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
+    """API shape of one rank tracker's schedule (a one-time ``at(...)`` schedule for its next slot)."""
+    parsed = _parse_target_input(detail.get('Target')) or {}
+    expression = str(detail.get('ScheduleExpression') or '')
+    next_run = expression[3:-1] + 'Z' if expression.startswith('at(') and expression.endswith(')') else None
+    return {
+        'id': detail.get('Name', ''),
+        'tracker_id': parsed.get('tracker_id'),
+        'display_name': str(detail.get('Description') or parsed.get('tracker_id') or ''),
+        'next_run_at': next_run,
+        'enabled': detail.get('State', 'ENABLED') == 'ENABLED',
+    }
+
+
+def _rank_tracker_schedules(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """GET /api/schedules/rank-trackers - the trackers' own schedules, read-only (each is edited on its tracker)."""
+    names: list[str] = []
+    params: dict[str, Any] = {'GroupName': RANK_TRACKER_SCHEDULE_GROUP, 'MaxResults': 100}
+    try:
+        while True:
+            response = scheduler.list_schedules(**params)
+            names.extend(summary['Name'] for summary in response.get('Schedules', []) if 'Name' in summary)
+            if not response.get('NextToken') or len(names) >= SCHEDULE_PAGE_MAX:
+                break
+            params['NextToken'] = response['NextToken']
+    except scheduler.exceptions.ResourceNotFoundException:
+        names = []  # No tracker has ever been scheduled: the group does not exist yet.
+
+    def detail(name: str) -> Mapping[str, Any] | None:
+        try:
+            return scheduler.get_schedule(Name=name, GroupName=RANK_TRACKER_SCHEDULE_GROUP)
+        except scheduler.exceptions.ResourceNotFoundException:
+            return None
+
+    with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
+        details = [item for item in pool.map(detail, names[:SCHEDULE_PAGE_MAX]) if item is not None]
+    schedules = sorted((describe_tracker_schedule(item) for item in details), key=lambda item: item['next_run_at'] or '')
+    return success_response({'schedules': schedules, 'count': len(schedules)}, event)
+
+
 @api_handler
 @route_handler({
+    ('GET', '/rank-trackers'): _rank_tracker_schedules,
     ('POST', '/run'): _run_schedule_handler,
     ('GET', None): _get_handler,
     ('POST', None): _create_schedule_handler,

@@ -247,6 +247,7 @@ class TestCreateSchedule:
             'display_name': 'Coruña',
             'form': {'frequency': 'weekly', 'time': '09:00', 'timezone': 'Europe/Madrid', 'day_of_week': 'MON', 'day_of_month': 1},
             'scope': {'mode': 'groups', 'group_ids': [GROUP_ID]},
+            'kind': 'analysis',
         }
 
     def test_defaults_to_all_keywords_and_a_daily_nine_oclock_utc_run(self, handler_module):
@@ -478,6 +479,7 @@ class TestUpdateSchedule:
             'display_name': 'Daily — all hotels',
             'form': {'frequency': 'daily', 'time': '09:00', 'timezone': 'UTC', 'day_of_week': 'MON', 'day_of_month': 1},
             'scope': {'mode': 'all'},
+            'kind': 'analysis',
         }
         assert body['legacy'] is False
 
@@ -605,3 +607,95 @@ class TestNonAdminCallers:
         assert status == 403
         assert mock_scheduler.method_calls == []
         assert mock_stepfunctions.method_calls == []
+
+
+DOMAIN_SNAPSHOTS_ARN = _test_env['SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN']
+
+
+def snapshot_detail(kind='domain_snapshots', schedule_id='sch-0d0d0d0d'):
+    """A GetSchedule response for a paid snapshot schedule (no keyword scope)."""
+    detail = v2_detail(schedule_id=schedule_id, display_name='Weekly domain traffic')
+    descriptor = {**json.loads(detail['Target']['Input']), 'scope': None, 'kind': kind}
+    return {**detail, 'Target': {**detail['Target'], 'Arn': DOMAIN_SNAPSHOTS_ARN, 'Input': json.dumps(descriptor)}}
+
+
+class TestSnapshotKinds:
+    """Paid SEO snapshot runs are Schedules too: they run only while one exists (TENETS.md, tenets 7 and 8)."""
+
+    def test_a_snapshot_schedule_starts_its_seo_state_machine_with_no_keyword_scope(self, handler_module):
+        status, body = parse_response(handler_module.handler(make_event('POST', body={
+            'kind': 'domain_snapshots', 'frequency': 'weekly', 'time': '04:00', 'day_of_week': 'MON',
+            'scope': {'mode': 'keywords', 'keyword_ids': ['ignored']},
+        }), {}))
+
+        assert status == 201
+        assert (created_kwargs()['Target']['Arn'], created_target_input()['kind'], created_target_input()['scope']) == (
+            DOMAIN_SNAPSHOTS_ARN, 'domain_snapshots', None,
+        )
+        assert (body['kind'], body['display_name'], body['scope_summary']) == (
+            'domain_snapshots', 'Domain traffic snapshots', 'every owned and competitor domain',
+        )
+
+    @pytest.mark.parametrize('kind', ['bogus', 7])
+    def test_refuses_an_unknown_kind(self, handler_module, kind):
+        status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': kind}), {}))
+
+        assert (status, body['field']) == (400, 'kind')
+        mock_scheduler.create_schedule.assert_not_called()
+
+    def test_refuses_a_snapshot_kind_when_the_seo_stack_is_not_deployed(self, handler_module, monkeypatch):
+        monkeypatch.setitem(handler_module.KINDS, 'backlink_snapshots', ('', 'Backlink snapshots'))
+
+        status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': 'backlink_snapshots'}), {}))
+
+        assert (status, body['field']) == (400, 'kind')
+
+    def test_an_update_keeps_the_kind_and_its_target(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+
+        status, body = parse_response(handler_module.handler(
+            id_event('PUT', 'sch-0d0d0d0d', body={'kind': 'analysis', 'time': '05:00'}), {},
+        ))
+
+        kwargs = mock_scheduler.update_schedule.call_args.kwargs
+        assert (status, body['kind'], kwargs['Target']['Arn']) == (200, 'domain_snapshots', DOMAIN_SNAPSHOTS_ARN)
+
+    def test_run_now_starts_the_snapshot_state_machine(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+
+        status, _body = parse_response(handler_module.handler(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), {}))
+
+        kwargs = mock_stepfunctions.start_execution.call_args.kwargs
+        assert (status, kwargs['stateMachineArn'], json.loads(kwargs['input'])['kind']) == (202, DOMAIN_SNAPSHOTS_ARN, 'domain_snapshots')
+
+    def test_a_schedule_written_before_kinds_is_an_analysis(self, handler_module):
+        assert handler_module.describe_schedule(v2_detail())['kind'] == 'analysis'
+
+
+class TestRankTrackerSchedules:
+    """GET /api/schedules/rank-trackers: the trackers' own one-time schedules, read-only, soonest first."""
+
+    def test_lists_each_trackers_next_check_soonest_first(self, handler_module):
+        mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'rank-b'}, {'Name': 'rank-a'}]}
+        details = {
+            'rank-a': {'Name': 'rank-a', 'Description': 'Hotels', 'ScheduleExpression': 'at(2026-11-10T05:12:00)',
+                       'Target': {'Input': json.dumps({'step': 'rank.due', 'tracker_id': 'a'})}},
+            'rank-b': {'Name': 'rank-b', 'Description': 'Flights', 'ScheduleExpression': 'at(2026-11-09T04:30:00)',
+                       'Target': {'Input': json.dumps({'step': 'rank.due', 'tracker_id': 'b'})}},
+        }
+        mock_scheduler.get_schedule.side_effect = lambda Name, GroupName: details[Name]
+
+        status, body = parse_response(handler_module.handler(make_event('GET', path='/api/schedules/rank-trackers'), {}))
+
+        assert status == 200
+        assert [(item['tracker_id'], item['display_name'], item['next_run_at']) for item in body['schedules']] == [
+            ('b', 'Flights', '2026-11-09T04:30:00Z'), ('a', 'Hotels', '2026-11-10T05:12:00Z'),
+        ]
+        assert mock_scheduler.list_schedules.call_args.kwargs['GroupName'] == 'citation-analysis-seo-rank'
+
+    def test_answers_an_empty_list_before_any_tracker_was_scheduled(self, handler_module):
+        mock_scheduler.list_schedules.side_effect = SchedulerResourceNotFound()
+
+        status, body = parse_response(handler_module.handler(make_event('GET', path='/api/schedules/rank-trackers'), {}))
+
+        assert (status, body['schedules']) == (200, [])

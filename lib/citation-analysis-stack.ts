@@ -28,6 +28,9 @@ import {
 import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion, webSearchPolicyStatement } from './constructs/web-search';
 import type { McpServerInputs } from './constructs/mcp-server';
 import type { SeoStackInputs } from './seo-stack';
+import { BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME } from './constructs/seo-backlinks';
+import { SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE } from './constructs/seo-domain';
+import { RANK_TRACKER_SCHEDULE_GROUP } from './constructs/seo-rank-tracking';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import {
   apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
@@ -368,6 +371,11 @@ class WebBuildRequiredError extends Error {
     super('Web dashboard not built. Run "./scripts/deploy.sh" for full deployment, or "cd web && npm install && npm run build" before "cdk deploy".');
     this.name = 'WebBuildRequiredError';
   }
+}
+
+/** The ARN of a SEO-stack state machine, by its fixed name (no cross-stack reference: the SEO stack depends on this one). */
+function seoStateMachineArn(stack: cdk.Stack, name: string): string {
+  return stack.formatArn({ service: 'states', resource: 'stateMachine', resourceName: name, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME });
 }
 
 export class CitationAnalysisStack extends cdk.Stack {
@@ -1855,6 +1863,9 @@ export class CitationAnalysisStack extends cdk.Stack {
         // POST /api/markets asks Bedrock for each market's local keyword.
         ...bedrockTierEnv,
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
+        // Schedule kinds of the SEO stack's paid snapshot runs (by name: the SEO stack depends on this one).
+        SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN: seoStateMachineArn(this, SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE),
+        SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN: seoStateMachineArn(this, BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME),
         SCHEDULE_ROLE_ARN: schedulerRole.roleArn,
         SECRETS_PREFIX: 'citation-analysis/',
       },
@@ -1962,6 +1973,15 @@ export class CitationAnalysisStack extends cdk.Stack {
       [`arn:aws:scheduler:${this.region}:${this.account}:schedule/citation-analysis-schedules/*`]
     );
     allow(configMgmtFunction, ['scheduler:ListSchedules'], ['*']);
+    // The rank trackers' own schedules (SEO stack), listed read-only on the Schedule page.
+    allow(configMgmtFunction, ['scheduler:GetSchedule'], [
+      `arn:aws:scheduler:${this.region}:${this.account}:schedule/${RANK_TRACKER_SCHEDULE_GROUP}/*`,
+    ]);
+    // "Run now" of a snapshot schedule, and the timed runs of one.
+    const seoSnapshotMachines = [SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE, BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME]
+      .map((name) => seoStateMachineArn(this, name));
+    allow(configMgmtFunction, ['states:StartExecution'], seoSnapshotMachines);
+    allow(schedulerRole, ['states:StartExecution'], seoSnapshotMachines);
     allow(
       configMgmtFunction,
       ['scheduler:CreateScheduleGroup', 'scheduler:GetScheduleGroup'],
