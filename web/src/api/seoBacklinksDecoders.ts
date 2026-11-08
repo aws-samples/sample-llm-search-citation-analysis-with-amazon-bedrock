@@ -7,7 +7,6 @@ import { isFiniteNumber } from './contentStudioDecoderPrimitives';
 import { isRecord } from '../types/domain/keywordDecoders';
 import { isExportAnswer } from './seoDecoders';
 import type {
-  BacklinkScheduleResponse,
   BacklinkSnapshotRunResponse,
   BacklinkSnapshotsResponse,
   BacklinksOverviewResponse,
@@ -168,8 +167,7 @@ function isTrackedDomain(value: unknown): boolean {
 }
 
 export function isBacklinkSnapshotsResponse(value: unknown): value is BacklinkSnapshotsResponse {
-  return matches(value, { schedule_enabled: 'boolean' })
-    && Array.isArray(value.domains) && value.domains.every(isTrackedDomain);
+  return isRecord(value) && Array.isArray(value.domains) && value.domains.every(isTrackedDomain);
 }
 
 export function isBacklinkSnapshotRunResponse(value: unknown): value is BacklinkSnapshotRunResponse {
@@ -177,8 +175,4 @@ export function isBacklinkSnapshotRunResponse(value: unknown): value is Backlink
     started: 'boolean',
     domains: 'number',
   });
-}
-
-export function isBacklinkScheduleResponse(value: unknown): value is BacklinkScheduleResponse {
-  return matches(value, { schedule_enabled: 'boolean' });
 }

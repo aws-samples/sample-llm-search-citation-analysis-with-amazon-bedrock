@@ -302,7 +302,7 @@ class TestSnapshots:
     def test_prices_a_run_at_one_summary_per_domain(self, call):
         answer = call('GET', '/api/seo/backlinks/snapshots')
 
-        assert (answer.body['estimated_run_cost_usd'], answer.body['schedule_enabled']) == (round(2 * SUMMARY_USD, 6), False)
+        assert answer.body['estimated_run_cost_usd'] == round(2 * SUMMARY_USD, 6)
 
     def test_refuses_snapshot_now_to_a_non_admin(self, call):
         answer = call('POST', '/api/seo/backlinks/snapshots', {})
@@ -313,8 +313,8 @@ class TestSnapshots:
         answer = call('POST', '/api/seo/backlinks/snapshots', {}, groups='Admin')
 
         started = answer.states.start_execution.call_args.kwargs
-        assert (answer.status, started['stateMachineArn'], json.loads(started['input'])['scheduled']) == (
-            202, STATE_MACHINE_ARN, False,
+        assert (answer.status, started['stateMachineArn'], json.loads(started['input'])['step']) == (
+            202, STATE_MACHINE_ARN, 'backlinks.snapshot_all',
         )
 
     def test_refuses_a_second_run_while_one_is_running(self, call):
@@ -322,12 +322,3 @@ class TestSnapshots:
 
         assert (answer.status, answer.body['code'], answer.states.start_execution.call_count) == (409, 'ALREADY_RUNNING', 0)
 
-    def test_turns_the_weekly_schedule_on_for_an_admin(self, call):
-        answer = call('PUT', '/api/seo/backlinks/snapshots/schedule', {'enabled': True}, groups='Admin')
-
-        assert (answer.status, answer.body, answer.snapshots.items[0]['enabled']) == (200, {'schedule_enabled': True}, True)
-
-    def test_refuses_the_schedule_to_a_non_admin(self, call):
-        answer = call('PUT', '/api/seo/backlinks/snapshots/schedule', {'enabled': True})
-
-        assert (answer.status, answer.snapshots.items) == (403, [])

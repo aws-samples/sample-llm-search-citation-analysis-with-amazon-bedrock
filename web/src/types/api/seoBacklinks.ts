@@ -163,14 +163,10 @@ export interface TrackedBacklinkDomain {
   readonly snapshots: readonly BacklinkSnapshotPoint[];
 }
 
-export interface BacklinkSnapshotsResponse {
-  readonly schedule_enabled: boolean;
-  readonly domains: readonly TrackedBacklinkDomain[];
-}
+export interface BacklinkSnapshotsResponse {readonly domains: readonly TrackedBacklinkDomain[];}
 
 export interface BacklinkSnapshotRunResponse {
   readonly started: boolean;
   readonly domains: number;
 }
 
-export interface BacklinkScheduleResponse {readonly schedule_enabled: boolean;}

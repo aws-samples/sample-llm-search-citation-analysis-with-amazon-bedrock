@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -14,8 +14,6 @@ from shared.domain_snapshots import (
     keyword_traffic,
     latest_snapshot,
     load_snapshot_keywords,
-    schedule_enabled,
-    set_schedule,
     summary_json,
     take_snapshot,
 )
@@ -120,22 +118,3 @@ class TestReads:
 def test_distinct_domains_drops_domains_another_entry_covers(domains, expected):
     assert distinct_domains(domains) == expected
 
-
-class TestScheduleSetting:
-    def test_is_off_until_an_admin_turns_it_on(self):
-        table = MagicMock()
-        table.get_item.return_value = {}
-
-        assert schedule_enabled(table) is False
-        table.get_item.assert_called_once_with(Key={'pk': '#settings', 'snapshot_at': 'schedule'})
-
-    def test_records_who_turned_it_on_and_when(self):
-        table = MagicMock()
-        set_schedule(table, enabled=True, updated_by='admin-sub', updated_at='2026-11-08T00:00:00Z')
-
-        assert table.put_item.call_args.kwargs['Item'] == {
-            'pk': '#settings', 'snapshot_at': 'schedule', 'enabled': True,
-            'updated_by': 'admin-sub', 'updated_at': '2026-11-08T00:00:00Z',
-        }
-        table.get_item.return_value = {'Item': table.put_item.call_args.kwargs['Item']}
-        assert schedule_enabled(table) is True

@@ -11,9 +11,8 @@ measured clicks.
   measured history is kept like every other record (TENETS.md, D2 and D5).
 * Stored keyword: ``keyword``, ``position`` (organic rank, ``rank_group``, 1-100), ``etv``, ``url``,
   ``search_volume``.
-* The weekly sweep over every owned and competitor domain is paid, so it is off until an Admin turns it on:
-  the setting is the item ``pk='#settings'``, ``snapshot_at='schedule'`` (``#`` never starts a domain), the same
-  way the backlink snapshots keep theirs. An Admin's one-off snapshot runs whatever the setting.
+* The sweep over every owned and competitor domain is paid, so it runs only when an Admin schedules it
+  (Operations > Schedule, an EventBridge Scheduler schedule); an Admin's one-off snapshot runs on request.
 * An empty answer (no keyword, no traffic) is not stored when the previous snapshot of the pair had data:
   DataForSEO occasionally answers a known domain with nothing, and a stored empty snapshot would read as
   "all traffic lost" in every comparison. A pair with no history keeps its empty first snapshot, so it shows
@@ -22,7 +21,6 @@ measured clicks.
 
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import os
@@ -31,7 +29,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from shared import snapshot_schedule
 from shared.bounded_reads import newest_items
 from shared.dataforseo_domain import DomainOverview, RankedKeyword, domain_overview, ranked_keywords
 from shared.dataforseo_domain_scope import ResearchTarget
@@ -211,16 +208,6 @@ def take_snapshot(
     return {'status': 'stored', 'keywords': len(keywords)}
 
 
-#: The weekly sweep's setting (``#`` never starts a domain, so no snapshot uses this key).
-SCHEDULE_KEY = {'pk': '#settings', 'snapshot_at': 'schedule'}
-
-
-#: ``schedule_enabled(table)``: whether an Admin turned the weekly sweep on (off when never set).
-schedule_enabled = functools.partial(snapshot_schedule.schedule_enabled, key=SCHEDULE_KEY)
-#: ``set_schedule(table, enabled=, updated_by=, updated_at=)``: record an Admin's choice.
-set_schedule = functools.partial(snapshot_schedule.set_schedule, key=SCHEDULE_KEY)
-
-
 def distinct_domains(domains: Sequence[str]) -> list[str]:
     """``domains`` without the ones another entry already covers as a subdomain (a snapshot rolls them up)."""
     unique = sorted(set(domains))
@@ -237,8 +224,6 @@ __all__ = [
     'latest_snapshot',
     'list_snapshots',
     'load_snapshot_keywords',
-    'schedule_enabled',
-    'set_schedule',
     'snapshot_item',
     'snapshot_s3_key',
     'summary_json',

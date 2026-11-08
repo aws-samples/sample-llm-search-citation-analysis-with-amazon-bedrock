@@ -8,8 +8,8 @@ The tracked domains are the brand config's ``first_party_domains`` (``owned``) a
 (``competitor``, with the competitor's name), normalized like citations are (lower-case host without ``www.``),
 deduplicated with the owned role winning, and limited to hosts the Backlinks API accepts.
 
-The weekly schedule is off until an Admin turns it on: its setting is the item ``domain='#settings'``,
-``snapshot_at='schedule'`` of the same table (``#`` never starts a domain, so it cannot collide).
+A run is started by an Admin ("Snapshot now") or by a Schedule (Operations > Schedule, an EventBridge Scheduler
+schedule); nothing runs while no schedule exists.
 """
 
 from __future__ import annotations
@@ -22,15 +22,12 @@ from typing import Any, Literal
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from shared import snapshot_schedule
 from shared.backlinks_target import is_registrable_host
 from shared.dynamo_decimal import convert_floats_to_decimal, plain
 from shared.env_vars import resolve_table_env
 from shared.kpi_engine import normalize_domain
 
 TABLE_ENV = 'DYNAMODB_TABLE_SEO_BACKLINK_SNAPSHOTS'
-SETTINGS_DOMAIN = '#settings'
-SCHEDULE_SORT_KEY = 'schedule'
 HISTORY_POINTS = 110
 """About two years of weekly points per domain."""
 
@@ -121,13 +118,3 @@ def latest_snapshot_at(table: Any, domain: str) -> str | None:
     items = answer.get('Items') or []
     return str(items[0]['snapshot_at']) if items else None
 
-
-SCHEDULE_KEY = {'domain': SETTINGS_DOMAIN, 'snapshot_at': SCHEDULE_SORT_KEY}
-
-
-def schedule_enabled(table: Any) -> bool:
-    return snapshot_schedule.schedule_enabled(table, SCHEDULE_KEY)
-
-
-def set_schedule(table: Any, **choice: Any) -> None:
-    snapshot_schedule.set_schedule(table, SCHEDULE_KEY, **choice)

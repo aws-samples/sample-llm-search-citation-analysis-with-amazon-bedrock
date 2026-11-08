@@ -8,8 +8,6 @@ from shared.backlink_snapshots import (
     TrackedDomain,
     domain_history,
     latest_snapshot_at,
-    schedule_enabled,
-    set_schedule,
     snapshot_item,
     tracked_domains,
 )
@@ -73,10 +71,3 @@ def test_finds_the_time_of_the_latest_snapshot():
 def test_reads_no_latest_snapshot_for_a_new_domain():
     assert latest_snapshot_at(FakeSnapshotsTable(), 'example.com') is None
 
-
-def test_keeps_the_weekly_schedule_off_until_an_admin_turns_it_on():
-    table = FakeSnapshotsTable()
-    before = schedule_enabled(table)
-    set_schedule(table, enabled=True, updated_by='admin@example.com', updated_at='2026-10-05T06:00:00Z')
-
-    assert (before, schedule_enabled(table)) == (False, True)

@@ -1,7 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as events from 'aws-cdk-lib/aws-events';
-import * as eventTargets from 'aws-cdk-lib/aws-events-targets';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import { allow } from './permissions';
 import { SeoFeatureConstruct, stringKey } from './seo-feature';
@@ -19,8 +17,9 @@ const SNAPSHOT_TASK_TIMEOUT = cdk.Duration.minutes(5);
 const LIST_TASK_TIMEOUT = cdk.Duration.minutes(1);
 const EXECUTION_TIMEOUT = cdk.Duration.hours(3);
 
-/** What both functions do on the snapshots table: read snapshots and the setting, put a snapshot or the setting. */
-const SNAPSHOT_TABLE_ACTIONS = ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem'];
+/** The router reads snapshots; the jobs function also puts them. No update, batch or delete (TENETS.md, D1 and D5). */
+const SNAPSHOT_READ_ACTIONS = ['dynamodb:GetItem', 'dynamodb:Query'];
+const SNAPSHOT_WRITE_ACTIONS = [...SNAPSHOT_READ_ACTIONS, 'dynamodb:PutItem'];
 
 /** Errors of an invocation Lambda refused before running the function: safe to retry, nothing was billed. */
 const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.ServiceException'];
@@ -37,11 +36,10 @@ const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.Servi
  *   DataForSEO work, so it is never retried, not even on a Lambda service
  *   error (the call may already have been sent); a failed snapshot is caught
  *   so the others still run. Only the free listing retries throttles.
- * - A weekly EventBridge rule (Monday 04:00 UTC) starts it over every owned
- *   and competitor domain, and the listing step does nothing until an Admin
- *   turns the weekly sweep on (`PUT /api/seo/domains/snapshots/schedule`; off
- *   by default, since it is recurring paid work). The Admin route starts it
- *   for one target whatever the setting.
+ * - A Schedule (Operations > Schedule, kind "Domain traffic snapshots": an
+ *   EventBridge Scheduler schedule an Admin creates in the main stack) starts
+ *   it over every owned and competitor domain; nothing runs while no schedule
+ *   exists. The Admin route starts it for one target.
  * - The router reads snapshots, starts executions and reads the
  *   recommendation statuses; the jobs function writes snapshots.
  */
@@ -53,21 +51,12 @@ export class SeoDomain extends SeoFeatureConstruct {
       partitionKey: stringKey('pk'),
       sortKey: stringKey('snapshot_at'),
     });
-    // Per action, no delete (TENETS.md, tenet 6 and D5): both read snapshots; the router writes the Admin's
-    // weekly-sweep setting, the jobs function writes snapshots.
-    snapshotsTable.grant(router, ...SNAPSHOT_TABLE_ACTIONS);
-    snapshotsTable.grant(jobs, ...SNAPSHOT_TABLE_ACTIONS);
+    snapshotsTable.grant(router, ...SNAPSHOT_READ_ACTIONS);
+    snapshotsTable.grant(jobs, ...SNAPSHOT_WRITE_ACTIONS);
 
     const stateMachine = this.snapshotStateMachine();
     stateMachine.grantStartExecution(router);
 
-    new events.Rule(this, 'WeeklySnapshotRule', {
-      ruleName: 'CitationAnalysis-SeoDomainSnapshotsWeekly',
-      description: 'Weekly estimated-traffic snapshots of every owned and competitor domain',
-      schedule: events.Schedule.cron({ weekDay: 'MON', hour: '4', minute: '0' }),
-    }).addTarget(new eventTargets.SfnStateMachine(stateMachine, {
-      input: events.RuleTargetInput.fromObject({}),
-    }));
 
     const statusTable = dynamodb.Table.fromTableName(this, 'RecommendationStatusTable', RECOMMENDATION_STATUS_TABLE);
     allow(router, ['dynamodb:BatchGetItem'], [statusTable.tableArn]);
@@ -84,7 +73,6 @@ export class SeoDomain extends SeoFeatureConstruct {
       ['domains/pages', ['POST']],
       ['domains/competitors', ['POST']],
       ['domains/snapshots', ['GET', 'POST']],
-      ['domains/snapshots/schedule', ['GET', 'PUT']],
       ['insights', ['GET']],
     );
   }

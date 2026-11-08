@@ -39,7 +39,6 @@ import { DomainOverviewSummary } from './DomainOverviewSummary';
 import { DomainPagesPanel } from './DomainPagesPanel';
 import { DomainSearchForm } from './DomainSearchForm';
 import { DomainSnapshotButton } from './DomainSnapshotButton';
-import { DomainSnapshotSchedule } from './DomainSnapshotSchedule';
 import { DomainSnapshotHistory } from './DomainSnapshotHistory';
 import { useSettingsDomains } from '../settingsDomains';
 
@@ -159,7 +158,6 @@ function ConfiguredDomainOverview() {
           <DomainOverviewSummary overview={overviewState.response} />
           <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4">
             {isAdmin && <DomainSnapshotButton domain={overviewState.response.hostname} marketId={overviewState.response.market_id} />}
-            {isAdmin && <DomainSnapshotSchedule />}
             <DomainSnapshotHistory key={overviewState.response.hostname} domain={overviewState.response.hostname}
               marketId={overviewState.response.market_id} />
           </div>

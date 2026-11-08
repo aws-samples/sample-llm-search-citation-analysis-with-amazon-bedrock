@@ -5,18 +5,16 @@
  * `fetchSerpCompetitors`) are paid DataForSEO Labs calls: callers run them only
  * on an explicit user action, and nothing here retries them (a timed-out call
  * may already be billed). Snapshots and recommendations are reads of stored
- * data; `takeDomainSnapshot` (Admin) starts one paid snapshot job, and
- * `setDomainSnapshotSchedule` (Admin) turns the paid weekly sweep on or off.
+ * data; `takeDomainSnapshot` (Admin) starts one paid snapshot job.
  */
 import {
-  seoGet, seoPost, seoSend, type SeoRequestOptions
+  seoGet, seoPost, type SeoRequestOptions
 } from './seoRequest';
 import { decodeSeo } from './seoDecoders';
 import {
   isDomainKeywordsResponse,
   isDomainOverviewResponse,
   isDomainPagesResponse,
-  isDomainSnapshotScheduleResponse,
   isDomainSnapshotsResponse,
   isSeoInsightsResponse,
   isSerpCompetitorsResponse,
@@ -28,7 +26,6 @@ import type {
   DomainOverviewResponse,
   DomainPagesRequest,
   DomainPagesResponse,
-  DomainSnapshotScheduleResponse,
   DomainSnapshotsResponse,
   DomainTargetRequest,
   SeoInsightsResponse,
@@ -77,14 +74,6 @@ export async function takeDomainSnapshot(
   }, options: SeoRequestOptions = {}
 ): Promise<TakeSnapshotResponse> {
   return decodeSeo(await seoPost('/domains/snapshots', request, options), isTakeSnapshotResponse, 'snapshot start');
-}
-
-export async function fetchDomainSnapshotSchedule(options: SeoRequestOptions = {}): Promise<DomainSnapshotScheduleResponse> {
-  return decodeSeo(await seoGet('/domains/snapshots/schedule', {}, options), isDomainSnapshotScheduleResponse, 'snapshot schedule');
-}
-
-export async function setDomainSnapshotSchedule(enabled: boolean): Promise<DomainSnapshotScheduleResponse> {
-  return decodeSeo(await seoSend('PUT', '/domains/snapshots/schedule', { enabled }), isDomainSnapshotScheduleResponse, 'snapshot schedule');
 }
 
 export async function fetchSeoInsights(

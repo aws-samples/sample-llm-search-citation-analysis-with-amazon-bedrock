@@ -8,7 +8,6 @@ import {
   fetchBacklinkSnapshots,
   fetchBacklinksOverview,
   fetchBacklinksTable,
-  setBacklinkSnapshotSchedule,
   startBacklinkSnapshots,
 } from './seoBacklinks';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
@@ -125,11 +124,5 @@ describe('backlink snapshots', () => {
       url: 'https://seo.example.com/prod/api/seo/backlinks/snapshots',
       body: {},
     });
-  });
-
-  it('puts the weekly schedule setting', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({ schedule_enabled: true }));
-
-    await expect(setBacklinkSnapshotSchedule(true)).resolves.toStrictEqual({ schedule_enabled: true });
   });
 });

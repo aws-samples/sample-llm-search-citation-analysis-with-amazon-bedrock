@@ -4,23 +4,21 @@
  * The overview and the three tables are paid DataForSEO lookups: they are
  * sent only when the user asks (Search, a tab, a page, a sort, an expanded
  * domain) and never retried, since a timed-out call may already be billed.
- * The snapshot list is a free read. Starting a snapshot run and the weekly
- * schedule are Admin only. Every answer passes the guards of
+ * The snapshot list is a free read. Starting a snapshot run is Admin only; a
+ * weekly run is a Schedule (Operations > Schedule). Every answer passes the guards of
  * `./seoBacklinksDecoders`.
  */
 import { decodeSeo } from './seoDecoders';
 import {
-  isBacklinkScheduleResponse,
   isBacklinkSnapshotRunResponse,
   isBacklinkSnapshotsResponse,
   isBacklinksOverviewResponse,
   isBacklinksTableResponse,
 } from './seoBacklinksDecoders';
 import {
-  seoGet, seoPost, seoSend, type SeoRequestOptions
+  seoGet, seoPost, type SeoRequestOptions
 } from './seoRequest';
 import type {
-  BacklinkScheduleResponse,
   BacklinkSnapshotRunResponse,
   BacklinkSnapshotsResponse,
   BacklinksOverviewResponse,
@@ -58,9 +56,4 @@ export async function fetchBacklinkSnapshots(options: SeoRequestOptions = {}): P
 export async function startBacklinkSnapshots(): Promise<BacklinkSnapshotRunResponse> {
   const payload = await seoPost('/backlinks/snapshots', {});
   return decodeSeo(payload, isBacklinkSnapshotRunResponse, 'snapshot run');
-}
-
-export async function setBacklinkSnapshotSchedule(enabled: boolean): Promise<BacklinkScheduleResponse> {
-  const payload = await seoSend('PUT', '/backlinks/snapshots/schedule', { enabled });
-  return decodeSeo(payload, isBacklinkScheduleResponse, 'snapshot schedule');
 }

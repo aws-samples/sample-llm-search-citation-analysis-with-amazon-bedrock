@@ -20,7 +20,6 @@ describe('SeoBacklinks routes', () => {
       'POST /api/seo/backlinks/rows',
       'POST /api/seo/backlinks/snapshots',
       'POST /api/seo/backlinks/top-pages',
-      'PUT /api/seo/backlinks/snapshots/schedule',
     ]);
   });
 });
@@ -64,18 +63,11 @@ describe('Backlink snapshot runs', () => {
       resolvePath(task, ['Retry']),
     ]).toStrictEqual([{
       step: 'backlinks.snapshot_all',
-      'scheduled.$': '$.scheduled',
     }, 900, undefined]);
   });
 
-  it('starts the run every Monday at 06:00 UTC as a scheduled run, never retried by the rule', () => {
-    const [target] = Array.isArray(snapshot.ruleTargets) ? snapshot.ruleTargets : [];
-
-    expect([snapshot.ruleSchedule, resolvePath(target, ['Input']), resolvePath(target, ['RetryPolicy'])]).toStrictEqual([
-      'cron(0 6 ? * MON *)',
-      '{"scheduled":true}',
-      { MaximumRetryAttempts: 0 },
-    ]);
+  it('has no always-on weekly rule: a Schedule an Admin creates starts it (TENETS.md, tenets 7 and 8)', () => {
+    expect(snapshot.ruleNames.filter((name) => name.includes('BacklinkSnapshots'))).toStrictEqual([]);
   });
 
   it('lets the router start and list snapshot runs only', () => {

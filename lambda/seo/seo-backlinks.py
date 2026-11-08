@@ -7,10 +7,9 @@ SEO Backlinks API (response shapes in ``web/src/types/api/seoBacklinks.ts``):
 - POST /api/seo/backlinks/top-pages         - one page of the target's most linked pages (paid)
 - GET  /api/seo/backlinks/snapshots         - stored weekly snapshots of the owned and competitor domains (free)
 - POST /api/seo/backlinks/snapshots         - Admin: snapshot every tracked domain now (paid, one call per domain)
-- PUT  /api/seo/backlinks/snapshots/schedule - Admin: turn the weekly snapshot on or off
 
 The paid lookups are open to every signed-in user (one-off spend); snapshots are batch and recurring spend, so
-starting them and scheduling them is Admin only.
+starting one is Admin only; a weekly run is a Schedule (Operations > Schedule).
 
 Every target is normalized and every filter checked against DataForSEO's 8-condition budget before any paid call
 (``shared.backlinks_target``, ``shared.backlinks_filters``): a refused request is a 400 ``VALIDATION_ERROR`` with
@@ -44,11 +43,10 @@ sys.path.insert(0, '/opt/python')
 import boto3
 from seo_export import EXPORT_SCHEMA, ExportWindowError, export_pricing, row_window
 from seo_http import CachePolicy, brand_config, seo_error, seo_route, validation_errors
-from seo_schedule import schedule_setter
 
 from shared.api_response import success_response
 from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
-from shared.backlink_snapshots import domain_history, schedule_enabled, set_schedule, snapshots_table, tracked_domains
+from shared.backlink_snapshots import domain_history, snapshots_table, tracked_domains
 from shared.backlinks_filters import (
     TABS,
     FilterError,
@@ -282,7 +280,6 @@ def handle_snapshots(event: dict[str, Any], _context: Any, *_args: Any, **_kwarg
     table = snapshots_table()
     domains = tracked_domains(brand_config())
     return success_response({
-        'schedule_enabled': schedule_enabled(table),
         'estimated_run_cost_usd': round(len(domains) * SUMMARY_USD, 6),
         'domains': [{
             'domain': tracked.domain, 'role': tracked.role, 'competitor': tracked.competitor,
@@ -306,7 +303,7 @@ def handle_snapshot_now(event: dict[str, Any], _context: Any, *_args: Any, **_kw
         return seo_error(409, 'ALREADY_RUNNING', 'A snapshot run is already in progress', event)
     client.start_execution(
         stateMachineArn=arn, name=f'manual-{get_timestamp_compact()}',
-        input=json.dumps({'step': 'backlinks.snapshot_all', 'scheduled': False,
+        input=json.dumps({'step': 'backlinks.snapshot_all',
                           'requested_by': get_caller_identity(event) or 'unknown'}),
     )
     return success_response({
@@ -314,8 +311,6 @@ def handle_snapshot_now(event: dict[str, Any], _context: Any, *_args: Any, **_kw
     }, event, status_code=202)
 
 
-#: PUT /api/seo/backlinks/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly snapshot on or off.
-handle_schedule = schedule_setter(lambda **choice: set_schedule(snapshots_table(), **choice))
 
 
 TABLE_ROUTES = {'backlinks': '/rows', 'referring_domains': '/referring-domains', 'top_pages': '/top-pages'}
@@ -323,7 +318,6 @@ TABLE_ROUTES = {'backlinks': '/rows', 'referring_domains': '/referring-domains',
 handler = seo_route({
     ('POST', '/backlinks/overview'): handle_overview,
     **{('POST', f'/backlinks{TABLE_ROUTES[tab]}'): table_handler(tab) for tab in TABS},
-    ('PUT', '/backlinks/snapshots/schedule'): handle_schedule,
     ('GET', '/backlinks/snapshots'): handle_snapshots,
     ('POST', '/backlinks/snapshots'): handle_snapshot_now,
 })

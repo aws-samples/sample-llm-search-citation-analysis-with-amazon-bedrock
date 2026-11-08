@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.backlink_snapshots import set_schedule, snapshot_item
+from shared.backlink_snapshots import snapshot_item
 from shared.dataforseo_client import DataForSeoError
 from shared.utils import get_timestamp
 from testing.backlinks_fixtures import SUMMARY_ROW, FakeSnapshotsTable
@@ -53,16 +53,6 @@ def test_snapshots_each_domain_with_its_subdomains(run):
     assert [(call.args[0].api_target, call.args[0].include_subdomains) for call in run.summary.call_args_list] == [
         ('example.com', True), ('acme.example.org', True),
     ]
-
-
-def test_does_nothing_on_the_weekly_rule_while_the_schedule_is_off(run):
-    assert (run.step({'scheduled': True}), run.summary.call_count) == ({'skipped': 'schedule_off'}, 0)
-
-
-def test_runs_on_the_weekly_rule_once_the_schedule_is_on(run):
-    set_schedule(run.table, enabled=True, updated_by='admin@example.com', updated_at=get_timestamp())
-
-    assert run.step({'scheduled': True})['stored'] == 2
 
 
 def test_skips_a_domain_snapshotted_less_than_20_hours_ago(run):

@@ -171,7 +171,6 @@ export function buildTrackedDomain(overrides: Partial<TrackedBacklinkDomain> = {
 
 export function buildSnapshots(overrides: Partial<BacklinkSnapshotsResponse> = {}): BacklinkSnapshotsResponse {
   return {
-    schedule_enabled: false,
     domains: [
       buildTrackedDomain(),
       buildTrackedDomain({

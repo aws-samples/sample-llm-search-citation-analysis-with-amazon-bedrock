@@ -10,7 +10,6 @@ import { SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE, SEO_DOMAIN_SNAPSHOTS_TABLE } from '
 import { SEO_JOBS_FUNCTION_NAME } from './seo-stack';
 import {
   functionActionsMentioning,
-  ruleScheduleAndInput,
   sharedFunctionEnvironments,
   stateMachineStates,
   synthesizeSeoFeatureTemplate,
@@ -34,9 +33,8 @@ export interface SeoDomainSnapshot {
   /** Every action the router holds on the state machine, and the actions on the Action Center status table. */
   routerStateMachineActions: string[];
   routerStatusTableActions: string[];
-  /** The weekly rule's schedule and its target's input. */
-  ruleSchedule: unknown;
-  ruleInput: unknown;
+  /** Names of the template's EventBridge rules (a Schedule, not a rule, starts the weekly sweep). */
+  ruleNames: string[];
 }
 
 export function synthesizeSeoDomainSnapshot(): SeoDomainSnapshot {
@@ -46,7 +44,6 @@ export function synthesizeSeoDomainSnapshot(): SeoDomainSnapshot {
     template, 'AWS::StepFunctions::StateMachine', 'StateMachineName', SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE
   );
   const table = template.findResources('AWS::DynamoDB::Table')[tableId];
-  const [rule] = Object.values(template.findResources('AWS::Events::Rule', { Properties: { Name: 'CitationAnalysis-SeoDomainSnapshotsWeekly' } }));
   return {
     template,
     routes: sortedUnique(methodRouteLabels(extractApiAuthSnapshots(template)))
@@ -59,6 +56,6 @@ export function synthesizeSeoDomainSnapshot(): SeoDomainSnapshot {
     jobsTableActions: functionActionsMentioning(template, SEO_JOBS_FUNCTION_NAME, tableId),
     routerStateMachineActions: functionActionsMentioning(template, SEO_ROUTER, machineId),
     routerStatusTableActions: functionActionsMentioning(template, SEO_ROUTER, 'CitationAnalysis-RecommendationStatus'),
-    ...ruleScheduleAndInput(rule),
+    ruleNames: Object.values(template.findResources('AWS::Events::Rule')).map((rule) => String(resolvePath(rule, ['Properties', 'Name']))),
   };
 }

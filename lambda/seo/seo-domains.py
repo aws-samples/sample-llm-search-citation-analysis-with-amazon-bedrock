@@ -7,8 +7,6 @@ Domain Overview API and SEO recommendations (shapes in ``web/src/types/api/seoDo
 - POST /api/seo/domains/competitors  - the domains ranking on a set of keywords (SERP competitors)
 - GET  /api/seo/domains/snapshots    - stored estimated-traffic snapshots of a domain in a market
 - POST /api/seo/domains/snapshots    - (Admin) take one snapshot now (starts the snapshot state machine)
-- GET  /api/seo/domains/snapshots/schedule - whether the weekly sweep of every tracked domain is on
-- PUT  /api/seo/domains/snapshots/schedule - (Admin) turn the weekly sweep on or off (off by default: it is paid)
 - GET  /api/seo/insights             - SEO recommendations over the SEO vs GEO rows, with their status
 
 The four lookups are live DataForSEO Labs calls (one each, never re-sent, each well under 20 s) open to every
@@ -68,7 +66,6 @@ from seo_domain_requests import (
 from seo_export import EXPORT_SCHEMA, RowWindow, export_pricing, row_window
 from seo_geo_data import SCOPE_QUERY_SCHEMA, load_seo_geo
 from seo_http import MARKET_ID_FIELD, CachePolicy, dynamodb_table, keyword_list, seo_error, seo_route
-from seo_schedule import schedule_setter
 
 from shared.api_response import api_response, success_response
 from shared.auth import ADMIN_GROUP, require_group
@@ -83,7 +80,7 @@ from shared.dataforseo_domain import (
 from shared.dataforseo_domain_scope import parse_research_target
 from shared.dataforseo_pricing import LABS_ROW_USD, LABS_TASK_USD, labs_usd
 from shared.decorators import json_object_body, validate
-from shared.domain_snapshots import SNAPSHOT_KEYWORD_LIMIT, list_snapshots, schedule_enabled, set_schedule, summary_json
+from shared.domain_snapshots import SNAPSHOT_KEYWORD_LIMIT, list_snapshots, summary_json
 from shared.dynamodb_batch import BatchGetUnprocessedError, batch_get_items
 from shared.seo_insights import seo_recommendations
 from shared.utils import get_timestamp
@@ -309,15 +306,6 @@ def handle_take_snapshot(event: dict[str, Any], _context: Any, *, domain: str, m
     }, event)
 
 
-def handle_get_schedule(event: dict[str, Any], _context: Any, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
-    """GET /api/seo/domains/snapshots/schedule - whether the weekly sweep is on."""
-    return success_response({'schedule_enabled': schedule_enabled(snapshots_table())}, event)
-
-
-#: PUT /api/seo/domains/snapshots/schedule (Admin) - ``{enabled}`` turns the weekly sweep on or off.
-handle_set_schedule = schedule_setter(lambda **choice: set_schedule(snapshots_table(), **choice))
-
-
 # ---------------------------------------------------------------------------
 # SEO recommendations
 # ---------------------------------------------------------------------------
@@ -362,9 +350,6 @@ handler = seo_route({
     ('POST', '/domains/keywords'): handle_keywords,
     ('POST', '/domains/pages'): handle_pages,
     ('POST', '/domains/competitors'): handle_competitors,
-    # Before '/domains/snapshots': a route matches when its path is a segment run of the request's.
-    ('GET', '/domains/snapshots/schedule'): handle_get_schedule,
-    ('PUT', '/domains/snapshots/schedule'): handle_set_schedule,
     ('GET', '/domains/snapshots'): handle_list_snapshots,
     ('POST', '/domains/snapshots'): handle_take_snapshot,
     ('GET', '/insights'): handle_insights,

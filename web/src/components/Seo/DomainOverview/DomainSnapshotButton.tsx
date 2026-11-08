@@ -17,7 +17,7 @@ type Outcome = { readonly kind: 'idle' | 'sending' } | {
 /**
  * (Admin) Store an estimated traffic snapshot of the domain now, after a
  * confirmation naming its paid calls. The weekly sweep of your and your
- * competitors' domains is a separate, off-by-default setting (`DomainSnapshotSchedule`).
+ * competitors' domains is a Schedule an Admin creates (Operations > Schedule).
  */
 export function DomainSnapshotButton({
   domain, marketId

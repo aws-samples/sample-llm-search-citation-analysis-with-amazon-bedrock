@@ -1,13 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
-import * as events from 'aws-cdk-lib/aws-events';
-import * as eventTargets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import { SeoFeatureConstruct, stringKey } from './seo-feature';
 
 export const BACKLINK_SNAPSHOTS_TABLE_NAME = 'CitationAnalysis-SeoBacklinkSnapshots';
 export const BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME = 'CitationAnalysis-SeoBacklinkSnapshots';
-export const BACKLINK_SNAPSHOTS_RULE_NAME = 'CitationAnalysis-SeoBacklinkSnapshotsWeekly';
 
 /** The jobs function stops starting DataForSEO calls 13 minutes in; its own timeout is 15. */
 const SNAPSHOT_TASK_TIMEOUT = cdk.Duration.minutes(15);
@@ -20,12 +17,11 @@ const SNAPSHOT_RUN_TIMEOUT = cdk.Duration.minutes(20);
  *
  * Snapshots live in `CitationAnalysis-SeoBacklinkSnapshots` (pk `domain`,
  * sk `snapshot_at`, kept, never expired). One state machine with one task
- * runs the jobs step `backlinks.snapshot_all`: a weekly EventBridge rule
- * starts it with `{"scheduled": true}` (the step does nothing until an Admin
- * turns the schedule on) and the Admin route "snapshot now" with
- * `{"scheduled": false}`. The task is never retried, by Step Functions or by
- * the rule: every DataForSEO summary it sends is billed, even when the call
- * then fails.
+ * runs the jobs step `backlinks.snapshot_all`, started by the Admin route
+ * "snapshot now" or by a Schedule (Operations > Schedule, kind "Backlink
+ * snapshots": an EventBridge Scheduler schedule an Admin creates in the main
+ * stack); nothing runs while no schedule exists. The task is never retried:
+ * every DataForSEO summary it sends is billed, even when the call then fails.
  */
 export class SeoBacklinks extends SeoFeatureConstruct {
   protected build(): void {
@@ -41,15 +37,6 @@ export class SeoBacklinks extends SeoFeatureConstruct {
     router.addEnvironment('SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN', snapshotStateMachine.stateMachineArn);
     snapshotStateMachine.grant(router, 'states:StartExecution', 'states:ListExecutions');
 
-    const weekly = new events.Rule(this, 'WeeklyRule', {
-      ruleName: BACKLINK_SNAPSHOTS_RULE_NAME,
-      description: 'Weekly backlink snapshots of the owned and competitor domains (runs only when an Admin enabled it)',
-      schedule: events.Schedule.cron({ weekDay: 'MON', hour: '6', minute: '0' }),
-    });
-    weekly.addTarget(new eventTargets.SfnStateMachine(snapshotStateMachine, {
-      input: events.RuleTargetInput.fromObject({ scheduled: true }),
-      retryAttempts: 0,
-    }));
 
     this.serve(
       ['backlinks/overview', ['POST']],
@@ -57,7 +44,6 @@ export class SeoBacklinks extends SeoFeatureConstruct {
       ['backlinks/referring-domains', ['POST']],
       ['backlinks/top-pages', ['POST']],
       ['backlinks/snapshots', ['GET', 'POST']],
-      ['backlinks/snapshots/schedule', ['PUT']],
     );
   }
 
@@ -65,7 +51,6 @@ export class SeoBacklinks extends SeoFeatureConstruct {
   private snapshotRun(): stepfunctions.StateMachine {
     const snapshotAll = this.jobsTask('SnapshotAll', {
       step: 'backlinks.snapshot_all',
-      scheduled: stepfunctions.JsonPath.stringAt('$.scheduled'),
     }, { outputPath: '$.Payload', retryOnServiceExceptions: false, timeout: SNAPSHOT_TASK_TIMEOUT });
     const role = new iam.Role(this, 'StateMachineRole', {
       assumedBy: new iam.ServicePrincipal('states.amazonaws.com'),

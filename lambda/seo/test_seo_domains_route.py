@@ -180,26 +180,6 @@ class TestSnapshots:
         assert (status, body['code']) == (409, 'ALREADY_RUNNING')
 
 
-class TestSnapshotSchedule:
-    def test_reads_the_weekly_sweep_setting_off_by_default(self, domains_module):
-        table = MagicMock()
-        table.get_item.return_value = {}
-
-        status, body = call(domains_module, 'GET', '/api/seo/domains/snapshots/schedule',
-                            snapshots_table=MagicMock(return_value=table))
-
-        assert (status, body) == (200, {'schedule_enabled': False})
-
-    @pytest.mark.parametrize(('groups', 'status', 'saved'), [('Users', 403, False), ('Admin', 200, True)])
-    def test_only_an_admin_turns_it_on(self, domains_module, groups, status, saved):
-        table = MagicMock()
-
-        answered, _body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
-                               groups=groups, snapshots_table=MagicMock(return_value=table))
-
-        assert (answered, table.put_item.called) == (status, saved)
-
-
 class TestInsights:
     ROWS = [{'keyword': 'cheap flights', 'search_volume': 100, 'quadrant': 'ai_gap', 'organic_position': 5}]
 

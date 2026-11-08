@@ -10,8 +10,7 @@ import {
 } from 'vitest';
 import { EXPORT_EXCEL_LABEL } from '../../ui/ExportExcelButton';
 import {
-  fetchDomainKeywords, fetchDomainOverview, fetchDomainPages, fetchDomainSnapshotSchedule, fetchDomainSnapshots, fetchSerpCompetitors,
-  setDomainSnapshotSchedule, takeDomainSnapshot
+  fetchDomainKeywords, fetchDomainOverview, fetchDomainPages, fetchDomainSnapshots, fetchSerpCompetitors, takeDomainSnapshot
 } from '../../../api/seoDomains';
 import {
   buildDomainKeywords, buildDomainOverview, buildDomainPages, buildDomainSnapshots, buildSerpCompetitors, SNAPSHOT_STARTED
@@ -45,8 +44,6 @@ export function mockDomainAnswers(admin = false): void {
   vi.mocked(fetchSerpCompetitors).mockResolvedValue(buildSerpCompetitors());
   vi.mocked(takeDomainSnapshot).mockResolvedValue(SNAPSHOT_STARTED);
   vi.mocked(fetchDomainSnapshots).mockResolvedValue(buildDomainSnapshots());
-  vi.mocked(fetchDomainSnapshotSchedule).mockResolvedValue({ schedule_enabled: false });
-  vi.mocked(setDomainSnapshotSchedule).mockImplementation((enabled) => Promise.resolve({ schedule_enabled: enabled }));
   mockAdminRole(admin);
   mockBrandSettings();
 }

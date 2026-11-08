@@ -2,7 +2,7 @@ import {
   useCallback, useState
 } from 'react';
 import {
-  fetchBacklinkSnapshots, setBacklinkSnapshotSchedule, startBacklinkSnapshots
+  fetchBacklinkSnapshots, startBacklinkSnapshots
 } from '../api/seoBacklinks';
 import { seoErrorMessage } from '../api/seo';
 import type { BacklinkSnapshotsResponse } from '../types/api/seoBacklinks';
@@ -16,20 +16,17 @@ export interface BacklinkSnapshotsState extends SeoRequestState<BacklinkSnapshot
   readonly busy: boolean;
   /** Admin: start one snapshot run of every tracked domain (paid). */
   readonly snapshotNow: () => Promise<void>;
-  /** Admin: turn the weekly snapshot on or off. */
-  readonly setSchedule: (enabled: boolean) => Promise<void>;
 }
 
 /**
- * The stored weekly snapshots of the owned and competitor domains (a free
- * read, fetched on mount and after the schedule changes) and the Admin
- * actions on them.
+ * The stored snapshots of the owned and competitor domains (a free read,
+ * fetched on mount) and the Admin "snapshot now". A weekly run is a Schedule
+ * (Operations > Schedule).
  */
 export function useBacklinkSnapshots(active: boolean): BacklinkSnapshotsState {
-  const [version, setVersion] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const list = useSeoRequest(active, String(version), () => fetchBacklinkSnapshots());
+  const list = useSeoRequest(active, 'snapshots', () => fetchBacklinkSnapshots());
 
   const act = useCallback(async (action: () => Promise<string>) => {
     setBusy(true);
@@ -47,17 +44,11 @@ export function useBacklinkSnapshots(active: boolean): BacklinkSnapshotsState {
     return `Snapshot started for ${run.domains} domains. New points appear in a few minutes.`;
   }), [act]);
 
-  const setSchedule = useCallback((enabled: boolean) => act(async () => {
-    const answer = await setBacklinkSnapshotSchedule(enabled);
-    setVersion((current) => current + 1);
-    return answer.schedule_enabled ? 'Weekly snapshots are on (Mondays, 06:00 UTC).' : 'Weekly snapshots are off.';
-  }), [act]);
 
   return {
     ...list,
     notice,
     busy,
     snapshotNow,
-    setSchedule,
   };
 }

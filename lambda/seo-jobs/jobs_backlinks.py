@@ -3,7 +3,7 @@
 ``backlinks.snapshot_all`` takes one snapshot of every tracked domain (``shared.backlink_snapshots``): one billed
 ``summary/live`` per domain with its subdomains, one after the other.
 
-* ``{"scheduled": true}`` is the weekly rule: it does nothing while an Admin has not turned the schedule on.
+* A run is started by an Admin or by a Schedule (Operations > Schedule); while no schedule exists nothing runs.
 * A domain snapshotted less than 20 hours ago is skipped, so a manual run next to the weekly one, or a run started
   again after a failure, never pays twice for the same week.
 * DataForSEO bills a call that fails after it was sent, so a failed domain is never retried; a balance, login or
@@ -28,7 +28,6 @@ import boto3
 from shared.backlink_snapshots import (
     TrackedDomain,
     latest_snapshot_at,
-    schedule_enabled,
     snapshot_item,
     snapshots_table,
     tracked_domains,
@@ -90,11 +89,9 @@ class SnapshotRun:
         self.counts['stored'] += 1
 
 
-def snapshot_all(event: dict[str, Any]) -> dict[str, Any]:
-    """Snapshot every tracked domain; ``{"scheduled": true}`` only when the weekly schedule is on."""
+def snapshot_all(_event: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot every tracked domain."""
     table = snapshots_table()
-    if event.get('scheduled') is True and not schedule_enabled(table):
-        return {'skipped': 'schedule_off'}
     domains = tracked_domains(brand_config())
     run = SnapshotRun(len(domains))
     started = _monotonic()

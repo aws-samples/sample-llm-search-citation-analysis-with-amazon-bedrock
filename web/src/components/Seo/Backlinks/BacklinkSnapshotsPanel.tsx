@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { BacklinkSnapshotsState } from '../../../hooks/useBacklinkSnapshots';
 import { Button } from '../../ui/Button';
 import { ErrorAlert } from '../../ui/ErrorAlert';
@@ -13,36 +14,25 @@ function callCount(domains: number): string {
   return domains === 1 ? '1 paid DataForSEO call' : `${String(domains)} paid DataForSEO calls`;
 }
 
-function scheduleNote(enabled: boolean | undefined): string {
-  if (enabled === undefined) return '';
-  return enabled ? ' Weekly snapshot is on.' : ' Weekly snapshot is off.';
-}
-
 function AdminControls({
   snapshots, domains
 }: {
   readonly snapshots: BacklinkSnapshotsState;
   readonly domains: number;
 }) {
-  const [confirming, setConfirming] = useState<'now' | 'schedule' | null>(null);
-  const enabled = snapshots.data?.schedule_enabled === true;
-  const confirmText = confirming === 'schedule'
-    ? `Every Monday this starts ${callCount(domains)}, one per domain. Continue?`
-    : `This starts ${callCount(domains)}, one per domain. Continue?`;
+  const [confirming, setConfirming] = useState(false);
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <Button size="sm" disabled={snapshots.busy || domains === 0} onClick={() => setConfirming('now')}>Snapshot now</Button>
-      {enabled
-        ? <Button size="sm" variant="secondary" disabled={snapshots.busy} onClick={() => void snapshots.setSchedule(false)}>Turn weekly snapshot off</Button>
-        : <Button size="sm" variant="secondary" disabled={snapshots.busy || domains === 0} onClick={() => setConfirming('schedule')}>Turn weekly snapshot on</Button>}
+      <Button size="sm" disabled={snapshots.busy || domains === 0} onClick={() => setConfirming(true)}>Snapshot now</Button>
+      <Link to="/schedule" className="text-sm text-blue-700 hover:underline">Schedule weekly snapshots</Link>
       {snapshots.notice !== null && <output className="text-sm text-gray-600">{snapshots.notice}</output>}
       <ConfirmModal
-        isOpen={confirming !== null}
-        onClose={() => setConfirming(null)}
-        onConfirm={() => void (confirming === 'now' ? snapshots.snapshotNow() : snapshots.setSchedule(true))}
-        title={confirming === 'schedule' ? 'Turn on weekly snapshots?' : 'Snapshot now?'}
-        message={confirmText}
-        confirmText={confirming === 'schedule' ? 'Turn on' : 'Snapshot'}
+        isOpen={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={() => void snapshots.snapshotNow()}
+        title="Snapshot now?"
+        message={`This starts ${callCount(domains)}, one per domain. Continue?`}
+        confirmText="Snapshot"
       />
     </div>
   );
@@ -62,7 +52,7 @@ export function BacklinkSnapshotsPanel({
         <h3 className="text-base font-semibold text-gray-900">Authority over time</h3>
         <p className="text-xs text-gray-500">
           DataForSEO rank (0-100) of your domains and your competitors&apos;, with subdomains, from weekly snapshots.
-          {scheduleNote(data?.schedule_enabled)}
+          {' Weekly runs are a Schedule (Operations > Schedule).'}
         </p>
       </div>
       {snapshots.loading && (

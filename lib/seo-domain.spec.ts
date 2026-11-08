@@ -11,14 +11,12 @@ describe('SeoDomain routes', () => {
   it('serves the domain and insights routes', () => {
     expect(snapshot.routes).toStrictEqual([
       'GET /api/seo/domains/snapshots',
-      'GET /api/seo/domains/snapshots/schedule',
       'GET /api/seo/insights',
       'POST /api/seo/domains/competitors',
       'POST /api/seo/domains/keywords',
       'POST /api/seo/domains/overview',
       'POST /api/seo/domains/pages',
       'POST /api/seo/domains/snapshots',
-      'PUT /api/seo/domains/snapshots/schedule',
     ]);
   });
 });
@@ -39,8 +37,8 @@ describe('CitationAnalysis-SeoDomainSnapshots table', () => {
     expect(snapshot.routerTableActions).toStrictEqual(expect.arrayContaining(['dynamodb:Query', 'dynamodb:GetItem']));
   });
 
-  it('lets the router write only whole items (the weekly-sweep setting), never update, batch or delete', () => {
-    expect(snapshot.routerTableActions.filter((action) => /Put|Update|Delete|Write/.test(action))).toStrictEqual(['dynamodb:PutItem']);
+  it('never lets the router write it', () => {
+    expect(snapshot.routerTableActions.filter((action) => /Put|Update|Delete|Write/.test(action))).toStrictEqual([]);
   });
 
   it('never lets either function delete a snapshot (TENETS.md, D5)', () => {
@@ -76,13 +74,9 @@ describe('CitationAnalysis-SeoDomainSnapshots state machine', () => {
   });
 });
 
-describe('Weekly snapshot rule', () => {
-  it('runs every Monday at 04:00 UTC', () => {
-    expect(snapshot.ruleSchedule).toBe('cron(0 4 ? * MON *)');
-  });
-
-  it('starts the sweep with no targets so the job lists every brand domain', () => {
-    expect(snapshot.ruleInput).toBe('{}');
+describe('Weekly sweep', () => {
+  it('has no always-on rule: a Schedule an Admin creates starts it (TENETS.md, tenets 7 and 8)', () => {
+    expect(snapshot.ruleNames.filter((name) => name.includes('DomainSnapshots'))).toStrictEqual([]);
   });
 });
 
