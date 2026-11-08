@@ -182,3 +182,14 @@ describe('Google AI Overviews search role', () => {
     expect(snapshot.aiOverviewProviderConfigActions).toStrictEqual(['dynamodb:GetItem', 'dynamodb:UpdateItem']);
   });
 });
+
+describe('SEO grants, per action (TENETS.md, tenet 6, D1 and D5)', () => {
+  it('lets the AI Overviews search role only put raw answers, never delete one', () => {
+    expect(snapshot.aiOverviewS3Actions).toStrictEqual(['s3:PutObject']);
+  });
+
+  it('never lets the router delete stored keyword metrics or cache entries', () => {
+    expect([...snapshot.routerKeywordMetricsActions, ...snapshot.routerCacheActions].filter((action) => action.includes('Delete'))).toStrictEqual([]);
+    expect(snapshot.routerKeywordMetricsActions).toContain('dynamodb:BatchWriteItem');
+  });
+});

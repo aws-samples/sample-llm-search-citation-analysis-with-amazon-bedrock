@@ -13,7 +13,7 @@ import {
 } from './constructs/provider-search';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import { SeoApi } from './constructs/seo-api';
-import type { SeoFeatureProps } from './constructs/seo-feature';
+import { type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
 import { seoFeatures } from './seo-features';
 import { pythonFunction } from './constructs/api-functions';
 
@@ -131,8 +131,10 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
     const router = this.seoApi.routerFunction;
     const jobs = this.jobsFunction(sharedLayer, environment);
     for (const fn of [router, jobs]) {
-      keywordMetricsTable.grantReadWriteData(fn);
-      cacheTable.grantReadWriteData(fn);
+      // Per action, no delete (TENETS.md, tenet 6 and D5): stored keyword metrics are batch-written; the cache is
+      // read and put (a conditional put never replaces a fresh non-empty answer), never deleted from.
+      keywordMetricsTable.grant(fn, ...sharedTableActions({ batchWrites: true }));
+      cacheTable.grant(fn, ...sharedTableActions({}));
       // Only the main-stack tables the handlers read; ProviderConfig is the AI Overviews function's.
       for (const table of [mainTables.searchResults, mainTables.keywords, mainTables.brandConfig]) {
         table.grantReadData(fn);
@@ -205,7 +207,8 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
     // retried invocation, reads what an earlier attempt stored (Query); it reads and updates the provider's
     // config row (enablement, saved model, pacing and health).
     resources.mainTables.searchResults.grant(role, 'dynamodb:PutItem', 'dynamodb:Query');
-    resources.rawResponsesBucket.grantWrite(role);
+    // Each raw answer is put once under raw-responses/ (Bronze, write-once): no delete, nothing outside the prefix.
+    allow(role, ['s3:PutObject'], [resources.rawResponsesBucket.arnForObjects('raw-responses/*')]);
     resources.mainTables.brandConfig.grantReadData(role);
     resources.mainTables.providerConfig.grant(role, 'dynamodb:GetItem', 'dynamodb:UpdateItem');
     role.addToPolicy(claudeInvokeModelStatement(this));

@@ -105,6 +105,11 @@ process.
   - A `neutral` or `branded` Visibility view no longer compares a keyword with a previous run stored before the
     branded flag existed (`change_unclassified_keywords` counts them), and each answer row records
     `branded_version`, the matcher rule that set its flag (D2, D3).
+  - The AI Overviews search role may only put raw answers under `raw-responses/` (no S3 delete), and the SEO keyword
+    metrics and cache tables are granted per action without `DeleteItem`.
+  - Tenet 8 (events, no polling): the SEO stack's clock-driven rules, its four bounded dashboard polling hooks and its
+    DataForSEO `task_get` polling are recorded in the tenet 8 gap of `TENETS.md`, as is its overwritable cache under
+    `seo/` in the raw-responses bucket (D2); moving them to events is tracked in #208.
   - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
 
 - `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit

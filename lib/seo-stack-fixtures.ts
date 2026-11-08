@@ -48,6 +48,10 @@ interface SeoStackSnapshot {
   /** DynamoDB actions of the AI Overviews search role on SearchResults and on ProviderConfig. */
   aiOverviewSearchResultsActions: string[];
   aiOverviewProviderConfigActions: string[];
+  /** S3 actions of the AI Overviews search role; DynamoDB actions of the router on the SEO keyword metrics and cache. */
+  aiOverviewS3Actions: string[];
+  routerKeywordMetricsActions: string[];
+  routerCacheActions: string[];
   mainResourceCount: number;
   mainResourceCountWithSeoEngine: number;
   /** SearchAllProviders branch start states without and with `-c seoEngine=true`. */
@@ -83,15 +87,34 @@ function mainTablesOfRole(template: Template, functionName: string): string[] {
   return [...new Set(names)].sort((left, right) => left.localeCompare(right));
 }
 
-/** The DynamoDB actions the function's role is allowed on the main stack table `tableName`, sorted. */
+/**
+ * The DynamoDB actions the function's role is allowed on table `tableName`, sorted: a main-stack table by its name in
+ * the ARN, a table of this stack by its logical id in the `Fn::GetAtt`.
+ */
 function mainTableActionsOfRole(template: Template, functionName: string, tableName: string): string[] {
   const statements = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName));
-  const onTable = statements.filter((statement) => JSON.stringify(resolvePath(statement, ['Resource'])).includes(`table/${tableName}`));
+  const local = Object.entries(template.findResources('AWS::DynamoDB::Table'))
+    .find(([, table]) => resolvePath(table, ['Properties', 'TableName']) === tableName)?.[0];
+  const names = [`table/${tableName}`, ...(local === undefined ? [] : [`"${local}"`])];
+  const onTable = statements.filter((statement) => {
+    const resource = JSON.stringify(resolvePath(statement, ['Resource']));
+    return names.some((name) => resource.includes(name));
+  });
   const actions = onTable.flatMap((statement) => {
     const action = resolvePath(statement, ['Action']);
     return Array.isArray(action) ? action.map(String) : [String(action)];
   });
   return [...new Set(actions)].filter((action) => action.startsWith('dynamodb:')).sort((left, right) => left.localeCompare(right));
+}
+
+/** Every action of the function's role that starts with `prefix` (for example `s3:`), sorted. */
+function roleActions(template: Template, functionName: string, prefix: string): string[] {
+  const statements = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName));
+  const actions = statements.flatMap((statement) => {
+    const action = resolvePath(statement, ['Action']);
+    return Array.isArray(action) ? action.map(String) : [String(action)];
+  });
+  return [...new Set(actions)].filter((action) => action.startsWith(prefix)).sort((left, right) => left.localeCompare(right));
 }
 
 function sortedEnvKeys(template: Template, functionName: string): string[] {
@@ -147,6 +170,9 @@ export function synthesizeSeoStackSnapshot(): SeoStackSnapshot {
     aiOverviewReservedConcurrency: extractReservedConcurrency(template, AI_OVERVIEW_SEARCH),
     aiOverviewSearchResultsActions: mainTableActionsOfRole(template, AI_OVERVIEW_SEARCH, 'CitationAnalysis-SearchResults'),
     aiOverviewProviderConfigActions: mainTableActionsOfRole(template, AI_OVERVIEW_SEARCH, 'CitationAnalysis-ProviderConfig'),
+    aiOverviewS3Actions: roleActions(template, AI_OVERVIEW_SEARCH, 's3:'),
+    routerKeywordMetricsActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoKeywordMetrics'),
+    routerCacheActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoCache'),
     mainResourceCount: resourceCount(mainTemplate),
     mainResourceCountWithSeoEngine: resourceCount(mainWithSeoEngine),
     mainBranchStarts: branchStarts(mainTemplate),
