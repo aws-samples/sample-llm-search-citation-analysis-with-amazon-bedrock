@@ -20,7 +20,9 @@ the engine's Lambda with the main stack, and the analysis workflow always has th
 - **Deploy every stack together** (`npm run deploy`). A `seoEngine` value in `cdk.json` or on the command line is
   now ignored, and you can remove it.
 - **Google AI Overviews is off until an Admin switches it on** in Settings › AI Providers, even with the DataForSEO
-  login saved. A deployment that had switched it on keeps it on.
+  login saved. A deployment that had switched it on keeps it on. **If you deployed with `-c seoEngine=true` and never
+  switched the engine on or off in Settings, it ran by default and now stops:** switch Google AI Overviews on in
+  Settings › AI Providers after upgrading to keep its answers. Its card shows it off until then.
 
 ### Changed
 
