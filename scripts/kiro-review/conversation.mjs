@@ -90,9 +90,17 @@ export function quoted(body) {
   return body.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n')
 }
 
+/** One line of plain text: a file path or a review state can carry a newline (git allows one in a file name). */
+const oneLine = (value) => [...String(value ?? '')]
+  .map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch))
+  .join('')
+  .replaceAll(/ {2,}/g, ' ')
+  .trim()
+
 function block(entry, prAuthor, maintainers) {
   const body = isOwnReview(entry) ? entry.body.slice(MARKER.length) : entry.body
-  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry, prAuthor, maintainers)}), ${entry.at}`
+  const who = oneLine(entry.user?.login ?? 'unknown')
+  const heading = `## ${oneLine(entry.kind)} by ${who} (${roleOf(entry, prAuthor, maintainers)}), ${oneLine(entry.at)}`
   return `${heading}\n\n${quoted(capped(body.trim(), MAX_ENTRY))}`
 }
 
