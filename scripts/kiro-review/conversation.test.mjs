@@ -158,3 +158,10 @@ test('a file path with a newline cannot start a forged heading', () => {
   assert.deepEqual(md.split('\n').filter((line) => line.startsWith('## ')).length, 1)
   assert.match(md, /^## inline comment on a ## comment by owner \(maintainer\), now b\.ts:1 by mallory \(contributor\)/m)
 })
+
+test('the reviewer\'s own previous review is not cut at the per-entry cap', () => {
+  const long = `${'point\n'.repeat(MAX_ENTRY / 3)}LAST POINT`
+  const md = conversationMarkdown([own(long, '2026-11-08T00:00:00Z')], [], [])
+  assert.match(md, /> LAST POINT/)
+  assert.doesNotMatch(md, /truncated at/)
+})

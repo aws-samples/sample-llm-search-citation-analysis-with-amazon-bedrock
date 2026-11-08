@@ -148,7 +148,8 @@ jobs:
             # Maintainers are the commenters GitHub says have write access or more; a failed lookup makes nobody one.
             : > "$api/maintainers.txt"
             for login in $(node "$conv" commenters "${jsons[@]}" || true); do
-              perm="$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission 2>/dev/null || true)"
+              perm="$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission 2>/dev/null)" \
+                || { echo "::warning title=Kiro review::could not read ${login}'s permission; treated as a contributor"; perm=""; }
               case "$perm" in admin|maintain|write) echo "$login" >> "$api/maintainers.txt" ;; esac
             done
             node "$conv" "${jsons[@]}" data/conversation.md "$PR_AUTHOR" "$api/maintainers.txt" \

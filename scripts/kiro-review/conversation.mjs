@@ -22,7 +22,9 @@ import {
   readFileSync, writeFileSync 
 } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { MARKER } from './comment.mjs'
+import {
+  MARKER, MAX_BODY 
+} from './comment.mjs'
 
 export const MAX_ENTRY = 6000
 export const MAX_ENTRIES = 60
@@ -101,7 +103,9 @@ function block(entry, prAuthor, maintainers) {
   const body = isOwnReview(entry) ? entry.body.slice(MARKER.length) : entry.body
   const who = oneLine(entry.user?.login ?? 'unknown')
   const heading = `## ${oneLine(entry.kind)} by ${who} (${roleOf(entry, prAuthor, maintainers)}), ${oneLine(entry.at)}`
-  return `${heading}\n\n${quoted(capped(body.trim(), MAX_ENTRY))}`
+  // Its own previous review is kept whole (up to the comment's own size limit): every point in it is re-checked.
+  const max = isOwnReview(entry) ? MAX_BODY + 2000 : MAX_ENTRY
+  return `${heading}\n\n${quoted(capped(body.trim(), max))}`
 }
 
 const byTime = (a, b) => String(a.at).localeCompare(String(b.at))
