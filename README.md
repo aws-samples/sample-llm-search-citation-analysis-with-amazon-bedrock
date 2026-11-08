@@ -98,6 +98,22 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | RecommendationStatus | recommendation_id | Action Center item status (TTL) |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
 
+The SEO stack (`CitationAnalysisSeoStack`) adds its own tables, with the same settings. Measurements are kept and
+never expire (Silver); only caches, receipts, locks and crawl bookkeeping carry a TTL:
+
+| Table (`CitationAnalysis-…`) | Key | Holds |
+|---|---|---|
+| SeoKeywordMetrics | keyword_id / market_id | Search volume, CPC, difficulty and intent per keyword and market, replaced whole on each refresh (Silver) |
+| SeoCache | cache_key | Paid-answer cache (TTL per answer; payloads over 350 KB in the `seo` bucket), local SEO jobs, Lighthouse runs and IndexNow history (kept), DataForSEO callback gates (`callback#<id>`, 2-day TTL) |
+| SeoRankTracking | pk / sk, GSI1 | Trackers (`TRACKER#<id>` / `META`), their extra keywords (`KW#`), runs (`RUN#`), per-keyword state (`STATE#`) and each check's results (`RUN#<run>` / `PAIR#<keyword>#<device>`, history through GSI1) (Silver, kept); the run lock (`ACTIVE_RUN`, TTL) |
+| SeoDomainSnapshots | `<domain>#<market_id>` / snapshot_at | Each traffic snapshot's overview figures (Silver, kept); its ranked keywords are in the `seo` bucket |
+| SeoBacklinkSnapshots | domain / snapshot_at | Each backlink snapshot's overview metrics (Silver, kept) |
+| SeoAudits | pk / sk, GSI1 | Site audits, their pages, issues and link summary (kept); the crawl's frontier URLs (90-day TTL) |
+
+The `seo` bucket (`citation-analysis-seo-<account>`) holds `seo/cache/<key>.json` (oversized cache payloads),
+`seo/lighthouse/<run>-<index>.json` (full Lighthouse reports), `seo/domain-snapshots/<domain>/<market>/<snapshot_at>.json`
+(a snapshot's ranked keywords, written once) and `seo/site-audit/<id>/robots.txt`.
+
 S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). The SEO stack adds `seo` (its oversized cache payloads, Lighthouse reports, domain-snapshot keywords and robots.txt copies), so `raw-responses` holds only the providers' answers. KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
 
 ### API and hosting

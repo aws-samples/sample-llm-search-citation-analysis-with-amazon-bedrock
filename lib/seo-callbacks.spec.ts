@@ -2,7 +2,7 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  allowStatementsOfRole, findFunctionRoleLogicalId, resolvePath, statementActions
+  allowStatementsOfRole, extractReservedConcurrency, findFunctionRoleLogicalId, resolvePath, statementActions
 } from './citation-analysis-stack-fixtures';
 import { GATE_KEY_PREFIX, SEO_CALLBACKS_FUNCTION_NAME } from './constructs/seo-callbacks';
 import { sharedFunctionEnvironments, synthesizeSeoFeatureTemplate } from './seo-feature-fixtures';
@@ -15,6 +15,10 @@ const urls = Object.values(template.findResources('AWS::Lambda::Url'));
 describe('CitationAnalysis-SeoCallbacks', () => {
   it('is reached through one function URL without sign-in (DataForSEO cannot sign in)', () => {
     expect(urls.map((url) => resolvePath(url, ['Properties', 'AuthType']))).toStrictEqual(['NONE']);
+  });
+
+  it('reserves 5 concurrent executions, since a function URL has no throttle of its own', () => {
+    expect(extractReservedConcurrency(template, SEO_CALLBACKS_FUNCTION_NAME)).toBe(5);
   });
 
   it('may only update gate items of the cache table and resume the gated state machines', () => {

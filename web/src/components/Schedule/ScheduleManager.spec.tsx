@@ -27,6 +27,7 @@ vi.mock('../../infrastructure', async () => {
 });
 
 vi.mock('../../api/executions', () => import('../../api/executionsMock-fixtures'));
+vi.mock('../../api/seo', () => ({ isSeoApiConfigured: vi.fn(() => true) }));
 
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
@@ -39,6 +40,7 @@ import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { ApiRequestError } from '../../infrastructure';
+import { isSeoApiConfigured } from '../../api/seo';
 
 const mockFetchSchedules = vi.mocked(fetchSchedules);
 const mockCreateSchedule = vi.mocked(createSchedule);
@@ -488,9 +490,18 @@ describe('ScheduleManager kinds', () => {
     mockCreateSchedule.mockResolvedValue(backlinkSchedule);
     mockRunSchedule.mockResolvedValue({ message: 'Weekly backlink snapshots started' });
     mockFetchRankTrackerSchedules.mockResolvedValue([]);
+    vi.mocked(isSeoApiConfigured).mockReturnValue(true);
   });
 
   describe('snapshot schedules', () => {
+    it('offers only analysis runs where the SEO stack is not deployed', async () => {
+      vi.mocked(isSeoApiConfigured).mockReturnValue(false);
+      renderManager();
+      await openCreateForm();
+
+      expect(within(screen.getByLabelText('Runs')).getAllByRole('option').map((option) => option.textContent)).toStrictEqual(['Analysis run']);
+    });
+
     it('names the paid calls and hides the keyword scope once a snapshot kind is picked', async () => {
       renderManager();
       await openCreateForm();

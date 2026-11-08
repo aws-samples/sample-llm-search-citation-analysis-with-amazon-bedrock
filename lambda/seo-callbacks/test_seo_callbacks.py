@@ -21,11 +21,11 @@ def callbacks():
 
 @pytest.fixture
 def gate(callbacks, monkeypatch):
-    """``arrive`` answering ``gate.arrival``; ``release`` recorded."""
+    """``arrive`` answering ``gate.arrival``; ``release_if_due`` recorded."""
     stub = MagicMock()
     stub.arrival = Arrival(remaining=1, task_token='token', output='{"next": "collect"}')
     monkeypatch.setattr(callbacks, 'arrive', MagicMock(side_effect=lambda _gate, _task: stub.arrival))
-    monkeypatch.setattr(callbacks, 'release', stub.release)
+    monkeypatch.setattr(callbacks, 'release_if_due', stub.release_if_due)
     return stub
 
 
@@ -37,7 +37,7 @@ def _ping(callbacks, query, method='GET'):
 def test_counts_a_pingback_and_keeps_waiting_while_tasks_remain(callbacks, gate):
     answer = _ping(callbacks, {'gate': GATE, 'id': TASK})
 
-    assert (answer['statusCode'], gate.release.call_count) == (200, 0)
+    assert (answer['statusCode'], gate.release_if_due.call_count) == (200, 0)
 
 
 def test_resumes_the_state_machine_on_the_last_pingback(callbacks, gate):
@@ -45,13 +45,14 @@ def test_resumes_the_state_machine_on_the_last_pingback(callbacks, gate):
 
     _ping(callbacks, {'gate': GATE, 'id': TASK})
 
-    gate.release.assert_called_once_with('token', '{"next": "collect"}')
+    gate.release_if_due.assert_called_once_with(GATE)
 
 
-def test_answers_an_unknown_gate_like_a_known_one(callbacks, gate):
+def test_a_repeated_pingback_tries_the_release_again_in_case_the_first_send_failed(callbacks, gate):
     gate.arrival = None
+    gate.release_if_due.return_value = False
 
-    assert (_ping(callbacks, {'gate': GATE, 'id': TASK})['statusCode'], gate.release.call_count) == (200, 0)
+    assert (_ping(callbacks, {'gate': GATE, 'id': TASK})['statusCode'], gate.release_if_due.call_args.args) == (200, (GATE,))
 
 
 @pytest.mark.parametrize('query', [{}, {'gate': 'short', 'id': TASK}, {'gate': GATE, 'id': 'a&b'}, None])

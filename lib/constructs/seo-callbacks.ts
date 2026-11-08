@@ -11,6 +11,14 @@ import { SEO_LOCAL_JOB_STATE_MACHINE_NAME } from './seo-local';
 export const SEO_CALLBACKS_FUNCTION_NAME = 'CitationAnalysis-SeoCallbacks';
 /** The state machines whose post step waits on a callback gate (`shared/dataforseo_callbacks.py`). */
 export const GATED_STATE_MACHINE_NAMES = [RANK_CHECK_STATE_MACHINE_NAME, SEO_LOCAL_JOB_STATE_MACHINE_NAME];
+/**
+ * A function URL has no stage throttle: this caps what anyone calling the
+ * public URL can run at once (and its cost), and keeps it from taking the
+ * account's unreserved concurrency from the workflow's Lambdas. Five
+ * invocations of about 50 ms each take some 100 callbacks a second; a
+ * throttled callback is covered by the wait's timeout.
+ */
+export const SEO_CALLBACKS_RESERVED_CONCURRENCY = 5;
 /** Partition key prefix of the gate items in `CitationAnalysis-SeoCache`. */
 export const GATE_KEY_PREFIX = 'callback#';
 
@@ -49,6 +57,7 @@ export class SeoCallbacks extends Construct {
       layers: [props.sharedLayer],
       timeout: Duration.seconds(10),
       memorySize: 256,
+      reservedConcurrentExecutions: SEO_CALLBACKS_RESERVED_CONCURRENCY,
       environment: { DYNAMODB_TABLE_SEO_CACHE: props.cacheTable.tableName },
     }, RemovalPolicy.DESTROY);
     const url = fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });

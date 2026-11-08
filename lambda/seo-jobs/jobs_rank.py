@@ -35,7 +35,7 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import Any
 
-from shared.dataforseo_callbacks import new_gate_id, open_gate, pingback_url, release, settle
+from shared.dataforseo_callbacks import new_gate_id, open_gate, pingback_url, release, release_if_due, settle
 from shared.dataforseo_locations import UnsupportedMarketError
 from shared.dataforseo_rank import RETRY_ROUNDS
 from shared.rank_tracking_checks import CheckProgress, collect_queued, post_pending, run_live
@@ -148,7 +148,7 @@ def post(event: dict[str, Any]) -> dict[str, Any]:
         return resumed
     gate = settle(gate_id, expected - queued)
     if gate.remaining <= 0:
-        release(task_token, gate.output)
+        release_if_due(gate_id)
     logger.info('rank.post queued=%d awaiting callbacks', queued)
     return {'queued': queued}
 

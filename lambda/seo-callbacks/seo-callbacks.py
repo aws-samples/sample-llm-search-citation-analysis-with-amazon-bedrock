@@ -5,6 +5,9 @@ DataForSEO calls ``<function URL>?gate=<gate id>&id=<task id>`` when a queued ta
 ``pingback_url`` is ready (``shared.dataforseo_callbacks``). The function counts the task on its gate; the task
 that empties the gate sends the waiting state machine's task token, which resumes it to collect the results.
 
+Sending the token can fail (throttling): the gate is then released again by the next pingback of the same gate,
+including DataForSEO's retry of this one, so a run does not wait for its safety timeout. A failure answers 500.
+
 The URL is public (DataForSEO cannot sign in), so the function holds nothing worth taking: it can only count on
 ``callback#`` gate items of ``CitationAnalysis-SeoCache`` and send task success to the two state machines that
 wait on gates. It has no DataForSEO credentials and calls nothing paid. The 32-byte random gate id is the only
@@ -21,7 +24,7 @@ from typing import Any
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.dataforseo_callbacks import arrive, is_gate_id, is_task_id, release
+from shared.dataforseo_callbacks import arrive, is_gate_id, is_task_id, release_if_due
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -46,9 +49,9 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     if not is_gate_id(gate_id) or not is_task_id(task_id):
         return _answer(400)
     arrival = arrive(gate_id, task_id)
-    if arrival is None:
-        return _answer(200)
-    if arrival.remaining <= 0 and arrival.task_token:
-        released = release(arrival.task_token, arrival.output)
-        logger.info('callback gate emptied; state machine resumed=%s', released)
+    # A repeated pingback (``arrival is None``) also tries: the first one may have failed to send the token.
+    if arrival is None or arrival.remaining <= 0:
+        released = release_if_due(gate_id)
+        if released:
+            logger.info('callback gate emptied; state machine resumed')
     return _answer(200)

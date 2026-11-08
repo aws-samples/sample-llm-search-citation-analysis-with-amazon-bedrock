@@ -116,3 +116,8 @@ DataForSEO does not serve answers `UNSUPPORTED_MARKET` before any paid call.
 - [seo-metrics.md](seo-metrics.md): definitions of the SEO vs GEO metrics and quadrants.
 - [geo-corrections.md](geo-corrections.md): why some AI-visibility figures changed when cited sources, empty
   replies and branded queries started being treated differently.
+
+## Data
+
+The SEO stack's tables (keys, contents, which items expire) and the `seo` bucket's key layout are listed in the
+README, "Data".

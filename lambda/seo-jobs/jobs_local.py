@@ -26,7 +26,7 @@ from typing import Any
 from shared import dataforseo_business_tasks as business_tasks
 from shared import dataforseo_local_serp as local_serp
 from shared.dataforseo_business import BusinessIdentifier, Near
-from shared.dataforseo_callbacks import new_gate_id, open_gate, pingback_url, release, settle
+from shared.dataforseo_callbacks import new_gate_id, open_gate, pingback_url, release, release_if_due, settle
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_tasks import TaskOutcome
 from shared.local_rank_grid import grid_points
@@ -122,7 +122,7 @@ def _post(job: dict[str, Any], task_token: str) -> dict[str, Any]:
     save_job(job)
     gate = settle(gate_id, expected - len(job['pending']))
     if gate.remaining <= 0:
-        release(task_token, gate.output)
+        release_if_due(gate_id)
     return _answer(job, 0)
 
 

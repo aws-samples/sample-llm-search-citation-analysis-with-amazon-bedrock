@@ -51,6 +51,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
+from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -403,12 +404,25 @@ def _validate_scope_request(value: Any) -> dict[str, Any]:
     return scope
 
 
+def _state_machine_exists(arn: str) -> bool:
+    """Whether ``arn`` names a deployed state machine (the SEO stack's are named, not referenced)."""
+    if not arn:
+        return False
+    try:
+        stepfunctions.describe_state_machine(stateMachineArn=arn)
+    except ClientError as error:
+        if error.response.get('Error', {}).get('Code') == 'StateMachineDoesNotExist':
+            return False
+        raise
+    return True
+
+
 def _validate_kind(value: Any) -> str:
     """A known kind whose state machine is deployed (``analysis`` when absent)."""
     kind = 'analysis' if value is None else value
     if not isinstance(kind, str) or kind not in KINDS:
         raise _InvalidRequest(f"kind must be one of: {', '.join(KINDS)}", 'kind')
-    if not KINDS[kind][0]:
+    if kind != 'analysis' and not _state_machine_exists(KINDS[kind][0]):
         raise _InvalidRequest(f'{kind} schedules need the SEO stack, which is not deployed', 'kind')
     return kind
 

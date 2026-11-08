@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
@@ -132,7 +133,7 @@ def _reset_mocks():
     for method in (
         mock_scheduler.get_schedule_group, mock_scheduler.create_schedule, mock_scheduler.update_schedule,
         mock_scheduler.delete_schedule, mock_scheduler.list_schedules, mock_scheduler.get_schedule,
-        mock_stepfunctions.start_execution, mock_groups_table.get_item,
+        mock_stepfunctions.start_execution, mock_stepfunctions.describe_state_machine, mock_groups_table.get_item,
     ):
         method.side_effect = None
     mock_scheduler.get_schedule_group.return_value = {'Name': 'citation-analysis-schedules'}
@@ -648,12 +649,24 @@ class TestSnapshotKinds:
         assert (status, body['field']) == (400, 'kind')
         mock_scheduler.create_schedule.assert_not_called()
 
-    def test_refuses_a_snapshot_kind_when_the_seo_stack_is_not_deployed(self, handler_module, monkeypatch):
-        monkeypatch.setitem(handler_module.KINDS, 'backlink_snapshots', ('', 'Backlink snapshots'))
+    def test_refuses_a_snapshot_kind_when_the_seo_stack_is_not_deployed(self, handler_module):
+        mock_stepfunctions.describe_state_machine.side_effect = ClientError(
+            {'Error': {'Code': 'StateMachineDoesNotExist', 'Message': 'gone'}}, 'DescribeStateMachine')
 
         status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': 'backlink_snapshots'}), {}))
 
         assert (status, body['field']) == (400, 'kind')
+        mock_scheduler.create_schedule.assert_not_called()
+
+    def test_refuses_to_run_a_snapshot_schedule_now_when_the_seo_stack_is_gone(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        mock_stepfunctions.describe_state_machine.side_effect = ClientError(
+            {'Error': {'Code': 'StateMachineDoesNotExist', 'Message': 'gone'}}, 'DescribeStateMachine')
+
+        status, _body = parse_response(handler_module.handler(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), {}))
+
+        assert status == 400
+        mock_stepfunctions.start_execution.assert_not_called()
 
     def test_an_update_keeps_the_kind_and_its_target(self, handler_module):
         mock_scheduler.get_schedule.return_value = snapshot_detail()

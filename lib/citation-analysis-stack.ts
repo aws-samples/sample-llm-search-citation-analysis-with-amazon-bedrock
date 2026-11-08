@@ -1966,7 +1966,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     // "Run now" of a snapshot schedule, and the timed runs of one.
     const seoSnapshotMachines = [SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE, BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME]
       .map((name) => seoStateMachineArn(this, name));
-    allow(configMgmtFunction, ['states:StartExecution'], seoSnapshotMachines);
+    // DescribeStateMachine: a snapshot kind is refused (400) while the SEO stack is not deployed.
+    allow(configMgmtFunction, ['states:DescribeStateMachine', 'states:StartExecution'], seoSnapshotMachines);
     allow(schedulerRole, ['states:StartExecution'], seoSnapshotMachines);
     allow(
       configMgmtFunction,

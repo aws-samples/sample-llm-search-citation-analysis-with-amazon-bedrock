@@ -116,6 +116,11 @@ process.
     cache payloads, Lighthouse reports, domain-snapshot keywords (written once per snapshot time) and robots.txt
     copies. The SEO stack no longer writes to the raw-responses bucket except the AI Overviews answers, so it stays
     write-once Bronze (D2).
+  - The callback function reserves 5 concurrent executions (a function URL has no throttle of its own); releasing a
+    gate claims it first and gives the claim back when sending the token fails, so the next pingback resumes the
+    run instead of the safety timeout. A snapshot schedule is refused (400) while the SEO stack's state machines
+    are not deployed, and the dashboard offers the snapshot kinds only where the SEO API is configured.
+  - The README "Data" section lists the SEO tables and the `seo` bucket's key layout (D7).
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).

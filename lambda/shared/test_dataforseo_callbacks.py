@@ -96,3 +96,39 @@ def test_a_wait_that_already_ended_is_not_an_error(code):
     states.send_task_success.side_effect = _client_error(code)
 
     assert callbacks.release('token', '{}', states) is False
+
+
+def _gate_table(claimed: dict | None):
+    """A table whose release claim answers ``claimed`` (``None``: the condition fails)."""
+    table = MagicMock()
+    if claimed is None:
+        table.update_item.side_effect = _client_error('ConditionalCheckFailedException')
+    else:
+        table.update_item.return_value = {'Attributes': claimed}
+    return table
+
+
+def test_releases_an_emptied_gate_once_it_is_claimed():
+    table = _gate_table({'remaining': 0, 'task_token': 'token', 'output': '{"next": "collect"}'})
+    states = MagicMock()
+
+    assert callbacks.release_if_due(GATE, table, states) is True
+    states.send_task_success.assert_called_once_with(taskToken='token', output='{"next": "collect"}')
+    assert 'attribute_not_exists(released)' in table.update_item.call_args.kwargs['ConditionExpression']
+
+
+def test_sends_nothing_for_a_gate_not_yet_empty_or_already_released():
+    states = MagicMock()
+
+    assert callbacks.release_if_due(GATE, _gate_table(None), states) is False
+    states.send_task_success.assert_not_called()
+
+
+def test_gives_the_claim_back_when_the_send_fails_so_a_later_pingback_sends_it():
+    table = _gate_table({'remaining': 0, 'task_token': 'token', 'output': '{}'})
+    states = MagicMock()
+    states.send_task_success.side_effect = _client_error('ThrottlingException')
+
+    with pytest.raises(ClientError):
+        callbacks.release_if_due(GATE, table, states)
+    assert table.update_item.call_args.kwargs['UpdateExpression'] == 'REMOVE released'

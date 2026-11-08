@@ -1,3 +1,4 @@
+import { isSeoApiConfigured } from '../../api/seo';
 import type { ScheduleFormData } from '../../types';
 import type { UpdateScheduleField } from './scheduleFormModel';
 import {
@@ -15,7 +16,8 @@ interface ScheduleKindFieldProps {
 /**
  * What the schedule starts. Picking a snapshot kind names it after the kind
  * while the name is still empty or another kind's default, and shows the
- * paid calls of one run.
+ * paid calls of one run. The snapshot kinds are offered only where the SEO
+ * stack is deployed (the API also refuses them otherwise).
  */
 export const ScheduleKindField = ({
   editable, formData, updateFormField, inputClassName
@@ -35,7 +37,7 @@ export const ScheduleKindField = ({
       {editable ? (
         <select id="schedule-kind" name="schedule-kind" value={formData.kind}
           onChange={(e) => choose(e.target.value)} className={inputClassName}>
-          {SCHEDULE_KINDS.map((info) => (
+          {SCHEDULE_KINDS.filter((info) => info.paidCalls === null || isSeoApiConfigured()).map((info) => (
             <option key={info.kind} value={info.kind}>{info.paidCalls === null ? info.label : `${info.label} (paid)`}</option>
           ))}
         </select>

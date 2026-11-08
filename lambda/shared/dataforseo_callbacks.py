@@ -10,6 +10,8 @@ with free ``task_get`` calls.
 
 - The gate id is 32 random bytes: knowing it is the only way to reach the gate, so it is never logged.
 - An arrival is counted once per task id (``seen``), so a repeated pingback cannot release the gate early.
+- Releasing claims the gate first (``released``), so it sends the token once; a send that fails gives the claim
+  back, and the next pingback of the gate (a retry of the same one included) or the post step sends it again.
 - Tasks DataForSEO refused at post time never call back: ``settle`` takes them off the count, and releases the
   gate when that leaves none.
 - A pingback that never comes is covered by the wait's own timeout, after which the state machine collects
@@ -49,6 +51,7 @@ __all__ = [
     'open_gate',
     'pingback_url',
     'release',
+    'release_if_due',
     'settle',
 ]
 
@@ -154,3 +157,36 @@ def release(task_token: str, output: str, states: Any = None) -> bool:
             return False
         raise
     return True
+
+
+def _claim(gate_id: str, table: Any) -> Arrival | None:
+    """Mark an emptied gate released; ``None`` when it is unknown, not empty yet or already released."""
+    try:
+        answer = table.update_item(
+            Key={'cache_key': gate_key(gate_id)},
+            UpdateExpression='SET released = :yes',
+            ConditionExpression='attribute_exists(cache_key) AND remaining <= :zero AND attribute_not_exists(released)',
+            ExpressionAttributeValues={':yes': True, ':zero': 0},
+            ReturnValues='ALL_NEW',
+        )
+    except ClientError as error:
+        if is_conditional_check_failure(error):
+            return None
+        raise
+    return _arrival(answer.get('Attributes') or {})
+
+
+def release_if_due(gate_id: str, table: Any = None, states: Any = None) -> bool:
+    """Resume the state machine once its gate is empty, exactly once; ``True`` when this call sent the token.
+
+    A failed send gives the claim back and raises, so a later pingback (or a retry of this one) sends it.
+    """
+    gates = table or _table()
+    gate = _claim(gate_id, gates)
+    if gate is None:
+        return False
+    try:
+        return release(gate.task_token, gate.output, states)
+    except Exception:
+        gates.update_item(Key={'cache_key': gate_key(gate_id)}, UpdateExpression='REMOVE released')
+        raise

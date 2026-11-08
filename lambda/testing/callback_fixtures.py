@@ -36,6 +36,13 @@ class GateStub:
         self.released.append((task_token, json.loads(output)))
         return True
 
+    def release_if_due(self, gate_id: str) -> bool:
+        gate = self.gates[gate_id]
+        if gate['remaining'] > 0 or gate.get('released'):
+            return False
+        gate['released'] = True
+        return self.release(gate['task_token'], gate['output'])
+
     @property
     def only_gate(self) -> dict[str, Any]:
         (gate,) = self.gates.values()
@@ -51,7 +58,7 @@ class GateStub:
 def fake_callback_gates(monkeypatch: pytest.MonkeyPatch, module: ModuleType) -> GateStub:
     """Replace the gate functions ``module`` imported from ``shared.dataforseo_callbacks``."""
     stub = GateStub()
-    for name in ('open_gate', 'settle', 'release'):
+    for name in ('open_gate', 'settle', 'release', 'release_if_due'):
         monkeypatch.setattr(module, name, getattr(stub, name))
     monkeypatch.setattr(module, 'pingback_url', lambda gate_id: f'https://callbacks.example/?gate={gate_id}&id=$id')
     return stub
