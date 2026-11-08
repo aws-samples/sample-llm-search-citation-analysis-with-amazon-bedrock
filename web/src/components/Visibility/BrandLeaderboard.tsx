@@ -38,7 +38,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
     ...brandReachColumns((brand) => (
       <div className="flex flex-wrap gap-1">
         {brand.engines.map((engine) => (
-          <span key={engine} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{engine}</span>
+          <span key={engine} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-sm text-xs">{engine}</span>
         ))}
       </div>
     )),
@@ -46,7 +46,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
       header: 'Type',
       render: (brand) => (
         // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the label below names the classification
-        <span className={`px-2 py-1 rounded text-xs ${CLASSIFICATION_BADGES[brand.classification]}`}>
+        <span className={`px-2 py-1 rounded-sm text-xs ${CLASSIFICATION_BADGES[brand.classification]}`}>
           {BRAND_CLASSIFICATION_LABELS[brand.classification]}
         </span>
       ),

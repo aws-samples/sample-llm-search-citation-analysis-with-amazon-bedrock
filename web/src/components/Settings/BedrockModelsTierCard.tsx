@@ -57,7 +57,7 @@ export const BedrockModelsTierCard = ({
           value={draft}
           onChange={(event) => onSelectModel(tier.tier, event.target.value)}
           disabled={saving}
-          className="min-w-[12rem] flex-1 p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900"
+          className="min-w-48 flex-1 p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900"
         >
           {pickerOptions(models, draft).map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
         </select>

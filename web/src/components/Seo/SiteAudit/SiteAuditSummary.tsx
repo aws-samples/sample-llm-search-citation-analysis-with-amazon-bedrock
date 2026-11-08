@@ -62,7 +62,7 @@ function BotRow({ bot }: { readonly bot: BotAccess }) {
       <td className="py-2 pr-3">{bot.vendor}</td>
       <td className="py-2 pr-3">{BOT_CLASS_LABELS[bot.bot_class]}</td>
       <td className="py-2 pr-3">
-        <span className={`rounded border px-2 py-0.5 text-xs ${ACCESS_BADGES[bot.access]}`}>{ACCESS_LABELS[bot.access]}</span>
+        <span className={`rounded-sm border px-2 py-0.5 text-xs ${ACCESS_BADGES[bot.access]}`}>{ACCESS_LABELS[bot.access]}</span>
       </td>
       <td className="py-2 font-mono text-xs text-gray-500">{bot.rule ? `${bot.rule} (line ${bot.line ?? '?'})` : '-'}</td>
     </tr>

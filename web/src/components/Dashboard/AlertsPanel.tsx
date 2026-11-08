@@ -79,7 +79,7 @@ function AlertRow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded border px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alertItem.severity]}`}>
+            <span className={`rounded-sm border px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alertItem.severity]}`}>
               {SEVERITY_LABELS[alertItem.severity]}
             </span>
             <span className="text-xs font-medium text-gray-700">
@@ -163,7 +163,7 @@ export function AlertsPanel() {
       {loading && items.length === 0 && (
         <SkeletonRegion label="Loading alerts" className="p-4 sm:p-5">
           <div className="flex h-5 items-center gap-2">
-            <Skeleton className="h-5 w-16 rounded" />
+            <Skeleton className="h-5 w-16 rounded-sm" />
             <Skeleton className="h-3 w-32" />
           </div>
           <div className="mt-2 flex h-5 items-center"><Skeleton className="h-3.5 w-40" /></div>

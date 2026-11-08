@@ -1,5 +1,5 @@
 import {
-  useId, useState, type FormEvent
+  useId, useState, type SubmitEvent
 } from 'react';
 import { Button } from '../../ui/Button';
 import type {
@@ -19,7 +19,7 @@ import {
 } from './backlinksScope';
 
 const MAX_TARGET_LENGTH = 2048;
-const FIELD_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900';
+const FIELD_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900';
 const LABEL_CLASS = 'block text-sm font-medium text-gray-700 mb-1';
 
 function isScope(value: string): value is BacklinksScope {
@@ -50,7 +50,7 @@ export function BacklinksSearchCard({
   const scope = pickedScope ?? impliedScope(resolved);
   const allowed = scopeAllowed(resolved, scope);
 
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     if (resolved === '' || !allowed) return;
     onSearch({

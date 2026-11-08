@@ -1,7 +1,7 @@
 import {
   useEffect, useState
 } from 'react';
-import type { FormEvent } from 'react';
+import type { SubmitEvent } from 'react';
 import type {
   AlertSettings, AlertSettingsUpdate, AlertSubscriptionStatus
 } from '../../types';
@@ -17,13 +17,13 @@ import { ErrorAlert } from '../ui/ErrorAlert';
 // Stryker disable next-line ObjectLiteral: replacing the Tailwind-only status palette has no behavioral effect
 const SUBSCRIPTION_CLASSES: Record<AlertSubscriptionStatus, string> = {
   // Stryker disable next-line StringLiteral: confirmed status colors are presentation-only
-  confirmed: 'rounded border px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 border-emerald-200',
+  confirmed: 'rounded-sm border px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 border-emerald-200',
   // Stryker disable next-line StringLiteral: pending status colors are presentation-only
-  pending_confirmation: 'rounded border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-800 border-amber-200',
+  pending_confirmation: 'rounded-sm border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-800 border-amber-200',
   // Stryker disable next-line StringLiteral: unsubscribed status colors are presentation-only
-  not_subscribed: 'rounded border px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 border-gray-200',
+  not_subscribed: 'rounded-sm border px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 border-gray-200',
   // Stryker disable next-line StringLiteral: unknown status colors are presentation-only
-  unknown: 'rounded border px-2 py-0.5 text-xs font-medium bg-red-50 text-red-700 border-red-200',
+  unknown: 'rounded-sm border px-2 py-0.5 text-xs font-medium bg-red-50 text-red-700 border-red-200',
 };
 
 function subscriptionLabel(status: AlertSubscriptionStatus): string {
@@ -143,7 +143,7 @@ export function AlertSettingsForm({
     setValidationError(null);
   }, [settings]);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const problem = validateAlertSettingsForm(values);
     setValidationError(problem);
@@ -159,7 +159,7 @@ export function AlertSettingsForm({
             type="checkbox"
             checked={values.enabled}
             onChange={(event) => updateValue('enabled', event.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300"
+            className="mt-0.5 h-4 w-4 rounded-sm border-gray-300"
           />
           <span>
             <span className="block text-sm font-medium text-gray-900">Enable alerts</span>

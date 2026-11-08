@@ -142,7 +142,7 @@ export const SettingsView = ({
   return (
     <div className="space-y-6">
       {/* A floor height keeps the footer from jumping while a section loads. */}
-      <section className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 min-h-[28rem]">
+      <section className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 min-h-112">
         <SectionContent
           section={section}
           keywords={keywords}

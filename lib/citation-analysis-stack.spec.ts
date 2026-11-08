@@ -4,6 +4,7 @@ import {
   describe, it, expect, beforeAll
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
+import { synthesizeDashboardStacks } from './api-stack-fixtures';
 import {
   EMPTY_BEDROCK_MODEL_PICKER_SNAPSHOT,
   EMPTY_CUSTOM_REPORTS_SNAPSHOT,
@@ -320,9 +321,7 @@ const SAVED_BEDROCK_MODEL_CALLERS = [
 ].sort((left, right) => left.localeCompare(right));
 
 beforeAll(() => {
-  const app = new cdk.App();
-  const stack = new CitationAnalysisStack(app, 'TestStack');
-  const template = Template.fromStack(stack);
+  const { mainTemplate: template, apiTemplate } = synthesizeDashboardStacks('Test');
 
   synthesized.definitionRaw = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
   synthesized.resourceCount = Object.keys(template.toJSON().Resources ?? {}).length;
@@ -339,31 +338,31 @@ beforeAll(() => {
   synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
   synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
 
-  const keywordsId = findApiResourceId(template, 'keywords');
-  const promoteId = findApiResourceId(template, 'promote', keywordsId);
-  const keywordId = findApiResourceId(template, '{id}', keywordsId);
-  synthesized.promoteMethods = extractApiMethods(template, promoteId);
-  synthesized.keywordIdMethods = extractApiMethods(template, keywordId);
+  const keywordsId = findApiResourceId(apiTemplate, 'keywords');
+  const promoteId = findApiResourceId(apiTemplate, 'promote', keywordsId);
+  const keywordId = findApiResourceId(apiTemplate, '{id}', keywordsId);
+  synthesized.promoteMethods = extractApiMethods(apiTemplate, promoteId);
+  synthesized.keywordIdMethods = extractApiMethods(apiTemplate, keywordId);
 
-  const keywordGroupsId = findApiResourceId(template, 'keyword-groups');
-  const keywordGroupId = findApiResourceId(template, '{id}', keywordGroupsId);
-  const keywordGroupMembersId = findApiResourceId(template, 'keywords', keywordGroupId);
-  synthesized.keywordGroupsMethods = extractApiMethods(template, keywordGroupsId);
-  synthesized.keywordGroupIdMethods = extractApiMethods(template, keywordGroupId);
-  synthesized.keywordGroupMembersMethods = extractApiMethods(template, keywordGroupMembersId);
+  const keywordGroupsId = findApiResourceId(apiTemplate, 'keyword-groups');
+  const keywordGroupId = findApiResourceId(apiTemplate, '{id}', keywordGroupsId);
+  const keywordGroupMembersId = findApiResourceId(apiTemplate, 'keywords', keywordGroupId);
+  synthesized.keywordGroupsMethods = extractApiMethods(apiTemplate, keywordGroupsId);
+  synthesized.keywordGroupIdMethods = extractApiMethods(apiTemplate, keywordGroupId);
+  synthesized.keywordGroupMembersMethods = extractApiMethods(apiTemplate, keywordGroupMembersId);
   synthesized.keywordGroupsTableKeySchema = extractTableKeySchema(template, 'CitationAnalysis-KeywordGroups');
 
-  const keywordResearchId = findApiResourceId(template, 'keyword-research');
-  const keywordResearchJobId = findApiResourceId(template, '{id}', keywordResearchId);
-  const keywordResearchRetryId = findApiResourceId(template, 'retry', keywordResearchJobId);
-  synthesized.keywordResearchIdMethods = extractApiMethods(template, keywordResearchJobId);
-  synthesized.keywordResearchRetryMethods = extractApiMethods(template, keywordResearchRetryId);
-  const keywordResearchAgentId = findApiResourceId(template, 'agent', keywordResearchId);
-  const researchTemplatesId = findApiResourceId(template, 'templates', keywordResearchId);
-  const researchTemplateId = findApiResourceId(template, '{id}', researchTemplatesId);
-  synthesized.keywordResearchAgentMethods = extractApiMethods(template, keywordResearchAgentId);
-  synthesized.researchTemplatesMethods = extractApiMethods(template, researchTemplatesId);
-  synthesized.researchTemplateIdMethods = extractApiMethods(template, researchTemplateId);
+  const keywordResearchId = findApiResourceId(apiTemplate, 'keyword-research');
+  const keywordResearchJobId = findApiResourceId(apiTemplate, '{id}', keywordResearchId);
+  const keywordResearchRetryId = findApiResourceId(apiTemplate, 'retry', keywordResearchJobId);
+  synthesized.keywordResearchIdMethods = extractApiMethods(apiTemplate, keywordResearchJobId);
+  synthesized.keywordResearchRetryMethods = extractApiMethods(apiTemplate, keywordResearchRetryId);
+  const keywordResearchAgentId = findApiResourceId(apiTemplate, 'agent', keywordResearchId);
+  const researchTemplatesId = findApiResourceId(apiTemplate, 'templates', keywordResearchId);
+  const researchTemplateId = findApiResourceId(apiTemplate, '{id}', researchTemplatesId);
+  synthesized.keywordResearchAgentMethods = extractApiMethods(apiTemplate, keywordResearchAgentId);
+  synthesized.researchTemplatesMethods = extractApiMethods(apiTemplate, researchTemplatesId);
+  synthesized.researchTemplateIdMethods = extractApiMethods(apiTemplate, researchTemplateId);
   synthesized.researchTemplatesTableKeySchema = extractTableKeySchema(template, 'CitationAnalysis-ResearchTemplates');
   synthesized.researchWorkerEnvVars = extractLambdaEnvVars(template, RESEARCH_WORKER_FUNCTION_NAME);
   synthesized.researchWorkerRoleActions = extractFunctionRoleActions(template, RESEARCH_WORKER_FUNCTION_NAME);
@@ -372,19 +371,19 @@ beforeAll(() => {
   synthesized.citationsContentMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-CitationsContent');
   synthesized.bucketDeploymentMemorySizes = extractMemorySizesByLogicalIdPrefix(template, 'CustomCDKBucketDeployment');
   synthesized.gatewayResponses = Object.values(
-    template.findResources('AWS::ApiGateway::GatewayResponse')
+    apiTemplate.findResources('AWS::ApiGateway::GatewayResponse')
   ).map((response) => ({
     responseType: resolveString(response, ['Properties', 'ResponseType']),
     statusCode: resolveString(response, ['Properties', 'StatusCode']),
     responseParameters: resolvePath(response, ['Properties', 'ResponseParameters']),
   }));
 
-  const schedulesId = findApiResourceId(template, 'schedules');
-  const scheduleId = findApiResourceId(template, '{name}', schedulesId);
-  const scheduleRunId = findApiResourceId(template, 'run', scheduleId);
-  synthesized.schedulesMethods = extractApiMethods(template, schedulesId);
-  synthesized.scheduleIdMethods = extractApiMethods(template, scheduleId);
-  synthesized.scheduleRunMethods = extractApiMethods(template, scheduleRunId);
+  const schedulesId = findApiResourceId(apiTemplate, 'schedules');
+  const scheduleId = findApiResourceId(apiTemplate, '{name}', schedulesId);
+  const scheduleRunId = findApiResourceId(apiTemplate, 'run', scheduleId);
+  synthesized.schedulesMethods = extractApiMethods(apiTemplate, schedulesId);
+  synthesized.scheduleIdMethods = extractApiMethods(apiTemplate, scheduleId);
+  synthesized.scheduleRunMethods = extractApiMethods(apiTemplate, scheduleRunId);
   synthesized.configMgmtFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
   synthesized.configMgmtEnvVars = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
   synthesized.configMgmtStateMachineActions = extractFunctionRoleActionsOn(
@@ -395,7 +394,7 @@ beforeAll(() => {
   );
   synthesized.healthCheckLayerRefs = extractLambdaLayerRefs(template, 'CitationAnalysis-API-Health');
 
-  synthesized.apiAuthSnapshots = extractApiAuthSnapshots(template);
+  synthesized.apiAuthSnapshots = extractApiAuthSnapshots(apiTemplate);
   synthesized.userPoolClientProps = extractUserPoolClientProps(template);
   synthesized.userPoolGroupNames = extractUserPoolGroupNames(template);
 
@@ -427,7 +426,7 @@ beforeAll(() => {
   synthesized.keywordMgmtConcurrency =
     extractReservedConcurrency(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.outputKeys = Object.keys(template.findOutputs('*'));
-  synthesized.apiBackedFunctionTimeouts = extractApiBackedFunctionTimeouts(template);
+  synthesized.apiBackedFunctionTimeouts = extractApiBackedFunctionTimeouts(template, apiTemplate);
 
   synthesized.apiLambdaLogGroups = extractLambdaLogGroups(template, API_FUNCTION_PREFIX);
   synthesized.workerLogGroupRetention = new Map(
@@ -436,7 +435,7 @@ beforeAll(() => {
 
   synthesized.stateMachineLogging = extractStateMachineLogging(template, WORKFLOW_STATE_MACHINE);
   synthesized.researchStateMachineLogging = extractStateMachineLogging(template, RESEARCH_STATE_MACHINE);
-  synthesized.prodStageMethodSettings = extractProdStageMethodSettings(template);
+  synthesized.prodStageMethodSettings = extractProdStageMethodSettings(apiTemplate);
 
   synthesized.waf = extractWafFootprint(template);
 
@@ -446,15 +445,15 @@ beforeAll(() => {
   synthesized.searchRoleProviderConfigActions =
     extractRoleTableActions(template, SEARCH_ROLE_NAME, PROVIDER_CONFIG_TABLE_NAME);
 
-  const visibilityId = findApiResourceId(template, 'visibility');
+  const visibilityId = findApiResourceId(apiTemplate, 'visibility');
   synthesized.sentimentExamplesMethods = extractApiMethods(
-    template, findApiResourceId(template, 'sentiment-examples', visibilityId)
+    apiTemplate, findApiResourceId(apiTemplate, 'sentiment-examples', visibilityId)
   );
   synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
   synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
   synthesized.providerSearch = extractProviderSearchSnapshot(template);
-  synthesized.customReports = extractCustomReportsSnapshot(template);
-  synthesized.bedrockModelPicker = extractBedrockModelPickerSnapshot(template, SHARED_MODELS_CALLERS_WITHOUT_INVOKE);
+  synthesized.customReports = extractCustomReportsSnapshot(template, apiTemplate);
+  synthesized.bedrockModelPicker = extractBedrockModelPickerSnapshot(template, apiTemplate, SHARED_MODELS_CALLERS_WITHOUT_INVOKE);
   synthesized.contentSecurityPolicy = extractContentSecurityPolicy(template);
 }, 180_000);
 
@@ -605,13 +604,16 @@ describe('WAF', () => {
 });
 
 /**
- * CloudFormation refuses a template with more than 500 resources, and the
- * main stack sits at 499 (2.42.0): new infrastructure goes into another stack
- * (the MCP server already does). Fails at synth time instead of at deploy.
+ * CloudFormation refuses a template with more than 500 resources. The main
+ * stack reached 497 in 2.42.0, ~310 of them the REST API; since 2.44.0 the
+ * API is `CitationAnalysisApiStack` and the main stack holds ~190. The budget
+ * of 350 leaves room for real features (a table is 1 resource, a Lambda with
+ * its role, policy and log group 4) while failing at synth time, long before
+ * the hard limit, if the API or another ~150-resource block moves back in.
  */
 describe('Main stack resource budget', () => {
-  it('stays under the 500-resource CloudFormation limit', () => {
-    expect(synthesized.resourceCount).toBeLessThan(500);
+  it('stays within a budget of 350 resources, well under the 500-resource CloudFormation limit', () => {
+    expect(synthesized.resourceCount).toBeLessThanOrEqual(350);
   });
 });
 
@@ -1827,8 +1829,7 @@ describe('AgentCore browser signing role', () => {
 });
 
 describe('KPI alert backend infrastructure', () => {
-  const app = new cdk.App();
-  const template = Template.fromStack(new CitationAnalysisStack(app, 'KpiAlertTestStack'));
+  const { mainTemplate: template, apiTemplate } = synthesizeDashboardStacks('KpiAlertTest');
 
   const tableNames = [
     'CitationAnalysis-KpiSnapshots',
@@ -2035,7 +2036,7 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('exposes the exact authenticated alert routes through ConfigMgmt', () => {
-    const alertRoutes = extractApiAuthSnapshots(template)
+    const alertRoutes = extractApiAuthSnapshots(apiTemplate)
       .filter((route) => route.path.startsWith('/api/alerts'))
       .sort((left, right) => `${left.path} ${left.httpMethod}`.localeCompare(`${right.path} ${right.httpMethod}`));
 
@@ -2053,16 +2054,16 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('integrates every alert route with the consolidated ConfigMgmt Lambda', () => {
-    const alertsId = findApiResourceId(template, 'alerts');
-    const alertId = findApiResourceId(template, '{id}', alertsId);
+    const alertsId = findApiResourceId(apiTemplate, 'alerts');
+    const alertId = findApiResourceId(apiTemplate, '{id}', alertsId);
     const routeIds = [
       alertsId,
-      findApiResourceId(template, 'acknowledge', alertId),
-      findApiResourceId(template, 'settings', alertsId),
-      findApiResourceId(template, 'test-notification', alertsId),
-      findApiResourceId(template, 'content-changes', alertsId),
+      findApiResourceId(apiTemplate, 'acknowledge', alertId),
+      findApiResourceId(apiTemplate, 'settings', alertsId),
+      findApiResourceId(apiTemplate, 'test-notification', alertsId),
+      findApiResourceId(apiTemplate, 'content-changes', alertsId),
     ];
-    const methods = routeIds.flatMap((resourceId) => extractApiMethods(template, resourceId));
+    const methods = routeIds.flatMap((resourceId) => extractApiMethods(apiTemplate, resourceId));
     const configFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
 
     expect(methods).toHaveLength(7);
@@ -2132,9 +2133,8 @@ describe('Citation Gaps gateway failure visibility', () => {
 });
 
 describe('Content Studio scopes batches and saved templates', () => {
-  const app = new cdk.App();
-  const template = Template.fromStack(new CitationAnalysisStack(app, 'ContentStudioFeatureStack'));
-  const snapshot = extractContentStudioInfrastructureSnapshot(template);
+  const contentStudioStacks = synthesizeDashboardStacks('ContentStudioFeature');
+  const snapshot = extractContentStudioInfrastructureSnapshot(contentStudioStacks.mainTemplate, contentStudioStacks.apiTemplate);
 
   it('adds only the status creation index to the existing content table', () => {
     expect(snapshot.contentTableIndexes).toStrictEqual([
@@ -2559,9 +2559,8 @@ describe('Bedrock model access opt-out (-c skipModelProvisioning=true)', () => {
  * regenerated through an Admin route.
  */
 describe('Report insights narrative', () => {
-  const snapshot = extractReportInsightsSnapshot(
-    Template.fromStack(new CitationAnalysisStack(new cdk.App(), 'ReportInsightsTestStack'))
-  );
+  const reportStacks = synthesizeDashboardStacks('ReportInsightsTest');
+  const snapshot = extractReportInsightsSnapshot(reportStacks.mainTemplate, reportStacks.apiTemplate);
   const state = (name: string): unknown => resolvePath(snapshot.states, [name]);
 
   it('decides on GenerateInsights after KpiAlerts on both of its branches', () => {
@@ -2649,6 +2648,7 @@ describe('Report insights narrative', () => {
   it('hands the worker the tables it reads and writes', () => {
     expect(snapshot.workerEnvironmentNames.filter((name) => name.startsWith('DYNAMODB_TABLE_'))).toStrictEqual([
       'DYNAMODB_TABLE_BRAND_CONFIG',
+      'DYNAMODB_TABLE_KEYWORD_RUN_KPIS',
       'DYNAMODB_TABLE_KEYWORDS',
       'DYNAMODB_TABLE_PROVIDER_CONFIG',
       'DYNAMODB_TABLE_REPORT_INSIGHTS',
@@ -2666,7 +2666,12 @@ describe('Report insights narrative', () => {
       'CitationAnalysis-ProviderConfig': ['dynamodb:GetItem'],
       'CitationAnalysis-BrandConfig': read,
       'CitationAnalysis-ReportInsights': ['dynamodb:PutItem'],
+      'CitationAnalysis-KeywordRunKpis': ['dynamodb:Query'],
     });
+  });
+
+  it('lets the Deduplication Lambda read back and put KeywordRunKpis rows and nothing else on that table', () => {
+    expect(snapshot.deduplicationKeywordRunKpisActions).toStrictEqual(['dynamodb:PutItem', 'dynamodb:Query']);
   });
 
   it('lets the worker invoke Bedrock models and nothing outside DynamoDB and Bedrock', () => {

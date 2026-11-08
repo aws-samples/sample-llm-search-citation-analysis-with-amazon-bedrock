@@ -44,7 +44,7 @@ export const TriggerSectionSkeleton = ({ keywordCount }: TriggerSectionSkeletonP
               <Skeleton className="h-5 w-40" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 px-3 pb-3">
-              {pickerCellIds(keywordCount).map((id) => <Skeleton key={id} className="h-8 rounded" />)}
+              {pickerCellIds(keywordCount).map((id) => <Skeleton key={id} className="h-8 rounded-sm" />)}
             </div>
           </div>
         </div>

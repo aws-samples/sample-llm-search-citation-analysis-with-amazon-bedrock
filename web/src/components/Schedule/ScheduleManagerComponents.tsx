@@ -142,7 +142,7 @@ const ScheduleItem = ({
             <button
               type="button"
               onClick={() => onEdit(schedule)}
-              className="text-left hover:underline focus:outline-none focus:ring-2 focus:ring-gray-900 rounded"
+              className="text-left hover:underline focus:outline-hidden focus:ring-2 focus:ring-gray-900 rounded-sm"
               aria-label={`Edit schedule ${schedule.display_name}`}
             >
               {schedule.display_name}

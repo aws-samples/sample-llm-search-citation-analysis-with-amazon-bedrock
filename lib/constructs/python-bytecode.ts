@@ -158,7 +158,13 @@ function filesHash(sourceDir: string, files: string[]): string {
   return hash.digest('hex');
 }
 
-const COMPILE_ARGS = ['-m', 'compileall', '-q', '--invalidation-mode', 'checked-hash'];
+/**
+ * `-d /var/task`: each code object records the file name it was compiled
+ * from, which would otherwise be the temp dir (local) or `/asset-output`
+ * (Docker), so the two paths gave different bytes. Lambda mounts the asset at
+ * /var/task, so both now record the runtime path.
+ */
+const COMPILE_ARGS = ['-m', 'compileall', '-q', '--invalidation-mode', 'checked-hash', '-d', '/var/task'];
 
 /** Thrown when CPython 3.12 rejects a handler file (a syntax error the runtime would hit on import). */
 class BytecodeCompileError extends Error {
@@ -200,7 +206,7 @@ function compiledTree(python: string, sourceDir: string, files: string[], hash: 
 }
 
 function shellQuote(value: string): string {
-  return ["'", value.split("'").join("'\\''"), "'"].join('');
+  return ["'", value.replaceAll("'", "'\\''"), "'"].join('');
 }
 
 /** The Docker fallback: the same copy and compile inside the Lambda 3.12 bundling image. */

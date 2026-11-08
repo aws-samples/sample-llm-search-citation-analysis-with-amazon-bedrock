@@ -96,6 +96,18 @@ describe('synthesized Python assets', () => {
     expect(pycFlags(path.join(assets.worker, '__pycache__/handler.cpython-312.pyc'))).toBe(CHECKED_HASH_FLAGS);
   });
 
+  // The code object's file name is the only host-dependent part of a pyc; a
+  // runtime path makes the local and Docker builds byte-identical.
+  it('records the Lambda task path, not the build directory, in handler bytecode', () => {
+    const pyc = fs.readFileSync(path.join(assets.worker, '__pycache__/handler.cpython-312.pyc'));
+    expect(pyc.includes('/var/task/handler.py')).toBe(true);
+  });
+
+  it('records the layer mount path, not the build directory, in layer bytecode', () => {
+    const pyc = fs.readFileSync(path.join(assets.layer, 'python/shared/__pycache__/models.cpython-312.pyc'));
+    expect(pyc.includes('/opt/python/shared/models.py')).toBe(true);
+  });
+
   it('ships only the listed API handler files with their bytecode', () => {
     expect(listFiles(assets.api)).toStrictEqual([
       '__pycache__/get-stats.cpython-312.pyc',

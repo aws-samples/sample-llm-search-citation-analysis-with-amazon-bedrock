@@ -26,7 +26,7 @@ export const VideoDetails = ({ citation }: { readonly citation: CrawledContent }
         <img
           src={thumbnail}
           alt={`Thumbnail of the YouTube video ${citation.title}`}
-          className="w-full sm:w-60 rounded border border-gray-200 object-cover"
+          className="w-full sm:w-60 rounded-sm border border-gray-200 object-cover"
           loading="lazy"
           referrerPolicy="no-referrer"
         />

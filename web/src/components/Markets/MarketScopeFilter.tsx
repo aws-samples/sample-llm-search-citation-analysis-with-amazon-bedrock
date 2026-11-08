@@ -62,7 +62,7 @@ export function MarketScopeFilter({
                 checked={selected.has(option.id)}
                 onChange={() => toggle(option.id)}
                 disabled={disabled}
-                className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900"
               />
               {option.label}
             </label>

@@ -5,7 +5,7 @@ import { PLAY_PATHS } from '../ui/iconPaths';
 export function VideoBadge() {
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded"
+      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-sm"
       title="YouTube video"
     >
       <StrokeIcon className="w-3 h-3" paths={PLAY_PATHS} aria-hidden="true" />

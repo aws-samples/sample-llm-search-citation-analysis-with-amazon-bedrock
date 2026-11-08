@@ -54,7 +54,7 @@ function MetricRow({
       <td className="px-3 py-2">
         {rating === null
           ? <span className="text-xs text-gray-500">Not measured</span>
-          : <span className={`rounded px-2 py-0.5 text-xs ${RATING_CLASSES[rating]}`}>{RATING_LABELS[rating]}</span>}
+          : <span className={`rounded-sm px-2 py-0.5 text-xs ${RATING_CLASSES[rating]}`}>{RATING_LABELS[rating]}</span>}
       </td>
       <td className="px-3 py-2 text-xs text-gray-500">{thresholdNote(metric)}</td>
     </tr>
@@ -81,7 +81,7 @@ function AuditItem({ audit }: { readonly audit: LighthouseAudit }) {
   return (
     <li className="py-2">
       <div className="flex flex-wrap items-baseline gap-2">
-        <span className={`rounded px-2 py-0.5 text-xs ${SEVERITY_CLASSES[audit.severity]}`}>{audit.severity}</span>
+        <span className={`rounded-sm px-2 py-0.5 text-xs ${SEVERITY_CLASSES[audit.severity]}`}>{audit.severity}</span>
         <span className="font-medium text-gray-900">{audit.title}</span>
         <span className="text-xs text-gray-500">{SCORE_LABELS[audit.category]}</span>
         {savings !== '' && <span className="text-xs text-gray-600">{savings}</span>}

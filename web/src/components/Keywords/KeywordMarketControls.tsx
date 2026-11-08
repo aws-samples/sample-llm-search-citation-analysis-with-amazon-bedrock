@@ -39,7 +39,7 @@ export function KeywordMarketSelect({
     <span className="inline-flex items-center gap-2">
       <label htmlFor={id} className={hideLabel ? 'sr-only' : 'text-sm text-gray-600'}>{label}</label>
       <select id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}
-        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900">
         <option value="">No market</option>
         {markets.map((market) => <option key={market.market_id} value={market.market_id}>{market.name}</option>)}
       </select>
@@ -91,7 +91,7 @@ export function AddToMarketsButton({
       type="button"
       onClick={() => onAddToMarkets(keyword)}
       aria-label={`Add ${keyword.keyword} to markets`}
-      className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200"
+      className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-sm border border-gray-200"
     >
       Add to markets…
     </button>

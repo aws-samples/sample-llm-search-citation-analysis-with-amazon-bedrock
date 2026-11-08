@@ -20,7 +20,7 @@ export function VersionTab() {
           </div>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          The version follows the <code className="bg-gray-100 px-1 rounded">web/package.json</code> version
+          The version follows the <code className="bg-gray-100 px-1 rounded-sm">web/package.json</code> version
           and is bumped whenever a feature set is merged or deployed.
         </p>
       </div>

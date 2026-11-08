@@ -63,7 +63,7 @@ The Visibility tab, the per-group report, the Executive Summary, Brand Visibilit
 
 ### Lambda functions
 
-All functions run Python 3.12. CPU-bound functions are sized for CPU, which Lambda allocates in proportion to memory: 1,769 MB (one vCPU) for API-StatsInsights, API-CitationsContent, API-GetBrandMentions, KpiAlerts and ReportInsights; 1,024 MB for API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt and ParseKeywords; 3,008 MB and 900 s for GenerateSummary, which also builds the citation rollup. API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
+All functions run Python 3.12. CPU-bound functions are sized for CPU, which Lambda allocates in proportion to memory: 1,769 MB (one vCPU) for API-StatsInsights, API-CitationsContent, API-GetBrandMentions, KpiAlerts and ReportInsights; 1,024 MB for API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt and ParseKeywords; 1,024 MB and 300 s for Deduplication, which also records each keyword run's KPI counts; 3,008 MB and 900 s for GenerateSummary, which also builds the citation rollup. API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
 
 | Function | Code | Role |
 |---|---|---|
@@ -84,6 +84,7 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 |---|---|---|
 | SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands and its `market_id` |
 | Citations | keyword / normalized_url | Every deduplicated citation, with `content_type` (`video` or `page`) |
+| KeywordRunKpis | keyword / run_timestamp | One row of KPI counts per keyword and run (at most 25 brands), which the history views add up instead of re-reading every answer; see [KPI backfill](#kpi-backfill) |
 | CrawledContent | normalized_url / crawled_at | Crawled page content, summaries and SEO data |
 | Keywords | id | Keywords; `group_ids` holds group membership, `market_id` the market, `concept_id` the keyword a translation localizes |
 | KeywordGroups | id | Keyword groups |
@@ -118,7 +119,7 @@ S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and
 
 ### API and hosting
 
-A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
+A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. It has its own stack, `CitationAnalysisApiStack` (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`), which imports the API Lambdas, the user pool, the web bucket and the distribution from `CitationAnalysisStack` and is deployed after it; it also writes `config.json` (`{"apiUrl": "<stage URL>/api"}`) into the web bucket, which the dashboard reads at startup, so the API URL is not built into the bundle. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
 
 ### MCP server (preview)
 
@@ -143,11 +144,12 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 ## Project structure
 
 ```
-├── bin/                     # CDK app entry point (stacks CitationAnalysisStack, CitationAnalysisMcpStack)
+├── bin/                     # CDK app entry point (stacks CitationAnalysisStack, CitationAnalysisApiStack, CitationAnalysisMcpStack, CitationAnalysisWebSearchStack)
 ├── lib/
 │   ├── citation-analysis-stack.ts
+│   ├── api-stack.ts         # Dashboard REST API stack (+ config.json)
 │   ├── mcp-stack.ts         # MCP server stack
-│   └── constructs/          # auth.ts (Cognito), bedrock-model-access.ts, mcp-server.ts
+│   └── constructs/          # auth.ts (Cognito), rest-api.ts (dashboard routes), bedrock-model-access.ts, mcp-server.ts
 ├── lambda/
 │   ├── api/                 # API handlers
 │   ├── mcp/                 # MCP server: auth, protocol, catalogue, tool search, invoker
@@ -170,7 +172,7 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 
 ## Prerequisites
 
-- Node.js 20+ and npm
+- Node.js 22.12+ and npm (the lint and test toolchain needs 22.12)
 - Python 3.12 and pip. The layer builds, `cdk synth` and `npm test` compile every shipped module to CPython 3.12 bytecode (Lambda's read-only `/var/task` and `/opt` would otherwise make each cold start recompile ~430 modules). They need a CPython 3.12 (`$PYTHON312`, `python3.12` on `PATH`, or `uv python install 3.12`) or a running Docker, and fail on any other Python version. See [Python bytecode in the assets](#python-bytecode-in-the-assets).
 - AWS CLI with credentials and a default region (`aws configure`, or `AWS_REGION`)
 - AWS CDK CLI (`npm install -g aws-cdk`)
@@ -181,7 +183,10 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 
 - **Layers:** `build-layer.sh` installs with `pip --no-compile`, copies `shared/`, then runs `scripts/compile-python312.sh`: `unchecked-hash` bytecode for third-party packages, `checked-hash` for `shared/`. Hash-based `.pyc` carry no mtime, so two builds of the same input are byte-identical and the layer's asset hash does not change. Synth fails ("layer is stale") when a shared module has no `cpython-312.pyc` or its embedded source hash no longer matches the `.py`; rerun the layer build.
 - **Handlers:** `apiLambdaCode` and the worker directories are bundled at synth (`lib/constructs/python-bytecode.ts`): only runtime files (no `test_*.py`, `conftest.py` or caches), compiled `checked-hash` by a local 3.12 or, without one, inside the Lambda 3.12 bundling image. The asset hash covers just the shipped files, so editing one API handler redeploys only the Lambdas that bundle it.
+- **Cold-start saving:** measured in the Lambda image, the shipped `.pyc` save about 80–100 ms of CPU per router natively, about 0.5 s at 256 MB (2.42.0 estimated 1.5–3 s).
 - Every other `.pyc` (pytest's 3.14 caches in the source trees and the built layer) stays out of the assets.
+- **Same bytes on every host:** the code object's file name is the one host-dependent part of a `.pyc`, so it is set to the runtime path (`-d /opt/python` for layers, `-d /var/task` for handlers). The Docker and pip layer builds then give identical bytecode, and so do the local and Docker handler bundling. The pip branch differs from the Docker branch only in two `RECORD` files, which list the console scripts the build deletes (`bin/`, never run on Lambda).
+- **Checked after every compile:** `scripts/verify-python-artifacts.sh` runs with the interpreter that compiled the tree (or in the Lambda image) and fails the layer build when a `.py` has no current `cpython-312.pyc`, when bytecode is timestamp-based, from another Python, or records a build path, or when a native extension is not x86_64 ELF. To check a tree by hand: `scripts/verify-python-artifacts.sh --python python3.12 lambda/layer/python shared`.
 
 ## Deployment
 
@@ -189,12 +194,12 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 npm run deploy      # same as ./scripts/deploy.sh
 ```
 
-`scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys both stacks, rebuilds the dashboard with the new API and Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
+`scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys every stack (`cdk deploy --all`), rebuilds the dashboard with the new Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
 
 <details>
 <summary>Manual deployment</summary>
 
-The dashboard needs the API URL and Cognito IDs, which exist only after the first deploy, so the frontend is built twice:
+The dashboard needs the Cognito IDs, which exist only after the first deploy, so the frontend is built twice. The API URL is not built in: `CitationAnalysisApiStack` writes it to `config.json` in the web bucket.
 
 ```bash
 npm install
@@ -203,9 +208,23 @@ bash lambda/crawler-layer/build-layer.sh
 (cd web && npm install && npm run build)   # synth requires web/dist
 npm run build
 cdk bootstrap                              # first time per account/region
-cdk deploy --all                           # CitationAnalysisStack, then CitationAnalysisMcpStack
+cdk deploy --all                           # CitationAnalysisStack first, then the API, MCP and web search stacks
 ./scripts/deploy-web.sh                    # rebuild with the stack outputs, upload, invalidate CloudFront
 ```
+
+</details>
+
+<details>
+<summary>Upgrading from 2.42.0 or earlier (the API moves to its own stack)</summary>
+
+2.44.0 moves the REST API out of `CitationAnalysisStack` (which had 499 of CloudFormation's 500 resources and now has about 188) into `CitationAnalysisApiStack` (about 315). Upgrade with the usual `npm run deploy` (or rebuild `web/dist` with the new `./scripts/build-web.sh`, then `cdk deploy --all`). In that one deploy:
+
+1. CloudFormation updates `CitationAnalysisStack`: it uploads the new dashboard and, in its cleanup phase, deletes the old API. No table, bucket, function, user pool or distribution is replaced.
+2. CDK then creates `CitationAnalysisApiStack`: a new API with a **new URL**, and `config.json` pointing at it.
+
+Between the two the dashboard API is unavailable for a few minutes: the new dashboard shows "The API is being updated" and opens by itself once `config.json` exists; a tab still running the old dashboard gets errors and must be reloaded. Scripts or bookmarks that call the old `execute-api` URL must switch to the `ApiGatewayUrl` output of `CitationAnalysisApiStack` (same export name, `CitationAnalysis-ApiGatewayUrl`). The MCP server calls the Lambdas directly and is not affected. Do not deploy a `web/dist` built by an older `build-web.sh`: it has the old API URL built in.
+
+If another stack imports `CitationAnalysis-ApiGatewayUrl`, CloudFormation cannot delete the old export, so the `CitationAnalysisStack` update fails and rolls back; remove the import, deploy, then import the new export. After the deploy, run the [KPI backfill](#kpi-backfill) once.
 
 </details>
 
@@ -215,8 +234,8 @@ Other commands:
 |---|---|
 | `npm run deploy:cdk` | `cdk deploy --all --require-approval never` (layers and `web/dist` must already be built) |
 | `npm run deploy:full` | `deploy:cdk`, then clear the CloudFront cache |
-| `./scripts/deploy-web.sh` | Frontend only: build, sync to S3, invalidate CloudFront |
-| `./scripts/build-web.sh` | Build the dashboard with `VITE_*` values from the stack outputs |
+| `./scripts/deploy-web.sh` | Frontend only: build, sync to S3 (keeping `config.json`), invalidate CloudFront |
+| `./scripts/build-web.sh` | Build the dashboard with the Cognito and MCP `VITE_*` values from the stack outputs (the API URL comes from `config.json` at run time; `VITE_API_URL` in `web/.env.local` overrides it on `npm run dev`) |
 | `npm run clear-cache` | Invalidate the CloudFront distribution |
 | `npm run synth` | `cdk synth` |
 | `./scripts/quick-error-check.sh [minutes]` | Count provider retries and errors in the Search Lambda logs |
@@ -228,6 +247,28 @@ Get the dashboard URL later with:
 aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
   --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' --output text
 ```
+
+and the API URL (also in the dashboard's `/config.json`) with:
+
+```bash
+aws cloudformation describe-stacks --stack-name CitationAnalysisApiStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' --output text
+```
+
+### KPI backfill
+
+The history views (trends, overview, group KPIs, insights) add up one row of KPI counts per keyword run (`CitationAnalysis-KeywordRunKpis`), which DeduplicateCitations writes when a keyword's run completes. Runs from before 2.44.0 have no row and are read from the raw answers within the request's time budget, so long windows can be partial until the backfill has run. Run it once after upgrading, and again after changing the owned domains (rows counted against other owned domains are recounted from the raw answers until then). Each call stops before its time budget and returns `done` and a `cursor` to resume from:
+
+```bash
+aws lambda invoke --function-name CitationAnalysis-Deduplication --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"backfill_keyword_run_kpis"}' out.json
+while [ "$(jq -r '.done' out.json)" = "false" ]; do
+  aws lambda invoke --function-name CitationAnalysis-Deduplication --cli-binary-format raw-in-base64-out \
+    --payload "$(jq -c '{action:"backfill_keyword_run_kpis",cursor:.cursor}' out.json)" out.json
+done
+```
+
+The backfill skips runs whose row is current. Add `"rebuild": true` to the first payload to rewrite every row.
 
 ## Getting started
 

@@ -4,7 +4,7 @@ Visual language for the Citation Analysis dashboard: colours, typography,
 spacing, components, icons, charts, print output and dark/light theming. Use
 it to build new UI without inventing styles, and as a review checklist.
 
-> **Stack:** Tailwind CSS 3 (`darkMode: 'class'`), React 18, no icon
+> **Stack:** Tailwind CSS 4 (CSS-first, `web/src/index.css`; `dark:` keyed to the `.dark` class), React 19, no icon
 > library, no component library beyond the AWS Amplify `Authenticator`.
 > Generic primitives live in `web/src/components/ui/`; report building blocks
 > live in `components/Reports/layout/` and `components/Reports/charts/`.
@@ -543,7 +543,7 @@ bright white backgrounds. Dim them in dark mode:
 <img
   src={screenshotUrl}
   alt="Screenshot of the cited page"
-  className="w-full border border-gray-300 rounded shadow-lg dark:brightness-90 dark:contrast-95"
+  className="w-full border border-gray-300 rounded-sm shadow-lg dark:brightness-90 dark:contrast-95"
 />
 ```
 

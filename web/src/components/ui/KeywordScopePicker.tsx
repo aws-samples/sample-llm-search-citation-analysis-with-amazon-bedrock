@@ -179,7 +179,7 @@ function GroupIdPicker({
                 <input type="checkbox" aria-label={group.name} checked={isSelected}
                   onChange={() => toggleGroup(group.id)}
                   disabled={disabled || (!isSelected && selectionLimitReached)}
-                  className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900" />
+                  className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900" />
                 <span className="flex-1 text-sm text-gray-700">{group.name}</span>
                 <span className="text-xs text-gray-400">{keywordCountLabel(group.keyword_count)}</span>
               </label>
@@ -264,7 +264,7 @@ function KeywordIdPicker({
         <input id={searchId} name={searchId} type="search" value={search}
           onChange={(event) => setSearch(event.target.value)} placeholder="Search keywords..."
           disabled={disabled}
-          className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900" />
+          className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900" />
         <div className="flex items-center gap-3 text-sm">
           <span className="text-gray-500">{selected.size} of {keywords.length} selected</span>
           <button type="button" onClick={() => onChange(globalSelectionComplete ? [] : globalTargetIds)}
@@ -295,7 +295,7 @@ function KeywordIdPicker({
                   checked={state === 'all'}
                   ref={(element) => { if (element) element.indeterminate = state === 'some'; }}
                   onChange={() => toggleSection(section)} disabled={disabled || sectionCannotSelect}
-                  className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900" />
+                  className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900" />
                 <button type="button" onClick={() => toggleCollapsed(section.id)}
                   aria-expanded={!isCollapsed}
                   className="flex-1 flex items-center justify-between text-left text-sm font-medium text-gray-900">
@@ -310,11 +310,11 @@ function KeywordIdPicker({
                     const isSelected = selected.has(keyword.id);
                     return (
                       // Stryker disable next-line StringLiteral: React uses this only for reconciliation identity; the rendered label and selection behavior are unchanged.
-                      <label key={`${section.id}:${keyword.id}`} htmlFor={keywordId} className="flex items-center gap-2 p-1.5 hover:bg-white rounded cursor-pointer">
+                      <label key={`${section.id}:${keyword.id}`} htmlFor={keywordId} className="flex items-center gap-2 p-1.5 hover:bg-white rounded-sm cursor-pointer">
                         <input id={keywordId} name={name} value={keyword.id} type="checkbox" checked={isSelected}
                           onChange={() => toggleKeyword(keyword.id)}
                           disabled={disabled || (!isSelected && selectionAtLimit)}
-                          className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900" />
+                          className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900" />
                         <span className="text-sm text-gray-700 truncate">{keyword.keyword}</span>
                       </label>
                     );

@@ -133,7 +133,7 @@ function KeywordTableRow({
           aria-label={`Select ${row.keyword}`}
           checked={selected}
           onChange={() => onToggle(row.keyword)}
-          className="rounded border-gray-300"
+          className="rounded-sm border-gray-300"
         />
       </td>
       <KeywordCells row={row} active={active} onOpenSerp={onOpenSerp} />

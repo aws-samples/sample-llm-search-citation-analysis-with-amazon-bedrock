@@ -63,6 +63,7 @@ from shared.insights_narrative import (
     validate_narrative,
 )
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
+from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import Answer, answers_from_rows, brand_kpis, owned_domains_from
 from shared.llm_json import parse_llm_json
 from shared.markets import (
@@ -223,6 +224,7 @@ def _history(keywords: list[str], owned_domains: list[str]) -> tuple[list[dict[s
     """
     histories, truncated_before = load_window_histories(
         dynamodb.Table(SEARCH_RESULTS_TABLE), keywords, history_since(HISTORY_DAYS), owned_domains,
+        rollups=keyword_run_kpis_table(dynamodb),
     )
     if truncated_before is not None:
         logger.warning('Group history read cut short: runs at and before %s left out', truncated_before)

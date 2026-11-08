@@ -7,7 +7,7 @@ export default {
     },
   },
   create(context) {
-    const filename = context.getFilename()
+    const filename = context.filename
     const forbiddenWordsWithSuggestions = {
       'utils': 'Use domain-specific name describing what it does',
       'helpers': 'Try "fixtures" for test data, or name by purpose',

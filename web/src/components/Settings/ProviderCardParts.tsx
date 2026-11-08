@@ -67,7 +67,7 @@ const ProviderHealthBadge = ({ provider }: ProviderHealthProps) => {
 
   return (
     <output
-      className={`text-xs px-2 py-1 rounded border ${HEALTH_TONE_CLASSES[health.tone]}`}
+      className={`text-xs px-2 py-1 rounded-sm border ${HEALTH_TONE_CLASSES[health.tone]}`}
       title={getHealthTitle(health)}
     >
       {health.label}
@@ -111,12 +111,12 @@ function configuredLabel(provider: ProviderConfig): string {
 /** "Configured" plus the masked key and health, or the amber "Not configured" pill. */
 export const ProviderStatus = ({ provider }: ProviderHealthProps) => {
   if (!provider.configured) {
-    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{unconfiguredLabel(provider)}</span>;
+    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-sm">{unconfiguredLabel(provider)}</span>;
   }
   const ownKey = !usesIamAuth(provider) && provider.credential_from === undefined;
   return (
     <>
-      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{configuredLabel(provider)}</span>
+      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-sm">{configuredLabel(provider)}</span>
       {ownKey && provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
       <ProviderHealthBadge provider={provider} />
     </>

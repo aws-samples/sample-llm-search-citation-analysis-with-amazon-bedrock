@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import sys
-import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NotRequired, TypedDict
@@ -14,6 +11,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from shared.emf_metrics import emit_count
 from shared.utils import parse_timestamp
 
 logger = logging.getLogger(__name__)
@@ -68,22 +66,7 @@ def _error_code(exc: Exception) -> str:
 
 def _emit_read_failure(error_code: str) -> None:
     """Emit a low-cardinality CloudWatch EMF event without another API call."""
-    metric = {
-        '_aws': {
-            'Timestamp': int(time.time() * 1000),
-            'CloudWatchMetrics': [{
-                'Namespace': 'CitationAnalysis/Crawler',
-                'Dimensions': [['ErrorCode']],
-                'Metrics': [{
-                    'Name': 'CrawlCacheReadFailure',
-                    'Unit': 'Count',
-                }],
-            }],
-        },
-        'ErrorCode': error_code,
-        'CrawlCacheReadFailure': 1,
-    }
-    sys.stdout.write(json.dumps(metric, separators=(',', ':')) + '\n')
+    emit_count('CitationAnalysis/Crawler', 'CrawlCacheReadFailure', 'ErrorCode', error_code)
 
 
 def _query_latest_scope(table: Any, index_name: str, cache_scope: str) -> Mapping[str, object] | None:

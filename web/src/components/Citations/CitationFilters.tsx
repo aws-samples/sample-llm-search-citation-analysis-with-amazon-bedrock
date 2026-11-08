@@ -55,7 +55,7 @@ export const CitationFilters = ({
               setCurrentPage(1);
             }}
             placeholder="Filter by URL..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
           />
         </div>
         <div className="w-full sm:w-36">
@@ -68,7 +68,7 @@ export const CitationFilters = ({
               setContentType(toContentTypeFilter(e.target.value));
               setCurrentPage(1);
             }}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900"
           >
             {CONTENT_TYPE_OPTIONS.map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
@@ -88,7 +88,7 @@ export const CitationFilters = ({
             }}
             placeholder="Any"
             min={1}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
           />
         </div>
         <div className="flex gap-2">

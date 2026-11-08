@@ -21,7 +21,7 @@ const BEYOND_TOP_STATE = buildSeoGeoState({ data: buildSeoGeoResponse({ rows: [B
 describe('SeoGeoTableSection estimated traffic columns', () => {
   it.each([
     ['the snapshot position', '14 (snapshot)'],
-    ['the rounded estimated traffic', '35'],
+    ['the rounded-sm estimated traffic', '35'],
   ])('shows %s of a keyword beyond the top 10', (_what, text) => {
     render(<SeoGeoTableSection state={BEYOND_TOP_STATE} />);
 

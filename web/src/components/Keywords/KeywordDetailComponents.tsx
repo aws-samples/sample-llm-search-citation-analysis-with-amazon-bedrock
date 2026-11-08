@@ -213,7 +213,7 @@ export const SearchItem = ({
       >
         <div className="flex items-center gap-4 flex-1">
           <span
-            className="px-2 py-1 rounded text-xs font-medium text-white"
+            className="px-2 py-1 rounded-sm text-xs font-medium text-white"
             style={{ backgroundColor: colors.border }}
           >
             {search.provider}

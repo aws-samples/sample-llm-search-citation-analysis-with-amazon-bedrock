@@ -52,7 +52,7 @@ const getIconContainerClass = (item: ContentStudioHistory): string => {
 };
 
 const getContainerClass = (item: ContentStudioHistory): string => {
-  const baseClass = 'bg-white rounded-lg border p-4 cursor-pointer hover:shadow-sm transition-all';
+  const baseClass = 'bg-white rounded-lg border p-4 cursor-pointer hover:shadow-xs transition-all';
   if (!item.viewed && item.status === 'generated') {
     return `${baseClass} border-orange-300 bg-orange-50/30`;
   }
@@ -99,7 +99,7 @@ export const HistoryListItem = ({
 const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
   if (!item.viewed && item.status === 'generated') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-orange-500 text-white rounded font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-orange-500 text-white rounded-sm font-medium">
         NEW
       </span>
     );
@@ -107,7 +107,7 @@ const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
 
   if (item.status === 'generating') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-blue-500 text-white rounded font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-blue-500 text-white rounded-sm font-medium">
         GENERATING
       </span>
     );
@@ -115,7 +115,7 @@ const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
 
   if (item.status === 'failed') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-sm font-medium">
         FAILED
       </span>
     );

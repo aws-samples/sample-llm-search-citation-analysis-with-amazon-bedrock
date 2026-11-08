@@ -36,7 +36,7 @@ const KeywordResultRow = ({
             checked={selected?.has(selectionKey) ?? false}
             onChange={() => onToggle?.(keyword.keyword)}
             aria-label={`Select ${keyword.keyword}`}
-            className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+            className="h-4 w-4 rounded-sm border-gray-300 text-gray-900 focus:ring-gray-900"
           />
         </td>
       )}
@@ -90,7 +90,7 @@ export const KeywordResultsTable = ({
           <select
             value={filterIntent}
             onChange={(event) => setFilterIntent(event.target.value)}
-            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none flex-1 sm:flex-none"
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden flex-1 sm:flex-none"
           >
             <option value="all">All Intents</option>
             <option value="informational">Informational</option>
@@ -106,7 +106,7 @@ export const KeywordResultsTable = ({
                 setSortBy(value);
               }
             }}
-            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none flex-1 sm:flex-none"
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden flex-1 sm:flex-none"
           >
             <option value="relevance">Sort by Relevance</option>
             <option value="competition">Sort by Competition</option>

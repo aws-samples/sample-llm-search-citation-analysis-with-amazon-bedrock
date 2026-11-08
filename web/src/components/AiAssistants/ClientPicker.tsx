@@ -46,14 +46,14 @@ export function ClientPicker({ config }: { readonly config: McpConfig }) {
               aria-controls={panelId}
               tabIndex={isSelected ? 0 : -1}
               onClick={() => setSelected(id)}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${isSelected ? SELECTED_TAB : IDLE_TAB}`}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 ${isSelected ? SELECTED_TAB : IDLE_TAB}`}
             >
               {label}
             </button>
           );
         })}
       </div>
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(selected)} tabIndex={0} className="focus:outline-none">
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(selected)} tabIndex={0} className="focus:outline-hidden">
         <ClientGuidePanel guide={client.guide(config)} />
       </div>
     </div>

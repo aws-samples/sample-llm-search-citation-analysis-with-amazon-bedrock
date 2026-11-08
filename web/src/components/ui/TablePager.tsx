@@ -58,7 +58,7 @@ export function TablePager<TSize extends number>({
             const picked: TSize | undefined = sizes[event.target.selectedIndex];
             if (picked !== undefined) onPageSize(picked);
           }}
-          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
         >
           {sizes.map((size) => <option key={size} value={size}>{size}</option>)}
         </select>

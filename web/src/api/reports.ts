@@ -48,11 +48,13 @@ export interface ReportsOverviewResponse {
   change: HistoricalTrendsResponse['change'];
   trend_data: HistoricalTrendsResponse['trend_data'];
   latest_brands: HistoricalTrendsResponse['latest_brands'];
+  /** Some run of the window kept only its top 25 brands (`HistoricalTrendsResponse['brands_truncated']`). */
+  brands_truncated?: boolean;
   summary: ReportsOverviewSummary;
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];
   top_recommendations: Recommendation[];
-  truncated_before?: HistoricalTrendsResponse['truncated_before'];
+  truncated_before?: Exclude<HistoricalTrendsResponse['truncated_before'], undefined>;
 }
 
 export interface CompetitorOutrankedKeyword {

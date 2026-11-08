@@ -18,8 +18,8 @@ interface Props {
  */
 function useTooltipPosition(
   open: boolean,
-  buttonRef: RefObject<HTMLButtonElement>,
-  tooltipRef: RefObject<HTMLSpanElement>,
+  buttonRef: RefObject<HTMLButtonElement | null>,
+  tooltipRef: RefObject<HTMLSpanElement | null>,
 ): TooltipPosition | null {
   const [position, setPosition] = useState<TooltipPosition | null>(null);
 
@@ -95,7 +95,7 @@ export function InfoTooltip({
         onKeyDown={(event) => {
           if (event.key === 'Escape') setOpen(false);
         }}
-        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-400 text-[10px] font-semibold leading-none text-gray-500 hover:border-gray-600 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:border-gray-500 dark:text-gray-400"
+        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-400 text-[10px] font-semibold leading-none text-gray-500 hover:border-gray-600 hover:text-gray-700 focus:outline-hidden focus:ring-2 focus:ring-gray-900 dark:border-gray-500 dark:text-gray-400"
       >
         i
       </button>
@@ -106,7 +106,7 @@ export function InfoTooltip({
           role="tooltip"
           hidden={!open}
           style={position ?? undefined}
-          className="print-hidden fixed z-50 w-72 max-w-[calc(100vw-1rem)] whitespace-normal break-words rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+          className="print-hidden fixed z-50 w-72 max-w-[calc(100vw-1rem)] whitespace-normal wrap-break-word rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
         >
           {text}
         </span>,

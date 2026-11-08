@@ -86,29 +86,15 @@ describe('CompetitorGapReport', () => {
     expect(matches.length).toBeGreaterThan(0);
   });
 
-  it('renders the their-rank value for the outranked row', () => {
+  it.each([
+    ['the their-rank value for the outranked row', '#1'],
+    ['the our-rank value for the outranked row', '#3'],
+    ['the rank delta with a + sign', '+2'],
+    ['the outreach target domain', 'example.com'],
+    ['the lift score on the outreach card', '6.91'],
+  ])('renders %s', (_case, text) => {
     renderAt('/reports/competitor/Adidas');
-    expect(screen.getByText('#1')).toBeInTheDocument();
-  });
-
-  it('renders the our-rank value for the outranked row', () => {
-    renderAt('/reports/competitor/Adidas');
-    expect(screen.getByText('#3')).toBeInTheDocument();
-  });
-
-  it('renders the rank delta with a + sign', () => {
-    renderAt('/reports/competitor/Adidas');
-    expect(screen.getByText('+2')).toBeInTheDocument();
-  });
-
-  it('renders the outreach target domain', () => {
-    renderAt('/reports/competitor/Adidas');
-    expect(screen.getByText('example.com')).toBeInTheDocument();
-  });
-
-  it('renders the lift score on the outreach card', () => {
-    renderAt('/reports/competitor/Adidas');
-    expect(screen.getByText('6.91')).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 
   it('renders a competitor switcher populated with every configured competitor', () => {

@@ -27,7 +27,7 @@ interface ScheduleFormProps {
   legacyNotice?: string | null;
 }
 
-const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900';
+const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900';
 const TIMEZONE_LIST_ID = 'schedule-timezone-options';
 
 /**
@@ -48,7 +48,7 @@ export const ScheduleForm = ({
   >
     <h3 className="font-medium text-gray-900 mb-4">{mode === 'create' ? 'Create New Schedule' : `Edit "${formData.display_name}"`}</h3>
     {legacyNotice && (
-      <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">{legacyNotice}</p>
+      <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">{legacyNotice}</p>
     )}
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <ScheduleKindField editable={mode === 'create'} formData={formData} updateFormField={updateFormField}

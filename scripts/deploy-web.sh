@@ -50,9 +50,10 @@ fi
 
 print_info "Found bucket name: $BUCKET_NAME"
 
-# Step 3: Sync to S3
+# Step 3: Sync to S3. config.json (the API URL) belongs to CitationAnalysisApiStack:
+# --exclude keeps --delete from removing it, since web/dist has no copy.
 print_info "Syncing web/dist to S3..."
-aws s3 sync web/dist "s3://${BUCKET_NAME}" --delete
+aws s3 sync web/dist "s3://${BUCKET_NAME}" --delete --exclude config.json
 
 print_success "Files uploaded to S3"
 

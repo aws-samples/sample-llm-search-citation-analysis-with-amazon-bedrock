@@ -11,7 +11,7 @@ import { KpiDefinitionList } from '../ui/KpiDefinitionList';
 export function VisibilityDefinitions() {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="bg-white rounded-lg shadow p-4">
+    <section aria-labelledby={headingId} className="bg-white rounded-lg shadow-sm p-4">
       <Disclosure title="How these KPIs are measured" headingLevel={3} headingClassName="text-lg font-medium" headingId={headingId}>
         <KpiDefinitionList definitions={VISIBILITY_DEFINITIONS} />
       </Disclosure>

@@ -24,7 +24,7 @@ export function MarketSelector() {
         value={encodeMarketChoice(selectedMarketId)}
         onChange={(event) => selectMarket(decodeMarketChoice(event.target.value))}
         title="Market the views and reports cover"
-        className="max-w-[12rem] sm:max-w-[16rem] truncate rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-900"
+        className="max-w-48 sm:max-w-[16rem] truncate rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-700 dark:text-gray-200 focus:outline-hidden focus:ring-2 focus:ring-gray-900"
       >
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>

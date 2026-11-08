@@ -60,6 +60,12 @@ export function BrandTrendSection({ report }: ScopeSectionProps) {
         <>
           <MetricToggle metric={metric} onChange={setMetric} />
           <BrandTrendChart trends={trends.brand_trends} metric={metric} trackedLabel={trackedName(trends.latest_brands)} />
+          {trends.brands_truncated === true && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Each run keeps its top 25 brands (yours and tracked competitors always), so a competitor outside them counts as
+              not named in that run. Track a competitor in Settings to always keep it.
+            </p>
+          )}
         </>
       )}
     </TrendSection>

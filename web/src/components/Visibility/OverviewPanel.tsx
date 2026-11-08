@@ -19,7 +19,7 @@ export function OverviewPanel({
 }: Props) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="bg-white rounded-lg shadow p-4 space-y-3">
+    <section aria-labelledby={headingId} className="bg-white rounded-lg shadow-sm p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center">
           <h3 id={headingId} className="text-lg font-medium">{title}</h3>

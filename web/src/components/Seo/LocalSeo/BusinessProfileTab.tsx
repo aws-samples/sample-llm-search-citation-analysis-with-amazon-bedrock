@@ -51,7 +51,7 @@ function ProfileFacts({ profile }: { readonly profile: BusinessProfile }) {
       {facts.filter(([, value]) => value !== null).map(([label, value]) => (
         <div key={label}>
           <dt className="text-xs text-gray-500">{label}</dt>
-          <dd className="text-gray-900 break-words">{value}</dd>
+          <dd className="text-gray-900 wrap-break-word">{value}</dd>
         </div>
       ))}
     </dl>

@@ -3,7 +3,7 @@
  * suggests the latest audit's pages. Nothing is measured until Run Lighthouse is pressed (one paid run).
  */
 import {
-  useId, useState, type FormEvent
+  useId, useState, type SubmitEvent
 } from 'react';
 import { usePrefilledText } from '../../../hooks/usePrefilledText';
 import { useBrandSettings } from '../../../hooks/useSeoSettings';
@@ -30,7 +30,7 @@ export function MeasurePageForm({
   const [device, setDevice] = useState<LighthouseDevice>('mobile');
   const listId = useId();
 
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     onMeasure(url.trim(), device);
   };
@@ -45,7 +45,7 @@ export function MeasurePageForm({
         <label className="text-sm text-gray-700 sm:col-span-2">
           Page URL
           <input
-            className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
+            className="mt-1 block w-full rounded-sm border border-gray-300 px-2 py-1"
             value={url}
             list={listId}
             onFocus={onWantSuggestions}
@@ -59,7 +59,7 @@ export function MeasurePageForm({
         <label className="text-sm text-gray-700">
           Device
           <select
-            className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
+            className="mt-1 block w-full rounded-sm border border-gray-300 px-2 py-1"
             value={device}
             onChange={(event) => { setDevice(event.target.value === 'desktop' ? 'desktop' : 'mobile'); }}
           >

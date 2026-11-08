@@ -36,6 +36,7 @@ import boto3
 
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
+from shared.keyword_run_kpis import tracked_brand_names
 from shared.kpi_engine import owned_domains_from
 from shared.request_deadline import current_deadline
 from shared.scope_params import (
@@ -139,7 +140,7 @@ def build_overview(
     ``keywords_truncated``); ``truncated`` is true when it ran out before the
     recommendations were read, and ``top_recommendations`` is then empty.
     """
-    trends = _trends_helper()(scope, period, days, owned_domains_from(config))
+    trends = _trends_helper()(scope, period, days, owned_domains_from(config), tracked_brand_names(config))
     top_improving, top_declining = top_movers(trends['keyword_trends'], top)
     # A scope with no active keyword gets no recommendations: an empty list would
     # read as "discover the active keywords" to the loader and widen the report.
@@ -165,6 +166,8 @@ def build_overview(
         'change': trends['change'],
         'trend_data': trends['trend_data'],
         'latest_brands': trends['latest_brands'],
+        # Some run kept only its top brands, so the leaderboard may miss a competitor (tenet 2).
+        'brands_truncated': trends.get('brands_truncated', False),
         'summary': trends['overall'],
         'top_improving': top_improving,
         'top_declining': top_declining,

@@ -106,7 +106,7 @@ export function KeywordFilterPanel({
               type="checkbox"
               checked={filters.intents.includes(intent)}
               onChange={() => toggleIntent(intent)}
-              className="rounded border-gray-300"
+              className="rounded-sm border-gray-300"
             />
             {INTENT_LABELS[intent]}
           </label>

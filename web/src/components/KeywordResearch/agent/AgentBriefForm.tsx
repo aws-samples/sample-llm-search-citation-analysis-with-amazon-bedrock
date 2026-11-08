@@ -216,7 +216,7 @@ export function AgentBriefForm({
     return outcome;
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.SubmitEvent) => {
     event.preventDefault();
     setSubmitted(true);
     if (problems.length > 0) return;
@@ -276,7 +276,7 @@ export function AgentBriefForm({
                 htmlFor={checkboxId}
                 className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${checked ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
               >
-                <input id={checkboxId} name="dimensions" value={option.id} type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
+                <input id={checkboxId} name="dimensions" value={option.id} type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-gray-900 focus:ring-gray-500" />
                 <span>
                   <span className="block text-sm font-medium text-gray-900">{option.label}</span>
                   <span className="block text-xs text-gray-500">{option.description}</span>

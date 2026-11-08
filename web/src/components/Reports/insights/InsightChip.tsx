@@ -16,7 +16,7 @@ interface ChipProps {
 export function InsightChip({
   label, tone
 }: ChipProps) {
-  return <span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${TONE_CLASSES[tone]}`}>{label}</span>;
+  return <span className={`inline-block whitespace-nowrap rounded-sm px-1.5 py-0.5 text-xs font-medium ${TONE_CLASSES[tone]}`}>{label}</span>;
 }
 
 interface MarkedNameProps {

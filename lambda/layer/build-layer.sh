@@ -39,8 +39,11 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     
     # Use Amazon Linux 2023 image (matches Lambda Python 3.12 runtime)
     # --platform linux/amd64 ensures x86_64 compatibility (Lambda default)
+    # As the calling user: on Linux, files a root container writes cannot be removed by the host user
+    # (the rm of python/bin below, a rebuild). HOME=/tmp gives pip a writable home.
     docker run --rm \
         --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" -e HOME=/tmp \
         --entrypoint "" \
         -v "$(pwd)":/var/task \
         -w /var/task \
@@ -65,6 +68,11 @@ else
     echo "Cross-platform build completed"
 fi
 
+# pip's console scripts (bin/) are never run on Lambda (python/bin is not on
+# PATH) and their shebang names the installing interpreter, so the Docker and
+# pip builds of the same wheels differed only there. Drop them.
+rm -rf "${LAYER_DIR:?}/bin"
+
 # Copy shared Python modules (exclude test files from deployed layer)
 echo "Copying shared modules..."
 mkdir -p $LAYER_DIR/shared
@@ -86,7 +94,7 @@ fi
 echo "Lambda Layer built successfully in $LAYER_DIR/"
 echo ""
 echo "Layer structure:"
-ls -la $LAYER_DIR/ | head -20
+find "$LAYER_DIR" -mindepth 1 -maxdepth 1 | sort | head -20
 echo ""
 echo "Shared modules:"
 ls -la $LAYER_DIR/shared/

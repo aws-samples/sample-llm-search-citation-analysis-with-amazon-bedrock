@@ -33,7 +33,7 @@ function PromptPreview({ template }: { readonly template: string }) {
   if (!template) return null;
   const preview = template.replace('{keyword}', SAMPLE_KEYWORD);
   return (
-    <div className="mt-2 p-2 bg-gray-50 rounded text-xs text-gray-600">
+    <div className="mt-2 p-2 bg-gray-50 rounded-sm text-xs text-gray-600">
       <span className="text-gray-400">Preview: </span>{preview}
     </div>
   );
@@ -60,7 +60,7 @@ function PersonaForm({
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!name.trim() || !template.trim()) return;
     if (!template.includes('{keyword}')) {
@@ -128,7 +128,7 @@ function PersonaForm({
           required
         />
         <p className="text-xs text-gray-400 mt-1">
-          This is the actual prompt sent to AI providers. Use <code className="bg-gray-100 px-1 rounded">{'{keyword}'}</code> where the search keyword should be inserted.
+          This is the actual prompt sent to AI providers. Use <code className="bg-gray-100 px-1 rounded-sm">{'{keyword}'}</code> where the search keyword should be inserted.
         </p>
         {validationError && (
           <p className="text-xs text-red-600 mt-1">{validationError}</p>
@@ -221,7 +221,7 @@ function PersonaRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm text-gray-900">{prompt.name}</span>
-            <span className={`text-xs px-2 py-0.5 rounded ${statusClass}`}>
+            <span className={`text-xs px-2 py-0.5 rounded-sm ${statusClass}`}>
               {statusLabel}
             </span>
           </div>

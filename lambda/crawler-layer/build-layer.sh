@@ -17,8 +17,11 @@ mkdir -p "$LAYER_DIR"
 if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     BUILT_WITH_DOCKER=true
     echo "Using Docker to build for Linux compatibility..."
+    # As the calling user: on Linux, files a root container writes cannot be removed by the host user
+    # (the rm of python/bin below, a rebuild). HOME=/tmp gives pip a writable home.
     docker run --rm \
         --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" -e HOME=/tmp \
         --entrypoint "" \
         -v "$(pwd)":/var/task \
         -w /var/task \
@@ -43,6 +46,11 @@ else
         --no-compile
     echo "Cross-platform build completed"
 fi
+
+# pip's console scripts (bin/) are never run on Lambda (python/bin is not on
+# PATH) and their shebang names the installing interpreter, so the Docker and
+# pip builds of the same wheels differed only there. Drop them.
+rm -rf "${LAYER_DIR:?}/bin"
 
 # Copy first-party modules after dependencies so source always wins.
 echo "Copying shared modules..."
@@ -98,7 +106,7 @@ fi
 
 echo ""
 echo "Layer contents:"
-ls -la "$LAYER_DIR/" | head -20
+find "$LAYER_DIR" -mindepth 1 -maxdepth 1 | sort | head -20
 echo ""
 echo "Shared modules:"
 ls -la "$LAYER_DIR/shared/"

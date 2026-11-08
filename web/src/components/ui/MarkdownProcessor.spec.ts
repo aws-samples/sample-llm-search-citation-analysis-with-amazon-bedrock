@@ -18,7 +18,7 @@ describe('formatInlineMarkdown', () => {
 
   it('wraps a paired backtick span in a code tag', () => {
     expect(formatInlineMarkdown('run `npm test` first')).toBe(
-      'run <code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">npm test</code> first'
+      'run <code class="bg-gray-100 px-1 py-0.5 rounded-sm text-sm font-mono">npm test</code> first'
     );
   });
 

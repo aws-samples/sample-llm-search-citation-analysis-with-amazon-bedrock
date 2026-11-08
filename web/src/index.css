@@ -1,6 +1,103 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+  Cascade layers. Tailwind 4 emits everything into native layers, and unlayered
+  CSS beats every layer, so third-party and custom CSS is layered here to keep
+  the Tailwind 3 cascade the dashboard was designed against:
+  - Amplify UI goes into `base` ahead of preflight (v3 bundled it before
+    Tailwind, so utilities and preflight beat it on equal specificity);
+  - the overrides below sit in `utilities` BEFORE the generated utilities, as
+    v3 emitted variants (dark:, hover:, focus:, sm:) after custom CSS, so a
+    variant still wins a specificity tie against a `.dark .x` override;
+  - single-class rules that must win a tie against a plain utility (`.skeleton`
+    against `rounded-*`) come AFTER the generated utilities.
+*/
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import '@aws-amplify/ui-react/styles.css' layer(base);
+@import 'tailwindcss/preflight.css' layer(base);
+@import './palette.css';
+
+@custom-variant dark (&:is(.dark *));
+/* v3 applied hover: on touch devices too; v4 limits it to `(hover: hover)`. */
+@custom-variant hover (&:hover);
+
+@theme {
+  /* Tailwind 3's sans stack; 4.3 changed the default to a system-font list. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  /* v3 preflight defaults that v4 changed (tailwindcss.com/docs/upgrade-guide). */
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  :disabled {
+    cursor: default;
+  }
+
+  dialog {
+    margin: auto;
+  }
+
+  /* v4 preflight makes form fields transparent; v3 left the browser's field colour. */
+  input,
+  select,
+  optgroup,
+  textarea {
+    background-color: revert;
+  }
+
+  /* v4 preflight zeroes every element's padding; v3 left table cells the browser's
+     1px (a presentational hint, so `revert` cannot restore it). */
+  td,
+  th {
+    padding: 1px;
+  }
+}
+
+@utility bg-skin-primary {
+  /* Semantic color classes - only used for body element */
+  background-color: rgb(var(--color-bg-primary));
+}
+
+@utility text-skin-primary {
+  color: rgb(var(--color-text-primary));
+}
+
+@utility animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
 
 @layer base {
   /* Light mode (default) */
@@ -20,76 +117,77 @@
   }
 }
 
-/* Global dark mode overrides - using raw CSS to avoid circular @apply */
-.dark .bg-white {
-  background-color: rgb(31 41 55); /* gray-800 */
-}
+@layer utilities {
+  /* Global dark mode overrides - using raw CSS to avoid circular @apply */
+  .dark .bg-white {
+    background-color: rgb(31 41 55); /* gray-800 */
+  }
 
-.dark .bg-gray-50 {
-  background-color: rgb(17 24 39); /* gray-900 */
-}
+  .dark .bg-gray-50 {
+    background-color: rgb(17 24 39); /* gray-900 */
+  }
 
-.dark .bg-gray-100 {
-  background-color: rgb(55 65 81); /* gray-700 */
-}
+  .dark .bg-gray-100 {
+    background-color: rgb(55 65 81); /* gray-700 */
+  }
 
-.dark .bg-gray-200 {
-  background-color: rgb(75 85 99); /* gray-600 */
-}
+  .dark .bg-gray-200 {
+    background-color: rgb(75 85 99); /* gray-600 */
+  }
 
-.dark .border-gray-200 {
-  border-color: rgb(55 65 81); /* gray-700 */
-}
+  .dark .border-gray-200 {
+    border-color: rgb(55 65 81); /* gray-700 */
+  }
 
-.dark .border-gray-100 {
-  border-color: rgb(55 65 81); /* gray-700 */
-}
+  .dark .border-gray-100 {
+    border-color: rgb(55 65 81); /* gray-700 */
+  }
 
-.dark .border-gray-300 {
-  border-color: rgb(75 85 99); /* gray-600 */
-}
+  .dark .border-gray-300 {
+    border-color: rgb(75 85 99); /* gray-600 */
+  }
 
-.dark .hover\:border-gray-300:hover {
-  border-color: rgb(107 114 128); /* gray-500 */
-}
+  .dark .hover\:border-gray-300:hover {
+    border-color: rgb(107 114 128); /* gray-500 */
+  }
 
-.dark .text-gray-900 {
-  color: rgb(249 250 251); /* gray-50 */
-}
+  .dark .text-gray-900 {
+    color: rgb(249 250 251); /* gray-50 */
+  }
 
-.dark .text-gray-700 {
-  color: rgb(209 213 219); /* gray-300 */
-}
+  .dark .text-gray-700 {
+    color: rgb(209 213 219); /* gray-300 */
+  }
 
-.dark .text-gray-600 {
-  color: rgb(209 213 219); /* gray-300 */
-}
+  .dark .text-gray-600 {
+    color: rgb(209 213 219); /* gray-300 */
+  }
 
-.dark .text-gray-500 {
-  color: rgb(156 163 175); /* gray-400 */
-}
+  .dark .text-gray-500 {
+    color: rgb(156 163 175); /* gray-400 */
+  }
 
-.dark .text-gray-400 {
-  color: rgb(107 114 128); /* gray-500 */
-}
+  .dark .text-gray-400 {
+    color: rgb(107 114 128); /* gray-500 */
+  }
 
-.dark .text-gray-300 {
-  color: rgb(156 163 175); /* gray-400 */
-}
+  .dark .text-gray-300 {
+    color: rgb(156 163 175); /* gray-400 */
+  }
 
-.dark .hover\:bg-gray-50:hover {
-  background-color: rgb(55 65 81); /* gray-700 */
-}
+  .dark .hover\:bg-gray-50:hover {
+    background-color: rgb(55 65 81); /* gray-700 */
+  }
 
-.dark .hover\:bg-gray-100:hover {
-  background-color: rgb(75 85 99); /* gray-600 */
-}
+  .dark .hover\:bg-gray-100:hover {
+    background-color: rgb(75 85 99); /* gray-600 */
+  }
 
-.dark .hover\:bg-gray-200:hover {
-  background-color: rgb(75 85 99); /* gray-600 */
-}
+  .dark .hover\:bg-gray-200:hover {
+    background-color: rgb(75 85 99); /* gray-600 */
+  }
 
-/* ============================================================
+  /* ============================================================
  * Accent surfaces in dark mode
  *
  * Tinted Tailwind classes (`bg-{tone}-50`, `bg-{tone}-100`, accent
@@ -117,455 +215,613 @@
  * See `docs/design-system.md#1-theming-model` for the rationale.
  * ============================================================ */
 
-/* --- Emerald / Green (success, first-party brands, "yours") --- */
-.dark .bg-emerald-50  { background-color: rgb(6 78 59 / 0.25); }
-.dark .bg-emerald-100 { background-color: rgb(6 78 59 / 0.4); }
-.dark .bg-green-50    { background-color: rgb(6 78 59 / 0.25); }
-.dark .bg-green-100   { background-color: rgb(6 78 59 / 0.4); }
-.dark .text-emerald-700 { color: rgb(110 231 183); /* emerald-300 */ }
-.dark .text-emerald-800 { color: rgb(110 231 183); }
-.dark .text-green-700   { color: rgb(134 239 172); /* green-300 */ }
-.dark .text-green-800   { color: rgb(134 239 172); }
-.dark .text-green-900   { color: rgb(187 247 208); /* green-200 */ }
-.dark .border-emerald-100 { border-color: rgb(6 95 70 / 0.4); }
-.dark .border-emerald-200 { border-color: rgb(4 120 87 / 0.55); }
-.dark .border-emerald-300 { border-color: rgb(5 150 105 / 0.7); }
-.dark .border-green-200   { border-color: rgb(22 101 52 / 0.55); }
-.dark .hover\:bg-emerald-100:hover { background-color: rgb(6 78 59 / 0.55); }
-.dark .hover\:bg-emerald-200:hover { background-color: rgb(6 78 59 / 0.7); }
-
-/* --- Amber / Yellow (warnings, competitor brands) --- */
-.dark .bg-amber-50  { background-color: rgb(120 53 15 / 0.25); }
-.dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.4); }
-.dark .bg-yellow-100 { background-color: rgb(113 63 18 / 0.4); }
-.dark .text-amber-700  { color: rgb(252 211 77); /* amber-300 */ }
-.dark .text-amber-800  { color: rgb(252 211 77); }
-.dark .text-amber-900  { color: rgb(253 230 138); /* amber-200 */ }
-.dark .text-yellow-700 { color: rgb(253 224 71); /* yellow-300 */ }
-.dark .text-yellow-800 { color: rgb(253 224 71); }
-.dark .border-amber-100  { border-color: rgb(146 64 14 / 0.4); }
-.dark .border-amber-200  { border-color: rgb(180 83 9 / 0.55); }
-.dark .border-amber-300  { border-color: rgb(217 119 6 / 0.7); }
-.dark .hover\:bg-amber-100:hover { background-color: rgb(120 53 15 / 0.55); }
-.dark .hover\:bg-amber-200:hover { background-color: rgb(120 53 15 / 0.7); }
-
-/* --- Violet / Purple (brand mentions, custom entities) --- */
-.dark .bg-violet-50   { background-color: rgb(76 29 149 / 0.25); }
-.dark .bg-violet-100  { background-color: rgb(76 29 149 / 0.4); }
-.dark .bg-purple-50   { background-color: rgb(88 28 135 / 0.25); }
-.dark .bg-purple-100  { background-color: rgb(88 28 135 / 0.4); }
-.dark .text-violet-800  { color: rgb(196 181 253); }
-.dark .text-purple-700  { color: rgb(216 180 254); /* purple-300 */ }
-.dark .text-purple-800  { color: rgb(216 180 254); }
-.dark .text-purple-900  { color: rgb(233 213 255); /* purple-200 */ }
-.dark .border-violet-100  { border-color: rgb(91 33 182 / 0.4); }
-.dark .border-violet-200  { border-color: rgb(109 40 217 / 0.55); }
-.dark .border-violet-300  { border-color: rgb(124 58 237 / 0.7); }
-.dark .border-purple-100  { border-color: rgb(107 33 168 / 0.4); }
-.dark .border-purple-200  { border-color: rgb(126 34 206 / 0.55); }
-
-/* --- Blue / Indigo / Cyan (info, metrics, links) --- */
-.dark .bg-blue-50   { background-color: rgb(30 58 138 / 0.25); }
-.dark .bg-blue-100  { background-color: rgb(30 58 138 / 0.4); }
-.dark .bg-indigo-50  { background-color: rgb(49 46 129 / 0.25); }
-.dark .bg-cyan-50   { background-color: rgb(22 78 99 / 0.25); }
-.dark .text-blue-700   { color: rgb(147 197 253); /* blue-300 */ }
-.dark .text-blue-800   { color: rgb(147 197 253); }
-.dark .text-blue-900   { color: rgb(191 219 254); /* blue-200 */ }
-.dark .text-indigo-700 { color: rgb(165 180 252); /* indigo-300 */ }
-.dark .border-blue-100   { border-color: rgb(30 64 175 / 0.4); }
-.dark .border-blue-200   { border-color: rgb(29 78 216 / 0.55); }
-.dark .border-indigo-200 { border-color: rgb(67 56 202 / 0.55); }
-.dark .hover\:bg-blue-100:hover { background-color: rgb(30 58 138 / 0.55); }
-
-/* --- Red / Orange (errors, destructive, gaps) --- */
-.dark .bg-red-50    { background-color: rgb(127 29 29 / 0.25); }
-.dark .bg-red-100   { background-color: rgb(127 29 29 / 0.4); }
-.dark .bg-orange-50  { background-color: rgb(124 45 18 / 0.25); }
-.dark .bg-orange-100 { background-color: rgb(124 45 18 / 0.4); }
-.dark .text-red-700    { color: rgb(252 165 165); /* red-300 */ }
-.dark .text-red-800    { color: rgb(252 165 165); }
-.dark .text-orange-800 { color: rgb(253 186 116); }
-.dark .border-red-200   { border-color: rgb(185 28 28 / 0.55); }
-.dark .border-red-300   { border-color: rgb(220 38 38 / 0.7); }
-.dark .border-orange-200 { border-color: rgb(194 65 12 / 0.55); }
-.dark .border-orange-300 { border-color: rgb(234 88 12 / 0.7); }
-.dark .hover\:bg-red-100:hover    { background-color: rgb(127 29 29 / 0.55); }
-.dark .hover\:bg-red-200:hover    { background-color: rgb(127 29 29 / 0.7); }
-
-/* --- Alpha-modifier surfaces used in row backgrounds --- */
-.dark .bg-emerald-50\/50 { background-color: rgb(6 78 59 / 0.2); }
-.dark .bg-green-50\/30   { background-color: rgb(6 78 59 / 0.18); }
-.dark .bg-red-50\/30     { background-color: rgb(127 29 29 / 0.18); }
-.dark .bg-orange-50\/30  { background-color: rgb(124 45 18 / 0.2); }
-
-/* Input fields in dark mode */
-.dark input:not([type="checkbox"]):not([type="radio"]),
-.dark textarea,
-.dark select {
-  background-color: rgb(55 65 81); /* gray-700 */
-  border-color: rgb(75 85 99); /* gray-600 */
-  color: rgb(243 244 246); /* gray-100 */
-}
-
-.dark input::placeholder,
-.dark textarea::placeholder {
-  color: rgb(156 163 175); /* gray-400 */
-}
-
-.dark input:focus,
-.dark textarea:focus,
-.dark select:focus {
-  --tw-ring-color: rgb(107 114 128); /* gray-500 */
-  border-color: rgb(107 114 128); /* gray-500 */
-}
-
-@layer components {
-  /* Semantic color classes - only used for body element */
-  .bg-skin-primary {
-    background-color: rgb(var(--color-bg-primary));
+  /* --- Emerald / Green (success, first-party brands, "yours") --- */
+  .dark .bg-emerald-50 {
+    background-color: rgb(6 78 59 / 0.25);
   }
-  .text-skin-primary {
-    color: rgb(var(--color-text-primary));
+  .dark .bg-emerald-100 {
+    background-color: rgb(6 78 59 / 0.4);
+  }
+  .dark .bg-green-50 {
+    background-color: rgb(6 78 59 / 0.25);
+  }
+  .dark .bg-green-100 {
+    background-color: rgb(6 78 59 / 0.4);
+  }
+  .dark .text-emerald-700 {
+    color: rgb(110 231 183); /* emerald-300 */
+  }
+  .dark .text-emerald-800 {
+    color: rgb(110 231 183);
+  }
+  .dark .text-green-700 {
+    color: rgb(134 239 172); /* green-300 */
+  }
+  .dark .text-green-800 {
+    color: rgb(134 239 172);
+  }
+  .dark .text-green-900 {
+    color: rgb(187 247 208); /* green-200 */
+  }
+  .dark .border-emerald-100 {
+    border-color: rgb(6 95 70 / 0.4);
+  }
+  .dark .border-emerald-200 {
+    border-color: rgb(4 120 87 / 0.55);
+  }
+  .dark .border-emerald-300 {
+    border-color: rgb(5 150 105 / 0.7);
+  }
+  .dark .border-green-200 {
+    border-color: rgb(22 101 52 / 0.55);
+  }
+  .dark .hover\:bg-emerald-100:hover {
+    background-color: rgb(6 78 59 / 0.55);
+  }
+  .dark .hover\:bg-emerald-200:hover {
+    background-color: rgb(6 78 59 / 0.7);
+  }
+
+  /* --- Amber / Yellow (warnings, competitor brands) --- */
+  .dark .bg-amber-50 {
+    background-color: rgb(120 53 15 / 0.25);
+  }
+  .dark .bg-amber-100 {
+    background-color: rgb(120 53 15 / 0.4);
+  }
+  .dark .bg-yellow-100 {
+    background-color: rgb(113 63 18 / 0.4);
+  }
+  .dark .text-amber-700 {
+    color: rgb(252 211 77); /* amber-300 */
+  }
+  .dark .text-amber-800 {
+    color: rgb(252 211 77);
+  }
+  .dark .text-amber-900 {
+    color: rgb(253 230 138); /* amber-200 */
+  }
+  .dark .text-yellow-700 {
+    color: rgb(253 224 71); /* yellow-300 */
+  }
+  .dark .text-yellow-800 {
+    color: rgb(253 224 71);
+  }
+  .dark .border-amber-100 {
+    border-color: rgb(146 64 14 / 0.4);
+  }
+  .dark .border-amber-200 {
+    border-color: rgb(180 83 9 / 0.55);
+  }
+  .dark .border-amber-300 {
+    border-color: rgb(217 119 6 / 0.7);
+  }
+  .dark .hover\:bg-amber-100:hover {
+    background-color: rgb(120 53 15 / 0.55);
+  }
+  .dark .hover\:bg-amber-200:hover {
+    background-color: rgb(120 53 15 / 0.7);
+  }
+
+  /* --- Violet / Purple (brand mentions, custom entities) --- */
+  .dark .bg-violet-50 {
+    background-color: rgb(76 29 149 / 0.25);
+  }
+  .dark .bg-violet-100 {
+    background-color: rgb(76 29 149 / 0.4);
+  }
+  .dark .bg-purple-50 {
+    background-color: rgb(88 28 135 / 0.25);
+  }
+  .dark .bg-purple-100 {
+    background-color: rgb(88 28 135 / 0.4);
+  }
+  .dark .text-violet-800 {
+    color: rgb(196 181 253);
+  }
+  .dark .text-purple-700 {
+    color: rgb(216 180 254); /* purple-300 */
+  }
+  .dark .text-purple-800 {
+    color: rgb(216 180 254);
+  }
+  .dark .text-purple-900 {
+    color: rgb(233 213 255); /* purple-200 */
+  }
+  .dark .border-violet-100 {
+    border-color: rgb(91 33 182 / 0.4);
+  }
+  .dark .border-violet-200 {
+    border-color: rgb(109 40 217 / 0.55);
+  }
+  .dark .border-violet-300 {
+    border-color: rgb(124 58 237 / 0.7);
+  }
+  .dark .border-purple-100 {
+    border-color: rgb(107 33 168 / 0.4);
+  }
+  .dark .border-purple-200 {
+    border-color: rgb(126 34 206 / 0.55);
+  }
+
+  /* --- Blue / Indigo / Cyan (info, metrics, links) --- */
+  .dark .bg-blue-50 {
+    background-color: rgb(30 58 138 / 0.25);
+  }
+  .dark .bg-blue-100 {
+    background-color: rgb(30 58 138 / 0.4);
+  }
+  .dark .bg-indigo-50 {
+    background-color: rgb(49 46 129 / 0.25);
+  }
+  .dark .bg-cyan-50 {
+    background-color: rgb(22 78 99 / 0.25);
+  }
+  .dark .text-blue-700 {
+    color: rgb(147 197 253); /* blue-300 */
+  }
+  .dark .text-blue-800 {
+    color: rgb(147 197 253);
+  }
+  .dark .text-blue-900 {
+    color: rgb(191 219 254); /* blue-200 */
+  }
+  .dark .text-indigo-700 {
+    color: rgb(165 180 252); /* indigo-300 */
+  }
+  .dark .border-blue-100 {
+    border-color: rgb(30 64 175 / 0.4);
+  }
+  .dark .border-blue-200 {
+    border-color: rgb(29 78 216 / 0.55);
+  }
+  .dark .border-indigo-200 {
+    border-color: rgb(67 56 202 / 0.55);
+  }
+  .dark .hover\:bg-blue-100:hover {
+    background-color: rgb(30 58 138 / 0.55);
+  }
+
+  /* --- Red / Orange (errors, destructive, gaps) --- */
+  .dark .bg-red-50 {
+    background-color: rgb(127 29 29 / 0.25);
+  }
+  .dark .bg-red-100 {
+    background-color: rgb(127 29 29 / 0.4);
+  }
+  .dark .bg-orange-50 {
+    background-color: rgb(124 45 18 / 0.25);
+  }
+  .dark .bg-orange-100 {
+    background-color: rgb(124 45 18 / 0.4);
+  }
+  .dark .text-red-700 {
+    color: rgb(252 165 165); /* red-300 */
+  }
+  .dark .text-red-800 {
+    color: rgb(252 165 165);
+  }
+  .dark .text-orange-800 {
+    color: rgb(253 186 116);
+  }
+  .dark .border-red-200 {
+    border-color: rgb(185 28 28 / 0.55);
+  }
+  .dark .border-red-300 {
+    border-color: rgb(220 38 38 / 0.7);
+  }
+  .dark .border-orange-200 {
+    border-color: rgb(194 65 12 / 0.55);
+  }
+  .dark .border-orange-300 {
+    border-color: rgb(234 88 12 / 0.7);
+  }
+  .dark .hover\:bg-red-100:hover {
+    background-color: rgb(127 29 29 / 0.55);
+  }
+  .dark .hover\:bg-red-200:hover {
+    background-color: rgb(127 29 29 / 0.7);
+  }
+
+  /* --- Alpha-modifier surfaces used in row backgrounds --- */
+  .dark .bg-emerald-50\/50 {
+    background-color: rgb(6 78 59 / 0.2);
+  }
+  .dark .bg-green-50\/30 {
+    background-color: rgb(6 78 59 / 0.18);
+  }
+  .dark .bg-red-50\/30 {
+    background-color: rgb(127 29 29 / 0.18);
+  }
+  .dark .bg-orange-50\/30 {
+    background-color: rgb(124 45 18 / 0.2);
+  }
+
+  /* Input fields in dark mode */
+  .dark input:not([type='checkbox']):not([type='radio']),
+  .dark textarea,
+  .dark select {
+    background-color: rgb(55 65 81); /* gray-700 */
+    border-color: rgb(75 85 99); /* gray-600 */
+    color: rgb(243 244 246); /* gray-100 */
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: rgb(156 163 175); /* gray-400 */
+  }
+
+  .dark input:focus,
+  .dark textarea:focus,
+  .dark select:focus {
+    --tw-ring-color: rgb(107 114 128); /* gray-500 */
+    border-color: rgb(107 114 128); /* gray-500 */
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* Markdown prose styles */
+  .prose-markdown h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: rgb(17 24 39);
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .prose-markdown h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: rgb(17 24 39);
+    margin-top: 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .prose-markdown h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: rgb(17 24 39);
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .prose-markdown h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgb(17 24 39);
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .prose-markdown p {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+    line-height: 1.625;
+  }
+
+  .prose-markdown ul {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+    margin-left: 1.5rem;
+    list-style-type: disc;
+  }
+
+  .prose-markdown ol {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+    margin-left: 1.5rem;
+    list-style-type: decimal;
+  }
+
+  .prose-markdown li {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .prose-markdown strong {
+    font-weight: 600;
+    color: rgb(17 24 39);
+  }
+
+  .prose-markdown em {
+    font-style: italic;
+  }
+
+  .prose-markdown blockquote {
+    border-left-width: 4px;
+    border-color: rgb(209 213 219);
+    padding-left: 1rem;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    font-style: italic;
+    color: rgb(75 85 99);
+  }
+
+  .prose-markdown code {
+    background-color: rgb(243 244 246);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-family: ui-monospace, monospace;
+    color: rgb(31 41 55);
+  }
+
+  .prose-markdown pre {
+    background-color: rgb(17 24 39);
+    color: rgb(243 244 246);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .prose-markdown pre code {
+    background-color: transparent;
+    padding: 0;
+    color: inherit;
+  }
+
+  .prose-markdown hr {
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-color: rgb(229 231 235);
+  }
+
+  .prose-markdown a {
+    color: rgb(37 99 235);
+  }
+
+  .prose-markdown a:hover {
+    text-decoration: underline;
+  }
+
+  .prose-markdown table {
+    width: 100%;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    border-collapse: collapse;
+  }
+
+  .prose-markdown th {
+    border: 1px solid rgb(209 213 219);
+    padding: 0.5rem 0.75rem;
+    background-color: rgb(249 250 251);
+    text-align: left;
+    font-weight: 600;
+  }
+
+  .prose-markdown td {
+    border: 1px solid rgb(209 213 219);
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* Dark mode prose styles */
+  .dark .prose-markdown h1,
+  .dark .prose-markdown h2,
+  .dark .prose-markdown h3,
+  .dark .prose-markdown h4,
+  .dark .prose-markdown strong {
+    color: rgb(243 244 246);
+  }
+
+  .dark .prose-markdown blockquote {
+    border-color: rgb(75 85 99);
+    color: rgb(156 163 175);
+  }
+
+  .dark .prose-markdown code {
+    background-color: rgb(55 65 81);
+    color: rgb(229 231 235);
+  }
+
+  .dark .prose-markdown hr {
+    border-color: rgb(55 65 81);
+  }
+
+  .dark .prose-markdown a {
+    color: rgb(96 165 250);
+  }
+
+  .dark .prose-markdown th {
+    border-color: rgb(75 85 99);
+    background-color: rgb(31 41 55);
+  }
+
+  .dark .prose-markdown td {
+    border-color: rgb(75 85 99);
+  }
+
+  /* AWS Amplify Authenticator Dark Mode Overrides */
+  .dark [data-amplify-authenticator] {
+    --amplify-colors-background-primary: rgb(17 24 39); /* gray-900 */
+    --amplify-colors-background-secondary: rgb(31 41 55); /* gray-800 */
+    --amplify-colors-background-tertiary: rgb(55 65 81); /* gray-700 */
+    --amplify-colors-font-primary: rgb(249 250 251); /* gray-50 */
+    --amplify-colors-font-secondary: rgb(209 213 219); /* gray-300 */
+    --amplify-colors-font-tertiary: rgb(156 163 175); /* gray-400 */
+    --amplify-colors-border-primary: rgb(75 85 99); /* gray-600 */
+    --amplify-colors-border-secondary: rgb(55 65 81); /* gray-700 */
+    --amplify-colors-border-tertiary: rgb(55 65 81); /* gray-700 */
+  }
+
+  .dark [data-amplify-authenticator] [data-amplify-container] {
+    background-color: rgb(31 41 55); /* gray-800 */
+    border-color: rgb(75 85 99); /* gray-600 */
+  }
+
+  .dark [data-amplify-authenticator] input {
+    background-color: rgb(55 65 81); /* gray-700 */
+    border-color: rgb(75 85 99); /* gray-600 */
+    color: rgb(243 244 246); /* gray-100 */
+  }
+
+  .dark [data-amplify-authenticator] input::placeholder {
+    color: rgb(156 163 175); /* gray-400 */
+  }
+
+  .dark [data-amplify-authenticator] button[type="submit"] {
+    background-color: rgb(17 24 39); /* gray-900 */
+    color: rgb(255 255 255);
+  }
+
+  .dark [data-amplify-authenticator] button[type="submit"]:hover {
+    background-color: rgb(31 41 55); /* gray-800 */
+  }
+
+  .dark [data-amplify-authenticator] [data-amplify-router-content] {
+    background-color: rgb(31 41 55); /* gray-800 */
+  }
+
+  /* ----------------------------------------------------------------------- */
+  /*  Print mode                                                             */
+  /* ----------------------------------------------------------------------- */
+
+  /*
+   * `print-mode` is added to <body>'s direct child <div> by App.tsx when the
+   * URL contains `?print=1`. It signals "remove navigation chrome and prep for
+   * a paper/PDF screenshot" even before the actual `@media print` rules kick
+   * in (so the new tab looks like a print preview on screen too).
+   */
+  .print-mode .print-hidden {
+    display: none !important;
+  }
+
+  /* Collapsible reference content (ui/Disclosure) is collapsed on screen with
+     the `hidden` attribute, but a report preview (`?print=1`) and paper always
+     show it. */
+  .print-mode .print-reveal[hidden] {
+    display: block !important;
+  }
+
+  .print-mode {
+    /* Preserve background colors of charts, badges, and stat cards in PDF
+       output instead of stripping them to white. */
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print-mode .print-header {
+    margin-bottom: 0.5rem;
+  }
+
+  @media print {
+    /* Hide every element marked .print-hidden anywhere in the tree, even
+       outside of print-mode (modal portals, debug panels, etc.). */
+    .print-hidden,
+    [data-print-hidden="true"] {
+      display: none !important;
+    }
+
+    .print-reveal[hidden] {
+      display: block !important;
+    }
+
+    /* Page breaks helpers. Add `.page-break-before` to a section to start it
+       on a fresh page; `.avoid-break-inside` keeps a card together. */
+    .page-break-before {
+      break-before: page;
+    }
+    .avoid-break-inside {
+      break-inside: avoid;
+    }
+
+    /* Color preservation across all print contexts. */
+    * {
+      print-color-adjust: exact !important;
+      -webkit-print-color-adjust: exact !important;
+    }
+
+    /* Remove sticky positioning so headers don't repeat awkwardly mid-page. */
+    .sticky {
+      position: static !important;
+    }
+
+    /* Force charts to a printable size — on paper, full-width with capped
+       height keeps them legible. */
+    canvas {
+      max-width: 100% !important;
+      height: auto !important;
+    }
+
+    /* Light background regardless of the saved theme so PDFs are readable
+       when printed on white paper. */
+    body,
+    .print-mode {
+      background: white !important;
+      color: black !important;
+    }
+
+    /* Default page margins; the browser print dialog can override these. */
+    @page {
+      margin: 0.5in;
+    }
   }
 }
 
 @layer utilities {
-  .animate-fadeIn {
-    animation: fadeIn 0.2s ease-out;
+  @tailwind utilities;
+}
+
+@layer utilities {
+  /* Tailwind 3 `space-*`: a margin on every visible child after the first, at
+     a specificity that beats the child's own margin. v4 puts the gap after every
+     child but the last at zero specificity, which moves it around out-of-flow
+     children (sr-only legends, fixed overlays) and lets a child's margin
+     replace it. The first rule (specificity 0,0,1) cancels v4's rule; the
+     others restore v3's. A space-* class not listed here gets v4's behaviour. */
+  :where(.space-y-0\.5, .space-y-1, .space-y-2, .space-y-3, .space-y-4, .space-y-5, .space-y-6, .md\:space-y-0\.5, .md\:space-y-4) > :is(*, a) {
+    margin-block: revert-layer;
   }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
+  :where(.space-x-1) > :is(*, a) {
+    margin-inline: revert-layer;
   }
-  to {
-    opacity: 1;
-    transform: scale(1);
+  .space-y-0\.5 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 0.5); margin-bottom: 0; }
+  .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 1); margin-bottom: 0; }
+  .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 2); margin-bottom: 0; }
+  .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 3); margin-bottom: 0; }
+  .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 4); margin-bottom: 0; }
+  .space-y-5 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 5); margin-bottom: 0; }
+  .space-y-6 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 6); margin-bottom: 0; }
+  @media (width >= 48rem) {
+    .md\:space-y-0\.5 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 0.5); margin-bottom: 0; }
+    .md\:space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: calc(var(--spacing) * 4); margin-bottom: 0; }
   }
+  .space-x-1 > :not([hidden]) ~ :not([hidden]) { margin-right: 0; margin-left: calc(var(--spacing) * 1); }
 }
 
-/* Markdown prose styles */
-.prose-markdown h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: rgb(17 24 39);
-  margin-top: 1.5rem;
-  margin-bottom: 1rem;
-}
-
-.prose-markdown h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: rgb(17 24 39);
-  margin-top: 1.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.prose-markdown h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: rgb(17 24 39);
-  margin-top: 1rem;
-  margin-bottom: 0.5rem;
-}
-
-.prose-markdown h4 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: rgb(17 24 39);
-  margin-top: 0.75rem;
-  margin-bottom: 0.5rem;
-}
-
-.prose-markdown p {
-  margin-top: 0.75rem;
-  margin-bottom: 0.75rem;
-  line-height: 1.625;
-}
-
-.prose-markdown ul {
-  margin-top: 0.75rem;
-  margin-bottom: 0.75rem;
-  margin-left: 1.5rem;
-  list-style-type: disc;
-}
-
-.prose-markdown ol {
-  margin-top: 0.75rem;
-  margin-bottom: 0.75rem;
-  margin-left: 1.5rem;
-  list-style-type: decimal;
-}
-
-.prose-markdown li {
-  margin-top: 0.25rem;
-  margin-bottom: 0.25rem;
-}
-
-.prose-markdown strong {
-  font-weight: 600;
-  color: rgb(17 24 39);
-}
-
-.prose-markdown em {
-  font-style: italic;
-}
-
-.prose-markdown blockquote {
-  border-left-width: 4px;
-  border-color: rgb(209 213 219);
-  padding-left: 1rem;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-  font-style: italic;
-  color: rgb(75 85 99);
-}
-
-.prose-markdown code {
-  background-color: rgb(243 244 246);
-  padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.875rem;
-  font-family: ui-monospace, monospace;
-  color: rgb(31 41 55);
-}
-
-.prose-markdown pre {
-  background-color: rgb(17 24 39);
-  color: rgb(243 244 246);
-  padding: 1rem;
-  border-radius: 0.5rem;
-  overflow-x: auto;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-}
-
-.prose-markdown pre code {
-  background-color: transparent;
-  padding: 0;
-  color: inherit;
-}
-
-.prose-markdown hr {
-  margin-top: 1.5rem;
-  margin-bottom: 1.5rem;
-  border-color: rgb(229 231 235);
-}
-
-.prose-markdown a {
-  color: rgb(37 99 235);
-}
-
-.prose-markdown a:hover {
-  text-decoration: underline;
-}
-
-.prose-markdown table {
-  width: 100%;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
-  border-collapse: collapse;
-}
-
-.prose-markdown th {
-  border: 1px solid rgb(209 213 219);
-  padding: 0.5rem 0.75rem;
-  background-color: rgb(249 250 251);
-  text-align: left;
-  font-weight: 600;
-}
-
-.prose-markdown td {
-  border: 1px solid rgb(209 213 219);
-  padding: 0.5rem 0.75rem;
-}
-
-/* Dark mode prose styles */
-.dark .prose-markdown h1,
-.dark .prose-markdown h2,
-.dark .prose-markdown h3,
-.dark .prose-markdown h4,
-.dark .prose-markdown strong {
-  color: rgb(243 244 246);
-}
-
-.dark .prose-markdown blockquote {
-  border-color: rgb(75 85 99);
-  color: rgb(156 163 175);
-}
-
-.dark .prose-markdown code {
-  background-color: rgb(55 65 81);
-  color: rgb(229 231 235);
-}
-
-.dark .prose-markdown hr {
-  border-color: rgb(55 65 81);
-}
-
-.dark .prose-markdown a {
-  color: rgb(96 165 250);
-}
-
-.dark .prose-markdown th {
-  border-color: rgb(75 85 99);
-  background-color: rgb(31 41 55);
-}
-
-.dark .prose-markdown td {
-  border-color: rgb(75 85 99);
-}
-
-/* AWS Amplify Authenticator Dark Mode Overrides */
-.dark [data-amplify-authenticator] {
-  --amplify-colors-background-primary: rgb(17 24 39); /* gray-900 */
-  --amplify-colors-background-secondary: rgb(31 41 55); /* gray-800 */
-  --amplify-colors-background-tertiary: rgb(55 65 81); /* gray-700 */
-  --amplify-colors-font-primary: rgb(249 250 251); /* gray-50 */
-  --amplify-colors-font-secondary: rgb(209 213 219); /* gray-300 */
-  --amplify-colors-font-tertiary: rgb(156 163 175); /* gray-400 */
-  --amplify-colors-border-primary: rgb(75 85 99); /* gray-600 */
-  --amplify-colors-border-secondary: rgb(55 65 81); /* gray-700 */
-  --amplify-colors-border-tertiary: rgb(55 65 81); /* gray-700 */
-}
-
-.dark [data-amplify-authenticator] [data-amplify-container] {
-  background-color: rgb(31 41 55); /* gray-800 */
-  border-color: rgb(75 85 99); /* gray-600 */
-}
-
-.dark [data-amplify-authenticator] input {
-  background-color: rgb(55 65 81); /* gray-700 */
-  border-color: rgb(75 85 99); /* gray-600 */
-  color: rgb(243 244 246); /* gray-100 */
-}
-
-.dark [data-amplify-authenticator] input::placeholder {
-  color: rgb(156 163 175); /* gray-400 */
-}
-
-.dark [data-amplify-authenticator] button[type="submit"] {
-  background-color: rgb(17 24 39); /* gray-900 */
-  color: rgb(255 255 255);
-}
-
-.dark [data-amplify-authenticator] button[type="submit"]:hover {
-  background-color: rgb(31 41 55); /* gray-800 */
-}
-
-.dark [data-amplify-authenticator] [data-amplify-router-content] {
-  background-color: rgb(31 41 55); /* gray-800 */
-}
-
-/* ----------------------------------------------------------------------- */
-/*  Print mode                                                             */
-/* ----------------------------------------------------------------------- */
-
-/*
- * `print-mode` is added to <body>'s direct child <div> by App.tsx when the
- * URL contains `?print=1`. It signals "remove navigation chrome and prep for
- * a paper/PDF screenshot" even before the actual `@media print` rules kick
- * in (so the new tab looks like a print preview on screen too).
- */
-.print-mode .print-hidden {
-  display: none !important;
-}
-
-/* Collapsible reference content (ui/Disclosure) is collapsed on screen with
-   the `hidden` attribute, but a report preview (`?print=1`) and paper always
-   show it. */
-.print-mode .print-reveal[hidden] {
-  display: block !important;
-}
-
-.print-mode {
-  /* Preserve background colors of charts, badges, and stat cards in PDF
-     output instead of stripping them to white. */
-  print-color-adjust: exact;
-  -webkit-print-color-adjust: exact;
-}
-
-.print-mode .print-header {
-  margin-bottom: 0.5rem;
-}
-
-@media print {
-  /* Hide every element marked .print-hidden anywhere in the tree, even
-     outside of print-mode (modal portals, debug panels, etc.). */
-  .print-hidden,
-  [data-print-hidden="true"] {
-    display: none !important;
-  }
-
-  .print-reveal[hidden] {
-    display: block !important;
-  }
-
-  /* Page breaks helpers. Add `.page-break-before` to a section to start it
-     on a fresh page; `.avoid-break-inside` keeps a card together. */
-  .page-break-before {
-    break-before: page;
-  }
-  .avoid-break-inside {
-    break-inside: avoid;
-  }
-
-  /* Color preservation across all print contexts. */
-  * {
-    print-color-adjust: exact !important;
-    -webkit-print-color-adjust: exact !important;
-  }
-
-  /* Remove sticky positioning so headers don't repeat awkwardly mid-page. */
-  .sticky {
-    position: static !important;
-  }
-
-  /* Force charts to a printable size — on paper, full-width with capped
-     height keeps them legible. */
-  canvas {
-    max-width: 100% !important;
-    height: auto !important;
-  }
-
-  /* Light background regardless of the saved theme so PDFs are readable
-     when printed on white paper. */
-  body,
-  .print-mode {
-    background: white !important;
-    color: black !important;
-  }
-
-  /* Default page margins; the browser print dialog can override these. */
-  @page {
-    margin: 0.5in;
-  }
-}
-
-/* Skeleton placeholders (components/ui/Skeleton.tsx). A muted block that
-   pulses while its real content loads; it reserves the content's footprint
-   so nothing shifts when the data arrives. Motion is dropped for users who
-   ask for reduced motion. */
-.skeleton {
-  background-color: rgb(229 231 235); /* gray-200 */
-  border-radius: 0.375rem;
-  animation: skeleton-pulse 1.6s ease-in-out infinite;
-}
-
-.dark .skeleton {
-  background-color: rgb(55 65 81); /* gray-700 */
-}
-
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-
-@media (prefers-reduced-motion: reduce) {
+@layer utilities {
+  /* Skeleton placeholders (components/ui/Skeleton.tsx). A muted block that
+     pulses while its real content loads; it reserves the content's footprint
+     so nothing shifts when the data arrives. Motion is dropped for users who
+     ask for reduced motion. */
   .skeleton {
-    animation: none;
+    background-color: rgb(229 231 235); /* gray-200 */
+    border-radius: 0.375rem;
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  .dark .skeleton {
+    background-color: rgb(55 65 81); /* gray-700 */
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      animation: none;
+    }
   }
 }

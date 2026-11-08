@@ -44,7 +44,7 @@ function PositionCell({
   const text = position === null ? NOT_NAMED : String(position);
   if (!row.lost_engines.includes(engine)) return <span>{text}</span>;
   return (
-    <span className="inline-block rounded bg-red-50 px-1.5 py-0.5 font-semibold text-red-700">
+    <span className="inline-block rounded-sm bg-red-50 px-1.5 py-0.5 font-semibold text-red-700">
       {text}
       <span className="sr-only">{LOST_LABEL}</span>
     </span>

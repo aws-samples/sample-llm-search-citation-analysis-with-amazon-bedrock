@@ -110,7 +110,7 @@ export const KeywordGroupsPanel = ({
           onKeyDown={(event) => { if (event.key === 'Enter') void submitCreate(); }}
           placeholder={'New group name (e.g. Spring campaign)'}
           disabled={busy}
-          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm"
+          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-gray-900 text-sm"
         />
         <button
           type="button"
@@ -149,7 +149,7 @@ export const KeywordGroupsPanel = ({
                     if (event.key === 'Escape') setEditingId(null);
                   }}
                   autoFocus
-                  className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
                 />
                 <button type="button" onClick={() => { void submitRename(group.id); }} className="px-2 py-1 text-sm bg-gray-900 text-white rounded-lg">Save</button>
                 <button type="button" onClick={() => setEditingId(null)} className="px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded-lg">Cancel</button>
@@ -168,7 +168,7 @@ export const KeywordGroupsPanel = ({
                   type="button"
                   aria-label={`Rename group ${group.name}`}
                   onClick={() => { setEditingId(group.id); setEditName(group.name); }}
-                  className="p-1 text-gray-400 hover:text-gray-700 rounded"
+                  className="p-1 text-gray-400 hover:text-gray-700 rounded-sm"
                 >
                   <PencilGlyph />
                 </button>
@@ -176,7 +176,7 @@ export const KeywordGroupsPanel = ({
                   type="button"
                   aria-label={`Delete group ${group.name}`}
                   onClick={() => onDelete(group)}
-                  className="p-1 text-gray-400 hover:text-red-600 rounded"
+                  className="p-1 text-gray-400 hover:text-red-600 rounded-sm"
                 >
                   <TrashGlyph />
                 </button>

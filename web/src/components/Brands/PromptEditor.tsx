@@ -33,18 +33,18 @@ export const PromptEditor = ({
           </select>
         </div>
         <div className="flex items-center gap-2">
-          {promptModified && (<span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">Unsaved</span>)}
-          {industryPrompts[industry] && (<span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Custom</span>)}
+          {promptModified && (<span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-sm">Unsaved</span>)}
+          {industryPrompts[industry] && (<span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-sm">Custom</span>)}
         </div>
       </div>
 
       <div className="bg-gray-100 border border-gray-200 rounded-lg p-3">
         <p className="text-xs text-gray-600 mb-2">Template variables:</p>
         <div className="flex flex-wrap gap-2">
-          <code className="text-xs bg-white px-2 py-1 rounded border">{'{{TRACKED_BRANDS}}'}</code>
-          <code className="text-xs bg-white px-2 py-1 rounded border">{'{{SENTIMENT_FIELDS}}'}</code>
-          <code className="text-xs bg-white px-2 py-1 rounded border">{'{{RANKING_CONTEXT_FIELD}}'}</code>
-          <code className="text-xs bg-white px-2 py-1 rounded border">{'{{TEXT}}'}</code>
+          <code className="text-xs bg-white px-2 py-1 rounded-sm border">{'{{TRACKED_BRANDS}}'}</code>
+          <code className="text-xs bg-white px-2 py-1 rounded-sm border">{'{{SENTIMENT_FIELDS}}'}</code>
+          <code className="text-xs bg-white px-2 py-1 rounded-sm border">{'{{RANKING_CONTEXT_FIELD}}'}</code>
+          <code className="text-xs bg-white px-2 py-1 rounded-sm border">{'{{TEXT}}'}</code>
         </div>
       </div>
 

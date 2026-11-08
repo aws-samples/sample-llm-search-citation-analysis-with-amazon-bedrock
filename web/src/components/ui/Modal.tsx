@@ -61,11 +61,11 @@ export const Modal = ({
   };
 
   return (
-    // `!m-0`: a caller's `space-y-*` wrapper would otherwise push this fixed overlay down.
-    <div className="fixed inset-0 z-50 !m-0 flex items-center justify-center p-4">
+    // `m-0!`: a caller's `space-y-*` wrapper would otherwise push this fixed overlay down.
+    <div className="fixed inset-0 z-50 m-0! flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"
+        className="absolute inset-0 bg-gray-900/50 backdrop-blur-xs"
         onClick={onClose}
         aria-hidden="true"
       />

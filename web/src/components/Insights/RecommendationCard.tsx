@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import type {
+  JSX, ReactNode
+} from 'react';
 import type { Recommendation } from '../../types';
 import {
   EyeIcon, CogIcon
@@ -98,7 +100,7 @@ const ExpandedContent = ({ rec }: { rec: Recommendation }) => (
     {rec.keywords && rec.keywords.length > 0 && (
       <div className="flex flex-wrap gap-1">
         {rec.keywords.map(kw => (
-          <span key={kw} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+          <span key={kw} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm text-xs">
             {kw}
           </span>
         ))}
@@ -109,7 +111,7 @@ const ExpandedContent = ({ rec }: { rec: Recommendation }) => (
 
 /** Marks a recommendation drawn from Google organic data rather than from the AI answers. */
 const SeoSourceBadge = () => (
-  <span className="px-1.5 py-0.5 rounded bg-lime-50 text-lime-800 text-xs font-semibold" title="From Google organic (SEO) data">
+  <span className="px-1.5 py-0.5 rounded-sm bg-lime-50 text-lime-800 text-xs font-semibold" title="From Google organic (SEO) data">
     SEO
   </span>
 );
@@ -127,7 +129,7 @@ export const RecommendationCard = ({
   rec, isExpanded, onClick, statusControl, fromSeo = false
 }: RecommendationCardProps) => (
   <div
-    className={`bg-white rounded-lg shadow border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
+    className={`bg-white rounded-lg shadow-sm border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
     onClick={onClick}
   >
     <div className="p-5">

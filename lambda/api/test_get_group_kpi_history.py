@@ -122,7 +122,7 @@ class TestGroupKpiHistoryRoute:
         assert _call({'group_id': 'sol', 'days': days})[1]['days'] == int(days)
 
     def test_answers_an_unexpected_failure_with_a_500(self):
-        with patch.object(_mod, 'group_kpi_history_from_answers', side_effect=PartitionReadFailure('boom')):
+        with patch.object(_mod, 'group_kpi_history_from_runs', side_effect=PartitionReadFailure('boom')):
             status, _ = _call({'group_id': 'sol'})
 
         assert status == 500

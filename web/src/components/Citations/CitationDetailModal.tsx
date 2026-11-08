@@ -77,7 +77,7 @@ const StatusBadge = ({ status }: { status?: CrawlStatus }) => {
     error: 'Error' 
   };
   return (
-    <span className={`px-2 py-0.5 text-xs font-medium rounded border ${styles[status]}`}>
+    <span className={`px-2 py-0.5 text-xs font-medium rounded-sm border ${styles[status]}`}>
       {labels[status]}
     </span>
   );
@@ -155,7 +155,7 @@ const SeoPointList = ({
 const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
   <div className="space-y-6">
     {seoAnalysis.relevance_score && (
-      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
+      <div className="bg-linear-to-r/srgb from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-gray-900">Relevance Score</h3>
@@ -229,7 +229,7 @@ export const CitationDetailModal = ({
             {citation.status === 'blocked' && <BlockedPageBanner blockReason={citation.block_reason} />}
             <div className="bg-gray-50 rounded-lg p-4">
               <p className="text-sm text-gray-600 mb-4">Screenshot captured on {formatDate(citation.crawled_at)}</p>
-              <img src={citation.screenshot_url} alt={`Screenshot of ${citation.title}`} className="w-full border border-gray-300 rounded shadow-lg dark:brightness-90 dark:contrast-95" />
+              <img src={citation.screenshot_url} alt={`Screenshot of ${citation.title}`} className="w-full border border-gray-300 rounded-sm shadow-lg dark:brightness-90 dark:contrast-95" />
             </div>
           </div>
         ) : null;
@@ -258,7 +258,7 @@ export const CitationDetailModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 !mt-0">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 mt-0!">
       <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex justify-between items-start">

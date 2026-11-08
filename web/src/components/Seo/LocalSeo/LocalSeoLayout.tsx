@@ -1,6 +1,6 @@
 /** Layout pieces the local SEO tabs share: a titled card, a search form, a results table and a request outcome. */
 import type {
-  FormEvent, ReactNode
+  SubmitEvent, ReactNode
 } from 'react';
 import {
   exportTableToExcel, type TableExport
@@ -64,7 +64,7 @@ interface LocalFormProps extends Omit<LocalCardProps, 'cached' | 'actions'> {
 export function LocalForm({
   title, note, submitLabel, canSubmit, onSubmit, footer, children
 }: LocalFormProps) {
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     onSubmit();
   };

@@ -1,7 +1,4 @@
 import {
-  StrictMode, createElement, type ReactNode
-} from 'react';
-import {
   act, renderHook
 } from '@testing-library/react';
 import { vi } from 'vitest';
@@ -75,18 +72,12 @@ export function buildTemplateDraft(
   };
 }
 
-interface TemplateHookStrictModeProps { readonly children: ReactNode; }
-
-function templateHookStrictMode({ children }: TemplateHookStrictModeProps) {
-  return createElement(StrictMode, null, children);
-}
-
 export function renderLoadedContentBriefTemplates() {
   return renderLoadedHook(() => useContentBriefTemplates());
 }
 
 export function renderLoadedContentBriefTemplatesInStrictMode() {
-  return renderLoadedHook(() => useContentBriefTemplates(), { wrapper: templateHookStrictMode });
+  return renderLoadedHook(() => useContentBriefTemplates(), { reactStrictMode: true });
 }
 
 /** Renders the hook while its initial list request stays in flight until `deferred` settles. */

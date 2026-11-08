@@ -98,7 +98,7 @@ const BulkInput = ({
       onChange={(e) => setBulkKeywords(e.target.value)}
       placeholder="Enter multiple keywords (one per line)"
       rows={6}
-      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none font-mono text-sm"
+      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-gray-900 resize-none font-mono text-sm"
       disabled={saving}
     />
     <div className="flex items-center justify-between">
@@ -136,7 +136,7 @@ const SingleInput = ({
       onChange={(e) => setNewKeyword(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && onAddKeyword()}
       placeholder="Enter new keyword..."
-      className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm"
+      className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-gray-900 text-sm"
       disabled={saving}
     />
     <button
@@ -254,7 +254,7 @@ const KeywordItem = ({
         aria-label={`Select ${keyword.keyword}`}
         checked={bulkSelected}
         onChange={onToggleBulkSelect}
-        className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+        className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900"
       />
     )}
     {isEditing ? (
@@ -300,7 +300,7 @@ const EditingView = ({
       value={editText}
       onChange={(e) => setEditText(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && onUpdateKeyword()}
-      className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm"
+      className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-gray-900 text-sm"
       autoFocus
     />
     {marketControls && (
@@ -334,7 +334,7 @@ interface DisplayViewProps {
  */
 const PausedBadge = () => (
   <span
-    className="px-1.5 py-0.5 text-xs rounded border border-amber-200 bg-amber-50 text-amber-700"
+    className="px-1.5 py-0.5 text-xs rounded-sm border border-amber-200 bg-amber-50 text-amber-700"
     title="Paused keywords stay in their groups but are skipped by analysis runs"
   >
     Paused
@@ -358,7 +358,7 @@ const DisplayView = ({
         onClick={() => onSetStatus(!isKeywordActive(keyword))}
         disabled={statusBusy}
         aria-label={isKeywordActive(keyword) ? `Pause ${keyword.keyword}` : `Activate ${keyword.keyword}`}
-        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-sm border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isKeywordActive(keyword) ? 'Pause' : 'Activate'}
       </button>
@@ -367,15 +367,15 @@ const DisplayView = ({
       <button
         onClick={onOpenGroups}
         aria-label={`Edit groups for ${keyword.keyword}`}
-        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200"
+        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-sm border border-gray-200"
       >
         Groups
       </button>
     )}
-    <button onClick={onStartEdit} aria-label={`Edit ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded">
+    <button onClick={onStartEdit} aria-label={`Edit ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-sm">
       <PencilIcon className="w-4 h-4" />
     </button>
-    <button onClick={onDeleteKeyword} aria-label={`Delete ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+    <button onClick={onDeleteKeyword} aria-label={`Delete ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-sm">
       <TrashIcon className="w-4 h-4" />
     </button>
   </>

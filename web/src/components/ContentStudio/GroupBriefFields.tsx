@@ -108,7 +108,7 @@ function LandingUrlField({
         maxLength={GROUP_BRIEF_MAX_URL_LENGTH}
         placeholder="https://example.com/page"
         disabled={disabled}
-        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
       />
       <FieldIssue issue={issue} />
     </div>
@@ -134,7 +134,7 @@ function CurrentCopyField({
         maxLength={GROUP_BRIEF_MAX_COPY_LENGTH}
         rows={8}
         disabled={disabled}
-        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
       />
       <div className="mt-1 flex justify-between text-xs text-gray-500">
         <span>{issue ?? 'Paste the source copy that should be rewritten.'}</span>

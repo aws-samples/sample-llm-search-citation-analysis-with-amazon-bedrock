@@ -18,7 +18,7 @@ export function PriorityBadge({
   priority, inline = false 
 }: Props) {
   const styles = priorityStyles(priority);
-  const placementClass = inline ? 'inline-block' : 'flex-shrink-0';
+  const placementClass = inline ? 'inline-block' : 'shrink-0';
   return (
     <span
       className={`${placementClass} px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${styles}`}

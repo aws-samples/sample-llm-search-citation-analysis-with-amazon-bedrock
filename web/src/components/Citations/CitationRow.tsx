@@ -71,7 +71,7 @@ export const CitationRow = ({
             {isVideoCitation(citation) && <VideoBadge />}
             <button
               onClick={(e) => onViewDetails(citation.url, e)}
-              className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+              className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded-sm hover:bg-blue-100 transition-colors"
               title="View crawled content and screenshot"
             >
               View
@@ -82,7 +82,7 @@ export const CitationRow = ({
           {getDomain(citation.url)}
         </td>
         <td className="px-6 py-4">
-          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm text-xs">
             {citation.keyword_count ?? 0}
           </span>
         </td>
@@ -126,7 +126,7 @@ export const CitationRow = ({
                               <span className="font-medium text-gray-900 hover:text-gray-600">{keyword}</span>
                               <div className="flex gap-1">
                                 {[...new Set(items.map(item => item.provider))].map((provider) => (
-                                  <span key={provider} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                  <span key={provider} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm text-xs">
                                     {provider}
                                   </span>
                                 ))}

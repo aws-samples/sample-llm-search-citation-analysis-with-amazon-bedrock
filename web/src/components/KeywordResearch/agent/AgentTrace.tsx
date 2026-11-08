@@ -17,7 +17,7 @@ function QueryList({
     <ul className="space-y-1">
       {queries.map((query) => (
         <li key={query.query} className="text-sm text-gray-800 flex flex-wrap items-baseline gap-2">
-          <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 text-[11px] font-medium text-gray-600">{dimensionLabel(query.dimension, catalog)}</span>
+          <span className="inline-flex px-1.5 py-0.5 rounded-sm bg-gray-100 text-[11px] font-medium text-gray-600">{dimensionLabel(query.dimension, catalog)}</span>
           <span className="font-medium">{query.query}</span>
           {query.rationale && <span className="text-xs text-gray-500">— {query.rationale}</span>}
         </li>
@@ -76,7 +76,7 @@ export function AgentTrace({ job }: AgentTraceProps) {
         {job.system_prompt && (
           <details className="text-sm">
             <summary className="cursor-pointer text-gray-700">Instructions used{job.template_name ? ` (${job.template_name})` : ''}</summary>
-            <pre className="mt-2 whitespace-pre-wrap text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded p-3 font-sans">{job.system_prompt}</pre>
+            <pre className="mt-2 whitespace-pre-wrap text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-sm p-3 font-sans">{job.system_prompt}</pre>
           </details>
         )}
         {rounds.length > 0 && (

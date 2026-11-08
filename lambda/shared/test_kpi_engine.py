@@ -12,6 +12,7 @@ from shared.kpi_engine import (
     ANSWER_PROJECTION,
     KPI_IDS,
     PERCENT_KPIS,
+    POSITION_POINTS_SCALE,
     answer_from_row,
     answers_from_rows,
     brand_kpis,
@@ -22,7 +23,7 @@ from shared.kpi_engine import (
     kpi_trends,
     normalize_domain,
     owned_domains_from,
-    position_weight,
+    position_points,
     source_table,
     trend_direction,
 )
@@ -242,10 +243,16 @@ class TestDomains:
         assert owned_domains_from(config) == expected
 
 
-class TestPositionWeight:
+class TestPositionPoints:
     @pytest.mark.parametrize(('rank', 'expected'), [(1, 1.0), (2, 0.9), (3, 0.81), (10, UNKNOWN_WEIGHT), (25, UNKNOWN_WEIGHT), (None, UNKNOWN_WEIGHT)])
     def test_decays_by_ten_percent_per_position_down_to_the_tenth(self, rank, expected):
-        assert position_weight(rank) == pytest.approx(expected)
+        assert position_points(rank) / POSITION_POINTS_SCALE == pytest.approx(expected)
+
+    @pytest.mark.parametrize('rank', [1, 2, 5, 9, 10, None])
+    def test_is_an_exact_integer_of_the_scale(self, rank):
+        exponent = (10 if rank is None else rank) - 1
+
+        assert position_points(rank) == 9 ** exponent * 10 ** (9 - exponent)
 
 
 class TestBrandKpis:

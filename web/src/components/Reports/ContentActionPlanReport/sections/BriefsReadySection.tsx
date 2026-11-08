@@ -75,7 +75,7 @@ function BriefCard({ item }: { readonly item: ContentStudioHistory }) {
           </p>
         )}
         aside={(
-          <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+          <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
             {new Date(item.created_at).toLocaleDateString()}
           </span>
         )}

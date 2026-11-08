@@ -98,7 +98,7 @@ interface Anchor {
 }
 
 /** Closes the pop-out on Escape or a press outside it and its entry. */
-function useDismiss(open: boolean, refs: ReadonlyArray<RefObject<HTMLElement>>, close: () => void) {
+function useDismiss(open: boolean, refs: ReadonlyArray<RefObject<HTMLElement | null>>, close: () => void) {
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (event: KeyboardEvent) => {
@@ -124,7 +124,7 @@ function RailFlyout({
   readonly anchor: Anchor;
   readonly items: readonly NavChild[];
   readonly activeChildId: string | null;
-  readonly panelRef: RefObject<HTMLElement>;
+  readonly panelRef: RefObject<HTMLElement | null>;
   readonly onNavigate: (path: string) => void;
 }) {
   return createPortal(

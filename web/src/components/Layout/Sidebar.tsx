@@ -219,7 +219,7 @@ export const Sidebar = ({
             aria-expanded={!collapsed}
             aria-controls="app-sidebar"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="hidden lg:inline-flex p-1.5 -mr-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+            className="hidden lg:inline-flex p-1.5 -mr-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-200 dark:hover:bg-gray-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
           >
             <StrokeIcon className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} paths={CHEVRON_DOUBLE_LEFT_PATHS} aria-hidden="true" />
           </button>

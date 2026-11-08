@@ -24,7 +24,7 @@ function StatCard({
   readonly color: string
 }) {
   return (
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm">
       <div className={`text-xl sm:text-2xl font-bold ${color}`}>{value}</div>
       <div className="text-xs sm:text-sm text-gray-500">{label}</div>
     </div>
@@ -39,7 +39,7 @@ function DomainSummary({ domains }: {
   }>
 }) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow">
+    <div className="bg-white p-4 rounded-lg shadow-sm">
       <h3 className="text-lg font-medium mb-3">Top Domains with Gaps</h3>
       <div className="space-y-2">
         {domains.slice(0, 10).map(domain => (
@@ -109,7 +109,7 @@ function CitationGapsSkeleton() {
   return (
     <SkeletonRegion label="Analyzing citation gaps" className="space-y-6">
       <StatTilesSkeleton count={4} gridClassName="grid-cols-2 lg:grid-cols-4" />
-      <div className="bg-white p-4 rounded-lg shadow">
+      <div className="bg-white p-4 rounded-lg shadow-sm">
         <div className="flex h-7 items-center mb-3"><Skeleton className="h-5 w-48" /></div>
         <SkeletonTable rows={10} columns={2} rowClassName="h-[41px]" />
       </div>

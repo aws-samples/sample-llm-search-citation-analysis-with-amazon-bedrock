@@ -23,8 +23,10 @@ or ``keyword``), ``days`` (1-365, default 90) and ``view``:
   Reads only that slice of the window, so a client asks for one run's drivers
   with ``from_run`` = its ``change.previous_timestamp`` and ``to_run`` = its timestamp.
 
-Every view reads at most ``WINDOW_ROWS_CAP`` rows, newest first, within the
-request's time budget (``shared.scoped_reports.load_window_answers``); a
+Every view reads each keyword's per-run KPI rollups (``shared.keyword_run_kpis``)
+and, for its runs older than its first rollup, at most ``WINDOW_ROWS_CAP``
+SearchResults rows, newest first, within the request's time budget
+(``shared.scoped_reports.load_window_runs``); a
 window the cap or the budget shortened reports the run it stopped at in
 ``truncated_before`` (``null`` otherwise). Keywords the budget left unread are
 left out: ``keywords_truncated`` is then true (summary, drivers), and a
@@ -52,19 +54,20 @@ from shared.cursors import (
 from shared.decorators import api_handler, optional_limit, validate
 from shared.group_kpi_history import (
     GROUP_RUN_MIN_COVERAGE,
-    group_kpi_history_from_answers,
+    group_kpi_history_from_runs,
     keyword_run_histories,
     keyword_summary,
     run_drivers,
     summary_run,
 )
+from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import owned_domains_from
 from shared.response_budget import PAGE_BUDGET_BYTES, json_bytes, take_within_budget
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scoped_dynamodb_resource
 from shared.scoped_reports import (
-    WindowAnswers,
+    WindowRuns,
     capped_scope,
-    load_window_answers,
+    load_window_runs,
     required_report_scope,
     rows_per_keyword,
 )
@@ -112,6 +115,13 @@ def search_table() -> Any:
     return dynamodb.Table(SEARCH_RESULTS_TABLE)
 
 
+def load_window(request: ViewRequest, keywords: list[str], since: str, **options: Any) -> WindowRuns:
+    """``keywords``' run tallies from ``since`` on (``shared.scoped_reports.load_window_runs``), without brand counts: no view lists brands."""
+    return load_window_runs(
+        search_table(), keywords, since, request.owned_domains, rollups=keyword_run_kpis_table(dynamodb), brands=False, **options,
+    )
+
+
 def newest_within_budget(runs: list[dict[str, Any]], max_bytes: int = PAGE_BUDGET_BYTES) -> tuple[list[dict[str, Any]], bool]:
     """The newest of ``runs`` (oldest first) that fit ``max_bytes``, still oldest first, and whether older ones were left out."""
     kept, truncated = take_within_budget(runs[::-1], max_bytes)
@@ -124,15 +134,15 @@ def bounded_keyword_history(entry: dict[str, Any]) -> dict[str, Any]:
     return {'keyword': entry['keyword'], 'runs': runs, 'runs_truncated': truncated}
 
 
-def _unread_fields(window: WindowAnswers) -> dict[str, Any]:
+def _unread_fields(window: WindowRuns) -> dict[str, Any]:
     """``keywords_truncated: true`` when the time budget left keywords of the window unread (they are left out)."""
     return {'keywords_truncated': True} if window.skipped else {}
 
 
 def summary_view(request: ViewRequest) -> ViewResult:
     """Every run of the window and each keyword's latest run, with no per-keyword runs and no drivers."""
-    window = load_window_answers(search_table(), request.keywords, request.since)
-    history = group_kpi_history_from_answers(window.read_keywords(request.keywords), window.answers, request.owned_domains)
+    window = load_window(request, request.keywords, request.since)
+    history = group_kpi_history_from_runs(window.read_keywords(request.keywords), window.runs, request.owned_domains)
     keywords = [keyword_summary(entry) for entry in history['keywords']]
     budget = max(PAGE_BUDGET_BYTES // 2, PAGE_BUDGET_BYTES - json_bytes(keywords))
     runs, runs_truncated = newest_within_budget([summary_run(run) for run in history['runs']], budget)
@@ -169,11 +179,9 @@ def keywords_view(request: ViewRequest) -> ViewResult:
     if rejected is not None:
         return None, rejected
     # Each keyword reads what it would in the summary, so a page agrees with it.
-    window = load_window_answers(
-        search_table(), page_keywords, request.since, max_rows=rows_per_keyword(len(request.keywords)),
-    )
-    readable = list(takewhile(lambda keyword: keyword in window.answers, page_keywords))
-    histories = [bounded_keyword_history(entry) for entry in keyword_run_histories(readable, window.answers, request.owned_domains)]
+    window = load_window(request, page_keywords, request.since, max_rows=rows_per_keyword(len(request.keywords)))
+    readable = list(takewhile(lambda keyword: keyword in window.runs, page_keywords))
+    histories = [bounded_keyword_history(entry) for entry in keyword_run_histories(readable, window.runs, request.owned_domains)]
     page, _ = take_within_budget(histories)
     single = request.params.get('detail_keyword') is not None
     return {
@@ -205,8 +213,8 @@ def drivers_view(request: ViewRequest) -> ViewResult:
     from_run, to_run, rejected = _drivers_range(request)
     if rejected is not None:
         return None, rejected
-    window = load_window_answers(search_table(), request.keywords, from_run or request.since, until=to_run)
-    history = group_kpi_history_from_answers(window.read_keywords(request.keywords), window.answers, request.owned_domains)
+    window = load_window(request, request.keywords, from_run or request.since, until=to_run)
+    history = group_kpi_history_from_runs(window.read_keywords(request.keywords), window.runs, request.owned_domains)
     changes = [change for change in run_drivers(history['runs']) if from_run is None or change['timestamp'] > from_run]
     page, truncated = take_within_budget(changes)
     return {

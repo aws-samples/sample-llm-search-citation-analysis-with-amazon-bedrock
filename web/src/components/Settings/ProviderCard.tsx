@@ -105,7 +105,7 @@ export const ProviderCard = ({
           <div>
             <div className="flex items-center gap-2">
               <h4 className="text-sm font-semibold text-gray-900">{provider.name}</h4>
-              {provider.model !== '' && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{provider.model}</span>}
+              {provider.model !== '' && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-sm">{provider.model}</span>}
             </div>
             <p className="text-xs text-gray-600 mt-1">{provider.description}</p>
             <div className="mt-2 flex flex-wrap items-center gap-2">

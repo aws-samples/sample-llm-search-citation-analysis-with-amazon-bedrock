@@ -59,7 +59,7 @@ function SiteKey({
   return (
     <li className="py-3 space-y-2">
       <p className="text-sm text-gray-800">
-        <span className="font-medium">{site.domain}</span> key <code className="rounded bg-gray-100 px-1">{site.key}</code>
+        <span className="font-medium">{site.domain}</span> key <code className="rounded-sm bg-gray-100 px-1">{site.key}</code>
       </p>
       <p className="text-xs text-gray-600">
         Publish a plain-text file named <code>{site.key}.txt</code> containing only the key at the root of each host you

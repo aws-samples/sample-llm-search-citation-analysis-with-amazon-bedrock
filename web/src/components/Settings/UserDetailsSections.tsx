@@ -70,13 +70,13 @@ export function AccessSwitch({
         aria-labelledby={labelId}
         disabled={disabled}
         onClick={onToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
           enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-500'
         }`}
       >
         <span
           aria-hidden="true"
-          className={`inline-block h-4 w-4 transform rounded-full bg-zinc-50 shadow transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`}
+          className={`inline-block h-4 w-4 transform rounded-full bg-zinc-50 shadow-sm transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`}
         />
       </button>
     </div>

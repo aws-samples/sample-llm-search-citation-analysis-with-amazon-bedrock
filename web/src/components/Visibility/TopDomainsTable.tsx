@@ -19,7 +19,7 @@ function DomainCell({ source }: { readonly source: SourceRow }) {
   return (
     <>
       <span className="font-medium text-gray-900">{source.domain}</span>
-      {source.owned && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800">owned</span>}
+      {source.owned && <span className="ml-2 rounded-sm bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800">owned</span>}
     </>
   );
 }

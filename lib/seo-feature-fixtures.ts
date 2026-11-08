@@ -73,7 +73,7 @@ export function functionActionsMentioning(template: Template, functionName: stri
 /** The named state machine's definition; its tokens (always inside JSON strings) read as `__REF__`. */
 export function stateMachineDefinitionJson(template: Template, stateMachineName: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(
-    extractStateMachineDefinition(template, stateMachineName).split('"__REF__"').join('__REF__')
+    extractStateMachineDefinition(template, stateMachineName).replaceAll('"__REF__"', '__REF__')
   );
   return typeof parsed === 'object' && parsed !== null ? { ...parsed } : {};
 }

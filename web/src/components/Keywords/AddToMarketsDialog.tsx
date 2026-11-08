@@ -44,7 +44,7 @@ function PickStep({
             <label key={market.market_id} htmlFor={id} className="flex items-center gap-2 text-sm text-gray-700">
               <input id={id} type="checkbox" checked={state.picked.includes(market.market_id)}
                 onChange={() => onToggle(market.market_id)}
-                className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900" />
+                className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900" />
               {market.name}
               <span className="text-xs text-gray-400">{market.language_name}</span>
             </label>
@@ -76,7 +76,7 @@ function ReviewStep({
           <div key={draft.market_id}>
             <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">{marketName(draft.market_id, markets)}</label>
             <input id={id} type="text" value={draft.keyword} onChange={(event) => onEdit(draft.market_id, event.target.value)}
-              className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
+              className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900" />
           </div>
         );
       })}

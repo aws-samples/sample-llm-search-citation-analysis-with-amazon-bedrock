@@ -36,7 +36,7 @@ interface GroupBriefPromptEditorProps {
   readonly onDelete: () => Promise<void>;
 }
 
-const INPUT_CLASS = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-500';
+const INPUT_CLASS = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-500';
 
 function TemplateSelector({
   templates,

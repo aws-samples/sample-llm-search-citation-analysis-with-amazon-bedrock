@@ -3,7 +3,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 
 interface DashboardChartCardProps {
   readonly title: string;
-  readonly canvasRef: RefObject<HTMLCanvasElement>;
+  readonly canvasRef: RefObject<HTMLCanvasElement | null>;
   readonly hasData: boolean;
   /** Second line of the empty state, e.g. "Run an analysis to see brand stats". */
   readonly emptyHint: string;

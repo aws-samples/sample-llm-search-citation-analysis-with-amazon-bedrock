@@ -3,7 +3,7 @@ import { Spinner } from '../../ui/Spinner';
 import type { MarketOption } from './agentBrief';
 
 /** Shared input styling for every control of the research-agent brief. */
-export const BRIEF_INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
+export const BRIEF_INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
 
 interface MarketSelectProps {
   readonly id: string;

@@ -1,5 +1,5 @@
 import {
-  useState, type FormEvent
+  useState, type SubmitEvent
 } from 'react';
 import type { DomainScope } from '../../../types/api/seoDomains';
 import { Button } from '../../ui/Button';
@@ -43,7 +43,7 @@ export const SCOPE_OPTIONS: ReadonlyArray<{
   },
 ];
 
-const FIELD_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900';
+const FIELD_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900';
 
 interface Props {
   readonly busy: boolean;
@@ -66,7 +66,7 @@ export function DomainSearchForm({
   const [target, setTarget] = useState('');
   const [scope, setScope] = useState<DomainScope | 'auto'>('auto');
   const resolved = effectiveTarget(target, domains.ownDomain);
-  const submit = (event: FormEvent) => {
+  const submit = (event: SubmitEvent) => {
     event.preventDefault();
     if (resolved !== '') onAnalyze(resolved, scope === 'auto' ? undefined : scope);
   };

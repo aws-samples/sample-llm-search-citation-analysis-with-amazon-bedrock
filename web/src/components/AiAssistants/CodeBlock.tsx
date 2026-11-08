@@ -23,7 +23,7 @@ export function CodeBlock({
           <CopyButton text={value} label={label} />
         </span>
       </figcaption>
-      <pre className={`${wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto'} bg-gray-900 p-3 text-sm leading-relaxed text-gray-100`}>
+      <pre className={`${wrap ? 'whitespace-pre-wrap wrap-break-word' : 'overflow-x-auto'} bg-gray-900 p-3 text-sm leading-relaxed text-gray-100`}>
         <code className="font-mono">{value}</code>
       </pre>
     </figure>

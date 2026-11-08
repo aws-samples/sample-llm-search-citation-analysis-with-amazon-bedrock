@@ -1,8 +1,7 @@
-import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { CitationAnalysisStack } from './citation-analysis-stack';
+import { synthesizeDashboardStacks } from './api-stack-fixtures';
 import {
   extractApiAuthSnapshots,
   extractFunctionRoleActionsOn,
@@ -82,16 +81,16 @@ function spillAccess(template: Template, functionName: string, bucketLogicalId: 
 }
 
 export function synthesizeResponseSizeSnapshot(): ResponseSizeSnapshot {
-  const template = Template.fromStack(new CitationAnalysisStack(new cdk.App(), 'ResponseSizeTestStack'));
+  const { mainTemplate: template, apiTemplate } = synthesizeDashboardStacks('ResponseSizeTest');
   const keywordsBucketLogicalId = Object.keys(template.findResources('AWS::S3::Bucket')).find(
     (logicalId) => logicalId.startsWith('KeywordsBucket'),
   ) ?? '';
-  const restApiId = findLogicalIdByName(template, 'AWS::ApiGateway::RestApi', 'Name', 'CitationAnalysis-API');
+  const restApiId = findLogicalIdByName(apiTemplate, 'AWS::ApiGateway::RestApi', 'Name', 'CitationAnalysis-API');
   return {
-    apiRoutes: extractApiAuthSnapshots(template).map((method) => `${method.httpMethod} ${method.path}`),
+    apiRoutes: extractApiAuthSnapshots(apiTemplate).map((method) => `${method.httpMethod} ${method.path}`),
     keywordsBucketLogicalId,
     keywordsBucketCors: resolvePath(template.toJSON(), ['Resources', keywordsBucketLogicalId, 'Properties', 'CorsConfiguration']),
-    minimumCompressionSize: resolvePath(template.toJSON(), ['Resources', restApiId, 'Properties', 'MinimumCompressionSize']),
+    minimumCompressionSize: resolvePath(apiTemplate.toJSON(), ['Resources', restApiId, 'Properties', 'MinimumCompressionSize']),
     spillAccess: Object.fromEntries(API_FUNCTION_NAMES.map((name) => [name, spillAccess(template, name, keywordsBucketLogicalId)])),
   };
 }

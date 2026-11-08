@@ -40,7 +40,7 @@ export const CompetitorAnalysis = ({
   // section), so a section switch clears the selection just like a new result does.
   const promotion = useRunPromotion(currentKeywords, onKeywordsAdded, currentKeywords);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
     await onAnalyze(url.trim());

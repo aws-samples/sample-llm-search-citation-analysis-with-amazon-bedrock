@@ -40,7 +40,7 @@ export function Disclosure({
           aria-expanded={open}
           aria-controls={contentId}
           onClick={() => setOpen(!open)}
-          className="inline-flex items-center gap-2 rounded text-left hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 dark:hover:text-gray-300"
+          className="inline-flex items-center gap-2 rounded-sm text-left hover:text-gray-600 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 dark:hover:text-gray-300"
         >
           {title}
           <ChevronDownIcon className={`print-hidden h-4 w-4 transition-transform ${chevronTurn}`} />

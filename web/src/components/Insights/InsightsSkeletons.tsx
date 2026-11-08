@@ -54,8 +54,8 @@ export const RecommendationsSkeleton = ({ useLlm }: { readonly useLlm: boolean }
     <StatTilesSkeleton count={3} gridClassName="grid-cols-3" tileClassName="h-[68px] sm:h-[100px]" />
     <div className="space-y-4">
       {RECOMMENDATION_CARD_IDS.map((id) => (
-        <div key={id} className="bg-white rounded-lg shadow p-5 flex items-start gap-4">
-          <Skeleton className="w-5 h-5 mt-0.5 rounded" />
+        <div key={id} className="bg-white rounded-lg shadow-sm p-5 flex items-start gap-4">
+          <Skeleton className="w-5 h-5 mt-0.5 rounded-sm" />
           <div className="flex-1">
             <Skeleton className="h-4 w-1/2 mt-1 mb-4" />
             <SkeletonLines lines={2} />

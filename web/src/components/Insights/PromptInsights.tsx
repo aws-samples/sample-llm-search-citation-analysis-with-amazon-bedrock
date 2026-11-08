@@ -52,7 +52,7 @@ function WinRateBadge({
   if (pending) return <Skeleton className="h-[84px] sm:h-[88px] w-24 rounded-xl self-start" />;
   if (!insights) return null;
   return (
-    <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 text-center self-start">
+    <div className="bg-linear-to-br/srgb from-green-50 to-emerald-50 rounded-xl p-4 text-center self-start">
       <div className="text-2xl sm:text-3xl font-bold text-green-600">{insights.summary.win_rate}%</div>
       <div className="text-xs text-green-700 font-medium mt-1">Win Rate</div>
     </div>
@@ -72,7 +72,7 @@ function SummaryTiles({
         ['Losing', 'border-red-500', 'text-red-600', insights.summary.losing_count],
         ['Opportunities', 'border-yellow-500', 'text-yellow-600', insights.summary.opportunity_count],
       ] as const).map(([label, borderClass, countClass, count]) => (
-        <div key={label} className={`bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 ${borderClass}`}>
+        <div key={label} className={`bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 ${borderClass}`}>
           <div className="text-xs sm:text-sm text-gray-500">{label}</div>
           <div className={`text-xl sm:text-2xl font-bold ${countClass}`}>{count}</div>
         </div>
@@ -125,7 +125,7 @@ export function PromptInsights({ keywords }: Props) {
     label: (
       <>
         {/* A fixed-width count slot, so the tabs keep their place when the counts arrive. */}
-        {tab.label} (<span className="inline-block min-w-[1.5rem] text-center tabular-nums">
+        {tab.label} (<span className="inline-block min-w-6 text-center tabular-nums">
           {pending ? <CountSkeleton /> : getCount(tab.id)}
         </span>)
       </>

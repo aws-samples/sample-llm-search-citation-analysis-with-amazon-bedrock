@@ -127,7 +127,7 @@ export const FiltersSection = ({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Filter by keyword..."
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
         />
       </div>
       <div className="w-full sm:w-40">
@@ -137,7 +137,7 @@ export const FiltersSection = ({
           name="searches-provider-filter"
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
         >
           <option value="all">All Providers</option>
           {providers.map((p) => (
@@ -153,7 +153,7 @@ export const FiltersSection = ({
             name="searches-prompt-filter"
             value={promptFilter}
             onChange={(e) => setPromptFilter(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
           >
             <option value="all">All Prompts</option>
             {promptNames.map((p) => (
@@ -206,15 +206,15 @@ export const KeywordRow = ({
       <td className="px-6 py-4 text-sm">
         <div className="flex flex-wrap gap-1">
           {group.providers.map((p) => (
-            <span key={p} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{p}</span>
+            <span key={p} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm text-xs">{p}</span>
           ))}
         </div>
       </td>
       <td className="px-6 py-4 text-sm">
-        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{group.totalRuns}</span>
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-sm text-xs">{group.totalRuns}</span>
       </td>
       <td className="px-6 py-4 text-sm">
-        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{group.totalCitations}</span>
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-sm text-xs">{group.totalCitations}</span>
       </td>
       <td className="px-6 py-4 text-sm text-gray-500">{group.avgCitationsPerRun.toFixed(1)}</td>
       <td className="px-6 py-4 text-sm text-gray-500">{new Date(group.latestTimestamp).toLocaleString()}</td>
@@ -261,7 +261,7 @@ const SearchDetailItem = ({ search }: { search: Search }) => {
       }`}
     >
       <div className="flex items-center gap-4">
-        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-sm text-xs font-medium">
           {search.provider}
         </span>
         <span className="text-sm text-gray-500">{new Date(search.timestamp).toLocaleString()}</span>

@@ -31,10 +31,10 @@ function SideStats({
 
 export function PromptCard({ prompt }: { readonly prompt: PromptInsight }) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow border-l-4 border-l-blue-500">
+    <div className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-l-blue-500">
       <div className="flex justify-between items-start mb-2">
         <h4 className="font-medium text-gray-900">{prompt.keyword}</h4>
-        <span className={`px-2 py-1 rounded text-xs ${STATUS_STYLES[prompt.status] ?? STATUS_STYLES.neutral}`}>
+        <span className={`px-2 py-1 rounded-sm text-xs ${STATUS_STYLES[prompt.status] ?? STATUS_STYLES.neutral}`}>
           {prompt.status}
         </span>
       </div>

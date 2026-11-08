@@ -84,13 +84,13 @@ export function ArchitectureTab() {
       <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
         <div className="flex flex-col items-center">
           <div className="flex items-center gap-4 mb-4">
-            <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 shadow-sm">
+            <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 shadow-xs">
               👤 User
             </div>
           </div>
           <div className="w-px h-6 bg-gray-300"></div>
           
-          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
+          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-xs mb-2">
             <div className="text-center">
               <div className="font-semibold">React Dashboard</div>
               <div className="text-xs text-gray-500">CloudFront + S3</div>
@@ -98,7 +98,7 @@ export function ArchitectureTab() {
           </div>
           <div className="w-px h-6 bg-gray-300"></div>
 
-          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
+          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-xs mb-2">
             <div className="text-center">
               <div className="font-semibold">API Gateway</div>
               <div className="text-xs text-gray-500">REST API + Cognito Auth</div>
@@ -107,13 +107,13 @@ export function ArchitectureTab() {
           <div className="w-px h-6 bg-gray-300"></div>
 
           <div className="flex items-center gap-4 mb-2">
-            <div className="bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm shadow-sm">
+            <div className="bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm shadow-xs">
               <div className="text-center">
                 <div className="font-semibold text-gray-700">Step Functions</div>
                 <div className="text-xs text-gray-500">Workflow Orchestration</div>
               </div>
             </div>
-            <div className="bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm shadow-sm">
+            <div className="bg-white border border-gray-300 rounded-lg px-4 py-3 text-sm shadow-xs">
               <div className="text-center">
                 <div className="font-semibold text-gray-700">EventBridge Scheduler</div>
                 <div className="text-xs text-gray-500">Automated Runs</div>
@@ -128,7 +128,7 @@ export function ArchitectureTab() {
 
           <div className="flex flex-wrap justify-center gap-3 mb-4">
             {['Parse', 'Search', 'Dedupe', 'Crawl', 'Summarize'].map((fn) => (
-              <div key={fn} className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs font-medium text-amber-800">
+              <div key={fn} className="bg-amber-50 border border-amber-200 rounded-sm px-3 py-2 text-xs font-medium text-amber-800">
                 λ {fn}
               </div>
             ))}
@@ -168,7 +168,7 @@ export function ArchitectureTab() {
         </div>
         <div className="flex flex-wrap gap-2 mt-3">
           {SEARCH_PROVIDERS.map((provider) => (
-            <span key={provider} className="text-xs bg-gray-50 text-gray-700 border border-gray-200 px-2 py-1 rounded">
+            <span key={provider} className="text-xs bg-gray-50 text-gray-700 border border-gray-200 px-2 py-1 rounded-sm">
               {provider}
             </span>
           ))}

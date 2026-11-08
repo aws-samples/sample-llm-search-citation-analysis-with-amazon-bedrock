@@ -7,6 +7,11 @@ Every deduplicated citation is stored in the Citations table (no cap) with its
 top ``MAX_CRAWLS_PER_KEYWORD`` go back to the workflow as
 ``deduplicated_citations``, the list the CrawlCitations Map crawls: it lives in
 the Step Functions state, which is capped at 256 KiB.
+
+When the keyword's run is done it also writes the run's KPI rollup that the
+history reports sum instead of re-reading every answer, and the
+``backfill_keyword_run_kpis`` action rolls up the runs stored before: both in
+``run_kpis_action``.
 """
 
 import json
@@ -16,10 +21,12 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
+import run_kpis_action
 
 from shared import youtube
 from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
+from shared.keyword_run_kpis_backfill import BACKFILL_ACTION
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error, step_function_success
@@ -268,6 +275,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         :func:`summarize_providers`.
     """
     logger.info('Received event: %s', json.dumps(event, default=str))
+    if event.get('action') == BACKFILL_ACTION:
+        return run_kpis_action.backfill_handler(event, context)
 
     # The search step used to hand back its sanitized keyword; the workflow now
     # merges nine per-provider outputs and passes the Map item's keyword, so
@@ -285,6 +294,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     if not results:
         logger.warning('No results provided for keyword: %s', keyword)
+        run_kpis_action.record_run_kpis(keyword, timestamp)
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
@@ -305,6 +315,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         # Step 4: Only the head of the ranking is crawled
         to_crawl = crawl_list(prioritized)
+
+        # Step 5: The run's KPI rollup for the history reports (best effort)
+        run_kpis_action.record_run_kpis(keyword, timestamp)
 
         logger.info(
             'Stored %s citations for keyword %s; %s go to the crawler',

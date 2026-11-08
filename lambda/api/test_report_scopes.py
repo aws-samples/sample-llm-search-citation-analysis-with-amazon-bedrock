@@ -641,7 +641,7 @@ class TestOverviewScope:
     def test_threads_the_scope_into_trends_and_recommendations(self, overview):
         seen: dict = {}
 
-        def fake_trends(scope: ReportScope | None, period, days, owned_domains):
+        def fake_trends(scope: ReportScope | None, period, days, owned_domains, tracked_brands=None):
             report_scope = present(scope)
             seen['scope'] = report_scope
             seen['owned_domains'] = owned_domains

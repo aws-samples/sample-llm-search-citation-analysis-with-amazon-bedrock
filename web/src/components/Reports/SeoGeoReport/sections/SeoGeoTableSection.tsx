@@ -15,7 +15,7 @@ import {
 const TITLE = 'Keywords';
 
 const QuadrantBadge = ({ row }: { readonly row: SeoGeoRow }) => (
-  <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${quadrantBadgeClass(row.quadrant)}`}>
+  <span className={`inline-block rounded-sm px-2 py-0.5 text-xs font-medium ${quadrantBadgeClass(row.quadrant)}`}>
     {quadrantLabel(row.quadrant)}
   </span>
 );

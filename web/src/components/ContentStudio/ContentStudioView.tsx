@@ -130,7 +130,7 @@ function ConfirmGenerateModal({
               id="output-language"
               value={outputLanguage}
               onChange={e => setOutputLanguage(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
             >
               {GROUP_BRIEF_LANGUAGES.map(lang => (
                 <option key={lang} value={lang}>{lang}</option>

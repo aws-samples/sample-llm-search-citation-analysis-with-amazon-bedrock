@@ -194,7 +194,7 @@ const DestinationGroupRow = ({
         id={`agent-group-${jobId}`}
         value={groupId}
         onChange={(event) => onGroupChange(event.target.value)}
-        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200"
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-200"
       >
         <option value="">No group (just add to Keywords)</option>
         {[...groups]
@@ -318,7 +318,7 @@ const DimensionSectionTable = ({
               return (
                 <tr key={key} className={checked ? 'bg-gray-50' : ''}>
                   <td className="py-1.5">
-                    <input type="checkbox" checked={checked} onChange={() => onToggle(keyword.keyword)} aria-label={`Select ${keyword.keyword}`} className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
+                    <input type="checkbox" checked={checked} onChange={() => onToggle(keyword.keyword)} aria-label={`Select ${keyword.keyword}`} className="h-4 w-4 rounded-sm border-gray-300 text-gray-900 focus:ring-gray-500" />
                   </td>
                   <td className="py-1.5 pr-3 font-medium text-gray-900">{keyword.keyword}</td>
                   <td className="py-1.5 pr-3 text-gray-600 max-w-sm">

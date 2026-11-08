@@ -28,7 +28,7 @@ export const ExtractionOptions = ({
           type="checkbox"
           checked={includeSentiment}
           onChange={(e) => onSentimentChange(e.target.checked)}
-          className="w-4 h-4 text-gray-900 rounded border-gray-300"
+          className="w-4 h-4 text-gray-900 rounded-sm border-gray-300"
         />
         <span className="text-sm text-gray-700">Include sentiment analysis</span>
       </label>
@@ -42,7 +42,7 @@ export const ExtractionOptions = ({
           type="checkbox"
           checked={includeRankingContext}
           onChange={(e) => onRankingContextChange(e.target.checked)}
-          className="w-4 h-4 text-gray-900 rounded border-gray-300"
+          className="w-4 h-4 text-gray-900 rounded-sm border-gray-300"
         />
         <span className="text-sm text-gray-700">Include ranking context</span>
       </label>

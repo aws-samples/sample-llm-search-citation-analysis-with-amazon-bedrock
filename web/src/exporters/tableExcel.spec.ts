@@ -68,7 +68,7 @@ describe('cell wording', () => {
   });
 
   it('rounds a DataForSEO float to the given decimals', () => {
-    expect(rounded(1.850000023841858, 2)).toBe(1.85);
+    expect(rounded(1.850000023841858, 2)).toBeCloseTo(1.85, 10);
   });
 
   it('rounds to a whole number with no decimals', () => {

@@ -21,7 +21,7 @@ export function PromotionMarketSelect({
         value={market.marketId ?? ''}
         onChange={(event) => market.choose(event.target.value === '' ? null : event.target.value)}
         disabled={disabled}
-        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900"
       >
         <option value="">{NO_MARKET_LABEL}</option>
         {market.markets.map((option) => (

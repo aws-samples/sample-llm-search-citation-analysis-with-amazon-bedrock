@@ -7,7 +7,6 @@ import {
   buildGroupBriefTemplateDraftHookResult,
   createDeferredTemplateMutation,
   mockUseContentBriefTemplates,
-  templateStrictModeBoundary,
 } from './useGroupBriefTemplateDraft-fixtures';
 import { useGroupBriefTemplateDraft } from './useGroupBriefTemplateDraft';
 
@@ -32,7 +31,7 @@ export function renderReplayedTemplateCreate() {
   return {
     ...renderHook(
       () => useTemplateCreateOnMount(),
-      {wrapper: templateStrictModeBoundary,}
+      {reactStrictMode: true,}
     ),
     create,
     firstCreate,

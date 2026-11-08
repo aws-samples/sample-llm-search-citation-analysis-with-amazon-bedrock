@@ -1,5 +1,5 @@
 import {
-  useEffect, useId, useState, type FormEvent
+  useEffect, useId, useState, type SubmitEvent
 } from 'react';
 import {
   useMarketProposal, type MarketProposalState
@@ -167,7 +167,7 @@ export function MarketForm({
     if (result.market !== null) onSubmit(result.market);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (step === 'choice') next();
     else save();
