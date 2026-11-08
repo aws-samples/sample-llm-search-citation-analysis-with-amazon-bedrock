@@ -71,7 +71,7 @@ The editable source is [docs/architecture.drawio](docs/architecture.drawio).
 - **`CitationAnalysis-Export`** (one execution per export, 7-day timeout): PrepareExport → ExportChunk until every row is written → FinalizeExport; any failure → MarkExportFailed. Each chunk is one `CitationAnalysis-ExportWorker` invocation that writes rows until 60 s before its 900 s timeout, uploads S3 multipart parts and saves a cursor, so an export of any size finishes.
 - **SEO state machines** (SEO stack, every step on `CitationAnalysis-SeoJobs`): `CitationAnalysis-SeoRankCheck` (rank checks: on demand, or for due trackers when the `CitationAnalysis-SeoRankTrackingTick` rule invokes the jobs function), `CitationAnalysis-SiteAudit`, `CitationAnalysis-SeoDomainSnapshots` and `CitationAnalysis-SeoBacklinkSnapshots` (weekly rules `CitationAnalysis-SeoDomainSnapshotsWeekly` and `CitationAnalysis-SeoBacklinkSnapshotsWeekly`), `CitationAnalysis-SeoLocalJob` (local rank grid, reviews, profile updates) and `CitationAnalysis-SeoLighthouse`.
 
-With `-c seoEngine=true`, SearchAllProviders also calls `CitationAnalysis-Search-google_ai_overview` (in the SEO stack) once per keyword, whatever the personas.
+SearchAllProviders also calls `CitationAnalysis-Search-google_ai_overview` (in the SEO stack) once per keyword, whatever the personas. It answers no rows until an Admin enables Google AI Overviews in Settings, and none if the SEO stack is not deployed.
 
 **Complete scoped views.** A scoped view (a keyword group, a market or all keywords) is read live when the estimated rows, keywords × (max(1, enabled personas) × engines + one Google AI Overviews answer) × runs needed, are at most 8,000 (`shared/scope_source.py`; at 10 personas that is 97 keywords); one keyword or a selection of up to 100 keywords is always live. A larger scope is served from the scope snapshot: `all`, every market and every larger group or group × market, rebuilt after each run and after keyword, group, market, brand-configuration or persona changes. The snapshot is built from one `KeywordLatest` object per keyword (`scope-snapshots/keywords/`), which DeduplicateCitations writes with the KPI row, and a per-scope series of up to 365 runs. A view the snapshot does not hold (another number of days, an older run, no build yet) answers `202 {status: "computing"}` while a view job computes it, and the same request answers 200 once it is stored. Every scoped answer carries `coverage` (`keywords_total`, `keywords_analyzed`, `complete`), `source`, `as_of` and `stale`, which the dashboard shows as "Covers X of Y keywords"; list cursors are tied to their build and answer `400 cursor_expired` when it is gone.
 
@@ -242,9 +242,9 @@ npm run deploy      # same as ./scripts/deploy.sh
 | `CitationAnalysisSeoStack` | The SEO API, SEO tables, state machines and jobs, the Google AI Overviews engine | Main stack (imports the user pool and `CitationAnalysis-CorsOrigin`) |
 | `CitationAnalysisWebSearchStack` | The Amazon Bedrock Web Search gateway, in `webSearchRegion` | Nothing (the main stack reaches it by SSM parameter name) |
 
-`cdk deploy --all` (and so `npm run deploy`) deploys the main stack first and the others after it. When you deploy stacks one at a time, deploy `CitationAnalysisStack` first. Two exceptions to "main first":
+`cdk deploy --all` (and so `npm run deploy`) deploys every stack together: the main stack first and the others after it. When you deploy stacks one at a time, deploy `CitationAnalysisStack` first. Two cross-stack calls by name:
 
-- **Google AI Overviews:** the main workflow calls the engine's Lambda by name only when deployed with `-c seoEngine=true`. Deploy the SEO stack once without the flag, then deploy again with `-c seoEngine=true` (see [docs/seo.md](docs/seo.md#setup)).
+- **Google AI Overviews:** the main workflow always calls the engine's Lambda, `CitationAnalysis-Search-google_ai_overview`, in the SEO stack. If that stack is not deployed, the branch answers no rows instead of failing.
 - **SEO exports** invoke `CitationAnalysis-SeoRouter` by name, so they work once the SEO stack exists; every other export works without it.
 
 Upgrading from an earlier release: read that release's upgrade notes in [CHANGELOG.md](CHANGELOG.md). The two upgrades below change how the stacks fit together.
@@ -377,7 +377,7 @@ DeduplicateCitations writes the row and the keyword's `KeywordLatest` object bes
 
    The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl, Amazon Bedrock Web Search). They add cited links to a run but write no answer, so they do not count towards the KPIs. Amazon Bedrock Web Search needs no key: see [Web search gateway](#web-search-gateway). A SerpAPI key also enables the research agent's Google signals step.
 
-   With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use. Enable **Google AI Overviews** there once the main stack is deployed with `-c seoEngine=true`. Steps: [docs/seo.md](docs/seo.md#setup).
+   With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use. Then enable **Google AI Overviews** there; it is part of every deployment and makes no paid call until enabled. Steps: [docs/seo.md](docs/seo.md#setup).
 
 3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your **First Party Brands** and competitors (**Expand Brand** and **Find Competitors** suggest more with Bedrock), and add your **Owned Domains**. Each competitor can list its own domains too (**Find Competitors** suggests them, unticked until you confirm), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
@@ -435,7 +435,6 @@ If model access is managed elsewhere, skip all of this with `cdk deploy -c skipM
 | `mcpRedirectUris` | `["http://localhost:5173/oauth/callback","http://localhost:5173/callback"]` (Kiro, Claude Code) | OAuth callback URLs of the MCP clients (exact match in Cognito), as a JSON array or a comma-separated string |
 | `mcpPinnedTools` | none | Catalogue operations the MCP server also lists as direct tools, e.g. `-c mcpPinnedTools=get_prompt_insights,list_providers` |
 | `mcpLimits` | `{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"seoCallsPerDay":50}` | Per-caller limits of the MCP spend tools; override any subset as a JSON object; `0` turns that spend off |
-| `seoEngine` | `false` | `-c seoEngine=true` adds Google AI Overviews to the analysis workflow; deploy `CitationAnalysisSeoStack` first, since the workflow calls its Lambda by name |
 
 ### Secrets
 

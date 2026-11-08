@@ -24,7 +24,7 @@ import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
 import { KpiWriteFailureAlarm } from './constructs/kpi-write-failure-alarm';
 import {
-  ProviderSearch, providerSearchEnvironment, readExternalSearchProviders, readProviderConcurrency, readProviderPacing
+  ProviderSearch, providerSearchEnvironment, EXTERNAL_SEARCH_PROVIDERS, readProviderConcurrency, readProviderPacing
 } from './constructs/provider-search';
 import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion, webSearchPolicyStatement } from './constructs/web-search';
 import type { McpServerInputs } from './constructs/mcp-server';
@@ -1414,8 +1414,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         providerConfigTable: providerConfigTable.tableName,
         rawResponsesBucket: rawResponsesBucket.bucketName,
       }),
-      // Google AI Overviews (SEO stack) behind `-c seoEngine=true`: a branch, no resource.
-      externalProviders: readExternalSearchProviders(this),
+      // Google AI Overviews (SEO stack, deployed with this one): a branch, no resource.
+      externalProviders: EXTERNAL_SEARCH_PROVIDERS,
     });
 
     // Grant Search Lambda read/write access to ProviderConfig table.

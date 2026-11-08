@@ -93,7 +93,7 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
  * `CitationAnalysis-Search-google_ai_overview` lives in the SEO stack
  * (`lib/seo-stack.ts`) with the rest of the SEO features (the main stack was
  * then at CloudFormation's 500-resource limit); the main workflow calls it by name (see
- * `readExternalSearchProviders`). Not benchmarked; DataForSEO allows 2,000
+ * `EXTERNAL_SEARCH_PROVIDERS`). Not benchmarked; DataForSEO allows 2,000
  * requests a minute per account, so 5 in flight is about the other paid
  * providers' level rather than a DataForSEO limit.
  */
@@ -101,20 +101,13 @@ export const GOOGLE_AI_OVERVIEW_PROVIDER: SearchProvider = {
   id: 'google_ai_overview', type: 'llm', defaultConcurrency: 5, billedOnce: true,
 };
 
-/** CDK context flag that adds the {@link GOOGLE_AI_OVERVIEW_PROVIDER} branch to the main workflow. */
-const SEO_ENGINE_CONTEXT = 'seoEngine';
-
 /**
- * The providers whose function another stack owns: Google AI Overviews when
- * CDK context `seoEngine` is `true` (`-c seoEngine=true`, or a boolean in
- * cdk.json), none otherwise. Off by default so the workflow never calls a
- * function before the SEO stack that holds it is deployed; a branch whose
- * function is missing fails into a counted failed provider row on every keyword.
+ * The providers whose function another stack owns: Google AI Overviews, always. `npm run deploy` deploys every
+ * stack together (`cdk deploy --all`), so the SEO stack's function exists by the time a run calls it. The engine
+ * spends nothing until an Admin enters the DataForSEO login and enables it in Settings; until then its function
+ * answers with no rows, like every disabled provider.
  */
-export function readExternalSearchProviders(scope: Construct): readonly SearchProvider[] {
-  const raw: unknown = scope.node.tryGetContext(SEO_ENGINE_CONTEXT);
-  return raw === true || raw === 'true' ? [GOOGLE_AI_OVERVIEW_PROVIDER] : [];
-}
+export const EXTERNAL_SEARCH_PROVIDERS: readonly SearchProvider[] = [GOOGLE_AI_OVERVIEW_PROVIDER];
 
 /** `CitationAnalysis-Search-<id>`: the name the workflow calls a provider's function by. */
 function providerSearchFunctionName(providerId: string): string {
@@ -293,7 +286,7 @@ export interface ProviderSearchProps extends ProviderFunctionProps {
   readonly pacing: ReadonlyMap<string, number>;
   /**
    * Providers whose `CitationAnalysis-Search-<id>` function another stack
-   * owns (from {@link readExternalSearchProviders}): the workflow gets their
+   * owns ({@link EXTERNAL_SEARCH_PROVIDERS}): the workflow gets their
    * branch, called by function name, and this construct creates no resource for them.
    */
   readonly externalProviders?: readonly SearchProvider[];
@@ -303,6 +296,8 @@ interface ProviderFunction {
   readonly provider: SearchProvider;
   readonly label: string;
   readonly handler: lambda.IFunction;
+  /** Another stack owns the function, so it can be missing (that stack not deployed yet, or removed). */
+  readonly external: boolean;
 }
 
 function constructLabel(providerId: string): string {
@@ -389,14 +384,14 @@ export class ProviderSearch extends Construct {
     super(scope, id);
     const ownFunctions = SEARCH_PROVIDERS.map((provider) => {
       const label = constructLabel(provider.id);
-      return { provider, label, handler: this.providerFunction(provider, label, props) };
+      return { provider, label, handler: this.providerFunction(provider, label, props), external: false };
     });
     const externalFunctions = (props.externalProviders ?? []).map((provider) => {
       const label = constructLabel(provider.id);
       const handler = lambda.Function.fromFunctionName(
         this, `${label}ExternalFunction`, providerSearchFunctionName(provider.id)
       );
-      return { provider, label, handler };
+      return { provider, label, handler, external: true };
     });
     this.providerFunctions = [...ownFunctions, ...externalFunctions];
   }
@@ -436,7 +431,7 @@ export class ProviderSearch extends Construct {
     }, label);
   }
 
-  private providerBranch({ provider, label, handler }: ProviderFunction): stepfunctions.IChainable {
+  private providerBranch({ provider, label, handler, external }: ProviderFunction): stepfunctions.IChainable {
     const invoke = new tasks.LambdaInvoke(this, `${label}Search`, {
       stateName: `Search-${provider.id}`,
       lambdaFunction: handler,
@@ -487,6 +482,18 @@ export class ProviderSearch extends Construct {
         maxAttempts: 2,
         backoffRate: 2.0,
       });
+    }
+    // A function another stack owns and that is not there (only the main
+    // stack deployed, or the SEO stack removed) answers no rows, as a disabled
+    // provider does, instead of a failed row on every keyword.
+    if (external) {
+      invoke.addCatch(
+        new stepfunctions.Pass(this, `${label}NotDeployed`, {
+          stateName: `NotDeployed-${provider.id}`,
+          result: stepfunctions.Result.fromObject({ results: [] }),
+        }),
+        { errors: ['Lambda.ResourceNotFoundException'] }
+      );
     }
     // A provider that still fails is counted as a failed call in the run
     // summary instead of failing the keyword and every other provider's answer.

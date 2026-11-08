@@ -79,8 +79,8 @@ export interface CitationAnalysisSeoStackProps extends cdk.StackProps {
  * and imports only the user pool and the `CitationAnalysis-CorsOrigin` export;
  * every other main-stack resource is named by constant.
  *
- * The AI Overviews function is called by name from the main workflow once
- * `-c seoEngine=true` adds its branch there, so deploy this stack first.
+ * The AI Overviews function is called by name from the main workflow's
+ * Search-google_ai_overview branch; `npm run deploy` deploys this stack with it.
  */
 export class CitationAnalysisSeoStack extends cdk.Stack {
   public readonly seoApi: SeoApi;

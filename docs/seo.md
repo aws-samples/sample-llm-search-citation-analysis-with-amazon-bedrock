@@ -58,9 +58,9 @@ every market is combined).
 
 1. Create a DataForSEO account and open **API Access** in its dashboard (https://app.dataforseo.com/api-access) for
    the API login and password. New accounts get $1 of free credit.
-2. Deploy: `npm run deploy` deploys every stack. To add the AI Overviews engine to the analysis workflow, deploy the
-   SEO stack first, then the main stack with `-c seoEngine=true` (the workflow calls the engine's Lambda,
-   `CitationAnalysis-Search-google_ai_overview`, by name).
+2. Deploy: `npm run deploy` deploys every stack together, the SEO stack and the Google AI Overviews engine
+   included. The analysis workflow always has the engine's branch (it calls
+   `CitationAnalysis-Search-google_ai_overview` by name); the engine makes no paid call until step 5.
 3. Rebuild the dashboard (`./scripts/build-web.sh` reads `SeoApiUrl` into `VITE_SEO_API_URL`). Without the SEO stack
    the SEO pages say "SEO data is not set up" and the SEO overview says the stack is not deployed.
 4. As an Admin, open **Settings › AI Providers › SEO data › DataForSEO**, enter the login and password and save. The

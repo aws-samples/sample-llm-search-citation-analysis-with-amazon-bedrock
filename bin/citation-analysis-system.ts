@@ -29,8 +29,8 @@ mcpStack.node.addDependency(stack);
 
 // The SEO features (DataForSEO, Google AI Overviews engine) have their own stack
 // and REST API for the same reason. It imports only the user pool and the
-// CorsOrigin export; deploy it before enabling `-c seoEngine=true`, which makes
-// the main workflow call its AI Overviews function by name.
+// CorsOrigin export, and is always deployed with the main stack: the main
+// workflow calls its AI Overviews function by name.
 const seoStack = new CitationAnalysisSeoStack(app, 'CitationAnalysisSeoStack', {
   env,
   description: 'Citation Analysis System - SEO API and Google AI Overviews engine',

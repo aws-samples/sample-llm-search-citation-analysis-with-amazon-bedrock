@@ -9,6 +9,32 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.46.0] - 2026-11-08
+
+Google AI Overviews is part of every deployment. `npm run deploy` (`cdk deploy --all`) deploys the SEO stack and
+the engine's Lambda with the main stack, and the analysis workflow always has the engine's branch. The
+`-c seoEngine=true` flag and the second deploy it needed are gone.
+
+### Upgrade notes
+
+- **Deploy every stack together** (`npm run deploy`). A `seoEngine` value in `cdk.json` or on the command line is
+  now ignored, and you can remove it.
+- **Nothing paid starts on its own.** Google AI Overviews only runs once the DataForSEO login is saved in Settings
+  › AI Providers › SEO data, and only while it is enabled there. Without the login, its function answers no rows.
+  If a deployment without the flag already has the DataForSEO login saved, Google AI Overviews is asked in the next
+  run, because an engine with no saved setting counts as enabled. Turn it off in Settings first if you don't want
+  that.
+
+### Changed
+
+- `lib/constructs/provider-search.ts`: `EXTERNAL_SEARCH_PROVIDERS` (Google AI Overviews) replaces
+  `readExternalSearchProviders` and its CDK context flag. The `Search-google_ai_overview` branch catches
+  `Lambda.ResourceNotFoundException` into `NotDeployed-google_ai_overview`, which answers no rows. So a main stack
+  deployed without the SEO stack runs as before, instead of writing a failed Google row for every keyword. Any
+  other failure still becomes the failed provider row, and the branch still never re-runs a billed call.
+- README (workflow, deploy order, setup, CDK context table), `docs/seo.md` (Setup) and the architecture diagram
+  no longer mention the flag.
+
 ## [2.45.2] - 2026-11-08
 
 ### Changed

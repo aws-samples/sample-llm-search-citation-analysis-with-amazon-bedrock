@@ -8,7 +8,7 @@ with the shape its page reads:
 
 - Settings > AI Providers: ``GET /api/seo/account`` - DataForSEO configured, with a balance;
 - SEO vs GEO report: ``GET /api/seo/seo-geo`` - a summary of every quadrant and one row per keyword; with
-  ``--group <id>``, that group's keywords must have Google AI Overviews data (the ``seoEngine`` workflow branch ran);
+  ``--group <id>``, that group's keywords must have Google AI Overviews data (the ``Search-google_ai_overview`` workflow branch ran);
 - Rank Tracking, Site Audit, Performance (Lighthouse, IndexNow) and Backlinks snapshots: their list routes;
 - Domain Overview: the stored traffic snapshots of the brand's first own domain.
 

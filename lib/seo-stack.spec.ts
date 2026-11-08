@@ -160,35 +160,41 @@ describe('CitationAnalysis-Search-google_ai_overview', () => {
   });
 });
 
-describe('Main stack with the seoEngine context', () => {
-  it('keeps its resource count when seoEngine is true', () => {
-    expect(snapshot.mainResourceCountWithSeoEngine).toBe(snapshot.mainResourceCount);
-    expect(snapshot.mainResourceCountWithSeoEngine).toBeLessThanOrEqual(500);
+describe('Main workflow and the Google AI Overviews engine (always deployed together, no flag)', () => {
+  it('stays within CloudFormation\'s 500-resource limit with the engine branch', () => {
+    expect(snapshot.mainResourceCount).toBeLessThanOrEqual(500);
   });
 
-  it('adds the Search-google_ai_overview branch only when seoEngine is true', () => {
-    expect(snapshot.mainBranchStarts).not.toContain('Search-google_ai_overview');
-    expect(snapshot.mainBranchStartsWithSeoEngine).toStrictEqual([...snapshot.mainBranchStarts, 'Search-google_ai_overview']);
+  it('always has the Search-google_ai_overview branch, after the ten providers the main stack owns', () => {
+    expect(snapshot.mainBranchStarts).toHaveLength(11);
+    expect(snapshot.mainBranchStarts.at(-1)).toBe('Search-google_ai_overview');
   });
 
   it('never re-runs a failed Search-google_ai_overview invocation, which would pay DataForSEO again', () => {
-    expect(retrierErrors(snapshot.mainSearchTasksWithSeoEngine.google_ai_overview))
+    expect(retrierErrors(snapshot.mainSearchTasks.google_ai_overview))
       .toStrictEqual([LAMBDA_SERVICE_ERRORS, ['Lambda.TooManyRequestsException']]);
   });
 
-  it('records a failed Search-google_ai_overview invocation as its failed provider row', () => {
-    expect(resolvePath(snapshot.mainSearchTasksWithSeoEngine.google_ai_overview, ['Catch']))
-      .toStrictEqual([{ ErrorEquals: ['States.ALL'], Next: 'SearchFailed-google_ai_overview' }]);
+  it('answers no rows when the SEO stack is not deployed, and a failed provider row for any other failure', () => {
+    expect(resolvePath(snapshot.mainSearchTasks.google_ai_overview, ['Catch'])).toStrictEqual([
+      { ErrorEquals: ['Lambda.ResourceNotFoundException'], Next: 'NotDeployed-google_ai_overview' },
+      { ErrorEquals: ['States.ALL'], Next: 'SearchFailed-google_ai_overview' },
+    ]);
+    expect(resolvePath(snapshot.aiOverviewNotDeployedState, ['Result'])).toStrictEqual({ results: [] });
   });
 
-  it('keeps the States.TaskFailed retrier on every other provider branch when seoEngine is true', () => {
-    const others = Object.entries(snapshot.mainSearchTasksWithSeoEngine)
+  it('keeps the States.TaskFailed retrier and the single failed-row catch on every other provider branch', () => {
+    const others = Object.entries(snapshot.mainSearchTasks)
       .filter(([providerId]) => providerId !== 'google_ai_overview');
     const lastRetriers = others.map(([, task]) => resolvePath(task, ['Retry', '3', 'ErrorEquals']));
+    const catches = others.map(([providerId, task]) => [providerId, resolvePath(task, ['Catch'])]);
 
     expect(others).toHaveLength(10);
     expect(new Set(lastRetriers.map((errors) => JSON.stringify(errors))))
       .toStrictEqual(new Set([JSON.stringify(['States.TaskFailed', 'States.Timeout'])]));
+    expect(catches).toStrictEqual(others.map(([providerId]) => [
+      providerId, [{ ErrorEquals: ['States.ALL'], Next: `SearchFailed-${providerId}` }],
+    ]));
   });
 });
 
