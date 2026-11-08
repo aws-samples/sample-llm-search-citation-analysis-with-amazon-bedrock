@@ -18,8 +18,9 @@ from pathlib import Path
 from hypothesis import given, settings
 
 from shared.kpi_engine import KPI_IDS, answers_from_rows, brand_kpis
-from shared.kpi_tally import run_tallies, tally_kpis
+from shared.kpi_tally import tally_kpis
 from testing.kpi_row_strategies import KEYWORDS, OWNED_DOMAINS, search_rows
+from testing.kpi_tally_fixtures import keyword_run_tallies
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DOC = _ROOT / 'docs' / 'kpi-definitions.md'
@@ -69,7 +70,7 @@ def test_the_reference_names_each_kpi_as_the_dashboard_does():
 def test_the_tallied_kpis_equal_the_engines_for_any_answers(rows, owned):
     """``tally_kpis`` (history reports) and ``brand_kpis`` (one-run views) give every KPI the same value."""
     answers = answers_from_rows(rows)
-    tallies = [tally for keyword in KEYWORDS for tally in run_tallies(keyword, [a for a in answers if a.keyword == keyword], owned)]
+    tallies = keyword_run_tallies(answers, KEYWORDS, owned)
 
     engine = brand_kpis(answers, owned)
     tallied = tally_kpis(tallies, owned)

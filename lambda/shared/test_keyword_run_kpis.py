@@ -20,11 +20,12 @@ from shared.keyword_run_kpis import (
     tracked_brand_names,
 )
 from shared.kpi_engine import answers_from_rows
-from shared.kpi_tally import run_tallies, run_tally
+from shared.kpi_tally import run_tally
 from shared.request_deadline import Deadline
 from testing.assertions import present
 from testing.keyword_run_kpis_fixtures import ROLLUP_TABLE_NAME, as_stored, rollup_items, rollup_table, rollups_deployed
 from testing.kpi_row_strategies import KEYWORDS, OWNED_DOMAINS, search_rows
+from testing.kpi_tally_fixtures import keyword_run_tallies
 from testing.window_budget_fixtures import ticking_deadline
 from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
@@ -38,8 +39,7 @@ class TestRows:
     @settings(max_examples=200, deadline=None)
     @given(rows=search_rows(), owned=OWNED_DOMAINS)
     def test_a_stored_row_reads_back_as_the_tally_written(self, rows, owned):
-        answers = answers_from_rows(rows)
-        tallies = [tally for keyword in KEYWORDS for tally in run_tallies(keyword, [a for a in answers if a.keyword == keyword], owned)]
+        tallies = keyword_run_tallies(answers_from_rows(rows), KEYWORDS, owned)
 
         assert [tally_from_item(as_stored(tally_item(tally))) for tally in tallies] == tallies
 
