@@ -145,6 +145,13 @@ def test_build_overview_carries_the_trend_series_and_the_latest_leaderboard(defa
     assert (default_overview['trend_data'], default_overview['latest_brands']) == (DEFAULT_FAKE_TRENDS['trend_data'], DEFAULT_FAKE_TRENDS['latest_brands'])
 
 
+@pytest.mark.parametrize('truncated', [True, False])
+def test_build_overview_says_when_the_leaderboard_kept_only_each_runs_top_brands(overview_mod, truncated):
+    overview_mod._sibling_cache['trends'] = lambda *_args, **_kwargs: {**DEFAULT_FAKE_TRENDS, 'brands_truncated': truncated}
+
+    assert overview_mod.build_overview({}, period='day', days=30, top=3)['brands_truncated'] is truncated
+
+
 def test_build_overview_reports_the_keyword_counts(default_overview):
     assert (default_overview['keywords_analyzed'], default_overview['keywords_with_data'], default_overview['summary']) == (
         5, 5, {'improving_count': 3, 'declining_count': 1, 'stable_count': 2},

@@ -166,6 +166,8 @@ def build_overview(
         'change': trends['change'],
         'trend_data': trends['trend_data'],
         'latest_brands': trends['latest_brands'],
+        # Some run kept only its top brands, so the leaderboard may miss a competitor (tenet 2).
+        'brands_truncated': trends.get('brands_truncated', False),
         'summary': trends['overall'],
         'top_improving': top_improving,
         'top_declining': top_declining,
