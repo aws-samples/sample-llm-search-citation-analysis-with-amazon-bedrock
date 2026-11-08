@@ -11,6 +11,9 @@ import { synthesizeSeoStackSnapshot } from './seo-stack-fixtures';
  * engine live beside the main stack, which sits at the 500-resource limit.
  */
 const snapshot = synthesizeSeoStackSnapshot();
+const [seoBucketId] = Object.keys(snapshot.template.findResources('AWS::S3::Bucket', {
+  Properties: { BucketName: 'citation-analysis-seo-123456789012' },
+}));
 
 describe('CitationAnalysisSeoStack resource budget', () => {
   it('needs no more than the 500 resources CloudFormation allows a stack', () => {
@@ -121,12 +124,28 @@ describe('CitationAnalysis-SeoRouter', () => {
     expect(snapshot.routerEnv).not.toHaveProperty('DYNAMODB_TABLE_CITATIONS');
   });
 
-  it('names the bucket, secrets prefix and CORS parameter in its environment', () => {
+  it('names the SEO bucket, secrets prefix and CORS parameter in its environment, and not the raw-responses bucket', () => {
     expect(snapshot.routerEnv).toMatchObject({
-      RAW_RESPONSES_BUCKET: 'citation-analysis-raw-responses-123456789012',
+      SEO_BUCKET: { Ref: seoBucketId },
       SECRETS_PREFIX: 'citation-analysis/',
       CORS_ORIGIN_PARAM: '/citation-analysis/cors-origin',
       DYNAMODB_TABLE_BRAND_CONFIG: 'CitationAnalysis-BrandConfig',
+    });
+    expect(snapshot.routerEnv).not.toHaveProperty('RAW_RESPONSES_BUCKET');
+  });
+});
+
+describe('citation-analysis-seo bucket', () => {
+  const bucket = snapshot.template.findResources('AWS::S3::Bucket')[seoBucketId];
+
+  it('is private, TLS-only through its policy, retained and logged like the main data buckets', () => {
+    expect(resolvePath(bucket, ['Properties', 'BucketName'])).toBe('citation-analysis-seo-123456789012');
+    expect(resolvePath(bucket, ['Properties', 'PublicAccessBlockConfiguration'])).toStrictEqual({
+      BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true,
+    });
+    expect(resolvePath(bucket, ['DeletionPolicy'])).toBe('Retain');
+    expect(resolvePath(bucket, ['Properties', 'LoggingConfiguration'])).toStrictEqual({
+      DestinationBucketName: 'citation-analysis-access-logs-123456789012', LogFilePrefix: 'seo/',
     });
   });
 });

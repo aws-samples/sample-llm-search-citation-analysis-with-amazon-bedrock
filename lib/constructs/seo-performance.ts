@@ -26,8 +26,8 @@ const STATE_MACHINE_TIMEOUT = cdk.Duration.hours(2);
  * Fail is free and retried on Lambda service errors; anything that escapes
  * Measure runs Fail, which marks the run failed so the dashboard stops
  * polling. Runs, summaries, IndexNow keys and submission history live in
- * `CitationAnalysis-SeoCache` and the full reports under the stack's `seo/`
- * prefix of the raw-responses bucket, both already granted to the shared
+ * `CitationAnalysis-SeoCache` and the full reports under `seo/lighthouse/` in
+ * the SEO bucket, both already granted to the shared
  * functions; the feature adds no table. The jobs function's 1 GB holds one
  * parsed report comfortably, and the step parses one at a time, so no
  * separate high-memory function is needed. IndexNow requests are sent by the

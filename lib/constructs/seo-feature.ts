@@ -33,8 +33,8 @@ export interface SeoFeatureProps {
   readonly sharedLayer: lambda.ILayerVersion;
   /** Environment both shared functions already carry; give any extra function the same. */
   readonly environment: Readonly<Record<string, string>>;
-  /** The private raw-responses bucket; SEO objects live under `seo/`. */
-  readonly rawResponsesBucket: s3.IBucket;
+  /** The SEO bucket (`citation-analysis-seo-<account>`), already readable and writable by both functions. */
+  readonly seoBucket: s3.IBucket;
   /** Main-stack tables by name, for read grants. */
   readonly mainTables: Readonly<Record<'searchResults' | 'keywords' | 'brandConfig' | 'citations', dynamodb.ITable>>;
 }
@@ -141,6 +141,25 @@ export abstract class SeoFeatureConstruct extends Construct implements SeoFeatur
       payload: stepfunctions.TaskInput.fromObject(payload),
       taskTimeout: stepfunctions.Timeout.duration(timeout),
     });
+  }
+
+  /**
+   * A `waitForTaskToken` jobs task that posts DataForSEO tasks behind a
+   * callback gate (`shared/dataforseo_callbacks.py`): the step receives the
+   * token as `task_token` and the state machine resumes when DataForSEO has
+   * called back for every task. Never retried (the post is billed). When the
+   * wait outlives `timeout`, `onTimeout` runs with the task's input.
+   */
+  protected callbackTask(
+    id: string, payload: Record<string, unknown>, timeout: cdk.Duration, onTimeout: stepfunctions.IChainable,
+  ): tasks.LambdaInvoke {
+    const task = this.jobsTask(id, { ...payload, task_token: stepfunctions.JsonPath.taskToken }, {
+      integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+      retryOnServiceExceptions: false,
+      timeout,
+    });
+    task.addCatch(onTimeout, { errors: ['States.Timeout'], resultPath: stepfunctions.JsonPath.DISCARD });
+    return task;
   }
 
   /**

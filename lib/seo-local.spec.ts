@@ -1,8 +1,8 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { LAMBDA_SERVICE_ERRORS, resolvePath } from './citation-analysis-stack-fixtures';
-import { routedJobWiring } from './seo-feature-fixtures';
+import { LAMBDA_SERVICE_ERRORS } from './citation-analysis-stack-fixtures';
+import { WAITS_ON_CALLBACKS, callbackWait, routedJobWiring } from './seo-feature-fixtures';
 import { synthesizeSeoLocalSnapshot } from './seo-local-fixtures';
 
 /** `SeoLocal`: the `/api/seo/local/...` routes and the `CitationAnalysis-SeoLocalJob` state machine. */
@@ -40,9 +40,7 @@ describe('CitationAnalysis-SeoLocalJob', () => {
   });
 
   it('waits for DataForSEO\'s callbacks on a task token instead of polling', () => {
-    expect(resolvePath(snapshot.states.Post, ['Resource'])).toContain('lambda:invoke.waitForTaskToken');
-    expect(resolvePath(snapshot.states.Post, ['Parameters', 'Payload', 'task_token.$'])).toBe('$$.Task.Token');
-    expect(Object.values(snapshot.states).filter((state) => resolvePath(state, ['Type']) === 'Wait')).toStrictEqual([]);
+    expect(callbackWait(snapshot.states, 'Post')).toStrictEqual(WAITS_ON_CALLBACKS);
   });
 
   it('collects once when no callback came in time, and marks the job failed when post or collect crashes', () => {

@@ -11,7 +11,7 @@ from shared.rank_tracking_runs import begin_run
 from shared.rank_tracking_scheduler import run_due
 from shared.rank_tracking_store import TrackedKeyword, Tracker, get_tracker
 from testing.rank_tracking_fixtures import NOW, RankTable, stored_tracker, tracker
-from testing.scheduler_stub import SchedulerStub
+from testing.scheduler_stub import SchedulerStub, scheduler_stub
 
 DUE = '2026-10-05T06:00:00.000000Z'
 NEXT_WEEK = '2026-10-12T06:00:00.000000Z'
@@ -20,12 +20,6 @@ NAME = 'rank-rt-example'
 
 class StartFailedError(RuntimeError):
     """The state machine refused to start."""
-
-
-@pytest.fixture(autouse=True)
-def _scheduler_env(monkeypatch):
-    monkeypatch.setenv('RANK_TRACKER_TARGET_ARN', 'arn:aws:lambda:us-east-1:123456789012:function:SeoJobs')
-    monkeypatch.setenv('RANK_TRACKER_SCHEDULER_ROLE_ARN', 'arn:aws:iam::123456789012:role/RankScheduler')
 
 
 @pytest.fixture
@@ -44,8 +38,8 @@ def table():
 
 
 @pytest.fixture
-def scheduler():
-    return SchedulerStub()
+def scheduler(monkeypatch):
+    return scheduler_stub(monkeypatch)
 
 
 def _stored(table: RankTable) -> Tracker:
@@ -84,21 +78,14 @@ def test_moves_the_schedule_to_a_later_slot_without_running(keywords, scheduler)
     assert (outcome, start.call_count, scheduler.expression(NAME)) == ('not_due', 0, 'at(2026-10-05T09:00:00)')
 
 
-@pytest.mark.parametrize('overrides', [{'is_active': False}, {'schedule': 'manual'}])
-def test_deletes_the_schedule_of_an_archived_or_manual_tracker(keywords, scheduler, overrides):
+@pytest.mark.parametrize('overrides', [{'is_active': False}, {'schedule': 'manual'}, None])
+def test_deletes_the_schedule_of_an_archived_manual_or_deleted_tracker(keywords, scheduler, overrides):
     idle = RankTable()
-    stored_tracker(idle, next_check_at=DUE, **overrides)
+    if overrides is not None:
+        stored_tracker(idle, next_check_at=DUE, **overrides)
     scheduler.create_schedule(Name=NAME, GroupName='citation-analysis-seo-rank')
 
     outcome = run_due(idle, MagicMock(), MagicMock(), 'rt-example', NOW, scheduler)['outcome']
-
-    assert (outcome, scheduler.expression(NAME)) == ('not_scheduled', None)
-
-
-def test_deletes_the_schedule_of_a_tracker_that_is_gone(keywords, scheduler):
-    scheduler.create_schedule(Name=NAME, GroupName='citation-analysis-seo-rank')
-
-    outcome = run_due(RankTable(), MagicMock(), MagicMock(), 'rt-example', NOW, scheduler)['outcome']
 
     assert (outcome, scheduler.expression(NAME)) == ('not_scheduled', None)
 

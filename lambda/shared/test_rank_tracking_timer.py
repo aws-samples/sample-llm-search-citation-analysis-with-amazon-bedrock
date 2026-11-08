@@ -8,21 +8,15 @@ import pytest
 
 from shared.rank_tracking_timer import sync_schedule
 from testing.rank_tracking_fixtures import NOW, tracker
-from testing.scheduler_stub import SchedulerStub
+from testing.scheduler_stub import scheduler_stub
 
 NAME = 'rank-rt-example'
 GROUP = 'citation-analysis-seo-rank'
 
 
-@pytest.fixture(autouse=True)
-def _scheduler_env(monkeypatch):
-    monkeypatch.setenv('RANK_TRACKER_TARGET_ARN', 'arn:aws:lambda:us-east-1:123456789012:function:SeoJobs')
-    monkeypatch.setenv('RANK_TRACKER_SCHEDULER_ROLE_ARN', 'arn:aws:iam::123456789012:role/RankScheduler')
-
-
 @pytest.fixture
-def scheduler():
-    return SchedulerStub()
+def scheduler(monkeypatch):
+    return scheduler_stub(monkeypatch)
 
 
 def test_creates_a_one_time_schedule_at_the_slot_named_after_the_tracker(scheduler):

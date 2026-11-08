@@ -20,6 +20,7 @@ import { pythonFunction } from './constructs/api-functions';
 
 export { SEO_JOBS_FUNCTION_NAME };
 import { citationAnalysisTable } from './constructs/tables';
+import { citationAnalysisBucket } from './constructs/buckets';
 
 /**
  * Main-stack resources the SEO functions use, by their constant names: a
@@ -36,8 +37,10 @@ const MAIN_TABLES = {
 const CORS_ORIGIN_PARAMETER = '/citation-analysis/cors-origin';
 /** The main stack's `CorsOrigin` export (the CloudFront origin): stable for the life of the distribution. */
 const CORS_ORIGIN_EXPORT = 'CitationAnalysis-CorsOrigin';
-/** Raw-responses bucket prefix the SEO router reads and writes (oversized cache payloads, `seo/cache/`). */
-const SEO_OBJECT_PREFIX = 'seo/*';
+/** The main stack's access-logs bucket; its policy lets the SEO bucket's server access logs in (`seo/`). */
+const ACCESS_LOGS_BUCKET_PREFIX = 'citation-analysis-access-logs';
+/** Names the SEO bucket `citation-analysis-<name>-<account>` and its access-log prefix `<name>/`. */
+export const SEO_BUCKET_NAME_PART = 'seo';
 
 type MainTables = Record<keyof typeof MAIN_TABLES, dynamodb.ITable>;
 
@@ -108,6 +111,7 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
     const rawResponsesBucket = s3.Bucket.fromBucketName(
       this, 'RawResponsesBucket', `citation-analysis-raw-responses-${this.account}`
     );
+    const seoBucket = this.seoBucket();
     const dataForSeoSecret = apiKeySecret(this, 'DataForSeoSecret', 'dataforseo');
 
     const environment: Record<string, string> = {
@@ -116,7 +120,7 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       DYNAMODB_TABLE_SEARCH_RESULTS: MAIN_TABLES.searchResults,
       DYNAMODB_TABLE_KEYWORDS: MAIN_TABLES.keywords,
       DYNAMODB_TABLE_BRAND_CONFIG: MAIN_TABLES.brandConfig,
-      RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
+      SEO_BUCKET: seoBucket.bucketName,
       SECRETS_PREFIX: 'citation-analysis/',
       CORS_ORIGIN_PARAM: CORS_ORIGIN_PARAMETER,
       ...(devMode ? { ALLOW_LOCALHOST: 'true' } : {}),
@@ -140,14 +144,15 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
         table.grantReadData(fn);
       }
       dataForSeoSecret.grantRead(fn);
-      allow(fn, ['s3:GetObject', 's3:PutObject'], [rawResponsesBucket.arnForObjects(SEO_OBJECT_PREFIX)]);
+      // The SEO bucket only: paid-answer cache, Lighthouse reports, domain snapshot keywords, robots.txt copies.
+      allow(fn, ['s3:GetObject', 's3:PutObject'], [seoBucket.arnForObjects('*')]);
     }
     ssm.StringParameter.fromStringParameterName(this, 'CorsOriginParam', CORS_ORIGIN_PARAMETER).grantRead(router);
     // DataForSEO calls back when a queued task is ready, resuming the waiting rank check or local SEO job.
     jobs.addEnvironment('DATAFORSEO_CALLBACK_URL', new SeoCallbacks(this, 'DataForSeoCallbacks', { sharedLayer, cacheTable, jobs }).url);
 
     const featureProps: SeoFeatureProps = {
-      router, jobs, sharedLayer, environment, rawResponsesBucket, mainTables,
+      router, jobs, sharedLayer, environment, seoBucket, mainTables,
     };
     // SEO features: each adds its tables, jobs and grants, and its routes to the API.
     for (const feature of seoFeatures(this, featureProps)) {
@@ -162,6 +167,22 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       value: this.seoApi.api.url,
       description: 'SEO API Gateway URL (the dashboard calls <SeoApiUrl>api/seo/...)',
     }).overrideLogicalId('SeoApiUrl');
+  }
+
+  /**
+   * `citation-analysis-seo-<account>`: the SEO stack's working objects (the
+   * paid-answer cache's oversized payloads, Lighthouse reports, the ranked
+   * keywords of each domain snapshot, robots.txt copies of site audits). Kept
+   * out of the raw-responses bucket, which is write-once Bronze (TENETS.md D2).
+   * Same settings as the main stack's data buckets: AWS-managed encryption, no
+   * versioning, no public access, TLS only, `RETAIN`, server access logs to
+   * the main stack's access-logs bucket under `seo/`.
+   */
+  private seoBucket(): s3.Bucket {
+    return citationAnalysisBucket(this, 'SeoBucket', {
+      name: SEO_BUCKET_NAME_PART,
+      accessLogsBucket: s3.Bucket.fromBucketName(this, 'AccessLogsBucket', `${ACCESS_LOGS_BUCKET_PREFIX}-${this.account}`),
+    });
   }
 
   /**

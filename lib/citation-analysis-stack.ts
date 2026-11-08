@@ -36,6 +36,7 @@ import {
   apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
 } from './constructs/api-functions';
 import { citationAnalysisTable, type CitationAnalysisIndexSpec } from './constructs/tables';
+import { citationAnalysisBucket } from './constructs/buckets';
 import { API_CORS_PREFLIGHT, addCorsGatewayResponses } from './constructs/api-cors';
 import {
   allow, apiKeySecret, lambdaServiceRole, shareOneApiPermission
@@ -165,34 +166,6 @@ function lambdaStep(
     payload,
     outputPath: '$.Payload',
     retryOnServiceExceptions: true,
-  });
-}
-
-/** The parts of a stack data bucket that differ between buckets; `citationAnalysisBucket` fixes the rest. */
-interface CitationAnalysisBucketSpec {
-  /** Names the bucket `citation-analysis-<name>-<account>` and its access-log prefix `<name>/`. */
-  name: string;
-  accessLogsBucket: s3.IBucket;
-  lifecycleRules?: s3.LifecycleRule[];
-}
-
-/**
- * One S3 data bucket with the settings every data bucket in this stack shares:
- * AWS-managed encryption, no versioning, all public access blocked, SSL-only,
- * `RETAIN` so tearing the stack down can never delete data, and server access
- * logs written to the shared access-logs bucket under the bucket's own prefix.
- */
-function citationAnalysisBucket(stack: cdk.Stack, id: string, spec: CitationAnalysisBucketSpec): s3.Bucket {
-  return new s3.Bucket(stack, id, {
-    bucketName: `citation-analysis-${spec.name}-${stack.account}`,
-    encryption: s3.BucketEncryption.S3_MANAGED,
-    versioned: false,
-    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-    removalPolicy: cdk.RemovalPolicy.RETAIN,
-    enforceSSL: true,
-    serverAccessLogsBucket: spec.accessLogsBucket,
-    serverAccessLogsPrefix: `${spec.name}/`,
-    lifecycleRules: spec.lifecycleRules,
   });
 }
 
@@ -705,6 +678,19 @@ export class CitationAnalysisStack extends cdk.Stack {
         },
       ],
     });
+
+    // The SEO stack's bucket (`citation-analysis-seo-<account>`, lib/seo-stack.ts)
+    // logs here under `seo/`. Named, not referenced: the SEO stack deploys after
+    // this one.
+    accessLogsBucket.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.ServicePrincipal('logging.s3.amazonaws.com')],
+      actions: ['s3:PutObject'],
+      resources: [accessLogsBucket.arnForObjects('seo/*')],
+      conditions: {
+        ArnLike: { 'aws:SourceArn': `arn:${this.partition}:s3:::citation-analysis-seo-${this.account}` },
+        StringEquals: { 'aws:SourceAccount': this.account },
+      },
+    }));
 
     // Keywords Bucket
     //

@@ -8,7 +8,7 @@ A run is one cache item (namespace ``lighthouse-run``, 30 days)::
 ``status`` is ``queued`` (created, execution starting), ``running``, ``completed`` or ``failed`` (the execution
 could not start, or a step crashed). ``results[i]`` is the outcome of ``targets[i]``: the compact summary of
 ``shared.lighthouse_report`` plus ``status: 'completed'`` and the S3 key of the full report
-(``seo/lighthouse/<run id>-<index>.json`` in the raw-responses bucket), or ``status: 'failed'`` with a message.
+(``seo/lighthouse/<run id>-<index>.json`` in the SEO bucket), or ``status: 'failed'`` with a message.
 
 Paying twice is prevented by receipts (namespace ``lighthouse-receipt``, 15 minutes): asking again for the same
 URL and device, or for the same audit's sample, answers the run already started unless it failed. The 20 newest
@@ -41,8 +41,8 @@ RECEIPT_TTL_SECONDS = 15 * 60
 RECENT_NAMESPACE = 'lighthouse-recent'
 RECENT_VERSION = 1
 RECENT_LIMIT = 20
-RAW_BUCKET_ENV = 'RAW_RESPONSES_BUCKET'
-RAW_PREFIX = 'seo/lighthouse/'
+BUCKET_ENV = 'SEO_BUCKET'
+S3_PREFIX = 'seo/lighthouse/'
 STATE_MACHINE_ENV = 'SEO_LIGHTHOUSE_STATE_MACHINE_ARN'
 TERMINAL_STATUSES = frozenset({'completed', 'failed'})
 _HEADER_FIELDS = ('run_id', 'kind', 'status', 'created_at', 'started_by', 'audit_id', 'estimated_cost_usd')
@@ -134,7 +134,7 @@ def run_view(run: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def raw_key(run_id: str, index: int) -> str:
-    return f'{RAW_PREFIX}{run_id}-{index}.json'
+    return f'{S3_PREFIX}{run_id}-{index}.json'
 
 
 @cache
@@ -146,7 +146,7 @@ def save_report(run_id: str, index: int, report: Mapping[str, Any]) -> str:
     """Keep the full Lighthouse report in S3; returns its key."""
     key = raw_key(run_id, index)
     _s3().put_object(
-        Bucket=os.environ[RAW_BUCKET_ENV], Key=key, Body=json.dumps(report).encode('utf-8'),
+        Bucket=os.environ[BUCKET_ENV], Key=key, Body=json.dumps(report).encode('utf-8'),
         ContentType='application/json',
     )
     return key

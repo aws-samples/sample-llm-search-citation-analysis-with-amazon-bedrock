@@ -1,6 +1,6 @@
-import * as cdk from 'aws-cdk-lib';
-import type * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as iam from 'aws-cdk-lib/aws-iam';
+import { ArnFormat, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { pythonFunction } from './api-functions';
@@ -17,7 +17,7 @@ export const GATE_KEY_PREFIX = 'callback#';
 export interface SeoCallbacksProps {
   readonly sharedLayer: lambda.ILayerVersion;
   /** `CitationAnalysis-SeoCache`, which holds the gates. */
-  readonly cacheTable: dynamodb.ITable;
+  readonly cacheTable: ITable;
   /** The jobs function: it opens gates, posts with their URL and resumes at once when nothing is left to wait for. */
   readonly jobs: lambda.Function;
 }
@@ -40,20 +40,20 @@ export class SeoCallbacks extends Construct {
 
   constructor(scope: Construct, id: string, props: SeoCallbacksProps) {
     super(scope, id);
-    const stack = cdk.Stack.of(this);
+    const stack = Stack.of(this);
     const fn = pythonFunction(this, 'Callbacks', {
       functionName: SEO_CALLBACKS_FUNCTION_NAME,
       description: 'DataForSEO pingbacks: count a ready task on its gate and resume the waiting state machine',
       handler: 'seo-callbacks.handler',
       code: lambdaHandlerFilesCode('seo-callbacks', ['seo-callbacks.py']),
       layers: [props.sharedLayer],
-      timeout: cdk.Duration.seconds(10),
+      timeout: Duration.seconds(10),
       memorySize: 256,
       environment: { DYNAMODB_TABLE_SEO_CACHE: props.cacheTable.tableName },
-    }, cdk.RemovalPolicy.DESTROY);
+    }, RemovalPolicy.DESTROY);
     const url = fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });
 
-    fn.addToRolePolicy(new iam.PolicyStatement({
+    fn.addToRolePolicy(new PolicyStatement({
       actions: ['dynamodb:UpdateItem'],
       resources: [props.cacheTable.tableArn],
       conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': [`${GATE_KEY_PREFIX}*`] } },
@@ -63,10 +63,10 @@ export class SeoCallbacks extends Construct {
       service: 'states',
       resource: 'stateMachine',
       resourceName: name,
-      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
     }));
     for (const grantee of [fn, props.jobs]) {
-      grantee.addToRolePolicy(new iam.PolicyStatement({ actions: ['states:SendTaskSuccess'], resources: gated }));
+      grantee.addToRolePolicy(new PolicyStatement({ actions: ['states:SendTaskSuccess'], resources: gated }));
     }
     this.url = url.url;
   }

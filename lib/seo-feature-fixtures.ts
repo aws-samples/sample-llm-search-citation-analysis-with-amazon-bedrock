@@ -160,6 +160,23 @@ export interface RoutedJobSnapshot {
   wiring: RoutedJobWiring;
 }
 
+/** How the state machine waits on `taskState`'s callbacks: a task-token Lambda invoke, and no Wait state anywhere. */
+export function callbackWait(states: Record<string, unknown>, taskState: string): {
+  waitsForTaskToken: boolean;
+  tokenParameter: unknown;
+  waitStates: number;
+} {
+  const state = states[taskState];
+  return {
+    waitsForTaskToken: String(resolvePath(state, ['Resource'])).includes('lambda:invoke.waitForTaskToken'),
+    tokenParameter: resolvePath(state, ['Parameters', 'Payload', 'task_token.$']),
+    waitStates: Object.values(states).filter((candidate) => resolvePath(candidate, ['Type']) === 'Wait').length,
+  };
+}
+
+/** The wait of a gated post step (`callbackWait`). */
+export const WAITS_ON_CALLBACKS = { waitsForTaskToken: true, tokenParameter: '$$.Task.Token', waitStates: 0 };
+
 /** Where each catcher of a state goes, in order: its target, prefixed `"<error> -> "` unless it catches `States.ALL`. */
 export function catchTargets(state: unknown): string[] {
   const catchers = resolvePath(state, ['Catch']);

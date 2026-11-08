@@ -1,6 +1,6 @@
 """
 Storage of site audits: table ``CitationAnalysis-SeoAudits`` (env ``DYNAMODB_TABLE_SEO_AUDITS``) and the
-robots.txt copy in the raw-responses bucket.
+robots.txt copy in the SEO bucket (``SEO_BUCKET``).
 
 One table, keys ``pk`` / ``sk``, a sparse index ``GSI1`` (``gsi1pk`` / ``gsi1sk``) and TTL ``ttl``. Only the
 frontier URLs (crawl bookkeeping) expire, 90 days after they are queued; the audit, its pages, issues and link
@@ -41,7 +41,7 @@ from shared.dynamodb_conditions import applied_conditionally
 from shared.env_vars import resolve_table_env
 
 AUDITS_TABLE_ENV = 'DYNAMODB_TABLE_SEO_AUDITS'
-RAW_BUCKET_ENV = 'RAW_RESPONSES_BUCKET'
+BUCKET_ENV = 'SEO_BUCKET'
 TTL_SECONDS = 90 * 86_400
 AUDIT_INDEX = 'GSI1'
 AUDITS_LIST_KEY = 'AUDITS'
@@ -283,7 +283,7 @@ class AuditStore:
 
 
 def _bucket() -> str:
-    return os.environ[RAW_BUCKET_ENV]
+    return os.environ[BUCKET_ENV]
 
 
 def robots_key(audit_id: str) -> str:

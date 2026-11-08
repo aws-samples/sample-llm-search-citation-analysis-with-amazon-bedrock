@@ -29,8 +29,8 @@ const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.Servi
  *
  * - `CitationAnalysis-SeoDomainSnapshots` (pk `domain#market_id`, sk
  *   `snapshot_at`, kept, never expired): the summary of each snapshot; its
- *   ranked keywords live under `seo/domain-snapshots/` in the raw-responses
- *   bucket (already granted to both functions under `seo/*`).
+ *   ranked keywords live under `seo/domain-snapshots/<domain>/<market>/<at>.json`
+ *   in the SEO bucket (written once; already granted to both functions).
  * - The `CitationAnalysis-SeoDomainSnapshots` state machine: list the targets
  *   (free) and snapshot each, two at a time. A snapshot task is billed
  *   DataForSEO work, so it is never retried, not even on a Lambda service

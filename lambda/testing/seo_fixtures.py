@@ -35,7 +35,7 @@ SEO_ENV: Mapping[str, str] = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
     'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
-    'RAW_RESPONSES_BUCKET': 'test-raw-responses',
+    'SEO_BUCKET': 'test-seo',
     'CORS_ORIGIN_PARAM': '',
     'RANK_TRACKER_TARGET_ARN': 'arn:aws:lambda:us-east-1:123456789012:function:CitationAnalysis-SeoJobs',
     'RANK_TRACKER_SCHEDULER_ROLE_ARN': 'arn:aws:iam::123456789012:role/RankTrackerScheduler',

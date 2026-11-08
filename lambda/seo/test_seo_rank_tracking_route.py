@@ -88,33 +88,20 @@ def test_reactivates_an_archived_tracker_with_the_new_settings(api):
     assert (status, body['tracker']['is_active'], body['tracker']['devices']) == (201, True, 'both')
 
 
-def test_schedules_a_new_weekly_tracker_and_leaves_a_manual_one_unscheduled(api):
+def test_schedules_a_new_weekly_tracker_on_its_own_schedule_and_leaves_a_manual_one_unscheduled(api):
     weekly = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
     manual = api.call('POST', BASE, body={'domain': 'example.org', 'schedule': 'manual'})[1]['tracker']
 
-    assert (weekly['next_check_at'][:10], manual['next_check_at']) == ('2026-10-12', None)
+    assert (weekly['next_check_at'][:10], manual['next_check_at'],
+            api.scheduler.expression(f"rank-{weekly['tracker_id']}")[:13],
+            api.scheduler.expression(f"rank-{manual['tracker_id']}")) == ('2026-10-12', None, 'at(2026-10-12', None)
 
 
-def test_gives_a_new_weekly_tracker_its_own_schedule_at_its_slot_and_a_manual_one_none(api):
-    weekly = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
-    manual = api.call('POST', BASE, body={'domain': 'example.org', 'schedule': 'manual'})[1]['tracker']
-
-    expression = api.scheduler.expression(f"rank-{weekly['tracker_id']}")
-    assert (expression[:13], api.scheduler.expression(f"rank-{manual['tracker_id']}")) == ('at(2026-10-12', None)
-
-
-def test_deletes_the_trackers_schedule_when_it_is_switched_to_manual(api):
+@pytest.mark.parametrize(('method', 'body'), [('PUT', {'schedule': 'manual'}), ('DELETE', None)])
+def test_deletes_the_trackers_schedule_when_it_is_switched_to_manual_or_archived(api, method, body):
     created = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
 
-    api.call('PUT', f"{BASE}/{created['tracker_id']}", body={'schedule': 'manual'})
-
-    assert api.scheduler.schedules == {}
-
-
-def test_deletes_the_trackers_schedule_when_it_is_archived(api):
-    created = api.call('POST', BASE, body={'domain': 'example.com'})[1]['tracker']
-
-    api.call('DELETE', f"{BASE}/{created['tracker_id']}")
+    api.call(method, f"{BASE}/{created['tracker_id']}", body=body)
 
     assert api.scheduler.schedules == {}
 

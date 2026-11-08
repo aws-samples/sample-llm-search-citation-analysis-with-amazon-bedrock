@@ -32,7 +32,7 @@ def table(monkeypatch) -> InMemoryCacheTable:
 def bucket(monkeypatch) -> InMemoryBucket:
     stub = InMemoryBucket()
     monkeypatch.setattr(seo_cache, '_s3', lambda: stub)
-    monkeypatch.setenv('RAW_RESPONSES_BUCKET', 'raw-example')
+    monkeypatch.setenv('SEO_BUCKET', 'raw-example')
     return stub
 
 
@@ -189,7 +189,7 @@ def test_returns_spilled_payload_when_it_is_read_back(table, bucket):
 
 
 def test_skips_write_when_payload_is_oversized_and_no_bucket_is_configured(table, monkeypatch):
-    monkeypatch.delenv('RAW_RESPONSES_BUCKET', raising=False)
+    monkeypatch.delenv('SEO_BUCKET', raising=False)
     monkeypatch.setattr(seo_cache, '_s3', MagicMock(side_effect=AssertionError('no S3 call expected')))
 
     put_cached('kw:research', 1, PARAMS, BIG, ttl_seconds=60)

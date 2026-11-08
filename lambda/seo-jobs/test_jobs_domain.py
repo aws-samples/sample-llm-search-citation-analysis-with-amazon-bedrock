@@ -30,7 +30,7 @@ def brand_table(default=BRAND):
 
 @pytest.fixture
 def jobs(monkeypatch):
-    monkeypatch.setenv('RAW_RESPONSES_BUCKET', 'raw')
+    monkeypatch.setenv('SEO_BUCKET', 'raw')
     module = load_handler_module(str(JOBS_DIR), 'jobs_domain.py')
     with patch.object(module, 'brand_config_table', return_value=brand_table()):
         yield module

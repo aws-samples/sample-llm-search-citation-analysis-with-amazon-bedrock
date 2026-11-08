@@ -155,16 +155,8 @@ export class SeoRankTracking extends SeoFeatureConstruct {
     const live = catching(this.step('LiveChecks', 'rank.live', false));
     const collect = catching(this.step('CollectTasks', 'rank.collect', true));
     collect.addRetry({ errors: ['States.TaskFailed'], maxAttempts: 2, interval: cdk.Duration.seconds(10) });
-    const post = this.jobsTask('PostTasks', {
-      step: 'rank.post', 'state.$': '$', task_token: stepfunctions.JsonPath.taskToken,
-    }, {
-      integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-      retryOnServiceExceptions: false,
-      timeout: POST_AND_CALLBACKS_TIMEOUT,
-    });
     // A callback that never came: collect once anyway (the input state is kept).
-    post.addCatch(collect, { errors: ['States.Timeout'], resultPath: stepfunctions.JsonPath.DISCARD });
-    catching(post);
+    const post = catching(this.callbackTask('PostTasks', { step: 'rank.post', 'state.$': '$' }, POST_AND_CALLBACKS_TIMEOUT, collect));
     const planRetry = catching(this.step('PlanRetry', 'rank.plan_retry', true));
     const finalize = catching(this.step('Finalize', 'rank.finalize', true));
 

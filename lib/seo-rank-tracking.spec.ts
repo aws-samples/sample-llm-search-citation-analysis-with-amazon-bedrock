@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { LAMBDA_SERVICE_ERRORS, resolvePath } from './citation-analysis-stack-fixtures';
 import {
-  TTL_ON_TTL_ATTRIBUTE, catchTargets, taskRetriers
+  TTL_ON_TTL_ATTRIBUTE, WAITS_ON_CALLBACKS, callbackWait, catchTargets, taskRetriers
 } from './seo-feature-fixtures';
 import { sharedTableActions } from './constructs/seo-feature';
 import { PAID_STATES, synthesizeRankTrackingSnapshot } from './seo-rank-tracking-fixtures';
@@ -98,9 +98,7 @@ describe('CitationAnalysis-SeoRankCheck state machine', () => {
   });
 
   it('waits for DataForSEO\'s callbacks on a task token instead of polling', () => {
-    expect(resolvePath(snapshot.states.PostTasks, ['Resource'])).toContain('lambda:invoke.waitForTaskToken');
-    expect(resolvePath(snapshot.states.PostTasks, ['Parameters', 'Payload', 'task_token.$'])).toBe('$$.Task.Token');
-    expect(Object.values(snapshot.states).filter((state) => resolvePath(state, ['Type']) === 'Wait')).toStrictEqual([]);
+    expect(callbackWait(snapshot.states, 'PostTasks')).toStrictEqual(WAITS_ON_CALLBACKS);
   });
 
   it('stops a run after three hours at most', () => {
@@ -126,9 +124,9 @@ describe('rank tracker schedules', () => {
   });
 
   it('names the schedules\' target and role in both functions\' environments', () => {
-    const keys = ['RANK_TRACKER_TARGET_ARN', 'RANK_TRACKER_SCHEDULER_ROLE_ARN'];
+    const named = [snapshot.routerEnv, snapshot.jobsEnv].map((env) => ['RANK_TRACKER_TARGET_ARN', 'RANK_TRACKER_SCHEDULER_ROLE_ARN']
+      .every((key) => key in env));
 
-    expect(keys.filter((key) => !(key in snapshot.routerEnv))).toStrictEqual([]);
-    expect(keys.filter((key) => !(key in snapshot.jobsEnv))).toStrictEqual([]);
+    expect(named).toStrictEqual([true, true]);
   });
 });

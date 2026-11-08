@@ -37,23 +37,17 @@ const STATE_MACHINE_TIMEOUT_MINUTES = 60;
  */
 export class SeoLocal extends SeoFeatureConstruct {
   protected build(): void {
-    const post = this.jobsTask('Post', {
-      step: 'local.post', 'job_id.$': '$.job_id', task_token: stepfunctions.JsonPath.taskToken,
-    }, {
-      integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-      retryOnServiceExceptions: false,
-      timeout: cdk.Duration.minutes(POST_AND_CALLBACKS_TIMEOUT_MINUTES),
-    });
     const collect = this.jobStep('Collect', {
       step: 'local.collect', 'job_id.$': '$.job_id',
     }, true);
+    // A callback that never came: collect once anyway (the input `{job_id}` is kept).
+    const post = this.callbackTask('Post', { step: 'local.post', 'job_id.$': '$.job_id' },
+      cdk.Duration.minutes(POST_AND_CALLBACKS_TIMEOUT_MINUTES), collect);
     const fail = this.jobStep('Fail', { step: 'local.fail', 'job_id.$': '$.job_id', 'error.$': '$.error' }, true);
     fail.next(new stepfunctions.Fail(this, 'JobFailed', {
       error: 'LocalSeoJobFailed',
       cause: 'The local SEO job stopped; the job item records it as failed.',
     }));
-    // A callback that never came: collect once anyway (the input `{job_id}` is kept).
-    post.addCatch(collect, { errors: ['States.Timeout'], resultPath: stepfunctions.JsonPath.DISCARD });
     for (const state of [post, collect]) {
       state.addCatch(fail, { errors: ['States.ALL'], resultPath: '$.error' });
     }

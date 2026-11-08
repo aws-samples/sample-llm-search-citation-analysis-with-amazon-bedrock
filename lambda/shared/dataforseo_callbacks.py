@@ -33,6 +33,7 @@ from typing import Any, TypeGuard
 import boto3
 from botocore.exceptions import ClientError
 
+from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 
 __all__ = [
@@ -126,7 +127,7 @@ def arrive(gate_id: str, task_id: str, table: Any = None) -> Arrival | None:
             ReturnValues='ALL_NEW',
         )
     except ClientError as error:
-        if error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+        if is_conditional_check_failure(error):
             return None
         raise
     return _arrival(answer.get('Attributes') or {})

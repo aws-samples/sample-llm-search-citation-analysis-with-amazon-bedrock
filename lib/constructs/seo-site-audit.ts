@@ -57,8 +57,8 @@ const STEPS: Record<'start' | 'crawl' | 'finalize' | 'fail', StepSpec> = {
  *   Finalize; any failure -> Fail (recorded on the audit). Its input is the
  *   audit id only, since execution input is kept in the history.
  * - The router may start and stop its executions and read/write the table;
- *   the jobs function runs the steps (robots.txt copies under the stack's
- *   `seo/` prefix of the raw-responses bucket, already granted).
+ *   the jobs function runs the steps (robots.txt copies under
+ *   `seo/site-audit/` in the SEO bucket, already granted).
  */
 export class SeoSiteAudit extends SeoFeatureConstruct {
   protected build(): void {

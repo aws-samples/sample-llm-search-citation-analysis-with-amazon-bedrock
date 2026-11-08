@@ -6,6 +6,8 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 
 class SchedulerNotFoundError(Exception):
     """Stands in for ``scheduler.exceptions.ResourceNotFoundException``."""
@@ -41,3 +43,10 @@ class SchedulerStub:
 
     def target_input(self, name: str, group: str = 'citation-analysis-seo-rank') -> dict[str, Any]:
         return json.loads(self.schedules[(group, name)]['Target']['Input'])
+
+
+def scheduler_stub(monkeypatch: pytest.MonkeyPatch) -> SchedulerStub:
+    """A fresh stub, with the target and role variables ``shared.rank_tracking_timer`` reads."""
+    monkeypatch.setenv('RANK_TRACKER_TARGET_ARN', 'arn:aws:lambda:us-east-1:123456789012:function:SeoJobs')
+    monkeypatch.setenv('RANK_TRACKER_SCHEDULER_ROLE_ARN', 'arn:aws:iam::123456789012:role/RankScheduler')
+    return SchedulerStub()

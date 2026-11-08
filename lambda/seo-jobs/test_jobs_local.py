@@ -55,6 +55,13 @@ def post_grid(monkeypatch):
 
 
 @pytest.fixture
+def point_4_refused(monkeypatch):
+    """``task_post`` accepting every grid point but the fifth (tag ``4``)."""
+    accepted = {tag: task for tag, task in ALL_TAGS.items() if tag != '4'}
+    monkeypatch.setattr(local_serp, 'post_grid_tasks', MagicMock(return_value=posted(accepted, {'4': 'Invalid Field'})))
+
+
+@pytest.fixture
 def post(jobs, memory, gates):
     """``post(kind)`` -> ``(answer, stored job)`` of one post step on a new job."""
     def run(kind='grid'):
@@ -105,10 +112,8 @@ class TestPost:
         assert (gates.only_gate['remaining'], gates.released, post_grid.call_args.kwargs['pingback_url']) == (
             9, [], f'https://callbacks.example/?gate={gate_id}&id=$id')
 
-    def test_does_not_wait_for_a_point_refused_at_post_time(self, post, monkeypatch, gates):
-        accepted = {tag: task for tag, task in ALL_TAGS.items() if tag != '4'}
-        monkeypatch.setattr(local_serp, 'post_grid_tasks', MagicMock(return_value=posted(accepted, {'4': 'Invalid Field'})))
-
+    @pytest.mark.usefixtures('point_4_refused')
+    def test_does_not_wait_for_a_point_refused_at_post_time(self, post, gates):
         post()
 
         assert gates.only_gate['remaining'] == 8
@@ -120,10 +125,8 @@ class TestPost:
 
         assert gates.released[0][1]['done'] is True
 
-    def test_marks_rejected_points_failed_at_post_time(self, post, monkeypatch):
-        accepted = {tag: task for tag, task in ALL_TAGS.items() if tag != '4'}
-        monkeypatch.setattr(local_serp, 'post_grid_tasks', MagicMock(return_value=posted(accepted, {'4': 'Invalid Field'})))
-
+    @pytest.mark.usefixtures('point_4_refused')
+    def test_marks_rejected_points_failed_at_post_time(self, post):
         assert post()[1]['results']['points']['4'] == {'status': 'failed', 'message': 'Invalid Field'}
 
     def test_fails_the_job_with_the_error_code_when_the_post_fails(self, post, monkeypatch):

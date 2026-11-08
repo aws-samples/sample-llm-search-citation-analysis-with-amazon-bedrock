@@ -2,7 +2,7 @@
 
 A read-through cache for paid DataForSEO answers, one DynamoDB item per key in ``CitationAnalysis-SeoCache``
 (env ``DYNAMODB_TABLE_SEO_CACHE``): ``{cache_key, payload (JSON string) | s3_key, expires_at, ttl, empty}``.
-Payloads over 350 KB go to S3 (``RAW_RESPONSES_BUCKET``, key ``seo/cache/<key>.json``) and the item keeps
+Payloads over 350 KB go to S3 (the SEO bucket, ``SEO_BUCKET``, key ``seo/cache/<key>.json``) and the item keeps
 only the pointer.
 
 Rules: the key is ``<namespace>#v<version>#sha256(canonical params)``, with keys sorted at every depth and
@@ -34,7 +34,7 @@ from shared.log_safety import log_text
 
 logger = logging.getLogger(__name__)
 
-BUCKET_ENV = 'RAW_RESPONSES_BUCKET'
+BUCKET_ENV = 'SEO_BUCKET'
 S3_PREFIX = 'seo/cache/'
 MAX_INLINE_PAYLOAD_BYTES = 350_000
 """DynamoDB items cap at 400 KB; leave room for the other attributes."""

@@ -39,7 +39,7 @@ def lighthouse(jobs, monkeypatch):
 def s3(monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(lighthouse_runs, '_s3', lambda: client)
-    monkeypatch.setenv('RAW_RESPONSES_BUCKET', 'test-raw-responses')
+    monkeypatch.setenv('SEO_BUCKET', 'test-raw-responses')
     return client
 
 

@@ -7,7 +7,7 @@ measured clicks.
 
 * Item: ``pk = <domain>#<market_id>``, ``snapshot_at`` (ISO-8601 UTC), the summary figures, and
   ``keywords_s3_key`` pointing at the ranked keywords (``seo/domain-snapshots/<domain>/<market>/<at>.json``
-  in the raw-responses bucket: a page of 1,000 keywords does not fit a 400 KB item). Snapshots never expire:
+  in the SEO bucket: a page of 1,000 keywords does not fit a 400 KB item). Snapshots never expire:
   measured history is kept like every other record (TENETS.md, D2 and D5).
 * Stored keyword: ``keyword``, ``position`` (organic rank, ``rank_group``, 1-100), ``etv``, ``url``,
   ``search_volume``.
@@ -38,7 +38,7 @@ from shared.utils import normalize_keyword
 logger = logging.getLogger(__name__)
 
 TABLE_ENV = 'DYNAMODB_TABLE_SEO_DOMAIN_SNAPSHOTS'
-BUCKET_ENV = 'RAW_RESPONSES_BUCKET'
+BUCKET_ENV = 'SEO_BUCKET'
 S3_PREFIX = 'seo/domain-snapshots'
 #: The most rows one Labs ``ranked_keywords`` call returns.
 SNAPSHOT_KEYWORD_LIMIT = 1000
