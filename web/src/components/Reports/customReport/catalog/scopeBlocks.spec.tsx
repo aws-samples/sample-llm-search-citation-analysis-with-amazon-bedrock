@@ -8,7 +8,7 @@ import {
   buildKeywordTrend, buildTrendView
 } from '../../layout/reportPayload-fixtures';
 import {
-  buildScopeReport, settledSlice
+  buildScopeReport, reportWithTrends, reportWithVisibility, settledSlice
 } from '../../scopeReport/scopeReport-fixtures';
 import {
   answerFetchesInOrder, clickLoadMore
@@ -58,5 +58,33 @@ describe('visibility_keyword_table block', () => {
     await clickLoadMore('keywords');
 
     expect(await screen.findByText('botas de montaña')).toBeInTheDocument();
+  });
+});
+
+describe('scope block coverage', () => {
+  it('says the block covers fewer keywords when the trends read was cut short', () => {
+    const scope = reportWithTrends({
+      coverage: {
+        keywords_total: 928,
+        keywords_analyzed: 400,
+        complete: false,
+      },
+    });
+    render(<ReportBlockView block={{ type: 'visibility_trend_history' }} sources={buildReportSources({ scope })} />);
+
+    expect(screen.getByRole('note')).toHaveTextContent('Covers 400 of 928 keywords');
+  });
+
+  it('says the block covers every keyword when the visibility read is complete', () => {
+    const scope = reportWithVisibility({
+      coverage: {
+        keywords_total: 928,
+        keywords_analyzed: 928,
+        complete: true,
+      },
+    });
+    render(<ReportBlockView block={{ type: 'visibility_headline' }} sources={buildReportSources({ scope })} />);
+
+    expect(screen.getByText('Covers all 928 keywords')).toBeInTheDocument();
   });
 });

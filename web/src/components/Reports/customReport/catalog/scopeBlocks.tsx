@@ -26,6 +26,8 @@ import { TopSourcesSection } from '../../SourcesReport/sections/TopSourcesSectio
 import { BrandSentimentSection } from '../../SentimentReport/sections/BrandSentimentSection';
 import { NetSentimentTrendSection } from '../../SentimentReport/sections/NetSentimentTrendSection';
 import { SentimentHeadlineSection } from '../../SentimentReport/sections/SentimentHeadlineSection';
+import { ScopeCoverageNote } from '../../../ui/ScopeCoverageNote';
+import type { ScopedResponseFields } from '../../../../types/domain/scopeCoverage';
 import {
   EVERY_SCOPE, type DataBlockDefinition, type ScopeKind
 } from './catalogTypes';
@@ -85,6 +87,21 @@ function ExploredEngineSentimentBlock({ report }: ScopeSectionProps) {
   return <EngineSentimentSection report={report} explore />;
 }
 
+/** A response cut short (not every keyword) or served from a snapshot older than the scope. */
+function needsNote(response: ScopedResponseFields | null): boolean {
+  return response?.stale === true || response?.coverage?.complete === false;
+}
+
+/**
+ * What the block was computed over (tenet 2): the `/visibility` or `/trends` answer that was cut short or is
+ * stale, otherwise the complete line of the one that loaded.
+ */
+function ScopeBlockCoverage({ report }: ScopeSectionProps) {
+  const responses: readonly (ScopedResponseFields | null)[] = [report.visibility.data, report.trends.data];
+  const response = responses.find(needsNote) ?? responses.find((candidate) => candidate !== null) ?? null;
+  return <ScopeCoverageNote response={response} className="mb-4" />;
+}
+
 const KEYWORD_SETS: readonly ScopeKind[] = ['all', 'group'];
 
 /** `[type, category, label, description, section, scopes]`; the type is what saved reports store. */
@@ -122,6 +139,11 @@ export const SCOPE_BLOCKS: readonly DataBlockDefinition[] = SCOPE_BLOCK_ROWS.map
     description,
     sources: ['scope'],
     scopes,
-    render: (sources) => sources.scope && <Section report={sources.scope} />,
+    render: (sources) => sources.scope && (
+      <>
+        <ScopeBlockCoverage report={sources.scope} />
+        <Section report={sources.scope} />
+      </>
+    ),
   };
 });

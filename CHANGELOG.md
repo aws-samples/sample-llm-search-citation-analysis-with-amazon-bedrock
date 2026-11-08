@@ -251,6 +251,13 @@ that work, and the Lambda sizes the owner decided on 2026-11-07.
 - A CSV text cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so a
   spreadsheet does not run it as a formula.
 - The cache-only SEO routes are reachable only by the export worker's direct invoke, never from the network.
+- An export's paid SEO reads count against its owner's daily limit (`SEO_PAID_REQUESTS_PER_DAY`), not one shared
+  `export-service` counter: the worker's route reads carry the owner in the claim `custom:export_owner`, which the SEO
+  router honours only for the export service (`shared/seo_spend_limit.py`).
+- No Lambda waits for a view job. A chunk that meets `202 computing` ends and answers `wait_seconds`; the export
+  state machine's `WaitForViewJob` state waits that long before the next chunk, and a wait does not count as a stall.
+- Custom-report scope blocks show the coverage note (the `/visibility` or `/trends` answer that was cut short or is
+  stale, otherwise the complete line).
 
 ### Known limits
 
@@ -260,7 +267,6 @@ that work, and the Lambda sizes the owner decided on 2026-11-07.
   for brands (a market row keeps 500 brands, a 10x market run names about 14,700), so it is not done.
 - **KpiAlerts at very large scale** may list pairs with a previous snapshot under `time_budget_scopes` (see Changed).
 - **Snapshot `total_crawled`** may lag by up to 7 days.
-- **Custom-report scope blocks** show no coverage note.
 - **An older run on a large Brand Mentions scope** starts one view job per appearances page; use the export instead.
 - **Sentiment examples** assume no two keywords differ only in letter case.
 - **Runs from before this release** keep at most 3 competitor caveat reasons per keyword.
