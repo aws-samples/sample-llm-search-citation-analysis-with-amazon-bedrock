@@ -52,7 +52,7 @@ def py   python      "pytest"                                'pytest -q -p no:ca
 # Release bookkeeping: package.json, web/package.json and CHANGELOG.md's newest release agree.
 def tsc  repo        "version: CHANGELOG ↔ package.json"     'node scripts/check-version.mjs'
 # The repo scripts' own tests: version check, dependency audit, scheduled-failure watch, this runner.
-def tsc  repo        "node: repo script tests"               'node --test scripts/check-version.test.mjs scripts/dependency-audit.test.mjs scripts/scheduled-failure-watch.test.mjs scripts/validate.test.mjs scripts/kiro-review/comment.test.mjs scripts/kiro-issue/issue.test.mjs'
+def tsc  repo        "node: repo script tests"               'node --test scripts/check-version.test.mjs scripts/dependency-audit.test.mjs scripts/scheduled-failure-watch.test.mjs scripts/validate.test.mjs scripts/kiro-review/comment.test.mjs scripts/kiro-review/conversation.test.mjs scripts/kiro-issue/issue.test.mjs'
 def tsc  cdk         "tsc: CDK app"                          'npx tsc --noEmit'
 def tsc  web         "tsc: dashboard"                        'cd web && npx tsc --noEmit'
 # knip twice per package: a symbol only its own tests use counts as dead in the production pass.

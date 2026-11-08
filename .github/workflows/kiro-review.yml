@@ -18,6 +18,9 @@
 #   reads inside the review root (this workspace) and deny .git, .env files, writes, shell, web, MCP and
 #   sub-agents. Nothing is pre-trusted on the command line, so any call outside those rules needs an approval
 #   that headless mode refuses. No MCP config is loaded.
+# - The review job's token can read contents and pull requests (to fetch the PR's comments, reviews and inline
+#   comments); it reaches only the step that prepares the inputs, never the Kiro step. That conversation is text
+#   from anyone who can comment, quoted and capped by scripts/kiro-review/conversation.mjs and read as data.
 # - Two jobs: `review` (the secret, read-only token, writes nothing on GitHub) and `post` (writes the comment,
 #   no secret). The comment is built by scripts/kiro-review/comment.mjs, which refuses text that looks like a
 #   credential, strips HTML and images and breaks @-mentions; GitHub also drops a job output that
@@ -52,6 +55,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read # the trusted checkout and the PR head checkout
+      pull-requests: read # the PR's comments, reviews and inline review comments
     outputs:
       body: ${{ steps.comment.outputs.body }}
       verdict: ${{ steps.comment.outputs.verdict }}
@@ -98,6 +102,10 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           # Workspace configuration a PR could add, and that Kiro might load, is removed before Kiro starts.
           rm -rf pr/.kiro pr/.amazonq pr/AGENTS.md
@@ -121,10 +129,35 @@ jobs:
             printf 'lines added, removed, file:\n%s\n' "$locks" >> data/lockfiles.txt
             for lock in package-lock.json web/package-lock.json; do
               git -C pr diff --no-color --unified=0 "$base" HEAD -- "$lock" \
-                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
+                | grep -E '^[+-] ' | head -n 40 | cut -c1-300 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
             done
           fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
+          # The conversation so far (comments, reviews, inline comments, the last Kiro review), so the reviewer
+          # follows up instead of starting over. Untrusted text, read as data and capped by conversation.mjs.
+          api="$RUNNER_TEMP/api"
+          mkdir -p "$api"
+          # A failed fetch costs only the follow-up, never the review.
+          for part in "issues/$PR_NUMBER/comments:issue-comments" "pulls/$PR_NUMBER/reviews:reviews" "pulls/$PR_NUMBER/comments:review-comments"; do
+            gh api --paginate --slurp "repos/$REPO/${part%%:*}" > "$api/${part##*:}.json" \
+              || { echo "::warning title=Kiro review::could not read ${part%%:*}; the review runs without it"; echo '[]' > "$api/${part##*:}.json"; }
+          done
+          if [ -f trusted/scripts/kiro-review/conversation.mjs ]; then
+            conv=trusted/scripts/kiro-review/conversation.mjs
+            jsons=("$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json")
+            # Maintainers are the commenters GitHub says have write access or more; a failed lookup makes nobody one.
+            : > "$api/maintainers.txt"
+            for login in $(node "$conv" commenters "${jsons[@]}" || true); do
+              perm="$(gh api "repos/$REPO/collaborators/$login/permission" --jq .permission 2> "$api/perm.err")" \
+                || { echo "::warning title=Kiro review::could not read ${login}'s permission ($(head -c 200 "$api/perm.err")); treated as a contributor"; perm=""; }
+              case "$perm" in admin|maintain|write) echo "$login" >> "$api/maintainers.txt" ;; esac
+            done
+            node "$conv" "${jsons[@]}" data/conversation.md "$PR_AUTHOR" "$api/maintainers.txt" \
+              || { echo "::warning title=Kiro review::could not build the conversation; the review runs without it"; echo 'No conversation available to this review.' > data/conversation.md; }
+          else
+            # The default branch predates conversation.mjs (the PR that adds it).
+            echo 'No conversation available to this review.' > data/conversation.md
+          fi
           wc -c data/*
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
