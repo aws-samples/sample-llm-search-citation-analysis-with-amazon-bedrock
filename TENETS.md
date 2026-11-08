@@ -61,16 +61,56 @@ provider that fails, throttles or times out costs its own answers only, never th
 Even as a sample, we design for a managed service: least privilege, infrastructure as code, serverless pay-per-use,
 encryption by default, and cost visibility per workload. The data outlives any single deployment or stack.
 
-### 7. Fully serverless. Cost-optimised by default, performance by choice.
+### 7. Fully serverless, paid per action. Low cost, or no cost when idle.
 
-The platform runs fully serverless and, by default, with **no fixed monthly cost** beyond what the data itself needs:
-no WAF, no SnapStart, no provisioned concurrency or capacity, no NAT gateway, no always-on database, cache or
-container. As a GitHub sample, we would rather wait a couple of seconds more than pay to hide a slow path: we make the
-Lambda faster (smaller imports, right-sized memory, fewer round trips) before we reach for a paid feature.
+The platform is serverless and every part of it is **paid per action**: a request, an invocation, a state
+transition, a message, a read or write, a gigabyte stored. When nobody uses it, it costs (close to) nothing. By
+default there is **no fixed monthly cost** beyond what the data itself needs: no WAF, no SnapStart, no provisioned
+concurrency or capacity, no NAT gateway, no always-on database, cache, container or self-hosted connection server
+(a pay-per-use client subscription, billed by message and connection time, is fine). A design that pays
+for capacity whether or not it is used is the wrong design here.
+
+Because we pay per action, we do not spend actions that do nothing: no polling loops, no long polling, no Lambda
+that waits for something to happen (tenet 8 lists the few bounded exceptions). Work starts when an event arrives, so the bill follows the work, not
+the clock: an open screen costs the connection time of its subscription, not repeated requests and Lambda
+invocations. As a GitHub sample, we would rather wait a couple of seconds more than pay
+to hide a slow path: we make the Lambda faster (smaller imports, right-sized memory, fewer round trips) before we
+reach for a paid feature.
 
 Performance or protection features that carry a fixed cost are **opt-in**, behind a flag a deployment chooses.
 Architecturally we build for the service either way (tenet 6); only the bill is opt-in. Lambda **reserved**
 concurrency is free (it only caps a function's share of the account) and is allowed by default.
+
+### 8. Event-driven. Events drive the architecture; nothing polls.
+
+This is an event-driven platform. Every change of state is an event, and whoever needs to know subscribes to it
+instead of asking again and again: a run, a step or a Lambda finishing, a Step Functions execution changing status,
+an object landing in S3, a crawl or a browser session ending, a row written to a table, a KPI alert firing.
+Components react to events; they never loop, sleep and re-check, and nothing long-polls (holds a request or a Lambda
+open waiting for a change). On a platform paid per action (tenet 7), every poll that finds nothing is an action paid
+for nothing; an event is paid for once, when something happened.
+
+- **Amazon EventBridge is the backbone.** Service events (Step Functions status changes, S3 object-created
+  notifications, DynamoDB streams through Pipes) and the events our own code publishes go through EventBridge, and
+  rules route them to the work that follows. Adding a reaction means adding a rule, not editing the producer.
+- **EventBridge Scheduler is the heartbeat.** Anything driven by time (scheduled runs, reconciliation, expiry, a
+  retry in a later invocation) is a schedule. No Lambda waits or loops to watch the clock. A short, bounded backoff
+  inside one call to a throttled or flaky service (`Retry-After`, a few seconds) is a retry, not polling, and stays
+  in the code that makes the call.
+- **AWS AppSync Events notifies clients.** The dashboard, and the API and MCP clients of tenet 4 that can hold a
+  subscription, subscribe to channels (run progress, job finished, alert raised) and are told when something
+  happens, instead of polling a REST route. AppSync Events is pay per message and connection, so it adds no fixed
+  cost (tenet 7). Events never replace reads: every state an event announces stays readable through its REST route
+  and MCP (tenet 4 ranks higher), and a client that cannot subscribe, such as a CLI or an MCP tool call, reads it
+  when it needs it.
+- **Polling is the exception, and it is bounded.** A client reads once to catch up when it connects or reconnects.
+  An external API that offers no callback (a provider's asynchronous search archive) is polled with backoff and a
+  deadline, and the result is published as an event. A scheduled reconcile that picks up events that were missed
+  is a safety net and stays (tenet 1 ranks higher): it is never the main path.
+- **Until AppSync Events is in place**, a new long-running dashboard job may report progress through the existing
+  polling hooks (bounded, stopping when the job ends), and it is added to the gap below. The change that introduces
+  AppSync Events moves those hooks to subscriptions and removes this clause; it is tracked in
+  [issue #208](https://github.com/aws-samples/sample-llm-search-citation-analysis-with-amazon-bedrock/issues/208).
 
 ---
 
@@ -161,6 +201,7 @@ tenet; closing a gap is a change of its own. Known gaps (2026-11):
 | 5 | Ten providers behind one search contract, each with its own Lambda and concurrency cap; a failed provider does not fail the run. | Not measured here: how much provider-specific code lives outside `lambda/search/`. |
 | 6 | Everything in CDK; tables and data buckets are `RETAIN` with point-in-time recovery; buckets block public access and require TLS. | Encryption uses AWS-managed keys, not a key the deployment controls; several roles get table-wide `grantReadWriteData` / `grantWriteData` (which include deletes) rather than per-action grants; cost is visible per stack only. |
 | 7 | No WAF by default (SECURITY.md explains how to add one); on-demand DynamoDB; no NAT gateway or always-on compute. | Secrets Manager holds one secret per provider key ($0.40 each per month). No test fails the synth on a new fixed-cost resource. |
+| 8 | A DynamoDB stream starts Content Studio generation; analysis runs are started by EventBridge Scheduler; each run is a Step Functions workflow whose steps hand over directly. | No AppSync Events: the dashboard polls for run status, research jobs, Content Studio generations, ranking analyses and insight regeneration (`web/src/hooks/useExecutionPolling.ts`, `researchPolling.ts`, `useContentStudio.ts`, `useSelfReflection.ts`, `useNarrativeRegeneration.ts`); the Content Studio reconcile (a safety net for missed stream records) runs on a scheduled EventBridge rule, not EventBridge Scheduler; nothing publishes run, crawl or alert events to EventBridge for other consumers; the API marks a stuck research job failed when it is read, not when it times out; the crawler waits a fixed 10 s before it connects to the AgentCore browser, which exposes no readiness signal yet (`lambda/shared/browser_tools.py`); the SerpAPI archive poll is bounded but returns its result in-process instead of publishing it as an event (`lambda/shared/serpapi.py`). |
 | D1 | Each run writes new `SearchResults` rows (keyword / timestamp_provider) and new raw-response objects; crawls are keyed by URL and crawl time. | Data buckets are unversioned and raw objects are not write-once; `Citations` rows are updated in place by deduplication. |
 | D2 | Bronze ≈ the `raw-responses` bucket and screenshots; Silver ≈ `SearchResults`, `Citations`, `CrawledContent`; Gold ≈ rollups, snapshots, summaries, insights. | The raw object also stores the extracted brands beside the raw answer; the raw-response write is best-effort (a failure is logged and the row is stored without it); rows carry no pipeline or prompt version. |
 | D3 | Citation rollups are rebuilt after every run. | No replay of extraction or aggregation from Bronze; no side-by-side comparison of versions. |
@@ -189,7 +230,7 @@ means a green pipeline.
   labeled, and a feature request is checked against this file. The triage tells the author which tenets it
   touches, whether it is aligned, and the closest version that fits, and keeps the conversation going until the
   request is aligned (labels `tenets: aligned`, `tenets: needs alignment`, `tenets: conflicts`).
-- **Pull request description**: every PR has a `## Tenets` section naming the tenets it touches (`1`–`7`, `D1`–`D7`)
+- **Pull request description**: every PR has a `## Tenets` section naming the tenets it touches (`1`–`8`, `D1`–`D7`)
   or `none` (`.github/PULL_REQUEST_TEMPLATE.md`). Reviewed by people; not checked by CI yet.
 
 ---
@@ -211,6 +252,7 @@ Tenets touched: <!-- e.g. 2, D1, D4 — or "none" -->
 - [ ] AI: numbers come from rules; model output cites only computed evidence; non-AI features work without Bedrock (3)
 - [ ] Headless: available and enforced via the API/MCP, not only the UI (4)
 - [ ] Providers: a new engine fits the provider contract; its failure costs only its own answers (5)
-- [ ] Cost: no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
+- [ ] Cost: everything new is paid per action, with no new fixed monthly cost by default; a paid feature is opt-in behind a flag (7)
+- [ ] Events: state changes are published as events and consumers subscribe (EventBridge, Scheduler, AppSync Events); no new polling loop or long poll except under "Until AppSync Events is in place", and every announced state stays readable through REST and MCP (8)
 - [ ] Trade-off: if this weakens a lower tenet to serve a higher one, explain it here
 ```

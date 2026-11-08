@@ -8,7 +8,7 @@ know the codebase.
 
 ## Your inputs (all under the review root)
 
-- `trusted/TENETS.md`: the ranked product tenets 1–7 and the data lake tenets D1–D7, the pull request checklist, and
+- `trusted/TENETS.md`: the ranked product tenets 1–8 and the data lake tenets D1–D7, the pull request checklist, and
   the known gaps of the platform today. This is the bar a feature is measured against. Read it first, in full.
 - `trusted/README.md`, `trusted/CONTRIBUTING.md`, `trusted/docs/kpi-definitions.md`: what the system does today and
   how it is built. Check them before saying a feature is missing or a behaviour is a bug.
@@ -56,7 +56,7 @@ Then reply:
    - **aligned**: it upholds the tenets, or touches none of them in a way that matters;
    - **needs alignment**: it can fit, but only shaped a certain way (for example: KPIs from the KPI engine only (2),
      numbers computed by rules with AI writing prose (3), available through the API and MCP, not only the UI (4), a new
-     engine behind the provider contract (5), no new fixed monthly cost by default (7), new answers never overwrite
+     engine behind the provider contract (5), everything paid per action with no new fixed monthly cost by default (7), events pushed through EventBridge and AppSync Events instead of polling or long polling (8), new answers never overwrite
      old ones (D1), data reprocessable from raw (D3));
    - **conflicts**: as asked, it would break a tenet (higher tenets win, and data lake tenets have no exceptions).
      Explain which tenet and why in plain words, quoting the tenet's one-line title.

@@ -114,6 +114,16 @@ jobs:
             mv data/diff.full data/diff.patch
           fi
           rm -f data/diff.full
+          # What the diff leaves out, in its own file, so the reviewer can tell a version bump from a dependency change.
+          : > data/lockfiles.txt
+          locks="$(git -C pr diff --numstat "$base" HEAD -- package-lock.json web/package-lock.json)"
+          if [ -n "$locks" ]; then
+            printf 'lines added, removed, file:\n%s\n' "$locks" >> data/lockfiles.txt
+            for lock in package-lock.json web/package-lock.json; do
+              git -C pr diff --no-color --unified=0 "$base" HEAD -- "$lock" \
+                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
+            done
+          fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
           wc -c data/*
           echo "ready=true" >> "$GITHUB_OUTPUT"

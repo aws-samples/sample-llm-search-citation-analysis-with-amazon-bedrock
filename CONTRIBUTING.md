@@ -123,7 +123,9 @@ lockfiles and the Python requirements, never for a release younger than seven da
 `.github/workflows/kiro-review.yml` runs [Kiro CLI in headless mode](https://kiro.dev/docs/cli/headless/) with the
 agent in `scripts/kiro-review/` (`agent.json`, its prompt and the task). The agent checks the change against the
 tenets, the repository rules and correctness and security, and answers with a verdict (`PASS`, `CONCERNS` or
-`BLOCKING`), blocking findings, concerns and a tenet table. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
+`BLOCKING`), blocking findings, concerns and a tenet table. It reads the diff without the two npm lockfiles; their
+line counts and up to 40 changed lines each come in a separate input, enough to tell a version bump from a dependency
+change. The comment is advisory: set `KIRO_REVIEW_ENFORCED` to
 `'true'` in the workflow to fail the check on `BLOCKING`.
 
 - **Setup.** Create a dedicated Kiro API key for CI (Kiro Pro or above; an administrator may need to allow API keys)
