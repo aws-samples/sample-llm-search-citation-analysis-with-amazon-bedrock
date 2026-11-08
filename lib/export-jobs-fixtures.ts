@@ -1,7 +1,7 @@
 import type { Template } from 'aws-cdk-lib/assertions';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import type { DashboardStacks } from './api-stack-fixtures';
+import { permissionsOf, type DashboardStacks } from './api-stack-fixtures';
 import {
   allowStatementsOfRole,
   collectRefTargets,
@@ -151,15 +151,6 @@ function viewJobRuleProperties(template: Template): Record<string, unknown> {
   return isRecord(properties) ? properties : {};
 }
 
-function invokePermissions(template: Template, functionLogicalId: string): { principal: string; sourceArn: string }[] {
-  return Object.values(template.findResources('AWS::Lambda::Permission'))
-    .filter((permission) => getAttTargets(JSON.stringify(resolvePath(permission, ['Properties', 'FunctionName'])) ?? '').includes(functionLogicalId))
-    .map((permission) => ({
-      principal: resolveString(permission, ['Properties', 'Principal']),
-      sourceArn: JSON.stringify(resolvePath(permission, ['Properties', 'SourceArn'])) ?? '',
-    }));
-}
-
 function functionProperties(template: Template, functionName: string): unknown {
   return resolvePath(template.toJSON(), ['Resources', findLambdaLogicalId(template, functionName), 'Properties']);
 }
@@ -235,7 +226,9 @@ export function extractExportServiceSnapshot({ mainTemplate, apiTemplate }: Dash
     workerEnvironment: environmentOf(mainTemplate, EXPORT_WORKER_FUNCTION_NAME),
     workerStatements: roleStatements(mainTemplate, findFunctionRoleLogicalId(mainTemplate, EXPORT_WORKER_FUNCTION_NAME)),
     viewJobRule: viewJobRuleProperties(mainTemplate),
-    workerInvokePermissions: invokePermissions(mainTemplate, workerLogicalId),
+    workerInvokePermissions: permissionsOf(mainTemplate)
+      .filter((permission) => permission.functionLogicalIds.includes(workerLogicalId))
+      .map(({ principal, sourceArn }) => ({ principal, sourceArn })),
     generateSummaryStatements: roleStatements(mainTemplate, findFunctionRoleLogicalId(mainTemplate, GENERATE_SUMMARY_FUNCTION_NAME)),
     apiEnvironment: environmentOf(mainTemplate, EXPORTS_API_FUNCTION_NAME),
     apiStatements: roleStatements(mainTemplate, findFunctionRoleLogicalId(mainTemplate, EXPORTS_API_FUNCTION_NAME)),
