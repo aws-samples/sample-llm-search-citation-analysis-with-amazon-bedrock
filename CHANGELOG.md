@@ -17,8 +17,10 @@ process.
   Each run now reads the PR's comments, reviews and inline review comments, oldest first, with each author's role
   (maintainer, contributor, bot) and its own previous review marked. The review opens with a **Since the last
   review** section that says, for each earlier point, whether it is resolved, partly resolved, still open or settled
-  by a maintainer; it drops a point an answer settles and treats a maintainer's explicit decision on a trade-off as
-  final, unless the change breaks a data lake tenet or creates a security problem. The conversation is untrusted
+  by a maintainer; it drops a point an answer settles and treats another maintainer's explicit decision on a
+  trade-off as final. The PR author's own decision is listed as "settled by the author" for a second maintainer to
+  see, not silently accepted. No decision settles a data lake tenet, a security problem or a repository rule. A
+  failed conversation fetch costs only the follow-up, never the review. The conversation is untrusted
   text: capped in size (whole oldest entries are dropped first; the reviewer's own last review is always kept),
   read as data, and every line of a body is quoted so a comment cannot forge an author or a maintainer role; a
   comment that tries to steer the reviewer is reported as blocking. The reviewer's own comment, edited in place on

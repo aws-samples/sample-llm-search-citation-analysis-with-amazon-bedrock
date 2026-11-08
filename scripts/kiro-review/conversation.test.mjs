@@ -111,3 +111,11 @@ test('the total cap drops whole oldest entries, never the reviewer\'s own review
   assert.doesNotMatch(md, /> 0:x/)
   for (const part of md.split('\n\n## ').slice(1)) assert.match(part, /^[^\n]+ by \S+ \((contributor|kiro, your previous review)\), /)
 })
+
+test('the PR author is told apart from other maintainers, whatever their repository role', () => {
+  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'ana'), 'PR author, maintainer')
+  assert.equal(roleOf(comment('bob', 'NONE', 'x'), 'bob'), 'PR author')
+  assert.equal(roleOf(comment('ana', 'OWNER', 'x'), 'bob'), 'maintainer')
+  const md = conversationMarkdown([comment('ana', 'OWNER', 'accepted as bundled', '2026-11-08T02:00:00Z')], [], [], 'ana')
+  assert.match(md, /## comment by ana \(PR author, maintainer\)/)
+})

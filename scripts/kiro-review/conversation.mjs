@@ -10,7 +10,7 @@
  * Everything here is untrusted text written by anyone who can comment, so it is capped (it costs credits and could
  * crowd out the diff) and the reviewer's prompt treats it as data.
  *
- * Usage: node scripts/kiro-review/conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md>
+ * Usage: node scripts/kiro-review/conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md> [pr-author]
  *   Each JSON file is a `gh api --paginate --slurp` result (an array of pages).
  */
 import {
@@ -30,12 +30,16 @@ export function isOwnReview(entry) {
   return entry.user?.login === BOT && typeof entry.body === 'string' && entry.body.startsWith(MARKER)
 }
 
-/** How the reviewer should weigh an author: its own review, a maintainer, a bot, or anyone else. */
-export function roleOf(entry) {
+/**
+ * How the reviewer should weigh an author: its own review, a bot, the PR's author (who cannot settle their own
+ * review's points the way another maintainer can), a maintainer, or anyone else.
+ */
+export function roleOf(entry, prAuthor = '') {
   if (isOwnReview(entry)) return 'kiro, your previous review'
   if (entry.user?.type === 'Bot' || entry.user?.login?.endsWith('[bot]')) return 'bot'
-  if (MAINTAINERS.has(entry.author_association)) return 'maintainer'
-  return 'contributor'
+  const maintainer = MAINTAINERS.has(entry.author_association)
+  if (prAuthor !== '' && entry.user?.login === prAuthor) return maintainer ? 'PR author, maintainer' : 'PR author'
+  return maintainer ? 'maintainer' : 'contributor'
 }
 
 const capped = (text, max) => (text.length > max ? `${text.slice(0, max)}\n[truncated at ${max} characters]` : text)
@@ -74,9 +78,9 @@ export function quoted(body) {
   return body.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n')
 }
 
-function block(entry) {
+function block(entry, prAuthor) {
   const body = isOwnReview(entry) ? entry.body.slice(MARKER.length) : entry.body
-  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry)}), ${entry.at}`
+  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry, prAuthor)}), ${entry.at}`
   return `${heading}\n\n${quoted(capped(body.trim(), MAX_ENTRY))}`
 }
 
@@ -86,15 +90,15 @@ const byTime = (a, b) => String(a.at).localeCompare(String(b.at))
  * The conversation as Markdown. When it is long, whole entries are dropped oldest first (never part of one) until it
  * fits MAX_ENTRIES and MAX_TOTAL; the reviewer's own last review is always kept.
  */
-export function conversationMarkdown(issueComments, reviews, reviewComments) {
+export function conversationMarkdown(issueComments, reviews, reviewComments, prAuthor = '') {
   const list = entries(issueComments, reviews, reviewComments)
   if (list.length === 0) return 'No comments or reviews on this pull request yet.\n'
   const own = list.filter(isOwnReview).at(-1)
-  const ownBlock = own ? block(own) : ''
+  const ownBlock = own ? block(own, prAuthor) : ''
   let budget = MAX_TOTAL - ownBlock.length
   const others = []
   for (const entry of list.filter((e) => !isOwnReview(e)).reverse()) {
-    const text = block(entry)
+    const text = block(entry, prAuthor)
     if (others.length >= MAX_ENTRIES || text.length + 2 > budget) break
     budget -= text.length + 2
     others.push({
@@ -116,12 +120,12 @@ function pages(path) {
 }
 
 function main(argv) {
-  if (argv.length !== 4) {
-    console.error('usage: conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md>')
+  if (argv.length < 4 || argv.length > 5) {
+    console.error('usage: conversation.mjs <issue-comments.json> <reviews.json> <review-comments.json> <out.md> [pr-author]')
     return 2
   }
-  const [issueComments, reviews, reviewComments, out] = argv
-  writeFileSync(out, conversationMarkdown(pages(issueComments), pages(reviews), pages(reviewComments)))
+  const [issueComments, reviews, reviewComments, out, prAuthor = ''] = argv
+  writeFileSync(out, conversationMarkdown(pages(issueComments), pages(reviews), pages(reviewComments), prAuthor))
   return 0
 }
 

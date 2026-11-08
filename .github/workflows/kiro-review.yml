@@ -18,6 +18,9 @@
 #   reads inside the review root (this workspace) and deny .git, .env files, writes, shell, web, MCP and
 #   sub-agents. Nothing is pre-trusted on the command line, so any call outside those rules needs an approval
 #   that headless mode refuses. No MCP config is loaded.
+# - The review job's token can read contents and pull requests (to fetch the PR's comments, reviews and inline
+#   comments); it reaches only the step that prepares the inputs, never the Kiro step. That conversation is text
+#   from anyone who can comment, quoted and capped by scripts/kiro-review/conversation.mjs and read as data.
 # - Two jobs: `review` (the secret, read-only token, writes nothing on GitHub) and `post` (writes the comment,
 #   no secret). The comment is built by scripts/kiro-review/comment.mjs, which refuses text that looks like a
 #   credential, strips HTML and images and breaks @-mentions; GitHub also drops a job output that
@@ -102,6 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           # Workspace configuration a PR could add, and that Kiro might load, is removed before Kiro starts.
           rm -rf pr/.kiro pr/.amazonq pr/AGENTS.md
@@ -133,12 +137,14 @@ jobs:
           # follows up instead of starting over. Untrusted text, read as data and capped by conversation.mjs.
           api="$RUNNER_TEMP/api"
           mkdir -p "$api"
-          gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments" > "$api/issue-comments.json"
-          gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUMBER/reviews" > "$api/reviews.json"
-          gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUMBER/comments" > "$api/review-comments.json"
+          # A failed fetch costs only the follow-up, never the review.
+          for part in "issues/$PR_NUMBER/comments:issue-comments" "pulls/$PR_NUMBER/reviews:reviews" "pulls/$PR_NUMBER/comments:review-comments"; do
+            gh api --paginate --slurp "repos/$REPO/${part%%:*}" > "$api/${part##*:}.json" \
+              || { echo "::warning title=Kiro review::could not read ${part%%:*}; the review runs without it"; echo '[]' > "$api/${part##*:}.json"; }
+          done
           if [ -f trusted/scripts/kiro-review/conversation.mjs ]; then
             node trusted/scripts/kiro-review/conversation.mjs \
-              "$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json" data/conversation.md
+              "$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json" data/conversation.md "$PR_AUTHOR"
           else
             # The default branch predates conversation.mjs (the PR that adds it).
             echo 'No conversation available to this review.' > data/conversation.md
