@@ -345,6 +345,14 @@ class WebBuildRequiredError extends Error {
   }
 }
 
+/** A string partition key and sort key. */
+function stringKeys(partition: string, sort: string): { partitionKey: dynamodb.Attribute; sortKey: dynamodb.Attribute } {
+  return {
+    partitionKey: { name: partition, type: dynamodb.AttributeType.STRING },
+    sortKey: { name: sort, type: dynamodb.AttributeType.STRING },
+  };
+}
+
 /** The ARN of a SEO-stack state machine, by its fixed name (no cross-stack reference: the SEO stack depends on this one). */
 function seoStateMachineArn(stack: cdk.Stack, name: string): string {
   return stack.formatArn({ service: 'states', resource: 'stateMachine', resourceName: name, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME });
@@ -413,24 +421,9 @@ export class CitationAnalysisStack extends cdk.Stack {
         // citing_providers, citation_count, and last_updated alongside keyword.
         {
           indexName: 'UrlIndex',
-          partitionKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
-          sortKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+          ...stringKeys('normalized_url', 'keyword'),
         },
       ],
-    });
-
-    // DynamoDB Table: KeywordRunKpis (2.44.0)
-    // One row per (keyword, run) with the additive counts every KPI in
-    // shared/kpi_engine.py is computed from (shared/kpi_tally.py), written by
-    // DeduplicateCitations when the keyword's run completes. History reports
-    // (trends, overview, group KPIs, insights) sum these rows instead of
-    // re-reading every answer, so a 365-day window of 100 keywords is whole.
-    // Derived data: a missing row falls back to the raw answers, and the
-    // Deduplication Lambda's `backfill_keyword_run_kpis` action rebuilds it.
-    const keywordRunKpisTable = citationAnalysisTable(this, 'KeywordRunKpisTable', {
-      tableName: 'CitationAnalysis-KeywordRunKpis',
-      partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'run_timestamp', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: CrawledContent
@@ -482,6 +475,19 @@ export class CitationAnalysisStack extends cdk.Stack {
     const keywordGroupsTable = citationAnalysisTable(this, 'KeywordGroupsTable', {
       tableName: 'CitationAnalysis-KeywordGroups',
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+    });
+
+    // DynamoDB Table: KeywordRunKpis (2.44.0)
+    // One row per (keyword, run) with the additive counts every KPI in
+    // shared/kpi_engine.py is computed from (shared/kpi_tally.py), written by
+    // DeduplicateCitations when the keyword's run completes. History reports
+    // (trends, overview, group KPIs, insights) sum these rows instead of
+    // re-reading every answer, so a 365-day window of 100 keywords is whole.
+    // Derived data: a missing row falls back to the raw answers, and the
+    // Deduplication Lambda's `backfill_keyword_run_kpis` action rebuilds it.
+    const keywordRunKpisTable = citationAnalysisTable(this, 'KeywordRunKpisTable', {
+      tableName: 'CitationAnalysis-KeywordRunKpis',
+      ...stringKeys('keyword', 'run_timestamp'),
     });
 
     // DynamoDB Table: ResearchTemplates
