@@ -14,11 +14,14 @@ import { hasHistory } from './backlinksScope';
 const SUBFOLDER_NOTE = 'A subfolder has totals only: backlinks and referring domains counted from its URLs, likely spam included.';
 const PAGE_NOTE = 'An exact page has no history: DataForSEO keeps backlink history per hostname.';
 const HISTORY_FAILED_NOTE = 'The history could not be loaded this time; search again in a few minutes to retry it.';
+const HISTORY_LIMIT_NOTE = 'The history was not loaded: you have reached today\'s limit of paid DataForSEO calls. It resets at midnight UTC.';
 
 function ScopeNote({ overview }: { readonly overview: BacklinksOverviewResponse }) {
   if (overview.scope === 'subfolder') return <p className="text-xs text-gray-500">{SUBFOLDER_NOTE}</p>;
   if (overview.scope === 'exact_url') return <p className="text-xs text-gray-500">{PAGE_NOTE}</p>;
-  if (overview.history_failed) return <p className="text-xs text-amber-700">{HISTORY_FAILED_NOTE}</p>;
+  if (overview.history_failed) {
+    return <p className="text-xs text-amber-700">{overview.history_limit_reached === true ? HISTORY_LIMIT_NOTE : HISTORY_FAILED_NOTE}</p>;
+  }
   if (overview.scope === 'domain') {
     return <p className="text-xs text-gray-500">Metrics exclude subdomains; the charts include them (DataForSEO keeps history per hostname).</p>;
   }

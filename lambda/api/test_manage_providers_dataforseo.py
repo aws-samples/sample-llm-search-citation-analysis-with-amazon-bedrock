@@ -287,3 +287,15 @@ class TestDailyCallLimit:
         status, _body = invoke(providers_api, event)
 
         assert (status, aws.table.update_item.called) == (403, False)
+
+    def test_audits_who_changed_the_limit_and_from_what(self, providers_api, aws, monkeypatch):
+        monkeypatch.setenv('DYNAMODB_TABLE_MCP_STATE', 'test-mcp-state')
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'dataforseo', 'daily_call_limit': 100}}
+
+        _put(providers_api, 'dataforseo', {'daily_call_limit': 40})
+
+        audit = aws.table.put_item.call_args.kwargs['Item']
+        assert {key: audit[key] for key in ('pk', 'tool', 'operation', 'outcome', 'previous_limit', 'limit')} == {
+            'pk': 'audit#admin@example.com', 'tool': 'settings', 'operation': 'PUT /api/providers/dataforseo',
+            'outcome': 'saved', 'previous_limit': 100, 'limit': 40,
+        }

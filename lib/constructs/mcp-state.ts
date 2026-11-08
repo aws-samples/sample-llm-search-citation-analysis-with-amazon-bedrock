@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import type * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 
@@ -13,6 +14,18 @@ import { Construct } from 'constructs';
  */
 
 export const MCP_STATE_TABLE_NAME = 'CitationAnalysis-McpState';
+
+/**
+ * Lets `grantee` write audit records of spend and settings calls (`lambda/shared/spend_audit.py`) to the MCP state
+ * table, by name: put only, and only `audit#` items, so it never reads, changes or deletes one (tenet 6, D4).
+ */
+export function grantAuditPut(scope: Construct, grantee: iam.IGrantable): void {
+  grantee.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({
+    actions: ['dynamodb:PutItem'],
+    resources: [cdk.Arn.format({ service: 'dynamodb', resource: 'table', resourceName: MCP_STATE_TABLE_NAME }, cdk.Stack.of(scope))],
+    conditions: { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['audit#*'] } },
+  }));
+}
 const MCP_LIMITS_CONTEXT = 'mcpLimits';
 
 /** Per-caller limits of the spend tools; the keys of the `mcpLimits` CDK context and of `MCP_LIMITS`. */

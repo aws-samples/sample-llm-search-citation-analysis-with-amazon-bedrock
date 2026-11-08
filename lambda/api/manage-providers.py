@@ -32,7 +32,7 @@ from shared.ai_clients import (
     perplexity_agent_payload,
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
-from shared.auth import ADMIN_GROUP, require_group
+from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
 from shared.config import (
     SEO_DAILY_CALL_LIMIT_ATTRIBUTE,
     SEO_DAILY_CALL_LIMIT_MAX,
@@ -58,7 +58,8 @@ from shared.provider_models import (
     is_valid_model_id,
 )
 from shared.request_deadline import current_deadline
-from shared.utils import get_timestamp
+from shared.spend_audit import audit_item, put_audit
+from shared.utils import get_timestamp, utc_now
 from shared.web_search_gateway import (
     WebSearchGatewayError,
     gateway_url,
@@ -378,8 +379,13 @@ def save_provider_enabled(provider_id: str, enabled: bool) -> bool:
     return True
 
 
-def save_daily_call_limit(value: int) -> bool:
-    """Persist the daily limit of paid DataForSEO calls per user on the ``dataforseo`` row, leaving the rest alone."""
+def save_daily_call_limit(value: int, actor: str) -> bool:
+    """Persist the daily limit of paid DataForSEO calls per user on the ``dataforseo`` row, leaving the rest alone.
+
+    The change is audited (D4): who, when, the limit before and after, in ``CitationAnalysis-McpState`` with the
+    spend calls it governs (``shared.spend_audit``).
+    """
+    previous = seo_daily_call_limit(get_provider_config(DATAFORSEO))
     try:
         dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(
             Key={'provider_id': DATAFORSEO},
@@ -390,6 +396,12 @@ def save_daily_call_limit(value: int) -> bool:
     except Exception:
         logger.exception("Error saving the daily SEO call limit")
         return False
+    audit_table = os.environ.get('DYNAMODB_TABLE_MCP_STATE')
+    if audit_table:
+        put_audit(dynamodb.Table(audit_table), audit_item(
+            actor, 'settings', f'PUT /api/providers/{DATAFORSEO}', 'saved', utc_now(),
+            reason=f'daily_call_limit {previous} -> {value}', previous_limit=previous, limit=value,
+        ))
     return True
 
 
@@ -1214,7 +1226,9 @@ def _save_update(update: _ProviderUpdate, event: dict) -> dict | None:
         saved.append('enabled')
     if update.set_model and not save_provider_model(update.provider_id, update.model):
         return _save_failure('Failed to save model', saved, event)
-    if update.daily_call_limit is not None and not save_daily_call_limit(update.daily_call_limit):
+    if update.daily_call_limit is not None and not save_daily_call_limit(
+        update.daily_call_limit, get_caller_identity(event) or 'unknown',
+    ):
         return _save_failure('Failed to save the daily call limit', saved, event)
     if update.proven:
         record_provider_success(dynamodb.Table(PROVIDER_CONFIG_TABLE), update.provider_id)

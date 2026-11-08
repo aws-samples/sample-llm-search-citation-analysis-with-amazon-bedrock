@@ -139,7 +139,8 @@ def test_audits_each_paid_request_with_who_what_how_and_its_calls(monkeypatch, t
     assert [(item['pk'], item['tool'], item['operation'], item['outcome'], item['calls'], item.get('reason'))
             for item in limit.audit_items()] == [
         (f'audit#{USER}', 'seo-api', 'POST /api/seo/keywords/research', 'http_200', 2, None),
-        (f'audit#{USER}', 'seo-api', 'POST /api/seo/keywords/research', 'limit_reached', 1, 'daily limit 3'),
+        (f'audit#{USER}', 'seo-api', 'POST /api/seo/keywords/research', 'http_429', 1,
+         'daily limit of 3 calls reached: a billed call was not sent'),
     ]
 
 

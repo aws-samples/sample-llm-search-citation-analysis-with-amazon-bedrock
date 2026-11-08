@@ -39,9 +39,13 @@ One daily limit of paid DataForSEO calls per user, set in Settings, for every cl
   it resets. MCP's `estimate_seo_*` shows that budget under `limits` and gives no confirmation token when the lookup
   could make more calls than are left. MCP keeps no SEO counter of its own.
 - **Every paid one-off SEO request writes an audit record** to `CitationAnalysis-McpState` (365 days): who, which
-  route, how it ended (`http_<status>` or `limit_reached`) and how many billed calls it made. The router may only
-  put `audit#` items there. MCP and the router build the record with the same code (`shared/spend_audit.py`).
-  This narrows the D4 gap in TENETS.md.
+  route, the HTTP status it answered, how many billed calls it made and, when the limit refused a call, why. The
+  router may only put `audit#` items there. MCP and the router build the record with the same code
+  (`shared/spend_audit.py`). An Admin's change to the limit is audited the same way (who, when, the limit before
+  and after; `tool: settings`). This narrows the D4 gap in TENETS.md.
+- **A backlinks overview whose history the limit stopped** keeps the paid summary and answers 200 with
+  `history_failed: true` and `history_limit_reached: true`. It is not cached, so a user with calls left gets the
+  whole overview. The Backlinks page says the daily limit was reached instead of asking for a retry.
 - README, `docs/seo.md` (Who can do what) and `docs/mcp.md` (Limits per user) describe the shared limit.
 
 ## [2.46.0] - 2026-11-08

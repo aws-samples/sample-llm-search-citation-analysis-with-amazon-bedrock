@@ -12,7 +12,7 @@ import {
   GOOGLE_AI_OVERVIEW_PROVIDER, providerSearchEnvironment, providerSearchFunction, type ProviderSearchResourceNames
 } from './constructs/provider-search';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
-import { MCP_STATE_TABLE_NAME } from './constructs/mcp-state';
+import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { SeoApi } from './constructs/seo-api';
 import { SeoCallbacks } from './constructs/seo-callbacks';
 import { SEO_JOBS_FUNCTION_NAME, type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
@@ -184,9 +184,7 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
     allowWhere(router, ['dynamodb:GetItem'], [providerConfig.tableArn], {
       'ForAllValues:StringEquals': { 'dynamodb:LeadingKeys': ['dataforseo'] },
     });
-    allowWhere(router, ['dynamodb:PutItem'], [
-      cdk.Arn.format({ service: 'dynamodb', resource: 'table', resourceName: MCP_STATE_TABLE_NAME }, this),
-    ], { 'ForAllValues:StringLike': { 'dynamodb:LeadingKeys': ['audit#*'] } });
+    grantAuditPut(this, router);
   }
 
   /**

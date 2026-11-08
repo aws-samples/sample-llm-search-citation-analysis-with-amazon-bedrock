@@ -151,9 +151,10 @@ def _audit(event: dict[str, Any], meter: _Meter, status: int) -> None:
     if not table_name:
         return
     operation = f'POST {str(event.get("path") or "").rstrip("/")}'
-    outcome = 'limit_reached' if meter.refused else f'http_{status}'
-    item = audit_item(meter.who, AUDIT_TOOL, operation, outcome, utc_now(), calls=meter.calls,
-                      reason=f'daily limit {meter.allowed}' if meter.refused else None)
+    # The outcome is the HTTP status the caller got: a request the limit cut short may still answer 200 with what
+    # its earlier calls paid for (a backlinks summary without its history), and says so.
+    reason = f'daily limit of {meter.allowed} calls reached: a billed call was not sent' if meter.refused else None
+    item = audit_item(meter.who, AUDIT_TOOL, operation, f'http_{status}', utc_now(), calls=meter.calls, reason=reason)
     put_audit(boto3.resource('dynamodb').Table(table_name), item)
 
 
