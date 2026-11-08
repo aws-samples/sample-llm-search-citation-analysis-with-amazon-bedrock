@@ -92,7 +92,7 @@ waits for a second maintainer), PASS when there are none.
 
 #### Since the last review
 
-- <one line per point from your previous review: resolved / partly resolved / still open / settled by a maintainer,
+- <one line per point from your previous review: resolved / partly resolved / still open / settled by a maintainer / settled by the author,
   and why>
 
 (Write "First review." when `data/conversation.md` holds no previous review of yours.)
