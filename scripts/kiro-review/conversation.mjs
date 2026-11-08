@@ -70,7 +70,7 @@ export function entries(issueComments, reviews, reviewComments) {
     ...reviews.map((r) => ({
       ...r,
       kind: `review (${String(r.state ?? '').toLowerCase()})`,
-      at: r.submitted_at 
+      at: r.submitted_at ?? r.created_at ?? '' 
     })),
     ...reviewComments.map((c) => ({
       ...c,

@@ -84,7 +84,8 @@ many speculative ones. Style nits that the linters already enforce are not findi
 ### Verdict: PASS | CONCERNS | BLOCKING
 
 One or two sentences: what the change does and your overall judgment. Use BLOCKING only when at least one
-blocking finding exists, CONCERNS when there are only non-blocking findings, PASS when there are none.
+blocking finding exists, CONCERNS when there are only non-blocking findings or a point is "settled by the author" (it
+waits for a second maintainer), PASS when there are none.
 
 **Tenets touched:** <ids, e.g. 2, D1, or none> (PR says: <the PR's line, or "missing">; <agrees | differs: why>)
 
