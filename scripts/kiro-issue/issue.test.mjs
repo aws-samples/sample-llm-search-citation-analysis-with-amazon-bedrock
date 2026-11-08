@@ -123,3 +123,13 @@ test('a horizontal rule inside the reply is kept; only the one before a footer g
   assert.equal(withoutFrame('A\n\n---\n\nB'), 'A\n\n---\n\nB')
   assert.equal(withoutFrame(POSTED), 'Which market?')
 })
+
+test('a marker the triager copied into its answer is dropped too, so the comment starts with the only one', () => {
+  const body = buildIssueComment({
+    label: 'question',
+    tenets: 'n/a',
+    reply: `${MARKER}\nWhich market?`,
+  })
+  assert.equal(body.split(MARKER).length - 1, 1)
+  assert.doesNotMatch(body, /&lt;!--/)
+})

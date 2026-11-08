@@ -48,7 +48,7 @@ const FOOTER_LINE = /^(?:<|&lt;)sub>Triage:/
  * carries exactly one banner and one footer.
  */
 export function withoutFrame(text) {
-  const lines = text.replace(MARKER, '').split('\n').filter((line) => line.trim() !== BANNER)
+  const lines = text.replaceAll(MARKER, '').split('\n').filter((line) => line.trim() !== BANNER)
   const kept = []
   for (const line of lines) {
     if (FOOTER_LINE.test(line.trim())) {
