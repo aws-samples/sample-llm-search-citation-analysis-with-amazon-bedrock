@@ -43,6 +43,44 @@ export function buildIamProvider(overrides: Partial<ProviderConfig> = {}): Provi
   });
 }
 
+/** What the DataForSEO rows send before a login is stored: no model, no key, never run. */
+const NO_SEO_LOGIN: Partial<ProviderConfig> = {
+  model: '',
+  model_configurable: false,
+  docs_url: 'https://app.dataforseo.com/api-access',
+  configured: false,
+  masked_key: null,
+  last_updated: null,
+  last_success_at: undefined,
+};
+
+/** The DataForSEO credential (`type: 'seo'`): a login and a password, no model. */
+export function buildDataForSeoProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return buildProviderConfig({
+    ...NO_SEO_LOGIN,
+    id: 'dataforseo',
+    name: 'DataForSEO',
+    description: 'Search volume, keyword difficulty and Google results pages',
+    type: 'seo',
+    credential_fields: ['login', 'password'],
+    ...overrides,
+  });
+}
+
+/** The Google AI Overviews engine, which uses the DataForSEO login and stores no key. */
+export function buildAiOverviewProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return buildProviderConfig({
+    ...NO_SEO_LOGIN,
+    id: 'google_ai_overview',
+    name: 'Google AI Overviews',
+    description: 'The AI Overview on a Google results page (via DataForSEO)',
+    type: 'llm',
+    credential_from: 'dataforseo',
+    enabled: false,
+    ...overrides,
+  });
+}
+
 /**
  * Claude as production found it on 2026-08-19: out of credit, still nominally
  * enabled, and failing every request since 10:00Z.

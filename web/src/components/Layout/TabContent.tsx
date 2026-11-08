@@ -10,6 +10,7 @@ import { AlertsPanel } from '../Dashboard/AlertsPanel';
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
+import { SeoDashboardCards } from '../Dashboard/SeoDashboardCards';
 import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule, AnalysisScope
@@ -39,6 +40,7 @@ const PromptInsights = lazy(() => import('../Insights').then(module => ({ defaul
 const CitationGaps = lazy(() => import('../Insights').then(module => ({ default: module.CitationGaps })));
 const Recommendations = lazy(() => import('../Insights').then(module => ({ default: module.Recommendations })));
 const ContentStudioView = lazy(() => import('../ContentStudio').then(module => ({ default: module.ContentStudioView })));
+const SeoRouter = lazy(() => import('../Seo/SeoRouter').then(module => ({ default: module.SeoRouter })));
 
 interface TabContentProps {
   readonly activeTab: TabType;
@@ -205,6 +207,7 @@ function DashboardContent({
         {combined && <PanelLoadError panel="citations" panels={panels} onRetry={retryPanel} spacingClassName="mb-4 " />}
         <DashboardCharts citations={view.citations} />
       </section>
+      <SeoDashboardCards />
       <AlertsPanel />
       <QuickActions citations={view.citations} keywords={keywords} setActiveTab={setActiveTab} />
     </ErrorBoundary>
@@ -258,6 +261,7 @@ export function TabContent(props: TabContentProps) {
     ),
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
+    seo: <SeoRouter />,
   };
 
   const component = tabComponents[activeTab];

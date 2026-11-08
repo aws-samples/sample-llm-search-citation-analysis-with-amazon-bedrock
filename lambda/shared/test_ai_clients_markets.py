@@ -5,7 +5,7 @@ Tests for the 2.37.0 provider refresh in ``shared.ai_clients``.
   hint, and leaves the body untouched without one (the query never changes)
 - the clients' per-attempt timeouts, and the research worker's override
 - a 4xx answer is not retried (it cannot succeed when sent again)
-- Claude: the ``allowed_callers`` fallback and the retry of in-body
+- Claude: direct callers on every request and the retry of in-body
   web search errors (raw shapes in ``testing.provider_response_fixtures``)
 """
 
@@ -24,7 +24,6 @@ from shared.ai_clients import ClaudeClient, ClaudeSearchError, GeminiClient, Ope
 from testing.provider_response_fixtures import (
     CHILE_INSTRUCTIONS,
     CHILE_USER_LOCATION,
-    CLAUDE_CALLERS_REFUSAL,
     CLAUDE_DIRECT_RESPONSE,
     CLAUDE_DYNAMIC_FILTERING_RESPONSE,
     build_market,
@@ -95,10 +94,17 @@ class TestOpenAIMarketPayload:
 
 
 class TestPerplexityMarketPayload:
-    def test_adds_the_market_instructions(self):
+    def test_puts_the_market_instructions_ahead_of_the_citation_instruction(self):
         payload = ai_clients.perplexity_agent_payload(_QUERY, 'perplexity/sonar', build_market())
 
-        assert payload['instructions'] == CHILE_INSTRUCTIONS
+        assert payload['instructions'] == f'{CHILE_INSTRUCTIONS}\n\n{ai_clients.PERPLEXITY_CITATION_INSTRUCTION}'
+
+    def test_asks_for_inline_markers_when_there_is_no_market(self):
+        payload = ai_clients.perplexity_agent_payload(_QUERY, 'perplexity/sonar')
+
+        assert payload['instructions'] == (
+            'Cite your sources inline using bracketed markers, one source per bracket, like [1][2].'
+        )
 
     def test_gives_the_web_search_tool_the_location_with_coordinates(self):
         tool, = ai_clients.perplexity_agent_payload(_QUERY, 'perplexity/sonar', build_market())['tools']
@@ -143,20 +149,21 @@ class TestClaudeMarketPayload:
     def test_gives_the_web_search_tool_the_approximate_user_location(self):
         tool, = ai_clients.claude_web_search_payload(_QUERY, _CLAUDE, market=build_market())['tools']
 
-        assert tool == {'type': 'web_search_20260318', 'name': 'web_search', 'user_location': CHILE_USER_LOCATION}
+        assert tool == {
+            'type': 'web_search_20260318', 'name': 'web_search', 'allowed_callers': ['direct'],
+            'user_location': CHILE_USER_LOCATION,
+        }
 
     def test_never_caps_the_searches_or_drops_the_results(self):
         tool, = ai_clients.claude_web_search_payload(_QUERY, _CLAUDE)['tools']
 
         assert ('max_uses' in tool, 'response_inclusion' in tool) == (False, False)
 
-    def test_names_the_direct_callers_only_when_asked(self):
-        payloads = [
-            ai_clients.claude_web_search_payload(_QUERY, _CLAUDE, allowed_callers=callers)
-            for callers in (None, ai_clients.CLAUDE_DIRECT_CALLERS)
-        ]
+    @pytest.mark.parametrize('market', [None, build_market()], ids=['no-market', 'market'])
+    def test_names_the_direct_callers_with_or_without_a_market(self, market):
+        tool, = ai_clients.claude_web_search_payload(_QUERY, _CLAUDE, market=market)['tools']
 
-        assert [payload['tools'][0].get('allowed_callers') for payload in payloads] == [None, ['direct']]
+        assert tool['allowed_callers'] == ['direct']
 
     def test_keeps_the_query_as_the_only_user_turn(self):
         payload = ai_clients.claude_web_search_payload(_QUERY, _CLAUDE, market=build_market())
@@ -169,7 +176,7 @@ class TestClientsSendTheMarket:
         (OpenAIClient('k'), lambda client, market: client.responses_with_web_search(_QUERY, market=market),
          lambda body: body['instructions']),
         (PerplexityClient('k'), lambda client, market: client.agent_response(_QUERY, market),
-         lambda body: body['instructions']),
+         lambda body: body['instructions'].split('\n\n')[0]),
         (GeminiClient('k'), lambda client, market: client.generate_content(_QUERY, market=market),
          lambda body: body['systemInstruction']['parts'][0]['text']),
         (ClaudeClient('k'), lambda client, market: client.generate_content(_QUERY, market=market),
@@ -219,35 +226,19 @@ class TestClientErrorsAreNotRetried:
         assert (result, http.post.call_count) == ({'output': []}, 2)
 
 
-class TestClaudeCallersFallback:
-    def test_asks_again_with_direct_callers_when_the_model_refuses_dynamic_filtering(self, http):
-        result = _ask_claude(http, _reply(400, CLAUDE_CALLERS_REFUSAL), _reply(200, CLAUDE_DIRECT_RESPONSE))
+class TestClaudeDirectCallers:
+    def test_sends_direct_callers_when_a_run_asks_claude(self, http):
+        _ask_claude(http, _reply(200, CLAUDE_DIRECT_RESPONSE))
 
-        assert (result, _sent_callers(http.post)) == (CLAUDE_DIRECT_RESPONSE, [None, ['direct']])
+        assert _sent_callers(http.post) == [['direct']]
 
-    def test_keeps_the_location_on_the_fallback_tool(self, http):
-        _ask_claude(http, _reply(400, CLAUDE_CALLERS_REFUSAL), _reply(200, CLAUDE_DIRECT_RESPONSE), market=build_market())
-
-        assert http.post.call_args.kwargs['json']['tools'][0]['user_location'] == CHILE_USER_LOCATION
-
-    def test_falls_back_once_only(self, http):
-        with pytest.raises(ai_clients.requests.exceptions.HTTPError, match='allowed_callers'):
-            _ask_claude(http, _reply(400, CLAUDE_CALLERS_REFUSAL), _reply(400, CLAUDE_CALLERS_REFUSAL))
-
-        assert http.post.call_count == 2
-
-    def test_raises_any_other_400_without_a_fallback(self, http):
+    def test_raises_a_400_without_asking_again(self, http):
         refusal = _reply(400, {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'max_tokens too large'}})
 
         with pytest.raises(ai_clients.requests.exceptions.HTTPError, match='max_tokens too large'):
             _ask_claude(http, refusal)
 
         assert http.post.call_count == 1
-
-    def test_answers_with_dynamic_filtering_when_the_model_accepts_it(self, http):
-        result = _ask_claude(http, _reply(200, CLAUDE_DYNAMIC_FILTERING_RESPONSE))
-
-        assert (result, http.post.call_count) == (CLAUDE_DYNAMIC_FILTERING_RESPONSE, 1)
 
 
 class TestClaudeInBodySearchErrors:
@@ -271,15 +262,10 @@ class TestClaudeInBodySearchErrors:
 
         assert (_ask_claude(http, _reply(200, answer)), http.post.call_count) == (answer, 1)
 
-    def test_keeps_the_direct_callers_when_asking_again_after_a_fallback(self, http):
-        _ask_claude(
-            http,
-            _reply(400, CLAUDE_CALLERS_REFUSAL),
-            _reply(200, claude_search_error_response('too_many_requests')),
-            _reply(200, CLAUDE_DIRECT_RESPONSE),
-        )
+    def test_keeps_the_direct_callers_when_asking_again_after_a_search_error(self, http):
+        _ask_claude(http, _reply(200, claude_search_error_response('too_many_requests')), _reply(200, CLAUDE_DIRECT_RESPONSE))
 
-        assert _sent_callers(http.post) == [None, ['direct'], ['direct']]
+        assert _sent_callers(http.post) == [['direct'], ['direct']]
 
 
 class TestClaudeSearchErrorCodes:

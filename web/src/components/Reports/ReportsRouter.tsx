@@ -50,6 +50,10 @@ const SentimentReport = lazy(() =>
   import('./SentimentReport').then((m) => ({default: m.SentimentReport,})),
 );
 
+const SeoGeoReport = lazy(() =>
+  import('./SeoGeoReport').then((m) => ({default: m.SeoGeoReport,})),
+);
+
 const CustomReportBuilder = lazy(() =>
   import('./customReport/CustomReportBuilder').then((m) => ({default: m.CustomReportBuilder,})),
 );
@@ -125,6 +129,7 @@ export function ReportsRouter({ keywords }: Props) {
             path="/reports/sentiment"
             element={<SentimentReport keywords={keywords} />}
           />
+          <Route path="/reports/seo-geo" element={<SeoGeoReport />} />
           <Route path="/reports/custom/new" element={<CustomReportBuilder />} />
           <Route path="/reports/custom/:id/edit" element={<CustomReportBuilder />} />
           <Route

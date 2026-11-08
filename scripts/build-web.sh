@@ -2,7 +2,8 @@
 
 # Build the web dashboard
 # Automatically fetches API Gateway URL and Cognito IDs from CloudFormation stack,
-# and the MCP server URL and client id from CitationAnalysisMcpStack when it exists
+# and the MCP server URL and client id from CitationAnalysisMcpStack when it exists,
+# and the SEO API URL from CitationAnalysisSeoStack when it exists
 set -e
 
 echo "Building web dashboard..."
@@ -75,6 +76,22 @@ if command -v aws &> /dev/null; then
         export VITE_MCP_CLIENT_ID="$MCP_CLIENT_ID"
     else
         echo "ℹ️  MCP stack outputs not found: the AI Assistants page will say the MCP server isn't deployed"
+    fi
+
+    # SEO API (optional stack CitationAnalysisSeoStack): like VITE_API_URL, the
+    # stage URL plus /api. The SEO views say the SEO stack isn't deployed when
+    # it is missing, so a missing stack is not an error.
+    SEO_API_URL=$(aws cloudformation describe-stacks \
+        --stack-name CitationAnalysisSeoStack \
+        --query 'Stacks[0].Outputs[?OutputKey==`SeoApiUrl`].OutputValue' \
+        --output text 2>/dev/null || echo "")
+
+    if [ -n "$SEO_API_URL" ] && [ "$SEO_API_URL" != "None" ]; then
+        SEO_API_URL="${SEO_API_URL%/}/api"
+        echo "Found SEO API URL: $SEO_API_URL"
+        export VITE_SEO_API_URL="$SEO_API_URL"
+    else
+        echo "SEO stack outputs not found: the SEO views will say the SEO stack isn't deployed"
     fi
 else
     echo "⚠️  AWS CLI not found, using fallback configuration"

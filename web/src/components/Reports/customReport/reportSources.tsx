@@ -5,6 +5,9 @@ import type { CustomReportDays } from '../../../api/customReports';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 import { useGroupKpiHistory } from '../../../hooks/useGroupKpiHistory';
 import { useReportInsights } from '../../../hooks/useReportInsights';
+import {
+  useSeoGeo, type SeoGeoState
+} from '../../../hooks/useSeoGeo';
 import type { ReportScope } from '../../../types';
 import type { GroupKpiHistoryResponse } from '../../../types/domain/groupKpiHistory';
 import type { ReportInsightsResponse } from '../../../types/domain/insights';
@@ -28,7 +31,7 @@ import {
  * however many blocks read it, and not at all when none does.
  */
 
-export type SourceId = 'scope' | 'overview' | 'groupKpis' | 'competitor' | 'contentPlan' | 'deepDive' | 'insights';
+export type SourceId = 'scope' | 'overview' | 'groupKpis' | 'competitor' | 'contentPlan' | 'deepDive' | 'insights' | 'seo';
 
 /** What the reader picked on the report page. */
 interface ReportInputs {
@@ -80,6 +83,8 @@ export interface ReportSources {
   readonly deepDive: DeepDiveSource | null;
   /** The engine plays, brand portfolio and run stability of the scope. */
   readonly insights: InsightsSource | null;
+  /** `GET /api/seo/seo-geo` for the header market and the scope's keyword group (the SEO stack's API). */
+  readonly seo: SeoGeoState | null;
 }
 
 const ReportSourcesContext = createContext<ReportSources | null>(null);
@@ -237,6 +242,13 @@ function InsightsSourceLayer({
   return <SourceLayer patch={{ insights }}>{children}</SourceLayer>;
 }
 
+function SeoSourceLayer({
+  inputs, children
+}: SourceProps) {
+  const seo = useSeoGeo(inputs.scope.kind === 'group' ? inputs.scope.groupId : null);
+  return <SourceLayer patch={{ seo }}>{children}</SourceLayer>;
+}
+
 const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> = {
   scope: ScopeSource,
   overview: OverviewSource,
@@ -245,6 +257,7 @@ const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> 
   contentPlan: ContentPlanSource,
   deepDive: DeepDiveSourceLayer,
   insights: InsightsSourceLayer,
+  seo: SeoSourceLayer,
 };
 
 /**
@@ -252,7 +265,7 @@ const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> 
  * a new scope, which can add or drop the scoped sources, never remounts and
  * refetches them.
  */
-const SOURCE_ORDER: readonly SourceId[] = ['contentPlan', 'competitor', 'scope', 'overview', 'groupKpis', 'deepDive', 'insights'];
+const SOURCE_ORDER: readonly SourceId[] = ['contentPlan', 'competitor', 'scope', 'overview', 'groupKpis', 'deepDive', 'insights', 'seo'];
 
 interface ProviderProps {
   readonly sources: ReadonlySet<SourceId>;
@@ -272,6 +285,7 @@ export function ReportSourcesProvider({
     contentPlan: null,
     deepDive: null,
     insights: null,
+    seo: null,
   };
   const tree = SOURCE_ORDER
     .filter((id) => sources.has(id))
@@ -284,6 +298,6 @@ export function ReportSourcesProvider({
 
 /** Every mounted source has settled: the page may print. */
 export function sourcesReady(sources: ReportSources): boolean {
-  return [sources.scope, sources.overview, sources.groupKpis, sources.competitor, sources.contentPlan, sources.deepDive, sources.insights]
+  return [sources.scope, sources.overview, sources.groupKpis, sources.competitor, sources.contentPlan, sources.deepDive, sources.insights, sources.seo]
     .every((source) => source === null || source.ready);
 }

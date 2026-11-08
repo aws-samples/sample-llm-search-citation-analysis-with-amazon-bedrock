@@ -85,7 +85,7 @@ class TestWindowAndRunQueries:
         query(table, 'hotel malaga', RUN_1)
 
         assert _projection(table) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model',
+            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id',
             {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
 

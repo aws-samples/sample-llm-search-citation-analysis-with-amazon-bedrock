@@ -1,3 +1,5 @@
+import { renderHook } from '@testing-library/react';
+import { useSettingsAttention } from '../Layout/settingsAttention';
 import { vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { BrandConfig } from '../../types';
@@ -47,4 +49,9 @@ export function buildAdminMembership(overrides: Partial<AdminMembership> = {}): 
     loading: false,
     ...overrides,
   };
+}
+
+/** The sections the view last published for the sidebar's attention dots, sorted. */
+export function publishedAttention(): string[] {
+  return [...renderHook(() => useSettingsAttention()).result.current].sort((left, right) => left.localeCompare(right));
 }

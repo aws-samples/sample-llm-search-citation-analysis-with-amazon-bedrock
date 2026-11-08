@@ -5,7 +5,7 @@ import {
   getErrorMessage, isAbortError 
 } from '../../infrastructure';
 import {
-  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
+  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule, type SchedulePayload
 } from '../../api/executions';
 import type {
   Keyword, Schedule, ScheduleFormData 
@@ -25,6 +25,13 @@ import {
 import {
   defaultScheduleFormData, formDataFromSchedule, toSchedulePayload, validateScheduleFormData 
 } from './scheduleFormModel';
+import {
+  kindOf, paidRunNotice
+} from './scheduleKinds';
+import { RankTrackerScheduleList } from './RankTrackerScheduleList';
+import {
+  PaidScheduleConfirm, type PaidConfirmation
+} from './PaidScheduleConfirm';
 
 interface ScheduleManagerProps {
   schedules: Schedule[];
@@ -50,6 +57,7 @@ export const ScheduleManager = ({
   const [saving, setSaving] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Schedule | null>(null);
+  const [paidConfirmation, setPaidConfirmation] = useState<PaidConfirmation | null>(null);
   const {
     alertModal, showAlert, closeAlert
   } = useAlertModal();
@@ -102,22 +110,21 @@ export const ScheduleManager = ({
     setSchedules(await fetchSchedules());
   };
 
-  const saveSchedule = async () => {
-    if (editor === null) return;
-    const problem = validateScheduleFormData(formData);
-    if (problem !== null) {
-      showAlert('Check the form', problem, 'error');
-      return;
-    }
-
+  /** `confirmed`: the Admin said yes to the paid confirmation, which the API requires for a paid schedule. */
+  const persistSchedule = async (target: Editor, confirmed = false) => {
     setSaving(true);
     try {
-      const payload = toSchedulePayload(formData);
-      if (editor.mode === 'create') {
+      const payload: SchedulePayload = confirmed
+        ? {
+          ...toSchedulePayload(formData),
+          confirm_paid: true,
+        }
+        : toSchedulePayload(formData);
+      if (target.mode === 'create') {
         await createSchedule(payload);
         showAlert('Success', 'Schedule created successfully', 'success');
       } else {
-        await updateSchedule(editor.schedule.id, payload);
+        await updateSchedule(target.schedule.id, payload);
         showAlert('Success', 'Schedule updated successfully', 'success');
       }
       closeEditor();
@@ -130,17 +137,51 @@ export const ScheduleManager = ({
     }
   };
 
-  const runNow = async (schedule: Schedule) => {
+  const saveSchedule = () => {
+    if (editor === null) return;
+    const problem = validateScheduleFormData(formData);
+    if (problem !== null) {
+      showAlert('Check the form', problem, 'error');
+      return;
+    }
+    const notice = paidRunNotice(formData.kind);
+    if (notice === null || !formData.enabled) {
+      void persistSchedule(editor);
+      return;
+    }
+    setPaidConfirmation({
+      title: 'Save a paid schedule?',
+      message: `"${formData.display_name.trim()}" runs on its own until it is disabled or deleted. ${notice} Continue?`,
+      confirmText: 'Save',
+      action: () => persistSchedule(editor, true),
+    });
+  };
+
+  const startRun = async (schedule: Schedule, confirmed = false) => {
     setRunningId(schedule.id);
     try {
-      const result = await runSchedule(schedule.id);
-      showAlert('Analysis started', result.message, 'success');
+      const result = await runSchedule(schedule.id, confirmed);
+      showAlert(kindOf(schedule) === 'analysis' ? 'Analysis started' : 'Snapshots started', result.message, 'success');
     } catch (err) {
       console.error('Error running schedule:', err);
       showAlert('Error', getErrorMessage(err, 'schedules'), 'error');
     } finally {
       setRunningId(null);
     }
+  };
+
+  const runNow = (schedule: Schedule) => {
+    const notice = paidRunNotice(kindOf(schedule));
+    if (notice === null) {
+      void startRun(schedule);
+      return;
+    }
+    setPaidConfirmation({
+      title: 'Run now?',
+      message: `${notice} Continue?`,
+      confirmText: 'Run',
+      action: () => startRun(schedule, true),
+    });
   };
 
   const confirmDelete = async () => {
@@ -213,6 +254,10 @@ export const ScheduleManager = ({
         confirmText="Delete"
         confirmVariant="danger"
       />
+
+      <PaidScheduleConfirm pending={paidConfirmation} onClose={() => setPaidConfirmation(null)} />
+
+      <RankTrackerScheduleList />
 
       <AlertModal {...alertModal} onClose={closeAlert} />
     </div>

@@ -5,6 +5,8 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { Construct } from 'constructs';
+import { bedrockTierEnv } from './bedrock-invoke';
+import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion } from './web-search';
 
 /**
  * One search Lambda per provider, called in parallel for every keyword.
@@ -21,7 +23,7 @@ import { Construct } from 'constructs';
 
 type ProviderType = 'llm' | 'search';
 
-interface SearchProvider {
+export interface SearchProvider {
   /** Provider id as `lambda/search/handler.py` names it in `providers`. */
   readonly id: string;
   readonly type: ProviderType;
@@ -39,6 +41,13 @@ interface SearchProvider {
    * per-minute limit needs this too. Omitted: not paced.
    */
   readonly defaultMinIntervalSeconds?: number;
+  /**
+   * Every invocation makes a billed call that the handler never retries
+   * itself, so the workflow must not re-run a failed invocation either: a
+   * crash or timeout after the provider answered would pay again. Only the
+   * slot-wait retry (the function never ran) applies. Omitted: retried.
+   */
+  readonly billedOnce?: boolean;
 }
 
 const SEARCH_PROVIDERS: readonly SearchProvider[] = [
@@ -77,6 +86,40 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
   // Amazon Bedrock Web Search through an AgentCore Gateway. Not benchmarked yet.
   { id: 'agentcore', type: 'search', defaultConcurrency: 5 },
 ];
+
+/**
+ * Google AI Overviews through DataForSEO's SERP API (an answer engine: the
+ * overview is the answer, its references the citations). Its function
+ * `CitationAnalysis-Search-google_ai_overview` lives in the SEO stack
+ * (`lib/seo-stack.ts`) because the main stack sits at CloudFormation's
+ * 500-resource limit; the main workflow calls it by name (see
+ * `readExternalSearchProviders`). Not benchmarked; DataForSEO allows 2,000
+ * requests a minute per account, so 5 in flight is about the other paid
+ * providers' level rather than a DataForSEO limit.
+ */
+export const GOOGLE_AI_OVERVIEW_PROVIDER: SearchProvider = {
+  id: 'google_ai_overview', type: 'llm', defaultConcurrency: 5, billedOnce: true,
+};
+
+/** CDK context flag that adds the {@link GOOGLE_AI_OVERVIEW_PROVIDER} branch to the main workflow. */
+const SEO_ENGINE_CONTEXT = 'seoEngine';
+
+/**
+ * The providers whose function another stack owns: Google AI Overviews when
+ * CDK context `seoEngine` is `true` (`-c seoEngine=true`, or a boolean in
+ * cdk.json), none otherwise. Off by default so the workflow never calls a
+ * function before the SEO stack that holds it is deployed; a branch whose
+ * function is missing fails into a counted failed provider row on every keyword.
+ */
+export function readExternalSearchProviders(scope: Construct): readonly SearchProvider[] {
+  const raw: unknown = scope.node.tryGetContext(SEO_ENGINE_CONTEXT);
+  return raw === true || raw === 'true' ? [GOOGLE_AI_OVERVIEW_PROVIDER] : [];
+}
+
+/** `CitationAnalysis-Search-<id>`: the name the workflow calls a provider's function by. */
+function providerSearchFunctionName(providerId: string): string {
+  return `CitationAnalysis-Search-${providerId}`;
+}
 
 const PROVIDER_CONCURRENCY_CONTEXT = 'providerConcurrency';
 const PROVIDER_PACING_CONTEXT = 'providerPacing';
@@ -206,16 +249,53 @@ export function readProviderPacing(scope: Construct): ReadonlyMap<string, number
   );
 }
 
-export interface ProviderSearchProps {
+/** The names a provider search function's environment carries (`providerSearchEnvironment`). */
+export interface ProviderSearchResourceNames {
+  readonly searchResultsTable: string;
+  readonly brandConfigTable: string;
+  readonly providerConfigTable: string;
+  readonly rawResponsesBucket: string;
+}
+
+/**
+ * The environment every provider search function shares (`lambda/search/handler.py`
+ * reads it): the tables and bucket it writes, the secrets prefix, the Web
+ * Search gateway location and the Bedrock tiers of brand extraction.
+ */
+export function providerSearchEnvironment(scope: Construct, names: ProviderSearchResourceNames): Record<string, string> {
+  return {
+    DYNAMODB_TABLE_SEARCH_RESULTS: names.searchResultsTable,
+    DYNAMODB_TABLE_BRAND_CONFIG: names.brandConfigTable,
+    DYNAMODB_TABLE_PROVIDER_CONFIG: names.providerConfigTable,
+    SECRETS_PREFIX: 'citation-analysis/',
+    RAW_RESPONSES_BUCKET: names.rawResponsesBucket,
+    WEB_SEARCH_REGION: readWebSearchRegion(scope),
+    WEB_SEARCH_GATEWAY_URL_PARAMETER,
+    ...bedrockTierEnv,
+  };
+}
+
+/** What one provider search function is built from. */
+export interface ProviderFunctionProps {
   /** Everything the provider functions share with the single search Lambda they replace. */
   readonly code: lambda.Code;
   readonly role: iam.IRole;
   readonly layers: lambda.ILayerVersion[];
+  /** From {@link providerSearchEnvironment}. */
   readonly environment: Record<string, string>;
+}
+
+export interface ProviderSearchProps extends ProviderFunctionProps {
   /** From {@link readProviderConcurrency}. */
   readonly concurrency: ReadonlyMap<string, number>;
   /** From {@link readProviderPacing}. */
   readonly pacing: ReadonlyMap<string, number>;
+  /**
+   * Providers whose `CitationAnalysis-Search-<id>` function another stack
+   * owns (from {@link readExternalSearchProviders}): the workflow gets their
+   * branch, called by function name, and this construct creates no resource for them.
+   */
+  readonly externalProviders?: readonly SearchProvider[];
 }
 
 interface ProviderFunction {
@@ -241,16 +321,83 @@ function failedProviderResult(provider: SearchProvider): Record<string, unknown>
   };
 }
 
-/** The ten `CitationAnalysis-Search-<id>` functions and the workflow states that call them. */
+/** A provider function's cap on calls in flight (0 = no cap) and seconds between calls (0 = not paced). */
+interface ProviderLimits {
+  readonly cap: number;
+  readonly interval: number;
+}
+
+/**
+ * `CitationAnalysis-Search-<id>`: the `lambda/search` handler for one
+ * provider, with its own 30-day log group and reserved concurrency. Built by
+ * {@link ProviderSearch} for the main stack's providers and by the SEO stack
+ * for {@link GOOGLE_AI_OVERVIEW_PROVIDER}. The construct ids are
+ * `<label>LogGroup` and `<label>Function` under `scope`.
+ */
+export function providerSearchFunction(
+  scope: Construct,
+  provider: SearchProvider,
+  props: ProviderFunctionProps,
+  limits: ProviderLimits,
+  label: string = constructLabel(provider.id),
+): lambda.Function {
+  const functionName = providerSearchFunctionName(provider.id);
+  const logGroup = new logs.LogGroup(scope, `${label}LogGroup`, {
+    logGroupName: `/aws/lambda/${functionName}`,
+    retention: logs.RetentionDays.ONE_MONTH,
+    removalPolicy: cdk.RemovalPolicy.DESTROY,
+  });
+  const { cap, interval } = limits;
+  // Only a paced provider carries the interval; the search handler reads it per request.
+  const pacingEnvironment: Record<string, string> = interval > 0
+    ? {
+      PROVIDER_MIN_INTERVAL_SECONDS: String(interval),
+    }
+    : {};
+
+  return new lambda.Function(scope, `${label}Function`, {
+    functionName,
+    runtime: lambda.Runtime.PYTHON_3_12,
+    handler: 'handler.handler',
+    code: props.code,
+    role: props.role,
+    layers: props.layers,
+    timeout: cdk.Duration.seconds(900), // 15 min max — invoked by Step Functions, not API Gateway
+    memorySize: 512,
+    description: `Query ${provider.id} with web search for one keyword; reserved concurrency caps its calls in flight`,
+    logGroup,
+    // 0 = no cap: the function draws on the account's unreserved pool.
+    reservedConcurrentExecutions: cap === 0 ? undefined : cap,
+    environment: {
+      ...props.environment,
+      PROVIDER_THROTTLE_EXTRA_ATTEMPTS: String(PROVIDER_THROTTLE_EXTRA_ATTEMPTS),
+      ...pacingEnvironment,
+    },
+  });
+}
+
+/**
+ * The ten `CitationAnalysis-Search-<id>` functions and the workflow states
+ * that call them, plus a branch per external provider whose function another
+ * stack owns (looked up by name, no resource here).
+ */
 export class ProviderSearch extends Construct {
   private readonly providerFunctions: ProviderFunction[];
 
   constructor(scope: Construct, id: string, props: ProviderSearchProps) {
     super(scope, id);
-    this.providerFunctions = SEARCH_PROVIDERS.map((provider) => {
+    const ownFunctions = SEARCH_PROVIDERS.map((provider) => {
       const label = constructLabel(provider.id);
       return { provider, label, handler: this.providerFunction(provider, label, props) };
     });
+    const externalFunctions = (props.externalProviders ?? []).map((provider) => {
+      const label = constructLabel(provider.id);
+      const handler = lambda.Function.fromFunctionName(
+        this, `${label}ExternalFunction`, providerSearchFunctionName(provider.id)
+      );
+      return { provider, label, handler };
+    });
+    this.providerFunctions = [...ownFunctions, ...externalFunctions];
   }
 
   /**
@@ -282,40 +429,10 @@ export class ProviderSearch extends Construct {
   }
 
   private providerFunction(provider: SearchProvider, label: string, props: ProviderSearchProps): lambda.Function {
-    const functionName = `CitationAnalysis-Search-${provider.id}`;
-    const logGroup = new logs.LogGroup(this, `${label}LogGroup`, {
-      logGroupName: `/aws/lambda/${functionName}`,
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-    const cap = props.concurrency.get(provider.id) ?? provider.defaultConcurrency;
-    const interval = props.pacing.get(provider.id) ?? provider.defaultMinIntervalSeconds ?? 0;
-    // Only a paced provider carries the interval; the search handler reads it per request.
-    const pacingEnvironment: Record<string, string> = interval > 0
-      ? {
-        PROVIDER_MIN_INTERVAL_SECONDS: String(interval),
-      }
-      : {};
-
-    return new lambda.Function(this, `${label}Function`, {
-      functionName,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'handler.handler',
-      code: props.code,
-      role: props.role,
-      layers: props.layers,
-      timeout: cdk.Duration.seconds(900), // 15 min max — invoked by Step Functions, not API Gateway
-      memorySize: 512,
-      description: `Query ${provider.id} with web search for one keyword; reserved concurrency caps its calls in flight`,
-      logGroup,
-      // 0 = no cap: the function draws on the account's unreserved pool.
-      reservedConcurrentExecutions: cap === 0 ? undefined : cap,
-      environment: {
-        ...props.environment,
-        PROVIDER_THROTTLE_EXTRA_ATTEMPTS: String(PROVIDER_THROTTLE_EXTRA_ATTEMPTS),
-        ...pacingEnvironment,
-      },
-    });
+    return providerSearchFunction(this, provider, props, {
+      cap: props.concurrency.get(provider.id) ?? provider.defaultConcurrency,
+      interval: props.pacing.get(provider.id) ?? provider.defaultMinIntervalSeconds ?? 0,
+    }, label);
   }
 
   private providerBranch({ provider, label, handler }: ProviderFunction): stepfunctions.IChainable {
@@ -352,19 +469,24 @@ export class ProviderSearch extends Construct {
     // continue; one invocation always answers at least one prompt, so ten
     // attempts cover the ten-prompt cap (MAX_QUERY_PROMPTS_PER_RUN). Must come
     // before the States.TaskFailed retrier, which would match it too.
-    invoke.addRetry({
-      errors: ['SearchTimeBudgetSpentError'],
-      interval: cdk.Duration.seconds(1),
-      backoffRate: 1,
-      maxAttempts: 10,
-    });
     // Lambda-level failures only: the clients retry their own HTTP errors.
-    invoke.addRetry({
-      errors: ['States.TaskFailed', 'States.Timeout'],
-      interval: cdk.Duration.seconds(10),
-      maxAttempts: 2,
-      backoffRate: 2.0,
-    });
+    // A billed-once provider asks one prompt per keyword, so it never runs
+    // out of time between prompts, and its failed run goes straight to the
+    // catch below.
+    if (provider.billedOnce !== true) {
+      invoke.addRetry({
+        errors: ['SearchTimeBudgetSpentError'],
+        interval: cdk.Duration.seconds(1),
+        backoffRate: 1,
+        maxAttempts: 10,
+      });
+      invoke.addRetry({
+        errors: ['States.TaskFailed', 'States.Timeout'],
+        interval: cdk.Duration.seconds(10),
+        maxAttempts: 2,
+        backoffRate: 2.0,
+      });
+    }
     // A provider that still fails is counted as a failed call in the run
     // summary instead of failing the keyword and every other provider's answer.
     invoke.addCatch(

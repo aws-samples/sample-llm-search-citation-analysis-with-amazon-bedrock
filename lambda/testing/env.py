@@ -47,6 +47,8 @@ SELF_REFLECTION_ENV: Mapping[str, str] = {
 # What manage-schedule.py resolves at import: the workflow it schedules, the role Scheduler assumes, the groups table.
 SCHEDULE_ENV: Mapping[str, str] = {
     'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
+    'SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:domain-snapshots',
+    'SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:backlink-snapshots',
     'SCHEDULE_ROLE_ARN': 'arn:aws:iam::123456789012:role/test-scheduler-role',
     'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
     'CORS_ORIGIN_PARAM': '',

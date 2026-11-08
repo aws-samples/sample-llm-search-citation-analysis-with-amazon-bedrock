@@ -56,6 +56,13 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     path: '/reports/sentiment',
   },
   {
+    title: 'SEO vs GEO',
+    description:
+      'Your Google organic position against how often the AI answers name you, per keyword of a market or keyword group: keywords per quadrant (both strong, AI gap, SEO gap, both weak), the scatter of position against AI mention rate sized by search volume, and every keyword with its AI Overview and citation overlap.',
+    audience: 'SEO and AI search lead',
+    path: '/reports/seo-geo',
+  },
+  {
     title: 'Competitor Gap Report',
     description:
       'For each tracked competitor: keywords where they outrank you, citation sources unique to them, and a prioritized outreach list ranked by potential visibility lift.',

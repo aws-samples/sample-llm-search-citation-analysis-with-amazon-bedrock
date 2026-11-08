@@ -124,6 +124,26 @@ _TIMEOUT_MARKERS = (
 )
 
 
+#: ``DataForSeoError.code`` → category. DataForSEO reports failures as in-body
+#: ``status_code`` values (40100, 40200, ...) that ``shared.dataforseo_client``
+#: has already turned into a code, so the code, not the message, is the signal.
+#: Matched by attribute rather than by importing the client, which needs
+#: ``requests`` (not in the crawler layer).
+_DATAFORSEO_CODE_CATEGORIES = {
+    'AUTH_FAILED': INVALID_KEY,
+    'BILLING_ISSUE': INSUFFICIENT_CREDIT,
+    'RATE_LIMITED': RATE_LIMITED,
+}
+
+
+def _dataforseo_category(error: object) -> str | None:
+    """The category of a ``DataForSeoError`` whose ``code`` is mapped, else ``None``."""
+    if type(error).__name__ != 'DataForSeoError':
+        return None
+    code = getattr(error, 'code', None)
+    return _DATAFORSEO_CODE_CATEGORIES.get(code) if isinstance(code, str) else None
+
+
 def classify_provider_error(error: object, status_code: int | None = None) -> str:
     """Map a provider failure to one of the module's categories.
 
@@ -142,6 +162,9 @@ def classify_provider_error(error: object, status_code: int | None = None) -> st
     module has not seen before degrades to "keep trying and stay visible"
     instead of switching a working provider off.
     """
+    dataforseo = _dataforseo_category(error)
+    if dataforseo is not None:
+        return dataforseo
     text = str(error).lower()
 
     if any(marker in text for marker in _CREDIT_MARKERS):

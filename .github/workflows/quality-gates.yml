@@ -71,42 +71,16 @@ jobs:
           bash lambda/layer/build-layer.sh
           bash lambda/crawler-layer/build-layer.sh
 
+      # Pinned binaries, checked against digests committed in the script; when GitHub's release download fails
+      # (it answers 504 for long stretches) the script installs the same version from proxy.golang.org or PyPI,
+      # each with its own integrity check, instead of failing the lane.
       - name: Install gitleaks (the working-tree secret scan, scripts/gitleaks-tree.sh)
         if: ${{ matrix.lane == 'lint' }}
-        env:
-          GITLEAKS_VERSION: 8.30.1
-          # Committed digest (the release checksums file agrees); bump with the version.
-          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-        run: |
-          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
-          echo "${GITLEAKS_SHA256}  /tmp/${tarball}" | sha256sum --check --strict -
-          mkdir -p "$HOME/.local/bin"
-          tar -xzf "/tmp/${tarball}" -C "$HOME/.local/bin" gitleaks
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        run: bash scripts/install-ci-tools.sh gitleaks
 
-      # Pinned binaries for scripts/actions-lint.sh, verified against digests committed HERE (not a checksum
-      # file fetched from the same release, which an attacker able to replace the asset could replace too).
-      # Bump: update the version and digest together, and ACTIONLINT_VERSION / ZIZMOR_VERSION in the script.
       - name: Install actionlint + zizmor (GitHub Actions lint, scripts/actions-lint.sh)
         if: ${{ matrix.lane == 'lint' }}
-        env:
-          ACTIONLINT_VERSION: 1.7.12
-          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-          ZIZMOR_VERSION: 1.31.1
-          ZIZMOR_SHA256: d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          al="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl -sSfL -o "/tmp/${al}" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${al}"
-          echo "${ACTIONLINT_SHA256}  /tmp/${al}" | sha256sum --check --strict -
-          tar -xzf "/tmp/${al}" -C "$HOME/.local/bin" actionlint
-          zz="zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          curl -sSfL -o "/tmp/${zz}" "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${zz}"
-          echo "${ZIZMOR_SHA256}  /tmp/${zz}" | sha256sum --check --strict -
-          tar -xzf "/tmp/${zz}" -C "$HOME/.local/bin" zizmor
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        run: bash scripts/install-ci-tools.sh actions-lint
 
       - name: Validate (one lane)
         env:

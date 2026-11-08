@@ -1,10 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import {
   McpServer, type McpServerInputs, readMcpContextList
 } from './constructs/mcp-server';
 import { McpState, readMcpLimits } from './constructs/mcp-state';
 import { pythonLayer } from './constructs/python-layer';
+import { SEO_ROUTER_FUNCTION_NAME } from './constructs/seo-api';
 
 /**
  * The local callbacks allowed when `mcpRedirectUris` is not set: Kiro's pinned
@@ -14,7 +16,7 @@ import { pythonLayer } from './constructs/python-layer';
 export const DEFAULT_REDIRECT_URIS = ['http://localhost:5173/oauth/callback', 'http://localhost:5173/callback'];
 
 export interface CitationAnalysisMcpStackProps extends cdk.StackProps {
-  /** The main stack's `mcpInputs`. */
+  /** The main stack's `mcpInputs`; the SEO router (`seo`) is added by name. */
   readonly inputs: McpServerInputs;
 }
 
@@ -51,6 +53,12 @@ export class CitationAnalysisMcpStack extends cdk.Stack {
 
     this.server = new McpServer(this, 'McpServer', {
       ...props.inputs,
+      // The SEO stack's router, by its constant name (no export, no
+      // dependency): tools on router `seo` fail cleanly until that stack exists.
+      apiFunctions: {
+        ...props.inputs.apiFunctions,
+        seo: lambda.Function.fromFunctionName(this, 'SeoRouterFunction', SEO_ROUTER_FUNCTION_NAME),
+      },
       sharedLayer,
       state,
       redirectUris: readMcpContextList(this, 'mcpRedirectUris', DEFAULT_REDIRECT_URIS),

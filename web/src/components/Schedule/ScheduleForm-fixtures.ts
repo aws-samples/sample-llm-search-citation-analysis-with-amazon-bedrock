@@ -17,6 +17,7 @@ function buildScheduleFormData(
   overrides: Partial<ScheduleFormData> = {}
 ): ScheduleFormData {
   return {
+    kind: 'analysis',
     display_name: '',
     frequency: 'daily',
     time: '09:00',

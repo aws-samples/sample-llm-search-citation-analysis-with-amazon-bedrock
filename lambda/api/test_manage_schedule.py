@@ -27,6 +27,10 @@ from testing.events import parse_response
 from testing.module_loader import load_handler_module
 
 
+class StateMachineDoesNotExist(Exception):
+    """Stands in for ``stepfunctions.exceptions.StateMachineDoesNotExist``."""
+
+
 class SchedulerResourceNotFound(Exception):
     """Stands in for scheduler.exceptions.ResourceNotFoundException."""
 
@@ -65,6 +69,11 @@ STATE_MACHINE_ARN = _test_env['STATE_MACHINE_ARN']
 def make_event(method, body=None, path_params=None, groups='Admin', path='/api/schedules'):
     """Build a minimal API Gateway event; defaults to an Admin caller."""
     return caller_event(method, path, resource=path, body=body, path_params=path_params, groups=groups)
+
+
+def rank_tracker_list_event():
+    """GET /api/schedules?source=rank-trackers as an Admin."""
+    return caller_event('GET', '/api/schedules', resource='/api/schedules', query={'source': 'rank-trackers'})
 
 
 def id_event(method, schedule_id, body=None, suffix='', groups='Admin'):
@@ -120,6 +129,7 @@ def _reset_mocks():
     mock_stepfunctions.reset_mock()
     mock_groups_table.reset_mock()
     mock_scheduler.exceptions.ResourceNotFoundException = SchedulerResourceNotFound
+    mock_stepfunctions.exceptions.StateMachineDoesNotExist = StateMachineDoesNotExist
     mock_scheduler.exceptions.ConflictException = SchedulerConflict
     mock_scheduler.exceptions.ValidationException = SchedulerValidation
     # reset_mock() keeps side effects; clear them so one test's failure mode
@@ -127,7 +137,7 @@ def _reset_mocks():
     for method in (
         mock_scheduler.get_schedule_group, mock_scheduler.create_schedule, mock_scheduler.update_schedule,
         mock_scheduler.delete_schedule, mock_scheduler.list_schedules, mock_scheduler.get_schedule,
-        mock_stepfunctions.start_execution, mock_groups_table.get_item,
+        mock_stepfunctions.start_execution, mock_stepfunctions.describe_state_machine, mock_groups_table.get_item,
     ):
         method.side_effect = None
     mock_scheduler.get_schedule_group.return_value = {'Name': 'citation-analysis-schedules'}
@@ -247,6 +257,7 @@ class TestCreateSchedule:
             'display_name': 'Coruña',
             'form': {'frequency': 'weekly', 'time': '09:00', 'timezone': 'Europe/Madrid', 'day_of_week': 'MON', 'day_of_month': 1},
             'scope': {'mode': 'groups', 'group_ids': [GROUP_ID]},
+            'kind': 'analysis',
         }
 
     def test_defaults_to_all_keywords_and_a_daily_nine_oclock_utc_run(self, handler_module):
@@ -478,6 +489,7 @@ class TestUpdateSchedule:
             'display_name': 'Daily — all hotels',
             'form': {'frequency': 'daily', 'time': '09:00', 'timezone': 'UTC', 'day_of_week': 'MON', 'day_of_month': 1},
             'scope': {'mode': 'all'},
+            'kind': 'analysis',
         }
         assert body['legacy'] is False
 
@@ -605,3 +617,143 @@ class TestNonAdminCallers:
         assert status == 403
         assert mock_scheduler.method_calls == []
         assert mock_stepfunctions.method_calls == []
+
+
+DOMAIN_SNAPSHOTS_ARN = _test_env['SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN']
+
+
+def snapshot_detail(kind='domain_snapshots', schedule_id='sch-0d0d0d0d'):
+    """A GetSchedule response for a paid snapshot schedule (no keyword scope)."""
+    detail = v2_detail(schedule_id=schedule_id, display_name='Weekly domain traffic')
+    descriptor = {**json.loads(detail['Target']['Input']), 'scope': None, 'kind': kind}
+    return {**detail, 'Target': {**detail['Target'], 'Arn': DOMAIN_SNAPSHOTS_ARN, 'Input': json.dumps(descriptor)}}
+
+
+class TestSnapshotKinds:
+    """Paid SEO snapshot runs are Schedules too: they run only while one exists (TENETS.md, tenets 7 and 8)."""
+
+    def test_a_snapshot_schedule_starts_its_seo_state_machine_with_no_keyword_scope(self, handler_module):
+        status, body = parse_response(handler_module.handler(make_event('POST', body={
+            'kind': 'domain_snapshots', 'frequency': 'weekly', 'time': '04:00', 'day_of_week': 'MON',
+            'scope': {'mode': 'keywords', 'keyword_ids': ['ignored']}, 'confirm_paid': True,
+        }), {}))
+
+        assert status == 201
+        assert (created_kwargs()['Target']['Arn'], created_target_input()['kind'], created_target_input()['scope']) == (
+            DOMAIN_SNAPSHOTS_ARN, 'domain_snapshots', None,
+        )
+        assert (body['kind'], body['display_name'], body['scope_summary']) == (
+            'domain_snapshots', 'Domain traffic snapshots', 'every owned and competitor domain',
+        )
+
+    @pytest.mark.parametrize('kind', ['bogus', 7])
+    def test_refuses_an_unknown_kind(self, handler_module, kind):
+        status, body = parse_response(handler_module.handler(make_event('POST', body={'kind': kind}), {}))
+
+        assert (status, body['field']) == (400, 'kind')
+        mock_scheduler.create_schedule.assert_not_called()
+
+    @pytest.mark.parametrize('confirmed', [
+        pytest.param(False, id='without-confirm_paid'),
+        pytest.param(True, id='seo-stack-not-deployed'),
+    ])
+    @pytest.mark.parametrize(('method', 'suffix', 'body', 'paid_call'), [
+        pytest.param('POST', '', {'kind': 'backlink_snapshots'}, mock_scheduler.create_schedule, id='create'),
+        pytest.param('PUT', '', {'time': '05:00'}, mock_scheduler.update_schedule, id='update'),
+        pytest.param('POST', '/run', {}, mock_stepfunctions.start_execution, id='run-now'),
+    ])
+    def test_refuses_an_enabled_paid_schedule(self, handler_module, confirmed, method, suffix, body, paid_call):
+        """Without ``confirm_paid`` (field ``confirm_paid``), or when the SEO stack is gone (field ``kind``)."""
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        if confirmed:
+            mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
+        request = {**body, 'confirm_paid': True} if confirmed else body
+        event = make_event(method, body=request) if suffix == '' and method == 'POST' else id_event(
+            method, 'sch-0d0d0d0d', body=request, suffix=suffix)
+
+        status, answer = parse_response(handler_module.handler(event, {}))
+
+        assert (status, answer['field'], paid_call.call_count) == (400, 'kind' if confirmed else 'confirm_paid', 0)
+
+    def test_disables_a_snapshot_schedule_after_the_seo_stack_is_gone(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        mock_stepfunctions.describe_state_machine.side_effect = StateMachineDoesNotExist('gone')
+
+        status = parse_response(handler_module.handler(id_event('PUT', 'sch-0d0d0d0d', body={'enabled': False}), {}))[0]
+
+        assert (status, mock_scheduler.update_schedule.call_args.kwargs['State']) == (200, 'DISABLED')
+
+    def test_refuses_a_run_now_body_that_is_not_an_object(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+        event = {**id_event('POST', 'sch-0d0d0d0d', suffix='/run'), 'body': '[]'}
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert (status, body['field']) == (400, 'body')
+
+    def test_saves_a_disabled_snapshot_schedule_without_the_acknowledgement(self, handler_module):
+        status = parse_response(handler_module.handler(
+            make_event('POST', body={'kind': 'backlink_snapshots', 'enabled': False}), {}))[0]
+
+        assert (status, mock_scheduler.create_schedule.call_count) == (201, 1)
+
+    def test_an_update_keeps_the_kind_and_its_target(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+
+        status, body = parse_response(handler_module.handler(
+            id_event('PUT', 'sch-0d0d0d0d', body={'kind': 'analysis', 'time': '05:00', 'confirm_paid': True}), {},
+        ))
+
+        kwargs = mock_scheduler.update_schedule.call_args.kwargs
+        assert (status, body['kind'], kwargs['Target']['Arn']) == (200, 'domain_snapshots', DOMAIN_SNAPSHOTS_ARN)
+
+    def test_run_now_starts_the_snapshot_state_machine(self, handler_module):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+
+        status, _body = parse_response(handler_module.handler(
+            id_event('POST', 'sch-0d0d0d0d', body={'confirm_paid': True}, suffix='/run'), {}))
+
+        kwargs = mock_stepfunctions.start_execution.call_args.kwargs
+        assert (status, kwargs['stateMachineArn'], json.loads(kwargs['input'])['kind']) == (202, DOMAIN_SNAPSHOTS_ARN, 'domain_snapshots')
+
+    def test_a_schedule_written_before_kinds_is_an_analysis(self, handler_module):
+        assert handler_module.describe_schedule(v2_detail())['kind'] == 'analysis'
+
+
+class TestRankTrackerSchedules:
+    """GET /api/schedules?source=rank-trackers: the trackers' own one-time schedules, read-only, soonest first."""
+
+    def test_lists_each_trackers_next_check_soonest_first(self, handler_module):
+        mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'rank-b'}, {'Name': 'rank-a'}]}
+        details = {
+            'rank-a': {'Name': 'rank-a', 'Description': 'Hotels', 'ScheduleExpression': 'at(2026-11-10T05:12:00)',
+                       'Target': {'Input': json.dumps({'step': 'rank.due', 'tracker_id': 'a'})}},
+            'rank-b': {'Name': 'rank-b', 'Description': 'Flights', 'ScheduleExpression': 'at(2026-11-09T04:30:00)',
+                       'Target': {'Input': json.dumps({'step': 'rank.due', 'tracker_id': 'b'})}},
+        }
+        mock_scheduler.get_schedule.side_effect = lambda Name, GroupName: details[Name]
+
+        status, body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))
+
+        assert status == 200
+        assert [(item['tracker_id'], item['display_name'], item['next_run_at']) for item in body['schedules']] == [
+            ('b', 'Flights', '2026-11-09T04:30:00Z'), ('a', 'Hotels', '2026-11-10T05:12:00Z'),
+        ]
+        assert (mock_scheduler.list_schedules.call_args.kwargs['GroupName'], body['truncated']) == (
+            'citation-analysis-seo-rank', False)
+
+    def test_says_when_more_trackers_are_scheduled_than_one_answer_lists(self, handler_module):
+        page = {'Schedules': [{'Name': f'rank-{index}'} for index in range(100)], 'NextToken': 'more'}
+        mock_scheduler.list_schedules.return_value = page
+        mock_scheduler.get_schedule.side_effect = lambda Name, GroupName: {'Name': Name, 'ScheduleExpression': ''}
+
+        body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))[1]
+
+        assert (body['count'], body['truncated']) == (100, True)
+
+    def test_answers_an_empty_list_before_any_tracker_was_scheduled(self, handler_module):
+        mock_scheduler.list_schedules.side_effect = SchedulerResourceNotFound()
+
+        status, body = parse_response(handler_module.handler(rank_tracker_list_event(), {}))
+
+        assert (status, body['schedules']) == (200, [])

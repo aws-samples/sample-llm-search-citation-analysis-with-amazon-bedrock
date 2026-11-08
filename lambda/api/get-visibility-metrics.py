@@ -23,7 +23,7 @@ from shared.answer_queries import query_last_two_runs_rows
 from shared.api_response import success_response
 from shared.brand_visibility import tracked_brand_names
 from shared.decorators import api_handler, validate
-from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.kpi_engine import BRANDED_FILTERS, Answer, answers_from_rows, filter_branded, owned_domains_from
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -64,12 +64,18 @@ def load_last_two_runs(keywords: list[str]) -> tuple[dict[str, list[Answer]], di
     return latest, previous, runs.skipped
 
 
+def _unclassified_keywords(run: dict[str, list[Answer]]) -> list[str]:
+    """The keywords whose run holds an answer stored before the branded flag existed."""
+    return [keyword for keyword, answers in run.items() if any(not answer.branded_classified for answer in answers)]
+
+
 def scope_visibility(
     scope: ReportScope,
     owned_domains: list[str],
     *,
     persona: str | None,
     brand: str | None,
+    branded: str = 'all',
     tracked_brands: list[str] | None = None,
 ) -> dict[str, Any]:
     """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords and the request's time budget.
@@ -78,13 +84,26 @@ def scope_visibility(
     pooled KPIs; ``keywords_truncated`` then says the view is partial.
     """
     keywords, scope_fields = capped_scope(scope)
-    latest, previous, skipped = load_last_two_runs(keywords)
+    latest_run, previous_run, skipped = load_last_two_runs(keywords)
+    latest, previous = (
+        {keyword: filter_branded(answers, branded) for keyword, answers in run.items()}
+        for run in (latest_run, previous_run)
+    )
+    # Like for like: a filtered view compares a keyword with its previous run only when that run's rows were
+    # classified (2.43+). An older run reads every answer as neutral, so its delta would mix two definitions.
+    unclassified = _unclassified_keywords(previous_run) if branded != 'all' else []
+    for keyword in unclassified:
+        previous[keyword] = []
     view = visibility_view(
         list(latest), latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand,
         tracked_brands=tracked_brands or (),
     )
     return {
         **scope_read_fields(scope_fields, skipped),
+        'branded': branded,
+        'change_unclassified_keywords': len(unclassified),
+        # Keywords whose latest run predates the flag: a filtered view reads their answers as neutral, so it says so.
+        'unclassified_keywords': len(_unclassified_keywords(latest_run)) if branded != 'all' else 0,
         'citations_configured': bool(owned_domains),
         **view,
     }
@@ -92,18 +111,23 @@ def scope_visibility(
 
 @api_handler
 @validate({
+    'branded': {'type': str, 'choices': list(BRANDED_FILTERS), 'default': 'all'},
     **SCOPE_QUERY_PARAMS,
     'brand': {'type': str, 'max_length': 200},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
 @required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
-def handler(event, context, report_scope, brand=None, query_prompt_id=None):
-    """GET /api/visibility — the KPIs of a scope's latest runs (see the module docstring)."""
+def handler(event, context, report_scope, brand=None, query_prompt_id=None, branded='all'):
+    """GET /api/visibility — the KPIs of a scope's latest runs (see the module docstring).
+
+    ``branded`` (``neutral`` | ``branded`` | ``all``, default ``all``) keeps the
+    answers to queries that do not name the brand, that do, or every answer.
+    """
     config = get_brand_config()
     first_party, competitors = tracked_brand_names(config)
     return success_response(
         scope_visibility(
-            report_scope, owned_domains_from(config), persona=query_prompt_id, brand=brand,
+            report_scope, owned_domains_from(config), persona=query_prompt_id, brand=brand, branded=branded,
             tracked_brands=[*first_party, *competitors],
         ),
         event,

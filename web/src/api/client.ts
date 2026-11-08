@@ -14,6 +14,11 @@ interface ApiErrorResponse {
 interface ApiRequestOptions {
   signal?: AbortSignal;
   allowStructured4xx?: boolean;
+  /**
+   * Read the `{error}` body of every non-2xx answer, 5xx included. Only for APIs whose
+   * error texts are fixed server strings (the SEO API never returns provider text).
+   */
+  allowStructuredErrors?: boolean;
   acceptedJsonStatuses?: readonly number[];
 }
 
@@ -56,11 +61,16 @@ async function readApiErrorResponse(response: Response): Promise<ApiErrorRespons
   }
 }
 
+function readsErrorBody(response: Response, options: ApiRequestOptions): boolean {
+  if (options.allowStructuredErrors === true) return true;
+  return options.allowStructured4xx === true && response.status >= 400 && response.status < 500;
+}
+
 async function createApiRequestError(
   response: Response,
-  allowStructured4xx: boolean
+  options: ApiRequestOptions
 ): Promise<ApiRequestError> {
-  const decodedError = allowStructured4xx && response.status >= 400 && response.status < 500
+  const decodedError = readsErrorBody(response, options)
     ? await readApiErrorResponse(response)
     : null;
   const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -96,7 +106,7 @@ async function requestJson<T>(
   });
 
   if (!response.ok && !acceptsJsonStatus(response, options)) {
-    throw await createApiRequestError(response, options.allowStructured4xx === true);
+    throw await createApiRequestError(response, options);
   }
 
   return parseJsonResponse<T>(response);
@@ -193,12 +203,24 @@ export async function apiGet<T>(
   endpoint: string,
   options: ApiGetOptions = {}
 ): Promise<T> {
+  return apiGetFrom<T>(API_BASE_URL, endpoint, options);
+}
+
+/**
+ * `apiGet` against another API of this deployment (e.g. the SEO stack's), with
+ * the same authentication and error handling.
+ */
+export async function apiGetFrom<T>(
+  baseUrl: string,
+  endpoint: string,
+  options: ApiGetOptions = {}
+): Promise<T> {
   const {
     params, retry = true, ...requestOptions
   } = options;
 
-  const baseUrl = `${API_BASE_URL}${endpoint}`;
-  const url = params ? `${baseUrl}?${new URLSearchParams(params)}` : baseUrl;
+  const endpointUrl = `${baseUrl}${endpoint}`;
+  const url = params ? `${endpointUrl}?${new URLSearchParams(params)}` : endpointUrl;
 
   try {
     return await requestJson<T>(url, {}, requestOptions);
@@ -207,6 +229,28 @@ export async function apiGet<T>(
     await waitBeforeRetry(retryDelayMs(), requestOptions.signal);
     return requestJson<T>(url, {}, requestOptions);
   }
+}
+
+/** `apiPost` against another API of this deployment (see `apiGetFrom`). */
+export async function apiPostTo<T>(
+  baseUrl: string,
+  endpoint: string,
+  body: unknown,
+  options: ApiRequestOptions = {}
+): Promise<T> {
+  return requestJson<T>(`${baseUrl}${endpoint}`, jsonBodyRequest('POST', body), options);
+}
+
+/** A PUT or DELETE against another API of this deployment (see `apiGetFrom`); DELETE sends no body. */
+export async function apiSendTo<T>(
+  baseUrl: string,
+  method: 'PUT' | 'DELETE',
+  endpoint: string,
+  body: unknown,
+  options: ApiRequestOptions = {}
+): Promise<T> {
+  const init = method === 'PUT' ? jsonBodyRequest('PUT', body) : { method };
+  return requestJson<T>(`${baseUrl}${endpoint}`, init, options);
 }
 
 /** An authenticated request with a JSON body, for the verbs that carry one. */

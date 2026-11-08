@@ -3,6 +3,7 @@ Provider Configuration API
 Manages AI provider settings: check status, enable/disable, update API keys
 """
 
+import base64
 import json
 import logging
 import os
@@ -21,7 +22,6 @@ sys.path.insert(0, '/opt/python')
 
 from shared.ai_clients import (
     ANTHROPIC_API_BASE,
-    CLAUDE_DIRECT_CALLERS,
     PERPLEXITY_AGENT_URL,
     PERPLEXITY_MODELS_URL,
     anthropic_headers,
@@ -33,6 +33,7 @@ from shared.ai_clients import (
 )
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
+from shared.dataforseo_client import BILLING_MESSAGE, DEFAULT_BASE_URL, response_error
 from shared.decorators import RouteNotHandledError, api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
@@ -73,6 +74,16 @@ SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 # Provider type constants
 PROVIDER_TYPE_LLM = 'llm'
 PROVIDER_TYPE_SEARCH = 'search'
+# A credential for the SEO stack (DataForSEO): neither an answer engine nor a
+# search provider, so no run calls it and nothing that counts engines or
+# search providers counts it.
+PROVIDER_TYPE_SEO = 'seo'
+
+#: The DataForSEO login every DataForSEO-backed provider shares
+#: (``citation-analysis/dataforseo-key`` = ``{"api_key": "<login>:<password>"}``).
+DATAFORSEO = 'dataforseo'
+DATAFORSEO_SECRET = f'{SECRETS_PREFIX}dataforseo-key'
+DATAFORSEO_DOCS_URL = 'https://app.dataforseo.com/api-access'
 
 # How a provider is authenticated: a key in Secrets Manager, or the Lambda's IAM role.
 AUTH_API_KEY = 'api_key'
@@ -107,6 +118,16 @@ PROVIDERS = {
         'description': 'Claude Sonnet with web search tool',
         'secret_name': f'{SECRETS_PREFIX}claude-key',
         'docs_url': 'https://console.anthropic.com/settings/keys',
+        'type': PROVIDER_TYPE_LLM
+    },
+    # No key of its own: it reads the DataForSEO login (`credential_from`).
+    'google_ai_overview': {
+        'name': 'Google AI Overviews',
+        'description': 'The AI Overview on a Google results page (via DataForSEO)',
+        'secret_name': DATAFORSEO_SECRET,
+        'credential_from': DATAFORSEO,
+        'docs_url': DATAFORSEO_DOCS_URL,
+        'model': 'google-serp',
         'type': PROVIDER_TYPE_LLM
     },
     # Search Providers (return search results directly)
@@ -160,8 +181,22 @@ PROVIDERS = {
         'docs_url': 'https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-connector-web-search-tool.html',
         'model': 'web-search',
         'type': PROVIDER_TYPE_SEARCH
-    }
+    },
+    # The login + password the SEO stack and Google AI Overviews use; the
+    # dashboard shows one input per `credential_fields` entry and sends
+    # `api_key: "<login>:<password>"`. No model.
+    DATAFORSEO: {
+        'name': 'DataForSEO',
+        'description': 'Keyword, SERP and AI Overview data for the SEO pages (login and API password)',
+        'secret_name': DATAFORSEO_SECRET,
+        'credential_fields': ['login', 'password'],
+        'docs_url': DATAFORSEO_DOCS_URL,
+        'type': PROVIDER_TYPE_SEO
+    },
 }
+
+#: The optional fields of a ``PROVIDERS`` entry ``GET /providers`` passes through as they are.
+_PASSTHROUGH_FIELDS = ('credential_from', 'credential_fields')
 
 # Health bookkeeping the search Lambda records on each provider row
 # (shared/provider_health.py). Surfaced on GET /providers so the dashboard can
@@ -210,7 +245,17 @@ def _api_key_from(response: Mapping[str, Any]) -> str:
     return json.loads(response['SecretString']).get('api_key', '') if 'SecretString' in response else ''
 
 
-def _secret_status(response: Mapping[str, Any]) -> dict:
+def mask_key(api_key: str) -> str:
+    """The first and last four characters of a key, for display."""
+    return api_key[:4] + '...' + api_key[-4:] if len(api_key) > 8 else '****'
+
+
+def mask_login(api_key: str) -> str:
+    """The login part of a ``login:password`` credential: the password is never shown, even in part."""
+    return api_key.partition(':')[0] or '****'
+
+
+def _secret_status(response: Mapping[str, Any], mask: Callable[[str], str] = mask_key) -> dict:
     """Status of a secret that exists: configured with a masked key, or present but empty."""
     api_key = _api_key_from(response)
     if not api_key:
@@ -219,13 +264,12 @@ def _secret_status(response: Mapping[str, Any]) -> dict:
     return {
         'exists': True,
         'has_value': True,
-        # Mask the key for display
-        'masked_key': api_key[:4] + '...' + api_key[-4:] if len(api_key) > 8 else '****',
+        'masked_key': mask(api_key),
         'last_updated': created.isoformat() if created else None,
     }
 
 
-def get_secret_status(secret_name: str) -> dict:
+def get_secret_status(secret_name: str, mask: Callable[[str], str] = mask_key) -> dict:
     """Check if a secret exists and has a value."""
     try:
         response = secrets_client.get_secret_value(SecretId=secret_name)
@@ -234,7 +278,7 @@ def get_secret_status(secret_name: str) -> dict:
             return {'exists': False, 'has_value': False, 'masked_key': None}
         logger.exception("Error checking secret")
         return {'exists': False, 'has_value': False}
-    return _secret_status(response)
+    return _secret_status(response, mask)
 
 
 def uses_iam(provider_id: str) -> bool:
@@ -242,11 +286,25 @@ def uses_iam(provider_id: str) -> bool:
     return PROVIDERS.get(provider_id, {}).get('auth', AUTH_API_KEY) == AUTH_IAM
 
 
+def uses_dataforseo_login(provider_id: str) -> bool:
+    """Whether ``provider_id``'s credential is the DataForSEO ``login:password``."""
+    return provider_id == DATAFORSEO or PROVIDERS.get(provider_id, {}).get('credential_from') == DATAFORSEO
+
+
+def borrows_credential(provider_id: str) -> bool:
+    """Whether ``provider_id`` reads another provider's key and so takes none of its own."""
+    return bool(PROVIDERS.get(provider_id, {}).get('credential_from'))
+
+
 def credential_status(provider_id: str) -> dict:
-    """``get_secret_status`` for a key provider; for an IAM provider, whether its gateway is deployed."""
+    """``get_secret_status`` for a key provider; for an IAM provider, whether its gateway is deployed.
+
+    A DataForSEO credential is masked to its login.
+    """
     if uses_iam(provider_id):
         return {'exists': True, 'has_value': gateway_url() is not None, 'masked_key': None}
-    return get_secret_status(PROVIDERS[provider_id]['secret_name'])
+    mask = mask_login if uses_dataforseo_login(provider_id) else mask_key
+    return get_secret_status(PROVIDERS[provider_id]['secret_name'], mask)
 
 
 def stored_api_key(secret_name: str) -> str:
@@ -552,6 +610,56 @@ def _firecrawl_request(api_key: str) -> dict[str, Any]:
     )
 
 
+_DATAFORSEO_USER_DATA_PATH = '/v3/appendix/user_data'
+
+
+def _dataforseo_request(api_key: str) -> dict[str, Any]:
+    # The free account endpoint (`shared.dataforseo_client.account_summary`
+    # reads it with the stored login); sent here with the candidate login so a
+    # key is proven before it is saved. Costs nothing.
+    token = base64.b64encode(api_key.encode('utf-8')).decode('ascii')
+    return _get(
+        f'{DEFAULT_BASE_URL}{_DATAFORSEO_USER_DATA_PATH}',
+        headers={'Authorization': f'Basic {token}', 'Accept': 'application/json'},
+    )
+
+
+_DATAFORSEO_REJECTED = 'DataForSEO rejected the login or API password'
+
+
+def _dataforseo_payload(response: Any) -> object:
+    """The parsed JSON body of a probe reply, or ``None`` when it is not JSON."""
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+def _dataforseo_result(response: Any) -> dict:
+    """Interpret ``GET /v3/appendix/user_data`` with the client's status ladder (one classification).
+
+    A 200 whose envelope and task are 20000 proves the login; ``AUTH_FAILED`` (HTTP 401/403, in-body
+    40100/40104) is a rejected login; ``BILLING_ISSUE`` a depleted balance; anything else is unexpected.
+    """
+    error = response_error(response.status_code, _dataforseo_payload(response), _DATAFORSEO_USER_DATA_PATH)
+    if error is None:
+        return {'valid': True}
+    if error.code == 'AUTH_FAILED':
+        return {'valid': False, 'error': _DATAFORSEO_REJECTED}
+    if error.code == 'BILLING_ISSUE':
+        return {'valid': False, 'error': BILLING_MESSAGE}
+    status = error.provider_status
+    return {'valid': False, 'error': f'Unexpected DataForSEO status {status}' if status else 'Invalid response format'}
+
+
+def dataforseo_format_error(api_key: str) -> str | None:
+    """Why ``api_key`` is not ``login:password`` (a non-empty login without ``:``, a non-empty password), else ``None``."""
+    login, separator, password = api_key.partition(':')
+    if not separator or not login or not password:
+        return 'Enter the DataForSEO login and API password as login:password'
+    return None
+
+
 @dataclass(frozen=True)
 class _KeyProbe:
     """How one provider's key is validated: the request to send, and how to read the reply."""
@@ -578,6 +686,9 @@ _KEY_PROBES: dict[str, _KeyProbe] = {
     'exa': _KeyProbe(_exa_request, _status_result),
     'serpapi': _KeyProbe(_serpapi_request, _status_result),
     'firecrawl': _KeyProbe(_firecrawl_request, _probe_result, _COMPLETION_PROBE_TIMEOUT),
+    # The DataForSEO login, and the engine that reads it
+    DATAFORSEO: _KeyProbe(_dataforseo_request, _dataforseo_result),
+    'google_ai_overview': _KeyProbe(_dataforseo_request, _dataforseo_result),
 }
 
 
@@ -676,14 +787,6 @@ def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
 def _claude_model_check(api_key: str, model: str) -> dict[str, Any]:
     # A short reply keeps the check to a cent or so; the prompt needs no search.
     return _claude_messages(api_key, claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=_MODEL_CHECK_MAX_TOKENS))
-
-
-def _claude_direct_model_check(api_key: str, model: str) -> dict[str, Any]:
-    """The check runs fall back to for a model that refuses dynamic filtering."""
-    payload = claude_web_search_payload(
-        _MODEL_CHECK_PROMPT, model, max_tokens=_MODEL_CHECK_MAX_TOKENS, allowed_callers=CLAUDE_DIRECT_CALLERS,
-    )
-    return _claude_messages(api_key, payload)
 
 
 def _claude_listing_request(api_key: str) -> dict[str, Any]:
@@ -816,35 +919,20 @@ class _ModelSupport(NamedTuple):
     """``api_key`` → ``requests.request`` arguments for the model listing."""
     read_ids: Callable[[Any], list[str]]
     """Listing payload → the ids worth offering in the picker."""
-    fallback_check: Callable[[str, str], dict[str, Any]] | None = None
-    """The check to send when the model refuses ``check``'s tool configuration the way runs fall back from."""
 
 
 _MODEL_SUPPORT: dict[str, _ModelSupport] = {
     'openai': _ModelSupport(_openai_model_check, _openai_request, _openai_model_ids),
     'perplexity': _ModelSupport(_perplexity_model_check, _perplexity_request, _perplexity_model_ids),
     'gemini': _ModelSupport(_gemini_model_check, _gemini_listing_request, _gemini_model_ids),
-    'claude': _ModelSupport(_claude_model_check, _claude_listing_request, _claude_model_ids, _claude_direct_model_check),
+    'claude': _ModelSupport(_claude_model_check, _claude_listing_request, _claude_model_ids),
 }
 
 
-def _is_caller_refusal(result: dict) -> bool:
-    """Whether a failed model check is Claude refusing dynamic filtering (its reason names ``allowed_callers``)."""
-    return not result.get('valid') and 'allowed_callers' in str(result.get('error', ''))
-
-
 def validate_model(provider_id: str, api_key: str, model: str) -> dict:
-    """Prove ``model`` answers a web-search prompt for ``provider_id`` with ``api_key``.
-
-    A Claude model that refuses dynamic filtering is checked again with
-    direct callers, the configuration runs fall back to for it.
-    """
+    """Prove ``model`` answers a web-search prompt for ``provider_id`` with ``api_key``, with the body runs send."""
     support = _MODEL_SUPPORT[provider_id]
-    label = f'model check for {provider_id}'
-    result = _send(support.check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, label)
-    if support.fallback_check is not None and _is_caller_refusal(result):
-        result = _send(support.fallback_check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, label)
-    return result
+    return _send(support.check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, f'model check for {provider_id}')
 
 
 def list_models(provider_id: str, api_key: str) -> dict:
@@ -864,7 +952,8 @@ def _model_fields(provider_id: str, config: Mapping[str, Any]) -> dict[str, Any]
     ``PROVIDERS`` they always carried.
     """
     if provider_id not in DEFAULT_PROVIDER_MODELS:
-        return {'model': PROVIDERS[provider_id]['model'], 'model_configurable': False}
+        # DataForSEO has no model at all (`None`).
+        return {'model': PROVIDERS[provider_id].get('model'), 'model_configurable': False}
     fields: dict[str, Any] = {
         'model': effective_model(provider_id, config),
         'default_model': default_model(provider_id),
@@ -903,6 +992,7 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             **_model_fields(provider_id, config),
             'docs_url': info['docs_url'],
             'type': info.get('type', PROVIDER_TYPE_LLM),
+            **{field: info[field] for field in _PASSTHROUGH_FIELDS if field in info},
             **_key_state_fields(config, secret_status),
             'last_updated': secret_status.get('last_updated'),
             **provider_health_fields(config),
@@ -936,6 +1026,22 @@ def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
     return wrapper
 
 
+def _malformed_credential(provider_id: str, api_key: str, event: dict) -> dict | None:
+    """The 400 for a DataForSEO credential that is not ``login:password``, else ``None``."""
+    reason = dataforseo_format_error(api_key) if uses_dataforseo_login(provider_id) else None
+    return validation_error(reason, event, 'api_key') if reason else None
+
+
+def _key_refusal(provider_id: str) -> str | None:
+    """Why ``provider_id`` takes no API key of its own (IAM, or another provider's key), else ``None``."""
+    if uses_iam(provider_id):
+        return 'This provider is authenticated by IAM and takes no API key'
+    if borrows_credential(provider_id):
+        source = PROVIDERS[PROVIDERS[provider_id]['credential_from']]['name']
+        return f'This provider uses the {source} login; set it on {source}'
+    return None
+
+
 @dataclass
 class _ProviderUpdate:
     """What one PUT /providers/{id} changes, read from the body before anything is proven or written."""
@@ -956,12 +1062,16 @@ def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate 
     """The update ``body`` asks for, or the 400 for the first malformed field."""
     update = _ProviderUpdate(provider_id, validate=bool(body.get('validate', True)))
     if body.get('api_key'):
-        if uses_iam(provider_id):
-            return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
+        refusal = _key_refusal(provider_id)
+        if refusal:
+            return validation_error(refusal, event, 'api_key')
         api_key = body['api_key'].strip()
         # Input validation - reasonable key length
         if len(api_key) > 500:
             return validation_error('API key too long', event)
+        malformed = _malformed_credential(provider_id, api_key, event)
+        if malformed:
+            return malformed
         update.api_key = api_key
     if 'enabled' in body:
         update.enabled = bool(body['enabled'])
@@ -1004,9 +1114,10 @@ def _prove_enabled(update: _ProviderUpdate, event: dict) -> dict | None:
     the provider off. Before this, re-enabling kept showing the failure that
     caused the auto-disable, dated weeks back, with no way to tell whether the
     new credit or key had taken. A probe stopped by the request's time budget
-    says nothing about the provider and records nothing.
+    says nothing about the provider and records nothing. An SEO credential is
+    never called by a run, so switching it on proves nothing.
     """
-    if not update.enabled:
+    if not update.enabled or PROVIDERS[update.provider_id].get('type') == PROVIDER_TYPE_SEO:
         return None
     api_key = update.api_key or _key_for_proof(update.provider_id, event, 'enabled', 'enabling this provider')
     if isinstance(api_key, dict):
@@ -1188,9 +1299,18 @@ def handle_validate_key(event: dict, context: Any, provider_id: str, body: dict 
     body = body or {}
     if uses_iam(provider_id):
         return validation_error('This provider is authenticated by IAM and takes no API key', event, 'api_key')
+    if borrows_credential(provider_id):
+        # No key of its own: prove the stored login it reads.
+        api_key = _key_for_proof(provider_id, event, 'api_key', 'checking this provider')
+        if isinstance(api_key, dict):
+            return api_key
+        return success_response(validate_api_key(provider_id, api_key), event)
     api_key = body.get('api_key', '').strip()
     if not api_key:
         return validation_error('API key required', event, 'api_key')
+    malformed = _malformed_credential(provider_id, api_key, event)
+    if malformed:
+        return malformed
 
     result = validate_api_key(provider_id, api_key)
     return success_response(result, event)

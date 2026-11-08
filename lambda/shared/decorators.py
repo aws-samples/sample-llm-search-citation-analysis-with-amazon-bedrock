@@ -348,7 +348,7 @@ def optional_provider() -> dict[str, Any]:
     return {
         'type': str,
         'max_length': 50,
-        'choices': ['openai', 'perplexity', 'gemini', 'claude']
+        'choices': ['openai', 'perplexity', 'gemini', 'claude', 'google_ai_overview']
     }
 
 

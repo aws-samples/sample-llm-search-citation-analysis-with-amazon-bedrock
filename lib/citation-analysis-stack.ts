@@ -7,7 +7,6 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as eventTargets from 'aws-cdk-lib/aws-events-targets';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as kms from 'aws-cdk-lib/aws-kms';
-import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
@@ -15,7 +14,6 @@ import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
@@ -24,38 +22,26 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
-import { ProviderSearch, readProviderConcurrency, readProviderPacing } from './constructs/provider-search';
+import {
+  ProviderSearch, providerSearchEnvironment, readExternalSearchProviders, readProviderConcurrency, readProviderPacing
+} from './constructs/provider-search';
 import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion, webSearchPolicyStatement } from './constructs/web-search';
 import type { McpServerInputs } from './constructs/mcp-server';
+import type { SeoStackInputs } from './seo-stack';
+import { BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME } from './constructs/seo-backlinks';
+import { SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE } from './constructs/seo-domain';
+import { RANK_TRACKER_SCHEDULE_GROUP } from './constructs/seo-rank-tracking';
+import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import {
-  lambdaHandlerFilesCode, lambdaSourceCode, pythonLayer
-} from './constructs/python-layer';
-
-/**
- * Bedrock model tier defaults per task role.
- *
- * Tiers map to model families in lambda/shared/models.py:
- *   fast     -> Haiku
- *   balanced -> Sonnet
- *   deep     -> Opus
- *
- * Lambdas read BEDROCK_TIER_<ROLE> and resolve the model ID via
- * shared.models.get_model_id(). An administrator can replace a tier's model in
- * Settings › Bedrock models (ProviderConfig rows `bedrock-<tier>`, read through
- * DYNAMODB_TABLE_PROVIDER_CONFIG; see `allowSavedBedrockModels`). To pin a
- * specific model ID in an incident, set BEDROCK_MODEL_<ROLE> (takes precedence
- * over both).
- */
-const bedrockTierEnv = {
-  BEDROCK_TIER_SUMMARIZATION: 'fast',
-  BEDROCK_TIER_EXTRACTION:    'fast',
-  BEDROCK_TIER_GENERATION:    'fast',
-  BEDROCK_TIER_ANALYSIS:      'balanced',
-  // Research agent (2.5.0): planning and the final selection reason over the
-  // whole brief; judging a round is a cheaper, high-volume call.
-  BEDROCK_TIER_RESEARCH_PLANNING:   'balanced',
-  BEDROCK_TIER_RESEARCH_EVALUATION: 'fast',
-} as const;
+  apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
+} from './constructs/api-functions';
+import { citationAnalysisTable, type CitationAnalysisIndexSpec } from './constructs/tables';
+import { citationAnalysisBucket } from './constructs/buckets';
+import { API_CORS_PREFLIGHT, addCorsGatewayResponses } from './constructs/api-cors';
+import {
+  allow, apiKeySecret, lambdaServiceRole, shareOneApiPermission
+} from './constructs/permissions';
+import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
 
 /**
  * Bound concurrent Content Studio model calls without reserving API capacity.
@@ -67,32 +53,6 @@ const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
 const CONTENT_STUDIO_STREAM_RETRY_ATTEMPTS = 2;
 const CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES = 60;
 const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
-
-/**
- * API Gateway's REST API integration timeout: a hard 29 seconds, not raisable.
- *
- * A Lambda behind API Gateway with a longer timeout does not get more time to
- * answer — the client has already received a 504 at 29s. It gets more time to
- * keep burning: billing compute, calling paid models, and writing to DynamoDB
- * for a response nobody will ever receive (AUDIT-2026-08-19 §2.9).
- *
- * So every function whose ONLY invoker is API Gateway is capped here. The
- * failure then surfaces as a Lambda timeout — visible in the function's own
- * Duration/Errors metrics — instead of only as an opaque gateway 504.
- *
- * One deliberate exception is documented at its definition:
- *   - `selfReflectionFunction` also runs its own Bedrock job when it invokes
- *     itself asynchronously (POST answers 202 at once), and that job needs
- *     longer than 29 s.
- *
- * Inside the 29 s, every API request carries a deadline
- * (`lambda/shared/request_deadline.py`, started by `@api_handler`) that its
- * reads, fan-outs and model calls stop at, answering partial data that says
- * so instead of running into the 504.
- *
- * Functions invoked by streams or Step Functions are not subject to this.
- */
-const API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS = 29;
 
 /**
  * Lambda memory that buys one full vCPU (CPU is allocated in proportion to
@@ -167,44 +127,6 @@ const WORKFLOW_TIMEOUT_DAYS = 7;
  */
 const PROCESS_KEYWORDS_TOLERATED_FAILURE_PERCENTAGE = 10;
 
-/** A 30-day CloudWatch log group; the removal policy is the only setting that differs between groups. */
-function monthLogGroup(
-  scope: Construct,
-  id: string,
-  logGroupName: string,
-  removalPolicy: cdk.RemovalPolicy
-): logs.LogGroup {
-  return new logs.LogGroup(scope, id, {
-    logGroupName,
-    retention: logs.RetentionDays.ONE_MONTH,
-    removalPolicy,
-  });
-}
-
-/** Props of one stack Lambda; the Python runtime and the log group are fixed by `pythonFunction`. */
-type PythonFunctionProps = Omit<lambda.FunctionProps, 'runtime' | 'logGroup' | 'functionName'> & {
-  functionName: string;
-};
-
-/**
- * `<name>Function` on Python 3.12, logging to its own explicit 30-day
- * `<name>LogGroup` at `/aws/lambda/<functionName>` instead of the
- * never-expiring group the Lambda service would create on first invocation.
- */
-function pythonFunction(
-  scope: Construct,
-  name: string,
-  props: PythonFunctionProps,
-  logRemovalPolicy: cdk.RemovalPolicy
-): lambda.Function {
-  const logGroup = monthLogGroup(scope, `${name}LogGroup`, `/aws/lambda/${props.functionName}`, logRemovalPolicy);
-  return new lambda.Function(scope, `${name}Function`, {
-    ...props,
-    runtime: lambda.Runtime.PYTHON_3_12,
-    logGroup,
-  });
-}
-
 /**
  * A Step Functions or stream worker. Its log group is `DESTROY`: these groups
  * were created by the stack from the start, and their short-lived debug
@@ -222,85 +144,6 @@ function workerFunction(
     { ...props, handler: props.handler ?? 'handler.handler' },
     cdk.RemovalPolicy.DESTROY
   );
-}
-
-/** Props of an API Lambda: the bundled handler files replace `code` and `handler`. */
-type ApiFunctionProps = Omit<PythonFunctionProps, 'code' | 'handler' | 'layers' | 'timeout'> & {
-  /** Handler files to bundle from `lambda/api/`; the first is the entry point (`<file>.handler`). */
-  handlerFiles: [string, ...string[]];
-  /** Defaults to the API Gateway integration ceiling; exceeding it needs a documented reason. */
-  timeout?: cdk.Duration;
-};
-
-/**
- * One API Lambda: the shared layer, only its own handler files, and an
- * explicit 30-day log group (`<name>LogGroup`).
- *
- * A Lambda with no log group in the template still gets one: the Lambda
- * service auto-creates `/aws/lambda/<functionName>` on first invocation, with
- * retention set to "Never expire". 39 of this account's 45 log groups were in
- * exactly that state, holding 70 MB that only grows and that nobody reads
- * past the first week of an incident (AUDIT-2026-08-19 §2.7).
- *
- * This mirrors the five Step Functions workers, which have carried explicit
- * `logs.LogGroup` constructs from the start. It is deliberately NOT
- * `logRetention:` on `lambda.Function`: that prop is deprecated in
- * aws-cdk-lib 2.x in favour of `logGroup`, and it works by deploying a
- * singleton custom-resource Lambda that calls PutRetentionPolicy after the
- * fact — an extra moving part to own for something the log group resource
- * states directly.
- *
- * WHY `RETAIN` HERE WHEN THE WORKERS USE `DESTROY` — read before deploying:
- *
- * All twelve of these groups ALREADY EXIST in the deployed account. The Lambda
- * service created them, so CloudFormation has never known about them, and
- * CloudFormation cannot Create a log group whose name is already taken. The
- * first `cdk deploy` carrying this change therefore fails with
- * "already exists" unless each group is first brought under stack management
- * (`cdk import`) or deleted so CloudFormation can recreate it.
- *
- * `RETAIN` is what keeps the import route open at all: CloudFormation's import
- * operation requires a DeletionPolicy on every resource being imported. It
- * also means that removing or renaming one of these constructs later abandons
- * the group rather than deleting production logs — which for the workers'
- * short-lived debug output did not matter, and here does.
- */
-function apiFunction(
-  scope: Construct,
-  name: string,
-  sharedLayer: lambda.ILayerVersion,
-  props: ApiFunctionProps
-): lambda.Function {
-  const { handlerFiles, timeout, ...functionProps } = props;
-  return pythonFunction(scope, name, {
-    ...functionProps,
-    handler: `${path.parse(handlerFiles[0]).name}.handler`,
-    code: apiLambdaCode(handlerFiles),
-    layers: [sharedLayer],
-    timeout: timeout ?? cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
-  }, cdk.RemovalPolicy.RETAIN);
-}
-
-/** A role the Lambda service assumes, with only the basic CloudWatch Logs execution policy attached. */
-function lambdaServiceRole(scope: Construct, id: string, roleName: string, description: string): iam.Role {
-  return new iam.Role(scope, id, {
-    roleName,
-    assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-    description,
-    managedPolicies: [
-      iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-    ],
-  });
-}
-
-/** Allow `actions` on `resources` in the grantee's identity policy. */
-function allow(grantee: iam.IGrantable, actions: string[], resources: string[]): void {
-  grantee.grantPrincipal.addToPrincipalPolicy(new iam.PolicyStatement({ actions, resources }));
-}
-
-/** An imported provider API key secret `citation-analysis/<keyName>-key`; an admin creates it from the dashboard. */
-function apiKeySecret(scope: Construct, id: string, keyName: string): secretsmanager.ISecret {
-  return secretsmanager.Secret.fromSecretNameV2(scope, id, `citation-analysis/${keyName}-key`);
 }
 
 /** A stack output exported as `CitationAnalysis-<id>`. */
@@ -324,120 +167,6 @@ function lambdaStep(
     outputPath: '$.Payload',
     retryOnServiceExceptions: true,
   });
-}
-
-/** A global secondary index of a stack table. ALL remains the default projection. */
-type CitationAnalysisIndexSpec = Pick<
-  dynamodb.GlobalSecondaryIndexProps,
-  'indexName' | 'partitionKey' | 'sortKey' | 'projectionType' | 'nonKeyAttributes'
->;
-
-/** The schema of one stack table; everything else is fixed by `citationAnalysisTable`. */
-interface CitationAnalysisTableSpec {
-  tableName: string;
-  partitionKey: dynamodb.Attribute;
-  sortKey?: dynamodb.Attribute;
-  /** Epoch-seconds attribute after which DynamoDB expires the item. Omitted for tables that keep every row. */
-  timeToLiveAttribute?: string;
-  /** Optional stream image used by durable event-driven workers. */
-  stream?: dynamodb.StreamViewType;
-  /**
-   * Added in the order listed. The order is load-bearing: it fixes the order of
-   * the template's AttributeDefinitions, and a reorder is a table diff on deploy.
-   */
-  globalSecondaryIndexes?: CitationAnalysisIndexSpec[];
-}
-
-/**
- * One DynamoDB table with the settings every table in this stack shares:
- * on-demand billing, AWS-managed encryption, point-in-time recovery and
- * `RETAIN`, so tearing the stack down can never delete data. Only the
- * schema varies between tables, and that is all a spec states.
- */
-function citationAnalysisTable(scope: Construct, id: string, spec: CitationAnalysisTableSpec): dynamodb.Table {
-  const table = new dynamodb.Table(scope, id, {
-    tableName: spec.tableName,
-    partitionKey: spec.partitionKey,
-    sortKey: spec.sortKey,
-    billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    encryption: dynamodb.TableEncryption.AWS_MANAGED,
-    pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-    removalPolicy: cdk.RemovalPolicy.RETAIN,
-    timeToLiveAttribute: spec.timeToLiveAttribute,
-    stream: spec.stream,
-  });
-
-  for (const index of spec.globalSecondaryIndexes ?? []) {
-    table.addGlobalSecondaryIndex({
-      ...index,
-      projectionType: index.projectionType ?? dynamodb.ProjectionType.ALL,
-    });
-  }
-
-  return table;
-}
-
-/** The parts of a stack data bucket that differ between buckets; `citationAnalysisBucket` fixes the rest. */
-interface CitationAnalysisBucketSpec {
-  /** Names the bucket `citation-analysis-<name>-<account>` and its access-log prefix `<name>/`. */
-  name: string;
-  accessLogsBucket: s3.IBucket;
-  lifecycleRules?: s3.LifecycleRule[];
-}
-
-/**
- * One S3 data bucket with the settings every data bucket in this stack shares:
- * AWS-managed encryption, no versioning, all public access blocked, SSL-only,
- * `RETAIN` so tearing the stack down can never delete data, and server access
- * logs written to the shared access-logs bucket under the bucket's own prefix.
- */
-function citationAnalysisBucket(stack: cdk.Stack, id: string, spec: CitationAnalysisBucketSpec): s3.Bucket {
-  return new s3.Bucket(stack, id, {
-    bucketName: `citation-analysis-${spec.name}-${stack.account}`,
-    encryption: s3.BucketEncryption.S3_MANAGED,
-    versioned: false,
-    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-    removalPolicy: cdk.RemovalPolicy.RETAIN,
-    enforceSSL: true,
-    serverAccessLogsBucket: spec.accessLogsBucket,
-    serverAccessLogsPrefix: `${spec.name}/`,
-    lifecycleRules: spec.lifecycleRules,
-  });
-}
-
-/**
- * `bedrock:InvokeModel` on the Claude models this stack calls through the
- * Converse API. The Converse API requires bedrock:InvokeModel permission (not
- * bedrock:Converse), and global cross-region inference requires all three ARN
- * patterns per AWS docs: the regional inference profile, the regional
- * foundation model and the global foundation model (no region/account).
- *
- * Anthropic models are AWS Marketplace products. This statement deliberately
- * does NOT grant `aws-marketplace:Subscribe`: the account-level subscription is
- * created once at deploy time by the BedrockModelAccess construct, so the
- * runtime roles never need Marketplace permissions of their own.
- */
-function claudeInvokeModelStatement(stack: cdk.Stack): iam.PolicyStatement {
-  return new iam.PolicyStatement({
-    effect: iam.Effect.ALLOW,
-    actions: ['bedrock:InvokeModel'],
-    resources: [
-      `arn:aws:bedrock:*:${stack.account}:inference-profile/global.anthropic.claude-*`,
-      'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
-      'arn:aws:bedrock:::foundation-model/anthropic.claude-*',
-    ],
-  });
-}
-
-/**
- * `dynamodb:GetItem` on the ProviderConfig table for a Lambda that calls
- * `shared.models`: it reads the model an administrator saved per tier in
- * Settings › Bedrock models (rows `bedrock-<tier>`). Pair it with the
- * `DYNAMODB_TABLE_PROVIDER_CONFIG` environment variable; without either the
- * Lambda falls back to the tier defaults.
- */
-function allowSavedBedrockModels(grantee: iam.IGrantable, providerConfigTable: dynamodb.ITable): void {
-  allow(grantee, ['dynamodb:GetItem'], [providerConfigTable.tableArn]);
 }
 
 /** Thrown at synth time when a CDK context tuning value is not usable. */
@@ -542,22 +271,6 @@ function provisionBedrockModelAccess(stack: cdk.Stack): void {
 }
 
 /**
- * Lambda code bundle containing only the given handler files from
- * `lambda/api/`: one file for a single-route function, the router plus its
- * handlers for a consolidated one. Shared code (including Decimal helpers in
- * shared/dynamo_decimal.py) ships via the Lambda layer, which keeps each
- * package small compared to bundling all API handlers together.
- *
- * The files ship with their CPython 3.12 bytecode, compiled at bundling time
- * by a local 3.12 (Docker as fallback), so a cold start does not recompile
- * them. The asset hash covers only these files: editing another API handler
- * no longer redeploys (and cold-starts) every API Lambda.
- */
-function apiLambdaCode(handlerFileNames: string[]): lambda.Code {
-  return lambdaHandlerFilesCode('api', handlerFileNames);
-}
-
-/**
  * A state machine with X-Ray tracing and full execution logging to its own
  * 30-day group at `/aws/vendedlogs/states/<stateMachineName>`.
  *
@@ -633,9 +346,16 @@ class WebBuildRequiredError extends Error {
   }
 }
 
+/** The ARN of a SEO-stack state machine, by its fixed name (no cross-stack reference: the SEO stack depends on this one). */
+function seoStateMachineArn(stack: cdk.Stack, name: string): string {
+  return stack.formatArn({ service: 'states', resource: 'stateMachine', resourceName: name, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME });
+}
+
 export class CitationAnalysisStack extends cdk.Stack {
   /** What the MCP stack builds on: the user pool and the API router Lambdas. */
   public readonly mcpInputs: McpServerInputs;
+  /** What the SEO stack builds on: the user pool. */
+  public readonly seoInputs: SeoStackInputs;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -959,6 +679,19 @@ export class CitationAnalysisStack extends cdk.Stack {
       ],
     });
 
+    // The SEO stack's bucket (`citation-analysis-seo-<account>`, lib/seo-stack.ts)
+    // logs here under `seo/`. Named, not referenced: the SEO stack deploys after
+    // this one.
+    accessLogsBucket.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.ServicePrincipal('logging.s3.amazonaws.com')],
+      actions: ['s3:PutObject'],
+      resources: [accessLogsBucket.arnForObjects('seo/*')],
+      conditions: {
+        ArnLike: { 'aws:SourceArn': `arn:${this.partition}:s3:::citation-analysis-seo-${this.account}` },
+        StringEquals: { 'aws:SourceAccount': this.account },
+      },
+    }));
+
     // Keywords Bucket
     //
     // `runs/` holds per-run scratch: the keyword manifest ParseKeywords writes
@@ -1206,15 +939,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       layers: [sharedLayer],
       concurrency: providerConcurrency,
       pacing: providerPacing,
-      environment: {
-        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
-        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
-        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
-        SECRETS_PREFIX: 'citation-analysis/',
-        RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
-        ...webSearchEnv,
-        ...bedrockTierEnv,
-      },
+      environment: providerSearchEnvironment(this, {
+        searchResultsTable: searchResultsTable.tableName,
+        brandConfigTable: brandConfigTable.tableName,
+        providerConfigTable: providerConfigTable.tableName,
+        rawResponsesBucket: rawResponsesBucket.bucketName,
+      }),
+      // Google AI Overviews (SEO stack) behind `-c seoEngine=true`: a branch, no resource.
+      externalProviders: readExternalSearchProviders(this),
     });
 
     // Grant Search Lambda read/write access to ProviderConfig table.
@@ -2117,6 +1849,9 @@ export class CitationAnalysisStack extends cdk.Stack {
         // POST /api/markets asks Bedrock for each market's local keyword.
         ...bedrockTierEnv,
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
+        // Schedule kinds of the SEO stack's paid snapshot runs (by name: the SEO stack depends on this one).
+        SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN: seoStateMachineArn(this, SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE),
+        SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN: seoStateMachineArn(this, BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME),
         SCHEDULE_ROLE_ARN: schedulerRole.roleArn,
         SECRETS_PREFIX: 'citation-analysis/',
       },
@@ -2224,6 +1959,16 @@ export class CitationAnalysisStack extends cdk.Stack {
       [`arn:aws:scheduler:${this.region}:${this.account}:schedule/citation-analysis-schedules/*`]
     );
     allow(configMgmtFunction, ['scheduler:ListSchedules'], ['*']);
+    // The rank trackers' own schedules (SEO stack), listed read-only on the Schedule page.
+    allow(configMgmtFunction, ['scheduler:GetSchedule'], [
+      `arn:aws:scheduler:${this.region}:${this.account}:schedule/${RANK_TRACKER_SCHEDULE_GROUP}/*`,
+    ]);
+    // "Run now" of a snapshot schedule, and the timed runs of one.
+    const seoSnapshotMachines = [SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE, BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME]
+      .map((name) => seoStateMachineArn(this, name));
+    // DescribeStateMachine: a snapshot kind is refused (400) while the SEO stack is not deployed.
+    allow(configMgmtFunction, ['states:DescribeStateMachine', 'states:StartExecution'], seoSnapshotMachines);
+    allow(schedulerRole, ['states:StartExecution'], seoSnapshotMachines);
     allow(
       configMgmtFunction,
       ['scheduler:CreateScheduleGroup', 'scheduler:GetScheduleGroup'],
@@ -2364,16 +2109,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       // (browsers do). Cuts transfer for large pages several-fold; it does not
       // raise the Lambda 6 MiB response cap, which is measured before this.
       minCompressionSize: cdk.Size.kibibytes(1),
-      // CORS preflight: API Gateway handles OPTIONS with wildcard origins.
-      // Actual CORS enforcement happens at Lambda level via SSM parameter containing CloudFront domain.
-      // This two-layer approach is required because CloudFront is created after API Gateway.
-      // Lambda functions read /citation-analysis/cors-origin from SSM and validate request origin.
-      defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
-        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
-        allowCredentials: false, // Must be false with wildcard origins
-      },
+      // CORS preflight: wildcard at API Gateway, real origin check in the Lambdas (see API_CORS_PREFLIGHT).
+      defaultCorsPreflightOptions: API_CORS_PREFLIGHT,
     });
 
     // Add Gateway Responses to include CORS headers in error responses
@@ -2475,6 +2212,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     const schedulesResource = apiResource.addResource('schedules');
     route(schedulesResource, configMgmtFunction, 'GET', 'POST');
+    // GET /schedules?source=rank-trackers lists each rank tracker's own
+    // EventBridge schedule, read-only. A query parameter, not a sub-resource:
+    // the stack is at CloudFormation's 500-resource limit.
 
     // Schedules v2 (2.3.0): the path parameter is the generated `sch-<hex>` id
     // (the EventBridge schedule Name); the display name lives in Description.
@@ -2886,27 +2626,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // SECURITY: Gateway responses use the CloudFront origin instead of wildcard '*'
     // so that auth failure details (401/403) are not observable by arbitrary origins.
     // In dev mode, use wildcard to allow localhost (Lambda-level CORS still validates per-request).
-    const gatewayResponseCorsHeaders = {
-      'Access-Control-Allow-Origin': devMode ? "'*'" : `'${cloudFrontOrigin}'`,
-      'Access-Control-Allow-Headers': "'Content-Type,Authorization,X-Api-Key'",
-      'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
-    };
-
-
-    // Integration failures (504 timeout, 5XX fallback) never reach the Lambda
-    // response helper. They get the same restricted CORS headers as the auth
-    // failures so browsers expose their HTTP status instead of masking them
-    // as an opaque CORS/network failure.
-    const corsGatewayResponses: [string, apigateway.ResponseType, string | undefined][] = [
-      ['Unauthorized', apigateway.ResponseType.UNAUTHORIZED, '401'],
-      ['AccessDenied', apigateway.ResponseType.ACCESS_DENIED, '403'],
-      ['ExpiredToken', apigateway.ResponseType.EXPIRED_TOKEN, '403'],
-      ['IntegrationTimeout', apigateway.ResponseType.INTEGRATION_TIMEOUT, '504'],
-      ['DefaultServerError', apigateway.ResponseType.DEFAULT_5XX, undefined],
-    ];
-    for (const [id, type, statusCode] of corsGatewayResponses) {
-      api.addGatewayResponse(id, { type, statusCode, responseHeaders: gatewayResponseCorsHeaders });
-    }
+    addCorsGatewayResponses(api, devMode ? '*' : cloudFrontOrigin);
     
     this.mcpInputs = {
       userPool: auth.userPool,
@@ -2922,6 +2642,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         'content-studio': contentStudioFunction,
       },
     };
+
+    this.seoInputs = { userPool: auth.userPool };
 
     // Update Cognito User Pool Client callback URLs with CloudFront domain
     const cfnUserPoolClient = auth.userPoolClient.node.defaultChild as cdk.aws_cognito.CfnUserPoolClient;
@@ -2975,49 +2697,14 @@ export class CitationAnalysisStack extends cdk.Stack {
     // ========================================
     // CDK creates 2 Lambda::Permission per API method (prod + test-invoke).
     // For consolidated Lambdas backing many routes, replace N permissions with
-    // a single wildcard permission per function. This is safe because all routes
-    // share the same Cognito authorizer and the Lambda handles its own routing.
-    // AWS docs support wildcard source ARNs for execute-api.
+    // a single wildcard permission per function (lib/constructs/permissions.ts).
 
     const consolidatedFunctions = [
       statsInsightsFunction, citationsContentFunction, keywordMgmtFunction,
       configMgmtFunction, executionMgmtFunction, manageBrandConfigFunction,
       contentStudioFunction, manageUsersFunction,
     ];
-
-    for (const fn of consolidatedFunctions) {
-      // Add single wildcard permission for this API
-      fn.addPermission('ApiGatewayWildcard', {
-        principal: new iam.ServicePrincipal('apigateway.amazonaws.com'),
-        sourceArn: api.arnForExecuteApi('*'),
-      });
-    }
-
-    // Remove CDK auto-generated per-method Lambda::Permission resources
-    // for consolidated functions. The wildcard permission above covers all methods.
-    // We use Aspects to remove them after synthesis since they're created on the
-    // API Gateway method constructs, not on the Lambda.
-    class RemoveDuplicatePermissions implements cdk.IAspect {
-      private readonly fnArnStrings: string[];
-      constructor(fns: lambda.Function[]) {
-        this.fnArnStrings = fns.map(fn => JSON.stringify(fn.functionArn));
-      }
-      public visit(node: Construct): void {
-        if (node instanceof lambda.CfnPermission) {
-          if (node.node.id === 'ApiGatewayWildcard') return;
-          const fnNameStr = JSON.stringify(node.functionName);
-          if (this.fnArnStrings.includes(fnNameStr)) {
-            const parent = node.node.scope;
-            if (parent) {
-              parent.node.tryRemoveChild(node.node.id);
-            }
-          }
-        }
-      }
-    }
-
-
-    cdk.Aspects.of(this).add(new RemoveDuplicatePermissions(consolidatedFunctions));
+    shareOneApiPermission(this, api, consolidatedFunctions);
 
     // ========================================
     // Outputs

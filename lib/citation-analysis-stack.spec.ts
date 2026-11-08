@@ -9,6 +9,7 @@ import {
   EMPTY_CUSTOM_REPORTS_SNAPSHOT,
   EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   EMPTY_WORKFLOW_SCALE_SNAPSHOT,
+  LAMBDA_SERVICE_ERRORS,
   SEARCH_PROVIDER_IDS,
   STATUS_CREATED_INDEX_SCHEMA,
   allProjectionIndexSchema,
@@ -65,6 +66,7 @@ import {
   regionalArnJoin,
   resolvePath,
   resolveString,
+  retrierErrors,
   retentionForLogGroupName,
   searchFunctionName,
   sortedHttpMethods,
@@ -883,12 +885,6 @@ const DEFAULT_PROVIDER_CAPS: Record<string, number | undefined> = {
   firecrawl: 2,
   agentcore: 5,
 };
-const LAMBDA_SERVICE_ERRORS = [
-  'Lambda.ClientExecutionTimeoutException',
-  'Lambda.ServiceException',
-  'Lambda.AWSLambdaException',
-  'Lambda.SdkClientException',
-];
 
 describe('Per-provider search functions', () => {
   it('caps each provider with its default reserved concurrency', () => {
@@ -966,9 +962,7 @@ describe('SearchAllProviders parallel search', () => {
   });
 
   it('checks the slot and time-budget retriers before States.TaskFailed, which also matches them', () => {
-    const retriers = resolvePath(searchTask('perplexity'), ['Retry']);
-
-    expect((Array.isArray(retriers) ? retriers : []).map((retrier) => resolvePath(retrier, ['ErrorEquals'])))
+    expect(retrierErrors(searchTask('perplexity')))
       .toStrictEqual([
         LAMBDA_SERVICE_ERRORS,
         ['Lambda.TooManyRequestsException'],
@@ -1306,6 +1300,11 @@ describe('Schedule routes (Schedules v2)', () => {
   it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
     expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
     expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+  });
+
+  it('gives ConfigMgmt the snapshot state machine ARNs that the snapshot schedule kinds target', () => {
+    expect(synthesized.configMgmtEnvVars).toHaveProperty('SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE_ARN');
+    expect(synthesized.configMgmtEnvVars).toHaveProperty('SEO_BACKLINK_SNAPSHOTS_STATE_MACHINE_ARN');
   });
 });
 

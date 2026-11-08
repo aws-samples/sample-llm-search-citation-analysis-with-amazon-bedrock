@@ -567,6 +567,7 @@ class TestUpdateModel:
                 'input': 'Reply with the single word OK.',
                 'tools': [{'type': 'web_search'}],
                 'max_output_tokens': 64,
+                'instructions': 'Cite your sources inline using bracketed markers, one source per bracket, like [1][2].',
             },
         }
 
@@ -584,7 +585,7 @@ class TestUpdateModel:
                 'model': 'claude-sonnet-4-6',
                 'max_tokens': 64,
                 'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
-                'tools': [{'type': 'web_search_20260318', 'name': 'web_search'}],
+                'tools': [{'type': 'web_search_20260318', 'name': 'web_search', 'allowed_callers': ['direct']}],
             },
         }
 
@@ -1229,47 +1230,24 @@ class TestPerplexityAgentApiModels:
         assert _put_provider(provider_id, {'model': 'google/gemini-3.6-flash'})[1]['field'] == 'model'
 
 
-class TestClaudeModelCheckFallsBackLikeRuns:
-    """A model that refuses dynamic filtering is checked with direct callers, as runs then ask it."""
+class TestClaudeModelCheckSendsDirectCallers:
+    """The check asks Claude in direct mode, exactly as runs do, and only once."""
 
-    def test_checks_again_with_direct_callers_and_stores_the_model(self, requests_stub):
+    def test_stores_the_model_after_one_direct_mode_check(self, requests_stub):
         _store_key()
-        requests_stub.side_effect = [
-            _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported by this model'),
-            _reply(200, {'content': []}),
-        ]
+        requests_stub.return_value = _reply(200, {'content': []})
 
         status, _ = _put_provider('claude', {'model': 'claude-haiku-4-5'})
 
-        assert (status, [call.kwargs['json']['tools'][0].get('allowed_callers') for call in requests_stub.call_args_list]) == (
-            200, [None, ['direct']],
+        assert (status, [call.kwargs['json']['tools'][0]['allowed_callers'] for call in requests_stub.call_args_list]) == (
+            200, [['direct']],
         )
 
-    def test_reports_the_fallbacks_failure(self, requests_stub):
-        _store_key()
-        requests_stub.side_effect = [
-            _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported by this model'),
-            _anthropic_rejection('web_search is not supported on this model'),
-        ]
-
-        assert _put_provider('claude', {'model': 'claude-haiku-4-5'})[1]['details'] == 'web_search is not supported on this model'
-
-    def test_checks_once_when_the_model_fails_for_another_reason(self, requests_stub):
+    def test_checks_once_when_the_model_refuses_the_tool(self, requests_stub):
         _store_key()
         requests_stub.return_value = _anthropic_rejection('web_search is not supported on this model')
 
         _put_provider('claude', {'model': 'claude-3-haiku-20240307'})
-
-        assert requests_stub.call_count == 1
-
-    @pytest.mark.parametrize(('provider_id', 'model'), [
-        ('openai', 'gpt-5.2'), ('perplexity', 'openai/gpt-6-luna'), ('gemini', 'gemini-2.5-pro'),
-    ])
-    def test_never_falls_back_for_another_engine(self, requests_stub, provider_id, model):
-        _store_key()
-        requests_stub.return_value = _reply(400, {'error': {'message': 'allowed_callers is not a valid field'}})
-
-        _put_provider(provider_id, {'model': model})
 
         assert requests_stub.call_count == 1
 
@@ -1433,15 +1411,6 @@ class TestTimeBudget:
             result = _module.validate_model('openai', 'sk-test-key-1234', 'gpt-5-mini')
 
         assert result == {'valid': False, 'error': _module.OUT_OF_TIME_MESSAGE, 'out_of_time': True}
-
-    def test_skips_the_claude_fallback_check_when_the_budget_is_spent(self, requests_stub):
-        _store_key()
-        requests_stub.return_value = _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported')
-        clock = MagicMock(side_effect=[0.0, 0.0, 100.0])
-        with patch.object(_module, 'current_deadline', return_value=Deadline(20, clock)):
-            status, _ = _put_provider('claude', {'model': 'claude-haiku-4-5'})
-
-        assert (status, requests_stub.call_count) == (503, 1)
 
     def test_records_no_failure_for_an_enable_check_the_budget_cut(self, requests_stub):
         _store_key()

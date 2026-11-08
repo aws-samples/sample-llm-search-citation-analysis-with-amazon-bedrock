@@ -1,7 +1,9 @@
 import {
   useEffect, useState
 } from 'react';
-import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
+import {
+  type BrandedFilter, useVisibilityMetrics
+} from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import type {
@@ -12,6 +14,7 @@ import { VisibilityOverview } from './VisibilityOverview';
 import { VisibilityOverviewSkeleton } from './VisibilitySkeletons';
 import type { HistoryRangeDays } from './VisibilityHistory';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
+import { BrandedFilterSelect } from './BrandedFilterSelect';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
@@ -32,6 +35,7 @@ export function VisibilityDashboard({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
   const [rangeDays, setRangeDays] = useState<HistoryRangeDays>(30);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [branded, setBranded] = useState<BrandedFilter>('all');
   const {
     activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
@@ -57,9 +61,9 @@ export function VisibilityDashboard({ keywords }: Props) {
   useEffect(() => {
     if (activeKeywords.length === 0) return;
     const current = decodeReportScope(scopeKey);
-    fetchVisibilityMetrics(current, selectedPersonaId ?? undefined);
+    fetchVisibilityMetrics(current, selectedPersonaId ?? undefined, undefined, branded);
     fetchHistoricalTrends(current, 'day', rangeDays);
-  }, [scopeKey, selectedPersonaId, rangeDays, activeKeywords.length, fetchVisibilityMetrics, fetchHistoricalTrends]);
+  }, [scopeKey, selectedPersonaId, branded, rangeDays, activeKeywords.length, fetchVisibilityMetrics, fetchHistoricalTrends]);
 
   useEffect(() => {
     const current = decodeReportScope(scopeKey);
@@ -85,6 +89,7 @@ export function VisibilityDashboard({ keywords }: Props) {
           selectedPersonaId={selectedPersonaId}
           onPersonaChange={setSelectedPersonaId}
         />
+        <BrandedFilterSelect value={branded} onChange={setBranded} />
       </PageHeaderCard>
 
       {visError && !visLoading && (

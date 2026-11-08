@@ -1,12 +1,21 @@
 """
-Validate a request-supplied list of strings: bounded, normalized per entry,
-deduplicated in first-seen order.
+Validate request-supplied text: a bounded optional string (``bounded_text``) and a list of strings
+(``normalize_string_list``: bounded, normalized per entry, deduplicated in first-seen order).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+
+
+def bounded_text(value: object, max_chars: int, error: Exception) -> str | None:
+    """``value`` trimmed (``None`` when absent or blank); raises ``error`` unless it is text of at most ``max_chars``."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > max_chars:
+        raise error
+    return value.strip() or None
 
 
 def normalize_string_list(

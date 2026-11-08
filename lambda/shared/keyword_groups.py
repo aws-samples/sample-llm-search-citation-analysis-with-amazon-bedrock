@@ -260,7 +260,11 @@ def resolve_scope(scope: dict[str, Any], keywords_table: Any) -> list[dict[str, 
     is deduplicated by id and sorted by keyword text so two runs over the
     same scope produce the same order.
     """
-    active = query_active_keywords(keywords_table)
+    return select_scope(scope, query_active_keywords(keywords_table))
+
+
+def select_scope(scope: dict[str, Any], active: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """:func:`resolve_scope` over already-read ``active`` keyword items (one read shared by several scopes)."""
     mode = scope.get('mode')
 
     if mode == 'groups':

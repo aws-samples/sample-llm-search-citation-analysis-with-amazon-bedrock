@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -31,7 +32,7 @@ JsonObject = dict[str, Any]
 RouteBuilder = Callable[[JsonObject], 'Route']
 Selector = Callable[[Any, JsonObject], Any]
 
-#: The argument a confirming spend operation carries (``start_run``, ``start_research``, ``generate_content_brief``).
+#: The argument a confirming spend operation carries (``start_run``, ``start_research``, ``generate_content_brief``, ``run_seo_*``, ``start_seo_job``).
 CONFIRMATION_ARGUMENT = 'confirmation_token'
 
 
@@ -44,7 +45,7 @@ class NotFound(LookupError):
 
 
 class Spend(NamedTuple):
-    """What a spend operation is: its ``family`` (``run``, ``research``, ``content``) and ``step`` (``estimate``, ``start``)."""
+    """What a spend operation is: its ``family`` (``run``, ``research``, ``content``, ``seo``) and ``step`` (``estimate``, ``start``)."""
 
     family: str
     step: str
@@ -127,14 +128,14 @@ _SCOPE_PROPERTIES: JsonObject = {
 }
 _SCOPE_RULE = 'Scope: one of group_id, keyword_ids, keyword, all.'
 
-_ENGINES = ('openai', 'perplexity', 'gemini', 'claude')
+_ENGINES = ('openai', 'perplexity', 'gemini', 'claude', 'google_ai_overview')
 _KEYWORD_STATUSES = ('active', 'inactive', 'paused')
 _PRIORITIES = ('high', 'normal', 'low')
 _PERIODS = ('day', 'week', 'month')
 _PROVIDER = _enum('One AI engine', _ENGINES)
 _PERSONA_ID = _string('Persona (query prompt) id')
 _DAYS = _integer('Window in days', 1, 365)
-_NEXT_TOKEN = _string('Cursor from the previous page')
+_NEXT_TOKEN = _string('Cursor from the previous page of this same query (same filters)')
 _PAGINATED = ' Paginated: pass next_token to continue.'
 
 
@@ -213,6 +214,14 @@ def _get_route(router: str, path: str, *params: str, scope: bool | None = None) 
     return route
 
 
+def _post_route(router: str, path: str, *fields: str) -> RouteBuilder:
+    """A POST route whose ``fields`` become the JSON body (a read that takes its ids in a body)."""
+    def route(arguments: JsonObject) -> Route:
+        return Route(router, 'POST', path, path, None, None, _body(arguments, *fields))
+
+    return route
+
+
 def _dispatch_route(argument: str, routes: Mapping[str, RouteBuilder]) -> RouteBuilder:
     """A route chosen by the value of one enum argument (``kind``, ``view``)."""
     def route(arguments: JsonObject) -> Route:
@@ -270,11 +279,18 @@ def _require(label: str, arguments: JsonObject, required: Sequence[str]) -> None
         raise InvalidArguments(f'{label} needs {", ".join(missing)}')
 
 
-def _manage_keywords_route(arguments: JsonObject) -> Route:
-    action = arguments['action']
-    required, build = _MANAGE_ACTIONS[action]
-    _require(action, arguments, required)
-    return build(arguments)
+def _checked_dispatch(argument: str, routes: Mapping[str, tuple[tuple[str, ...], RouteBuilder]]) -> RouteBuilder:
+    """A route chosen by one enum argument, after checking the arguments that choice needs."""
+    def route(arguments: JsonObject) -> Route:
+        choice = arguments[argument]
+        required, build = routes[choice]
+        _require(choice, arguments, required)
+        return build(arguments)
+
+    return route
+
+
+_manage_keywords_route = _checked_dispatch('action', _MANAGE_ACTIONS)
 
 
 def _path_route(router: str, resource: str, argument: str) -> RouteBuilder:
@@ -398,10 +414,12 @@ _JSON_TYPES: dict[str, type] = {'string': str, 'boolean': bool, 'array': list, '
 def _is_json_type(value: Any, expected: str) -> bool:
     if expected == 'integer':
         return isinstance(value, int) and not isinstance(value, bool)
+    if expected == 'number':
+        return isinstance(value, int | float) and not isinstance(value, bool)
     return isinstance(value, _JSON_TYPES[expected])
 
 
-def _check_range(name: str, value: int, spec: JsonObject) -> None:
+def _check_range(name: str, value: float, spec: JsonObject) -> None:
     minimum, maximum = spec.get('minimum'), spec.get('maximum')
     if maximum is None:
         if minimum is not None and value < minimum:
@@ -426,8 +444,8 @@ def _check_argument(name: str, value: Any, spec: JsonObject) -> None:
         raise InvalidArguments(f'{name} must be of type {expected}')
     allowed = spec.get('enum')
     if allowed is not None and value not in allowed:
-        raise InvalidArguments(f'{name} must be one of: {", ".join(allowed)}')
-    if expected == 'integer':
+        raise InvalidArguments(f'{name} must be one of: {", ".join(str(item) for item in allowed)}')
+    if expected in ('integer', 'number'):
         _check_range(name, value, spec)
     elif expected == 'array':
         _check_items(name, value, spec)
@@ -448,6 +466,12 @@ def validate_arguments(schema: JsonObject, arguments: Any) -> JsonObject:
         if value is not None:
             _check_argument(name, value, properties[name])
     return arguments
+
+
+def build_route(tool: Tool, arguments: Any) -> tuple[JsonObject, Route]:
+    """``(validated arguments, the API request they make)`` of one call of ``tool``; raises ``InvalidArguments``."""
+    valid = validate_arguments(tool.input_schema, arguments)
+    return valid, tool.route(valid)
 
 
 # --- The catalogue --------------------------------------------------------------
@@ -512,6 +536,9 @@ _RUN_ANALYSIS = 'Run Analysis'
 _KEYWORD_RESEARCH = 'Keyword Research'
 _CONTENT_STUDIO = 'Content Studio'
 _EXAMPLE_CONFIRMATION = 'value-from-the-estimate'
+_SEO = 'SEO'
+#: The SEO stack's router (``CitationAnalysis-SeoRouter``): free reads, and the ``seo`` spend family's DataForSEO lookups and jobs.
+_SEO_ROUTER = 'seo'
 
 _RUN_SCOPE_RULE = 'Scope: one of group_id, keyword_ids, all.'
 _RUN_SCHEMA = _schema({name: _SCOPE_PROPERTIES[name] for name in (*RUN_SCOPE_ARGUMENTS, MARKET_ARGUMENT)})
@@ -549,6 +576,270 @@ _CONTENT_SCHEMA = _schema({
 _CONTENT_TAGS = ('content studio', 'content brief', 'group brief', 'landing page', 'copy', 'write content', 'generate',
                  'article', 'rewrite', 'improve page', 'estimate', 'cost')
 
+# --- SEO (router ``seo``) ------------------------------------------------------------
+
+_SEO_PREFIX = '/api/seo'
+#: An id put into a request path (tracker, audit, job): letters, digits, ``-`` and ``_``, so it stays one segment.
+_PATH_SEGMENT = re.compile(r'[A-Za-z0-9_-]{1,64}')
+_SEO_MARKET = _string("Market id, default 'global'")
+_SEO_SCOPES = ('exact_url', 'subfolder', 'domain', 'subdomains')
+_FREE = 'Free (no DataForSEO call). '
+_ESTIMATE_FIRST = ' Step 1: calls, price each, confirmation_token; wait for approval.'
+_RUN_AFTER = ' Step 2 (spends credit): same arguments + confirmation_token, once approved.'
+
+
+def _int_choice(description: str, values: Sequence[int]) -> JsonObject:
+    return {'type': 'integer', 'enum': list(values), 'description': description}
+
+
+def _number(description: str, minimum: float, maximum: float) -> JsonObject:
+    return {'type': 'number', 'minimum': minimum, 'maximum': maximum, 'description': description}
+
+
+def _flag(description: str) -> JsonObject:
+    return {'type': 'boolean', 'description': description}
+
+
+def _seo_segment(arguments: JsonObject, name: str) -> str:
+    value = arguments.get(name)
+    if not isinstance(value, str) or not _PATH_SEGMENT.fullmatch(value):
+        raise InvalidArguments(f'{name} must be an id of letters, digits, - or _')
+    return value
+
+
+def _seo_get(path: str, *params: str) -> RouteBuilder:
+    return _get_route(_SEO_ROUTER, _SEO_PREFIX + path, *params)
+
+
+def _seo_post(path: str, *fields: str, **fixed: Any) -> RouteBuilder:
+    """A POST whose body is ``fixed`` plus the ``fields`` the call set."""
+    def route(arguments: JsonObject) -> Route:
+        full = _SEO_PREFIX + path
+        return Route(_SEO_ROUTER, 'POST', full, full, None, None, {**fixed, **_body(arguments, *fields)})
+
+    return route
+
+
+def _seo_item(method: str, resource: str, argument: str, *params: str) -> RouteBuilder:
+    """A request on one item: the ``{...}`` segment of ``resource`` is the id in ``argument``; ``params`` are the query."""
+    name = resource[resource.index('{') + 1:resource.index('}')]
+
+    def route(arguments: JsonObject) -> Route:
+        item_id = _seo_segment(arguments, argument)
+        path = _SEO_PREFIX + resource.replace(f'{{{name}}}', item_id)
+        body: JsonObject | None = {} if method == 'POST' else None
+        return Route(_SEO_ROUTER, method, path, _SEO_PREFIX + resource, {name: item_id},
+                     _query(arguments, *params) or None, body)
+
+    return route
+
+
+_TRACKER_ID = _string('Rank tracker id, from view=trackers')
+_RANK_SCHEMA = _schema({
+    'view': _enum('trackers: every active tracker and its latest run; tracker: one tracker and its keywords; '
+                  'results: positions over a period; history: one keyword over days', ('trackers', 'tracker', 'results', 'history')),
+    'tracker_id': _TRACKER_ID,
+    'period': _enum('results: window, default 7d', ('1d', '7d', '30d', '90d')),
+    'keyword_id': _string('history: tracked keyword id, from view=tracker'),
+    'days': _integer('history: days, default 365', 1, 365),
+}, ('view',))
+_RANK_VIEWS: dict[str, tuple[tuple[str, ...], RouteBuilder]] = {
+    'trackers': ((), _seo_get('/rank-trackers')),
+    'tracker': (('tracker_id',), _seo_item('GET', '/rank-trackers/{trackerId}', 'tracker_id')),
+    'results': (('tracker_id',), _seo_item('GET', '/rank-trackers/{trackerId}/results', 'tracker_id', 'period')),
+    'history': (('tracker_id', 'keyword_id'),
+                _seo_item('GET', '/rank-trackers/{trackerId}/history', 'tracker_id', 'keyword_id', 'days')),
+}
+_AUDIT_ID = _string('Site audit id, from view=list')
+_AUDIT_SCHEMA = _schema({
+    'view': _enum('list: recent audits; summary: status, progress, summary and AI readiness of one; issues: its issue '
+                  'types, or with issue_type the affected pages', ('list', 'summary', 'issues')),
+    'audit_id': _AUDIT_ID,
+    'issue_type': _string('issues: one issue type from the issue-type list'),
+    'limit': _integer('issues: pages per page, default 50', 1, 200),
+    'next_token': _string('issues: cursor from the previous page'),
+}, ('view',))
+_AUDIT_VIEWS: dict[str, tuple[tuple[str, ...], RouteBuilder]] = {
+    'list': ((), _seo_get('/audits')),
+    'summary': (('audit_id',), _seo_item('GET', '/audits/{auditId}', 'audit_id')),
+    'issues': (('audit_id',), _seo_item('GET', '/audits/{auditId}/issues', 'audit_id', 'issue_type', 'limit', 'next_token')),
+}
+
+_KEYWORD_LOOKUP_SCHEMA = _schema({
+    'lookup': _enum('research: keyword ideas around a seed with volume, difficulty, CPC and intent; serp: the organic '
+                    'Google results of a keyword', ('research', 'serp')),
+    'keyword': _string('The seed (research) or the keyword (serp), at most 200 characters'),
+    MARKET_ARGUMENT: _SEO_MARKET,
+    'mode': _enum('research: default auto', ('auto', 'related', 'suggestions', 'ideas')),
+    'limit': _int_choice('research: keywords, default 150', (150, 300, 500)),
+    'group_keywords': _flag('research: group close variants'),
+    'clickstream': _flag('research: clickstream volumes (doubles the price)'),
+    'depth': _int_choice('serp: results, default 20', (20, 50)),
+}, ('lookup', 'keyword'))
+_KEYWORD_LOOKUPS = {
+    'research': ((), _seo_post('/keywords/research', 'keyword', MARKET_ARGUMENT, 'mode', 'limit', 'group_keywords',
+                               'clickstream')),
+    'serp': ((), _seo_post('/serp', 'keyword', MARKET_ARGUMENT, 'depth')),
+}
+_DOMAIN_LOOKUP_SCHEMA = _schema({
+    'lookup': _enum('overview: organic keywords, estimated traffic and its value, position buckets; ranked_keywords: '
+                    'one page of the keywords the target ranks for', ('overview', 'ranked_keywords')),
+    'target': _string('Domain or URL'),
+    'scope': _enum('How much of the target counts', _SEO_SCOPES),
+    MARKET_ARGUMENT: _SEO_MARKET,
+    'page': _integer('ranked_keywords: page, default 1', 1, 200),
+    'page_size': _int_choice('ranked_keywords: rows, default 50', (50, 100)),
+    'sort': _enum('ranked_keywords: default traffic', ('rank', 'traffic', 'volume', 'score', 'cpc')),
+    'order': _enum('ranked_keywords: default desc', ('asc', 'desc')),
+    'search': _string('ranked_keywords: only keywords containing this text'),
+    'filters': {'type': 'object', 'description': 'ranked_keywords: {include, exclude, min_volume, max_volume, '
+                'min_traffic, max_traffic, ...} as in the dashboard'},
+}, ('lookup', 'target'))
+_DOMAIN_LOOKUPS = {
+    'overview': ((), _seo_post('/domains/overview', 'target', 'scope', MARKET_ARGUMENT)),
+    'ranked_keywords': ((), _seo_post('/domains/keywords', 'target', 'scope', MARKET_ARGUMENT, 'page', 'page_size',
+                                      'sort', 'order', 'search', 'filters')),
+}
+_BACKLINK_TABLE_FIELDS = ('target', 'scope', 'page', 'page_size', 'sort_field', 'sort_order', 'include_spam', 'filters')
+_BACKLINK_LOOKUP_SCHEMA = _schema({
+    'lookup': _enum('overview: totals and a year of history; links, referring_domains, top_pages: one page of that '
+                    'table', ('overview', 'links', 'referring_domains', 'top_pages')),
+    'target': _string('Domain or URL'),
+    'scope': _enum('How much of the target counts', (*_SEO_SCOPES, 'page')),
+    'page': _integer('tables: page, default 1', 1, 100),
+    'page_size': _int_choice('tables: rows, default 50', (50, 100, 200)),
+    'sort_field': _string('tables: column to sort by'),
+    'sort_order': _enum('tables: default desc', ('asc', 'desc')),
+    'include_spam': _flag('tables: keep links DataForSEO marks as spam'),
+    'mode': _enum('links: one link per referring domain (default) or every link', ('one_per_domain', 'as_is')),
+    'filters': {'type': 'object', 'description': 'tables: column filters as in the dashboard'},
+}, ('lookup', 'target'))
+_BACKLINK_LOOKUPS = {
+    'overview': ((), _seo_post('/backlinks/overview', 'target', 'scope')),
+    'links': ((), _seo_post('/backlinks/rows', *_BACKLINK_TABLE_FIELDS, 'mode')),
+    'referring_domains': ((), _seo_post('/backlinks/referring-domains', *_BACKLINK_TABLE_FIELDS)),
+    'top_pages': ((), _seo_post('/backlinks/top-pages', *_BACKLINK_TABLE_FIELDS)),
+}
+_POINT_FIELDS = ('latitude', 'longitude', MARKET_ARGUMENT)
+_BUSINESS_FIELDS = ('name', 'cid', 'place_id')
+_LOCAL_PROPERTIES: JsonObject = {
+    'latitude': _number('Latitude of the point searched around', -90, 90),
+    'longitude': _number('Longitude of the point searched around', -180, 180),
+    MARKET_ARGUMENT: _SEO_MARKET,
+    'name': _string('Business name'),
+    'cid': _string('Google CID of the business'),
+    'place_id': _string('Google place id of the business'),
+    'domain': _string('serp, rank_grid: website of the business whose rank to find'),
+    'keyword': _string('The search, at most 120 characters'),
+    'zoom': _integer('Map zoom', 4, 18),
+    'device': _enum('Default mobile', ('mobile', 'desktop')),
+}
+_LOCAL_LOOKUP_SCHEMA = _schema({
+    'lookup': _enum('businesses: listings near a point; profile: one Google Business Profile; serp: Maps or Local '
+                    'Finder results for a search and where a business sits in them', ('businesses', 'profile', 'serp')),
+    **_LOCAL_PROPERTIES,
+    'query': _string('businesses: name to search for'),
+    'categories': _string_list('businesses: business categories', max_items=10),
+    'radius_km': _number('businesses, profile: radius around the point', 0.2, 199),
+    'min_rating': _number('businesses: lowest rating', 1, 5),
+    'min_reviews': _integer('businesses: fewest reviews', 0, 1_000_000),
+    'is_claimed': _flag('businesses: only claimed (true) or unclaimed (false) profiles'),
+    'sort_by': _enum('businesses: default relevance', ('relevance', 'rating', 'reviews')),
+    'limit': _integer('businesses: rows, default 20', 1, 50),
+    'offset': _integer('businesses: rows to skip', 0, 1000),
+    'search_type': _enum('serp: default maps', ('maps', 'local_finder')),
+    'depth': _integer('serp: results, default 20', 1, 100),
+}, ('lookup',))
+_LOCAL_LOOKUPS = {
+    'businesses': ((), _seo_post('/local/businesses', 'query', 'categories', *_POINT_FIELDS, 'radius_km', 'min_rating',
+                                 'min_reviews', 'is_claimed', 'sort_by', 'limit', 'offset')),
+    'profile': ((), _seo_post('/local/profile', *_BUSINESS_FIELDS, *_POINT_FIELDS, 'radius_km')),
+    'serp': (('keyword',), _seo_post('/local/serp', 'keyword', *_POINT_FIELDS, *_BUSINESS_FIELDS, 'domain', 'zoom',
+                                     'search_type', 'device', 'depth')),
+}
+_SEO_JOB_SCHEMA = _schema({
+    'job': _enum('rank_run: check a rank tracker now; site_audit: crawl your own site; domain_snapshot: store the '
+                 "estimated traffic of a domain; backlinks_snapshot: snapshot every tracked domain's backlinks; "
+                 'rank_grid: local rank of a business on a grid of points',
+                 ('rank_run', 'site_audit', 'domain_snapshot', 'backlinks_snapshot', 'rank_grid')),
+    'tracker_id': _TRACKER_ID,
+    'start_url': _string('site_audit: a URL on one of your own domains'),
+    'max_pages': _int_choice('site_audit: pages to crawl, default 500', (100, 500, 2000)),
+    **_LOCAL_PROPERTIES,
+    'domain': _string('domain_snapshot: the domain; rank_grid: website of the business'),
+    'grid_size': _int_choice('rank_grid: points per side, default 3', (3, 5, 7)),
+    'spacing_km': _number('rank_grid: distance between points, default 2', 0.25, 10),
+}, ('job',))
+_SEO_JOBS = {
+    'rank_run': (('tracker_id',), _seo_item('POST', '/rank-trackers/{trackerId}/runs', 'tracker_id')),
+    'site_audit': (('start_url',), _seo_post('/audits', 'start_url', 'max_pages')),
+    'domain_snapshot': (('domain',), _seo_post('/domains/snapshots', 'domain', MARKET_ARGUMENT)),
+    'backlinks_snapshot': ((), _seo_post('/backlinks/snapshots')),
+    'rank_grid': (('keyword',), _seo_post('/local/jobs', 'keyword', *_POINT_FIELDS, *_BUSINESS_FIELDS, 'domain',
+                                          'grid_size', 'spacing_km', 'zoom', 'device', kind='grid')),
+}
+_SEO_SPEND_TAGS = ('seo', 'dataforseo', 'estimate', 'cost', 'price', 'paid', 'lookup')
+
+
+def _seo_spend_pair(
+    name: str, what: str, tags: Sequence[str], schema: JsonObject, examples: Sequence[JsonObject],
+    route: RouteBuilder, *, admin: bool = False,
+) -> tuple[Tool, Tool]:
+    """``estimate_<name>`` and the ``run_<name>`` (``start_<name>`` for admin jobs) it confirms, in family ``seo``."""
+    start = f'start_{name}' if admin else f'run_{name}'
+    every_tag = (*tags, *_SEO_SPEND_TAGS)
+    confirmed = [{**example, CONFIRMATION_ARGUMENT: _EXAMPLE_CONFIRMATION} for example in examples]
+    return (
+        _spend_tool(f'estimate_{name}', what + _ESTIMATE_FIRST, every_tag, schema, examples,
+                    spend=Spend('seo', 'estimate'), tab=_SEO, route=route, scope='run', admin=admin),
+        _spend_tool(start, what + _RUN_AFTER, every_tag, _confirming(schema), confirmed,
+                    spend=Spend('seo', 'start'), tab=_SEO, route=route, scope='run', admin=admin),
+    )
+
+
+_SEO_SPEND_TOOLS: tuple[Tool, ...] = (
+    *_seo_spend_pair(
+        'seo_keywords',
+        'DataForSEO keywords: research (ideas with volume, KD, CPC; ~$0.04-0.17) or serp (Google organic results; '
+        '~$0.0035-0.008). Cache hits free.',
+        ('keyword research', 'keyword ideas', 'search volume', 'serp', 'google results', 'organic results', 'ranking'),
+        _KEYWORD_LOOKUP_SCHEMA, ({'lookup': 'serp', 'keyword': _EXAMPLE_KEYWORD},),
+        _checked_dispatch('lookup', _KEYWORD_LOOKUPS),
+    ),
+    *_seo_spend_pair(
+        'seo_domain',
+        'DataForSEO domain: overview (traffic, keywords; ~$0.012) or ranked_keywords (~$0.018 per 50 rows). Cache '
+        'hits free.',
+        ('domain overview', 'ranked keywords', 'organic traffic', 'competitor domain', 'traffic value'),
+        _DOMAIN_LOOKUP_SCHEMA, ({'lookup': 'overview', 'target': 'example.com'},),
+        _checked_dispatch('lookup', _DOMAIN_LOOKUPS),
+    ),
+    *_seo_spend_pair(
+        'seo_backlinks',
+        'DataForSEO backlinks: overview (2 calls, ~$0.06) or a page of links, referring_domains or top_pages '
+        '(~$0.026-0.031). Cache hits free.',
+        ('backlinks', 'links', 'referring domains', 'top pages', 'link profile'),
+        _BACKLINK_LOOKUP_SCHEMA, ({'lookup': 'overview', 'target': 'example.com'},),
+        _checked_dispatch('lookup', _BACKLINK_LOOKUPS),
+    ),
+    *_seo_spend_pair(
+        'seo_local',
+        'DataForSEO local: businesses (~$0.02), profile (~$0.005) or serp (Maps ~$0.002, Local Finder $0.002 per 10 '
+        'results). Cache hits free.',
+        ('local seo', 'google business profile', 'maps', 'local finder', 'businesses near', 'local results'),
+        _LOCAL_LOOKUP_SCHEMA, ({'lookup': 'serp', 'keyword': 'hotel', 'latitude': 43.37, 'longitude': -8.4},),
+        _checked_dispatch('lookup', _LOCAL_LOOKUPS),
+    ),
+    *_seo_spend_pair(
+        'seo_job',
+        'SEO job (admin): rank_run (SERP per keyword+device), site_audit (free), domain_snapshot (2 calls), '
+        'backlinks_snapshot ($0.024/domain), rank_grid ($0.0012/point).',
+        ('rank tracking', 'rank check', 'site audit', 'crawl', 'snapshot', 'rank grid', 'batch', 'start'),
+        _SEO_JOB_SCHEMA, ({'job': 'rank_run', 'tracker_id': 'trk-1'},),
+        _checked_dispatch('job', _SEO_JOBS), admin=True,
+    ),
+)
+
 OPERATIONS: tuple[Tool, ...] = (
     _tool(
         'list_keyword_groups', _SETTINGS,
@@ -565,7 +856,7 @@ OPERATIONS: tuple[Tool, ...] = (
             'status': _enum('Only this status', _KEYWORD_STATUSES),
             'priority': _enum('Only this priority', _PRIORITIES),
             'limit': _integer('Page size', 1, 1000),
-            'next_token': _string('Cursor from the previous page'),
+            'next_token': _string('Cursor from the previous page of this same query (same filters)'),
         }),
         _get_route('keyword-mgmt', '/api/keywords', 'group_id', 'status', 'priority', 'limit', 'next_token'),
         ({'status': 'active'}, {'group_id': _EXAMPLE_GROUP, 'limit': 50}), direct=True,
@@ -681,8 +972,9 @@ OPERATIONS: tuple[Tool, ...] = (
     _tool(
         'list_providers', _SETTINGS,
         'AI engines and search providers with their enabled and configured flags and the model each one uses.',
-        ('providers', 'engines', 'models', 'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa',
-         'serpapi', 'firecrawl', 'agentcore', 'enabled', 'configured', 'api key', 'which engines'),
+        ('providers', 'engines', 'models', 'openai', 'perplexity', 'gemini', 'claude', 'google ai overviews', 'brave',
+         'tavily', 'exa', 'serpapi', 'firecrawl', 'agentcore', 'dataforseo', 'enabled', 'configured', 'api key',
+         'which engines'),
         _schema({}), _get_route('config-mgmt', '/api/providers'), ({},), shape=_provider_summary,
     ),
     _tool(
@@ -813,6 +1105,83 @@ OPERATIONS: tuple[Tool, ...] = (
         ({'group_id': _EXAMPLE_GROUP, 'days': 90},),
     ),
     _tool(
+        'get_keyword_metrics', _SEO,
+        _FREE + 'Stored SEO metrics of keywords by id in one market: search volume, monthly searches, keyword '
+        'difficulty, CPC, competition, intent. Ids without metrics are absent.',
+        ('seo', 'search volume', 'keyword difficulty', 'kd', 'cpc', 'competition', 'intent', 'keyword metrics',
+         'monthly searches', 'demand', 'dataforseo'),
+        _schema({
+            'keyword_ids': _string_list('Keyword ids (from list_keywords)', max_items=500),
+            MARKET_ARGUMENT: _SEO_MARKET,
+        }, ('keyword_ids',)),
+        _post_route(_SEO_ROUTER, '/api/seo/keywords/metrics/lookup', 'keyword_ids', MARKET_ARGUMENT),
+        ({'keyword_ids': ['kw_1', 'kw_2']}, {'keyword_ids': ['kw_1'], MARKET_ARGUMENT: 'cl-es'}),
+    ),
+    _tool(
+        'get_seo_geo_comparison', _SEO,
+        _FREE + 'SEO vs GEO per keyword: organic position, competitor positions, AI Overview shown/cites you, AI '
+        'mention rate, quadrant (both_strong, ai_gap, seo_gap, both_weak, no_data), totals.',
+        ('seo vs geo', 'organic position', 'google ranking', 'ai overview', 'ai overviews', 'quadrant', 'ai gap',
+         'seo gap', 'search vs ai', 'rank'),
+        _schema({
+            MARKET_ARGUMENT: _SEO_MARKET,
+            'group_id': _string('Only the keywords of this keyword group'),
+        }),
+        _get_route(_SEO_ROUTER, '/api/seo/seo-geo', MARKET_ARGUMENT, 'group_id'),
+        ({}, {'group_id': _EXAMPLE_GROUP, MARKET_ARGUMENT: 'cl-es'}),
+    ),
+    _tool(
+        'get_seo_recommendations', _SEO,
+        _FREE + 'SEO recommendations built from the SEO vs GEO rows of a market (and keyword group): what to do per '
+        'keyword, with priority and status.',
+        ('seo recommendations', 'seo insights', 'seo actions', 'what to fix', 'seo advice', 'opportunities'),
+        _schema({MARKET_ARGUMENT: _SEO_MARKET, 'group_id': _string('Only the keywords of this keyword group')}),
+        _seo_get('/insights', MARKET_ARGUMENT, 'group_id'), ({}, {'group_id': _EXAMPLE_GROUP}),
+    ),
+    _tool(
+        'get_rank_tracking', _SEO,
+        _FREE + 'Google rank tracking: trackers (domain, market, keyword scope, schedule, latest run), one tracker '
+        'with its keywords, positions over a period, or one keyword\'s history.',
+        ('rank tracking', 'rank tracker', 'google position', 'rankings', 'position history', 'keyword rank', 'serp position'),
+        _RANK_SCHEMA, _checked_dispatch('view', _RANK_VIEWS),
+        ({'view': 'trackers'}, {'view': 'results', 'tracker_id': 'trk-1', 'period': '30d'}),
+    ),
+    _tool(
+        'get_domain_snapshots', _SEO,
+        _FREE + 'Stored estimated-traffic snapshots of a domain in a market (organic keywords, traffic, traffic value '
+        'over time).',
+        ('domain snapshots', 'traffic history', 'estimated traffic', 'domain trend', 'organic traffic'),
+        _schema({'domain': _string('The domain'), MARKET_ARGUMENT: _SEO_MARKET}, ('domain',)),
+        _seo_get('/domains/snapshots', 'domain', MARKET_ARGUMENT), ({'domain': 'example.com'},),
+    ),
+    _tool(
+        'get_backlink_snapshots', _SEO,
+        _FREE + 'Stored weekly backlink snapshots of your domains and competitor domains, and whether the weekly '
+        'snapshot is on.',
+        ('backlink snapshots', 'backlink history', 'referring domains trend', 'link growth', 'competitor backlinks'),
+        _schema({}), _seo_get('/backlinks/snapshots'), ({},),
+    ),
+    _tool(
+        'get_site_audits', _SEO,
+        _FREE + 'Site audits of your own site: the recent audits, one audit (status, progress, summary, AI '
+        'readiness), its issue types, or the pages affected by one issue type.',
+        ('site audit', 'technical seo', 'crawl', 'issues', 'broken links', 'ai readiness', 'audit status'),
+        _AUDIT_SCHEMA, _checked_dispatch('view', _AUDIT_VIEWS),
+        ({'view': 'list'}, {'view': 'issues', 'audit_id': '0123456789abcdef0123456789abcdef'}),
+    ),
+    _tool(
+        'get_local_job', _SEO,
+        _FREE + 'Status and results of a local SEO job (rank grid, reviews, profile updates) by job_id.',
+        ('local job', 'rank grid', 'grid status', 'local seo', 'job status'),
+        _schema({
+            'job_id': _string('job_id returned when the job started'),
+            'domain': _string('Rank grid: website of the business to rank, default the one it started with'),
+            'name': _string('Rank grid: business name to rank'),
+        }, ('job_id',)),
+        _seo_item('GET', '/local/jobs/{job_id}', 'job_id', 'domain', 'name'),
+        ({'job_id': '0123456789abcdef0123456789abcdef'},),
+    ),
+    _tool(
         'list_schedules', _SCHEDULE,
         'Scheduled analysis runs: name, scope, cadence, timezone, enabled flag and next run.' + _PAGINATED,
         ('schedules', 'scheduled runs', 'cron', 'recurring', 'automation', 'cadence', 'weekly', 'daily'),
@@ -921,6 +1290,7 @@ OPERATIONS: tuple[Tool, ...] = (
         ({'group_id': _EXAMPLE_GROUP, 'content_angle': _DEFAULT_ANGLE, CONFIRMATION_ARGUMENT: _EXAMPLE_CONFIRMATION},),
         spend=Spend('content', 'start'), tab=_CONTENT_STUDIO, route=_content_brief_route, scope='write',
     ),
+    *_SEO_SPEND_TOOLS,
 )
 
 _BY_NAME: dict[str, Tool] = {tool.name: tool for tool in OPERATIONS}
@@ -979,8 +1349,10 @@ META_TOOLS: tuple[JsonObject, ...] = (
         'search_tools',
         'Find more operations by free text: providers, personas, totals, engine answers, persona rankings, prompt '
         'insights, report insights, recent runs, run status, crawled pages, sentiment examples, custom reports, '
-        'schedules, alerts, research jobs, Content Studio; and the estimate-then-start operations that spend credit: '
-        'analysis runs, keyword research, content briefs.',
+        'schedules, alerts, research jobs, Content Studio, SEO keyword metrics, SEO vs GEO, SEO recommendations, rank '
+        'tracking, domain and backlink snapshots, site audits, local jobs; and the estimate-then-start '
+        'operations that spend credit: analysis runs, keyword research, content briefs, DataForSEO lookups (keywords, '
+        'SERP, domains, backlinks, local) and SEO jobs.',
         SEARCH_TOOLS_SCHEMA, read_only=True,
     ),
     _meta(

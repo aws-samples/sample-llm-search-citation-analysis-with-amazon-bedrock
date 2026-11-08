@@ -6,7 +6,7 @@ import { buildChartData } from './KeywordDetailComponents';
 describe('buildChartData', () => {
   it.each(['lineChartData', 'barChartData'] as const)('labels the %s datasets with the provider display names', (chart) => {
     expect(buildChartData([], {})[chart].datasets.map((dataset) => dataset.label)).toStrictEqual([
-      'Anthropic Claude', 'Google Gemini', 'OpenAI', 'Perplexity',
+      'Anthropic Claude', 'Google Gemini', 'Google AI Overviews', 'OpenAI', 'Perplexity',
     ]);
   });
 
@@ -14,7 +14,7 @@ describe('buildChartData', () => {
     const { lineChartData } = buildChartData([], {});
 
     expect(lineChartData.datasets.map((dataset) => dataset.borderColor)).toStrictEqual([
-      'rgb(168, 85, 247)', 'rgb(59, 130, 246)', 'rgb(16, 185, 129)', 'rgb(249, 115, 22)',
+      'rgb(168, 85, 247)', 'rgb(59, 130, 246)', 'rgb(6, 182, 212)', 'rgb(16, 185, 129)', 'rgb(249, 115, 22)',
     ]);
   });
 });

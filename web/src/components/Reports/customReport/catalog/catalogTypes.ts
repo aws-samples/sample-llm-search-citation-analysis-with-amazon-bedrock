@@ -67,6 +67,11 @@ export const BLOCK_CATEGORIES = [
     description: 'One keyword in depth: personas, engines, sources and actions.',
   },
   {
+    id: 'seo',
+    label: 'SEO vs GEO',
+    description: 'Your Google organic position against how often the AI answers name you, per keyword of the market.',
+  },
+  {
     id: 'reference',
     label: 'Reference',
     description: 'The definitions of every KPI the report shows.',

@@ -80,12 +80,14 @@ class TestSummarizeProviders:
                 'citations': 2,
                 'failures': 0,
                 'error_categories': [],
+                'no_answers': 0,
             },
             'perplexity': {
                 'queries': 1,
                 'citations': 1,
                 'failures': 0,
                 'error_categories': [],
+                'no_answers': 0,
             },
         }
 
@@ -108,6 +110,7 @@ class TestSummarizeProviders:
             'citations': 2,
             'failures': 0,
             'error_categories': [],
+            'no_answers': 0,
         }
 
     def test_reports_zero_for_no_results(self, dedup) -> None:
@@ -146,6 +149,7 @@ class TestSummarizeProviders:
             'citations': 0,
             'failures': 1,
             'error_categories': ['unknown'],
+            'no_answers': 0,
         }
 
     def test_attributes_a_nameless_row_to_unknown(self, dedup) -> None:
@@ -157,6 +161,7 @@ class TestSummarizeProviders:
                 'citations': 1,
                 'failures': 0,
                 'error_categories': [],
+                'no_answers': 0,
             }
         }
 
@@ -191,6 +196,7 @@ class TestErrorCategoriesSurviveTheRollup:
             'citations': 0,
             'failures': 1,
             'error_categories': ['insufficient_credit'],
+            'no_answers': 0,
         }
 
     def test_reports_both_categories_when_one_provider_fails_two_ways(self, dedup) -> None:
@@ -268,6 +274,7 @@ class TestErrorCategoriesSurviveTheRollup:
             'citations': 1,
             'failures': 0,
             'error_categories': [],
+            'no_answers': 0,
         }
 
 
@@ -354,3 +361,42 @@ class TestKeywordSanitization:
             dedup.handler(event, None)
 
         assert store.call_args.args[0] == 'best hotels malaga'
+
+
+class TestNoAnswerRows:
+    """A Google results page without an AI Overview (`status: 'no_answer'`) is neither a failure nor an answer."""
+
+    def test_counts_no_answer_rows_separately_from_failures(self, dedup) -> None:
+        results = [
+            {'provider': 'google_ai_overview', 'status': 'no_answer', 'citations': []},
+            {'provider': 'google_ai_overview', 'status': 'success', 'citations': ['https://a.example']},
+        ]
+
+        summary = dedup.summarize_providers(results)
+
+        assert summary['by_provider']['google_ai_overview'] == {
+            'queries': 2,
+            'citations': 1,
+            'failures': 0,
+            'error_categories': [],
+            'no_answers': 1,
+        }
+
+    def test_counts_an_empty_engine_answer_as_a_no_answer(self, dedup) -> None:
+        summary = dedup.summarize_providers([{'provider': 'openai', 'status': 'no_answer', 'citations': []}])
+
+        assert (summary['by_provider']['openai']['no_answers'], summary['by_provider']['openai']['failures']) == (1, 0)
+
+
+class TestRetrievedUrls:
+    """Pages an engine only retrieved (``retrieved_urls``) are not citations: they never reach the Citations table."""
+
+    def test_deduplicates_only_the_cited_urls(self, dedup) -> None:
+        row = {**provider_row('openai', ['https://a.example/cited']), 'retrieved_urls': ['https://b.example/read']}
+
+        assert list(dedup.deduplicate_citations([row])) == ['https://a.example/cited']
+
+    def test_totals_only_the_cited_urls_per_provider(self, dedup) -> None:
+        row = {**provider_row('claude', []), 'retrieved_urls': ['https://b.example/read']}
+
+        assert dedup.summarize_providers([row])['by_provider']['claude']['citations'] == 0

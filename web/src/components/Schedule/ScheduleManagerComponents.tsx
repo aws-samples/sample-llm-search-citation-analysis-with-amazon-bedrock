@@ -10,6 +10,9 @@ import {
 import { Skeleton } from '../ui/Skeleton';
 import { ScheduleListSkeleton } from './ScheduleListSkeleton';
 import { useMarketSelection } from '../Markets/marketSelectionContext';
+import {
+  kindOf, scheduleKindInfo
+} from './scheduleKinds';
 
 interface ScheduleHeaderProps {
   showForm: boolean;
@@ -28,7 +31,9 @@ export const ScheduleHeader = ({
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
       <div>
         <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Click a schedule to edit it. Group scopes are resolved when the schedule runs.</p>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Analysis runs and paid SEO snapshots. Click a schedule to edit it. Group scopes are resolved when the schedule runs.
+        </p>
       </div>
       {adminLoading && <Skeleton className="h-9 w-full sm:w-36 rounded-lg" />}
       {isAdmin && (
@@ -111,12 +116,14 @@ interface ScheduleItemProps extends Pick<ScheduleListProps, 'groups' | 'onEdit' 
   running: boolean;
 }
 
-/** What a schedule runs, with the markets it is narrowed to. */
+/** What a schedule runs, with the markets it is narrowed to; snapshot kinds cover every tracked domain. */
 const ScheduleScopeLine = ({
   schedule, groups
 }: Pick<ScheduleItemProps, 'schedule' | 'groups'>) => {
   const { catalog } = useMarketSelection();
-  const description = describeScheduleScope(schedule.scope, groups, schedule.keywords, catalog.markets);
+  const description = kindOf(schedule) === 'analysis'
+    ? describeScheduleScope(schedule.scope, groups, schedule.keywords, catalog.markets)
+    : `${scheduleKindInfo(schedule.kind).label}: ${schedule.scope_summary ?? 'every owned and competitor domain'}`;
   return <p className="text-xs text-gray-500 mt-1 truncate" title={description}>{description}</p>;
 };
 
@@ -149,6 +156,11 @@ const ScheduleItem = ({
         >
           {schedule.enabled ? 'Enabled' : 'Disabled'}
         </span>
+        {kindOf(schedule) !== 'analysis' && (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Each run calls DataForSEO">
+            Paid
+          </span>
+        )}
         {schedule.legacy && (
           <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Created with the previous version; save it once to upgrade">
             Legacy

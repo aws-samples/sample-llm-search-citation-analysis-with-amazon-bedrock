@@ -25,6 +25,8 @@ export interface McpLimits {
   readonly jobsPerDay: number;
   /** Keywords one `start_run` may cover. */
   readonly maxRunKeywords: number;
+  /** DataForSEO lookups and SEO jobs (the `run_seo_*` and `start_seo_job` tools) a caller may start per UTC day. */
+  readonly seoCallsPerDay: number;
 }
 
 export const DEFAULT_MCP_LIMITS: McpLimits = {
@@ -32,6 +34,7 @@ export const DEFAULT_MCP_LIMITS: McpLimits = {
   runsPerDay: 5,
   jobsPerDay: 20,
   maxRunKeywords: 50,
+  seoCallsPerDay: 50,
 };
 
 /** The item operations `state.py` performs; no Scan and no batch writes. */

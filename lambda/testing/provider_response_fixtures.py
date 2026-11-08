@@ -257,12 +257,3 @@ def claude_search_error_response(error_code: str) -> dict[str, Any]:
     response['content'][3].pop('citations')
     return response
 
-
-CLAUDE_CALLERS_REFUSAL = {
-    'type': 'error',
-    'error': {
-        'type': 'invalid_request_error',
-        'message': 'tools.0.allowed_callers: dynamic filtering is not supported by this model',
-    },
-}
-"""Illustrative 400 body of a model refusing the tool's default ``allowed_callers`` (no live refusal was recorded)."""

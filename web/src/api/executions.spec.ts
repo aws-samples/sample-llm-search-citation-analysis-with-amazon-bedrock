@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import {
-  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
+  createSchedule, deleteSchedule, fetchRankTrackerSchedules, fetchSchedules, runSchedule, updateSchedule 
 } from './executions';
 import type { SchedulePayload } from './executions';
 import {
@@ -23,6 +23,7 @@ const payload: SchedulePayload = {
     mode: 'groups',
     group_ids: ['group-coruna'] 
   },
+  kind: 'analysis',
 };
 
 describe('executions API', () => {
@@ -137,6 +138,50 @@ describe('executions API', () => {
 
       expect(mockApiPost).toHaveBeenCalledWith('/schedules/sch-1/run', {}, { allowStructured4xx: true });
       expect(result.message).toBe('started');
+    });
+
+    it('acknowledges a paid run when the caller confirmed it', async () => {
+      mockApiPost.mockResolvedValue({ message: 'started' });
+
+      await runSchedule('sch-1', true);
+
+      expect(mockApiPost).toHaveBeenCalledWith('/schedules/sch-1/run', { confirm_paid: true }, { allowStructured4xx: true });
+    });
+  });
+
+  describe('fetchRankTrackerSchedules', () => {
+    it('reads the trackers\' schedules through GET /schedules?source=rank-trackers', async () => {
+      const schedule = {
+        id: 'rank-a',
+        tracker_id: 'a',
+        display_name: 'Hotels',
+        next_run_at: '2026-11-09T04:30:00Z',
+        enabled: true,
+      };
+      mockApiGet.mockResolvedValue({ schedules: [schedule] });
+
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [schedule],
+        truncated: false,
+      });
+      expect(mockApiGet).toHaveBeenCalledWith('/schedules', {
+        signal: undefined,
+        params: { source: 'rank-trackers' },
+      });
+    });
+
+    it('answers an empty list when the API sends none, and passes on a cut-short list', async () => {
+      mockApiGet.mockResolvedValueOnce({});
+      mockApiGet.mockResolvedValueOnce({ truncated: true });
+
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [],
+        truncated: false,
+      });
+      await expect(fetchRankTrackerSchedules()).resolves.toStrictEqual({
+        schedules: [],
+        truncated: true,
+      });
     });
   });
 });

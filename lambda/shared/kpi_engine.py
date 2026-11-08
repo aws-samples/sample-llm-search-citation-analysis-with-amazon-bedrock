@@ -25,8 +25,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from shared.brand_names import COMPETITOR, FIRST_PARTY, normalize_brand_key
-from shared.config import LLM_PROVIDERS
+from shared.config import LLM_PROVIDERS, Provider
 from shared.constants import UNRANKED_SENTINEL
+from shared.markets import GLOBAL_MARKET_ID
 
 #: The KPIs a scope (keyword, group, run, period) reports for the tracked brand.
 KPI_IDS: tuple[str, ...] = (
@@ -71,7 +72,11 @@ OTHER = 'other'
 SENTIMENT_LABELS: tuple[str, ...] = ('positive', 'neutral', 'mixed', 'negative')
 
 #: The SearchResults attributes an answer is read from (`#ts` = timestamp, `#st` = status, `#md` = metadata).
-ANSWER_PROJECTION = 'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model'
+ANSWER_PROJECTION = 'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id'
+
+#: The ``branded`` filters of a pool of answers: answers to queries that do not name the brand
+#: (``neutral``), that do (``branded``), or every answer (``all``).
+BRANDED_FILTERS: tuple[str, ...] = ('neutral', 'branded', 'all')
 ANSWER_ATTRIBUTE_NAMES = {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'}
 
 
@@ -107,6 +112,11 @@ class Answer:
     model: str | None
     cited_urls: tuple[str, ...] = ()
     """The URLs the answer cites, each once, in the order cited (``cited_domains`` are their hosts)."""
+    branded: bool = False
+    """Whether the query named the tracked brand (fixed when the row was written; rows from before 2.43 are neutral)."""
+    branded_classified: bool = True
+    """Whether the row carried a ``branded`` flag at all; rows from before 2.43 did not, so their ``branded`` is a default."""
+    market_id: str = GLOBAL_MARKET_ID
 
     def first_party(self) -> tuple[Sighting, ...]:
         return tuple(sighting for sighting in self.sightings if sighting.classification == FIRST_PARTY)
@@ -225,11 +235,26 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
         cited_domains=frozenset(filter(None, (normalize_domain(url) for url in row.get('citations') or []))),
         model=model if isinstance(model, str) and model else None,
         cited_urls=_cited_urls(row.get('citations')),
+        branded=row.get('branded') is True,
+        branded_classified='branded' in row,
+        market_id=str(row.get('market_id') or GLOBAL_MARKET_ID),
     )
 
 
 def answers_from_rows(rows: Iterable[Mapping[str, Any]]) -> list[Answer]:
     return [answer for answer in map(answer_from_row, rows) if answer is not None]
+
+
+def filter_branded(answers: Iterable[Answer], branded: str = 'all') -> list[Answer]:
+    """The answers one ``BRANDED_FILTERS`` value keeps: ``neutral`` (not branded), ``branded``, or ``all``.
+
+    An answer to a query naming the brand mentions it almost by construction,
+    so the neutral answers are the ones that measure unprompted visibility.
+    """
+    if branded == 'all':
+        return list(answers)
+    keep = branded == 'branded'
+    return [answer for answer in answers if answer.branded is keep]
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +339,33 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
         'keyword_coverage': percent(len({answer.keyword for answer in mentioning}), len(keywords)),
         'engines': len(engines),
         'keywords': len(keywords),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Google AI Overviews presence (a coverage figure, not a KPI)
+# ---------------------------------------------------------------------------
+
+#: The row status of a Google results page that showed no AI Overview: not an answer.
+NO_ANSWER = 'no_answer'
+
+
+def overview_presence(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """How often Google showed an AI Overview: "Overview shown for n of m queries".
+
+    ``aio_queries`` counts the Google AI Overviews rows whose page was read
+    (``success`` + ``no_answer``; errors measured nothing), ``aio_overviews``
+    the ``success`` ones and ``aio_presence_rate`` their percentage. It is
+    reported next to ``answers`` and is not in ``KPI_IDS``: it says nothing
+    about the brand, and a ``no_answer`` row is never an answer.
+    """
+    statuses = [row.get('status') for row in rows if row.get('provider') == Provider.GOOGLE_AI_OVERVIEW]
+    read = [status for status in statuses if status in ('success', NO_ANSWER)]
+    shown = sum(status == 'success' for status in read)
+    return {
+        'aio_overviews': shown,
+        'aio_queries': len(read),
+        'aio_presence_rate': percent(shown, len(read)),
     }
 
 
@@ -441,8 +493,10 @@ def kpi_trends(changes: Mapping[str, float | None]) -> dict[str, str]:
 __all__ = [
     'ANSWER_ATTRIBUTE_NAMES',
     'ANSWER_PROJECTION',
+    'BRANDED_FILTERS',
     'COMPETITOR',
     'KPI_IDS',
+    'NO_ANSWER',
     'PERCENT_KPIS',
     'SENTIMENT_LABELS',
     'TRENDED_KPIS',
@@ -453,11 +507,13 @@ __all__ = [
     'brand_kpis',
     'brand_table',
     'engine_breakdown',
+    'filter_branded',
     'is_owned_domain',
     'kpi_changes',
     'kpi_trends',
     'matches_domain',
     'normalize_domain',
+    'overview_presence',
     'owned_domains_from',
     'percent',
     'position_weight',

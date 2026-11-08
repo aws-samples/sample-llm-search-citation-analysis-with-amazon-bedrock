@@ -527,3 +527,19 @@ class TestTheProductionIncidentEndToEnd:
         become a separate signal rather than a correction to the old one.
         """
         assert report['summary']['keywords']['success_rate'] == 100.0
+
+
+def test_carries_no_answer_count_into_breakdown_when_rollup_has_one(module):
+    rollup = {'result_count': 2, 'by_provider': {'google_ai_overview': {
+        'queries': 2, 'citations': 1, 'failures': 0, 'error_categories': [], 'no_answers': 1,
+    }}}
+    stats = module.aggregate_statistics([post_crawl_keyword_result(result_count=2, by_provider=rollup['by_provider'])])
+
+    assert (stats['providers_breakdown']['google_ai_overview']['no_answers'],
+            stats['providers_breakdown']['google_ai_overview']['failures']) == (1, 0)
+
+
+def test_adds_no_no_answer_field_when_rollup_has_none(module):
+    stats = module.aggregate_statistics([post_crawl_keyword_result()])
+
+    assert all('no_answers' not in bucket for bucket in stats['providers_breakdown'].values())

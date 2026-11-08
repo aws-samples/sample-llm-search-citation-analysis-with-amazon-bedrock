@@ -16,6 +16,7 @@ from typing import Any
 
 from shared.brand_names import normalize_brand_key
 from shared.constants import UNRANKED_SENTINEL
+from shared.kpi_comparison import COMPARABLE, PeriodComparison, answers_by_keyword
 from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
 from shared.markets import GLOBAL_MARKET_ID, market_scoped_key
 from shared.string_lists import normalize_string_list
@@ -25,8 +26,11 @@ from shared.visibility_score import finite_number
 RETENTION_DAYS = 365
 MAX_NOTIFICATION_EMAILS = 100
 
-#: The KPI definitions snapshots are measured with; 2 = the KPIs of 2.21.0 (docs/kpi-definitions.md).
-KPI_VERSION = 2
+#: The KPI definitions snapshots are measured with; 2 = the KPIs of 2.21.0 (docs/kpi-definitions.md);
+#: 3 = Google AI Overviews joined the answer engines, so earlier snapshots are not comparable;
+#: 4 = only cited URLs are citations, blank answers are no answers, and changes are judged on the
+#: neutral answers of the cells both runs answered (3 and 4 both arrived in 2.43.0).
+KPI_VERSION = 4
 
 DEFAULT_ALERT_SETTINGS: dict[str, Any] = {
     'enabled': True,
@@ -413,6 +417,37 @@ def compare_snapshots(
     alerts.extend(_lost_keyword_alerts(previous, current))
     alerts.extend(_improvement_alert(previous, current, settings, content_change))
     return alerts
+
+
+def comparison_alerts(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any],
+    comparison: PeriodComparison,
+    settings: dict[str, Any],
+    *,
+    content_marker: dict[str, Any] | None = None,
+    owned_domains: Iterable[str] = (),
+    tracked_competitors: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """The alerts between two snapshots, judged on the answers of the cells both runs answered.
+
+    Nothing fires unless ``comparison`` is ``comparable``: a new engine,
+    persona or keyword, or a run with many failed calls, would otherwise read
+    as a gain or a loss. The rules then compare the KPIs of the matched
+    answers (``kpi_comparison.compare_runs``), not the snapshots' pooled values.
+    """
+    if previous is None or comparison.state != COMPARABLE:
+        return []
+    domains = list(owned_domains)
+    competitors = list(tracked_competitors)
+
+    def view(snapshot: dict[str, Any], answers: Iterable[Answer]) -> dict[str, Any]:
+        metrics = snapshot_metrics(answers_by_keyword(answers), domains, competitors)
+        return {**metrics, 'group_id': snapshot.get('group_id'), 'snapshot_at': snapshot.get('snapshot_at')}
+
+    return compare_snapshots(
+        view(previous, comparison.previous), view(current, comparison.current), settings, content_change=content_marker,
+    )
 
 
 def build_alert_item(

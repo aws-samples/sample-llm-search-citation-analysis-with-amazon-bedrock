@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.42.3",
+  "version": "2.43.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -30,7 +30,10 @@
     "deploy:full": "npm run deploy:cdk && npm run clear-cache",
     "clear-cache": "bash scripts/clear-cloudfront-cache.sh",
     "synth": "cdk synth",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:users": ".venv/bin/python scripts/e2e_user_invites.py",
+    "e2e:seo": ".venv/bin/python scripts/e2e_seo.py",
+    "e2e": "npm run e2e:seo && npm run e2e:users"
   },
   "keywords": [
     "cdk",
@@ -53,8 +56,8 @@
     "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unicorn": "^62.0.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "jscpd": "5.2.1",
-    "knip": "6.40.0",
+    "jscpd": "5.4.2",
+    "knip": "6.44.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.72.1",
@@ -70,7 +73,7 @@
     "yaml@^1.0.0": "^1.10.3",
     "picomatch": "^4.0.4",
     "brace-expansion": "^5.0.12",
-    "minimatch": "^10.2.3",
+    "minimatch": "^11.0.1",
     "axios": "^1.20.0",
     "follow-redirects": "^1.16.0",
     "smol-toml@<1.9.0": "1.9.0",

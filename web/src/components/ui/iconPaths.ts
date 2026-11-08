@@ -4,6 +4,12 @@
  * glyph used in more than one place is spelled out once.
  */
 export const PAUSE_PATHS = ['M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z'];
+export const TREND_UP_PATHS = ['M3 17l6-6 4 4 8-8m0 0h-6m6 0v6'];
+export const MAP_PIN_PATHS = [
+  'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z',
+  'M15 11a3 3 0 11-6 0 3 3 0 016 0z',
+];
+export const CLIPBOARD_CHECK_PATHS = ['M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4'];
 export const PLAY_PATHS = [
   'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z',
   'M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
@@ -33,6 +39,9 @@ export const CLOCK_PATHS = ['M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'];
 export const COLLECTION_PATHS = ['M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10'];
 
 export const CHEVRON_RIGHT_PATHS = ['M9 5l7 7-7 7'];
+export const CHEVRON_UP_PATHS = ['M5 15l7-7 7 7'];
+/** Two left chevrons: collapse a side panel (the sidebar rail toggle). */
+export const CHEVRON_DOUBLE_LEFT_PATHS = ['M11 19l-7-7 7-7m8 14l-7-7 7-7'];
 export const DOCUMENT_TEXT_PATHS = ['M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'];
 export const BOLT_PATHS = ['M13 10V3L4 14h7v7l9-11h-7z'];
 export const LIGHTBULB_PATHS = ['M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z'];

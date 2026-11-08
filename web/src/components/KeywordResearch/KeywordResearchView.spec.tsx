@@ -23,6 +23,8 @@ vi.mock('./ResearchHistory', () => ({
   ),
 }));
 
+vi.mock('./explorer/KeywordExplorer', () => ({KeywordExplorer: () => <div data-testid="keyword-explorer">Keyword Explorer</div>,}));
+
 vi.mock('./agent/ResearchAgent', () => ({ResearchAgent: () => <div data-testid="research-agent">Research Agent</div>,}));
 
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
@@ -58,6 +60,7 @@ describe('KeywordResearchView', () => {
       const tabs = within(screen.getByRole('tablist', { name: 'Keyword research' })).getAllByRole('tab');
       expect(tabs.map((tab) => tab.textContent)).toStrictEqual([
         'Related KeywordsExpand',
+        'Keyword ExplorerExplorer',
         'Competitor AnalysisCompetitor',
         'HistoryHistory',
         'Research AgentAgent',
@@ -76,6 +79,11 @@ describe('KeywordResearchView', () => {
         outcome: 'switches to the research agent when its tab is clicked',
         tab: /research agent/i,
         view: 'research-agent',
+      },
+      {
+        outcome: 'switches to the keyword explorer when its tab is clicked',
+        tab: /keyword explorer/i,
+        view: 'keyword-explorer',
       },
       {
         outcome: 'switches to competitor analysis tab when clicked',
@@ -111,10 +119,10 @@ describe('KeywordResearchView', () => {
   });
 
   describe('header', () => {
-    it('describes the three ways to research, agent last', () => {
+    it('describes the four ways to research, agent last', () => {
       render(<KeywordResearchView />);
 
-      expect(screen.getByText('Expand seed terms, analyze competitor websites, or let the research agent plan and run a business\'s keyword research.')).toBeInTheDocument();
+      expect(screen.getByText('Expand seed terms, explore search volume and difficulty, analyze competitor websites, or let the research agent plan and run a business\'s keyword research.')).toBeInTheDocument();
     });
   });
 

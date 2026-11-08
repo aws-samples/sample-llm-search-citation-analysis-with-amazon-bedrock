@@ -70,6 +70,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/** The retrier `retryOnServiceExceptions` puts first on every Lambda invoke task. */
+export const LAMBDA_SERVICE_ERRORS = [
+  'Lambda.ClientExecutionTimeoutException',
+  'Lambda.ServiceException',
+  'Lambda.AWSLambdaException',
+  'Lambda.SdkClientException',
+];
+
 /** Walk a nested unknown structure without unsafe member access. */
 export function resolvePath(root: unknown, keys: string[]): unknown {
   return keys.reduce<unknown>(
@@ -315,7 +323,7 @@ function statementTargets(statement: unknown, resourceLogicalId: string): boolea
   return [...collectGetAttTargets(resource), ...collectRefTargets(resource)].includes(resourceLogicalId);
 }
 
-function sortedUnique(values: string[]): string[] {
+export function sortedUnique(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
@@ -1476,6 +1484,12 @@ export function providerSearchBranch(definition: unknown, providerId: string): u
 }
 
 /** Every SearchAllProviders branch's start state, in definition order. */
+/** The `ErrorEquals` of each retrier of a Task state, in order. */
+export function retrierErrors(task: unknown): unknown[] {
+  const retriers = resolvePath(task, ['Retry']);
+  return (Array.isArray(retriers) ? retriers : []).map((retrier) => resolvePath(retrier, ['ErrorEquals']));
+}
+
 export function providerSearchBranchStarts(definition: unknown): unknown[] {
   return providerSearchBranches(definition).map((branch) => resolvePath(branch, ['StartAt']));
 }

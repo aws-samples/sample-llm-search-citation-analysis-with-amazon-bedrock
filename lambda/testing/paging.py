@@ -15,7 +15,7 @@ from testing.events import parse_response
 from testing.response_size import assert_within_page_budget
 
 #: ``(status, body)`` of a route refusing a malformed or foreign ``next_token``.
-INVALID_NEXT_TOKEN = (400, {'error': 'Invalid next_token', 'field': 'next_token'})
+INVALID_NEXT_TOKEN = (400, {'error': 'Invalid next_token: pass the next_token of the previous page, with the same filters', 'field': 'next_token'})
 
 
 def minute_stamp(index: int) -> str:

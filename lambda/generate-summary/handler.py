@@ -130,6 +130,9 @@ def merge_provider_summary(stats: dict[str, Any], provider_summary: dict[str, An
         bucket['citations'] += counts.get('citations', 0)
         bucket['failures'] += counts.get('failures', 0)
         add_error_categories(bucket, counts.get('error_categories') or [])
+        # A results page without an AI Overview: neither a failure nor an answer.
+        if counts.get('no_answers'):
+            bucket['no_answers'] = bucket.get('no_answers', 0) + _count(counts['no_answers'])
 
 
 def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, Any]]) -> None:

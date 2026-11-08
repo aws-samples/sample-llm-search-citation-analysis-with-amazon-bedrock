@@ -9,6 +9,182 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.43.0] - 2026-11-08
+
+### Added
+
+- **SEO stack** (`CitationAnalysisSeoStack`, `lib/seo-stack.ts`): Google organic data from DataForSEO next to the
+  AI-visibility numbers, behind its own Cognito-protected API (`CitationAnalysis-SeoApi`, routes under `/api/seo/`,
+  one router Lambda `CitationAnalysis-SeoRouter` plus a jobs Lambda for work longer than an API call). A separate
+  stack because the main stack is at the 500-resource limit; it builds its own shared layer and imports only the
+  user pool and the CloudFront origin. Nothing paid runs on page load: every DataForSEO call follows a click, batch
+  or recurring spend asks for confirmation with the price first, billed calls and timeouts are never re-sent, and
+  answers are cached (a cached non-empty answer is never replaced by an empty one). Creating, scheduling or
+  starting recurring paid work is for Admins; one-off lookups are open to every signed-in user. Setup, pages and
+  prices: [docs/seo.md](docs/seo.md).
+  - **DataForSEO client** (`shared/dataforseo_client.py`): Basic auth from `citation-analysis/dataforseo-key`
+    (`login:password`), one deadline per call capped by the Lambda's remaining time, server errors retried only on
+    idempotent reads; DataForSEO's in-body status codes become typed errors and a billed failure keeps its cost.
+    Queued tasks (`shared/dataforseo_tasks.py`) for scheduled work at the cheaper queue price.
+  - **Keyword Explorer** (Keyword Research › Keyword Explorer): keyword ideas for a seed in the header market with
+    volume, trend, difficulty, CPC, competition and intent; filters, CSV export with a formula-injection guard, the
+    Google results page of a keyword (top 20 or 50) and *Track keywords* into a keyword group. Every national
+    research stores its rows' metrics (`CitationAnalysis-SeoKeywordMetrics`), so tracking costs nothing extra.
+  - **SEO vs GEO report** (`/reports/seo-geo`, custom report blocks *SEO vs GEO quadrants* and *SEO vs GEO table*):
+    per keyword and market, your organic position next to the AI mention rate, AI Overview presence and citation
+    overlap, in four quadrants; plus the ranked position from rank tracking or traffic snapshots when the results
+    page has none of your domains, estimated traffic per keyword, and share of estimated search traffic against
+    share of AI mentions. Definitions: [docs/seo-metrics.md](docs/seo-metrics.md).
+  - **Rank Tracking** (`/seo/rank-tracking`): Google positions of a domain for up to 1,000 keywords per tracker,
+    desktop and/or mobile, top 10 to 100, daily, weekly, monthly or manual; organic positions only, subdomains
+    match. A suspicious miss or drop is re-checked up to twice through the queue, and a keyword that ranked before
+    shows *Not found (unconfirmed)* until a second check confirms it. History and the position distribution per
+    check. [docs/seo-rank-tracking.md](docs/seo-rank-tracking.md).
+  - **Domain Overview and estimated traffic** (`/seo/domain`): organic keywords, estimated traffic and its value,
+    position buckets, top keywords and pages and SERP competitors of any domain, subdomain, subfolder or URL
+    (about $0.03 per analysis); traffic snapshots of your and your competitors' domains (a Schedule, below), and SEO
+    recommendations built on the SEO vs GEO rows (`GET /api/seo/insights`). [docs/seo-domain.md](docs/seo-domain.md).
+  - **Backlinks** (`/seo/backlinks`): totals and a year of history, links, referring domains, anchors, new and lost
+    links and top pages of a target (overview about $0.06); authority snapshots of the tracked domains, on a
+    Schedule. [docs/seo-backlinks.md](docs/seo-backlinks.md).
+  - **Local SEO** (`/seo/local`): Google business listings near a point, Google Business Profiles with reviews,
+    updates and questions, Maps and Local Finder results with your business's position, and a 3 × 3 to 7 × 7 local
+    rank grid run in DataForSEO's queue. [docs/seo-local.md](docs/seo-local.md).
+  - **Site Audit with AI readiness** (`/seo/site-audit`): crawls your own site (100, 500 or 2,000 pages, one request
+    per second, robots.txt obeyed, no paid API) and lists technical issues per page and AI-readiness checks: AI
+    search and training crawlers blocked in robots.txt, `llms.txt`, structured data and more; CSV export.
+    [docs/seo-site-audit.md](docs/seo-site-audit.md).
+  - **Performance** (`/seo/performance`): Lighthouse category scores, Core Web Vitals rated against their published
+    limits and the top opportunities of a page of your own domains ($0.005 per page and device; an Admin audit
+    sample of 10 pages × 2 devices up to $0.10), and **IndexNow** submissions of changed URLs (free).
+    [docs/seo-performance.md](docs/seo-performance.md).
+  - **SEO navigation**: a sidebar **SEO** section opening `/seo` (one card per page and the next setup step), each
+    page on its own URL. The **Action Center** lists the SEO recommendations next to the answer-based ones, marked
+    **SEO**, with the same status tracking (the answer-based ones still show when the SEO API is unreachable). The
+    **Dashboard** gains *SEO vs GEO* and *Rankings* cards, free reads of stored data.
+  - **Settings › AI Providers › SEO data**: a DataForSEO card (login and password, checked with DataForSEO's free
+    account endpoint, balance shown to Admins).
+  - **MCP tools**: free reads `get_keyword_metrics`, `get_seo_geo_comparison`, `get_seo_recommendations`,
+    `get_rank_tracking`, `get_domain_snapshots`, `get_backlink_snapshots`, `get_site_audits` and `get_local_job`;
+    and the spend family `seo` (estimate, then run with the confirmation token): `*_seo_keywords`, `*_seo_domain`,
+    `*_seo_backlinks`, `*_seo_local` and the Admin `*_seo_job` (rank run, site audit, snapshots, rank grid). Estimates state the most
+    calls a request makes and the list price of one call, never a total; a new per-caller daily limit
+    `seoCallsPerDay` (default 50). [docs/mcp.md](docs/mcp.md).
+- **Google AI Overviews is the fifth answer engine** (`google_ai_overview`): the AI Overview of the Google results
+  page for the plain keyword, once per keyword per run whatever the personas, through the DataForSEO login. A page
+  without an overview is stored as `no_answer` and counts in no KPI; the same call records the organic top 10. Its
+  Lambda (`CitationAnalysis-Search-google_ai_overview`) lives in the SEO stack; the main workflow calls it by name
+  when deployed with `-c seoEngine=true`. Like every engine it follows the 2.42.0 search time budget: its one call
+  per keyword is stored as soon as it answers and is not asked again when the invocation is retried.
+- **Queries filter** on the Visibility tab (all / without your brand / naming your brand; `branded` parameter of
+  `/api/visibility`, default all): each answer row records whether its query named a first-party brand or domain.
+- **SEO pages start from Settings**: a rank tracker checks the Settings keywords of its market or of one keyword
+  group (extra keywords optional), its domain is picked from Brand Tracking, the empty Rank Tracking page offers
+  one-click *Track your rankings* / *Track competitors* (paid checks reviewed first), and the other SEO pages are
+  prefilled with your domains, markets and keywords.
+- **Collapsible sidebar**: on large screens the sidebar folds to an icon rail; the choice is remembered per browser.
+- **Domain Overview and Backlinks tables restyled**: page header card with the search form, stat tiles, position
+  badges, score chips, compact numbers with exact tooltips, sticky headers and one pager (`ui/DataTable`).
+- **Intent column in Domain Overview top keywords**: DataForSEO's main search intent per ranked keyword as a chip
+  (informational, commercial, transactional, navigational, unknown); keyword pages cached without it are refetched.
+
+### Changed
+
+- **Review fixes before release** (Kiro review of the 2.43.0 pull request, TENETS.md):
+  - SEO measurements are records, not cache, so they are kept (D2, D5): domain and backlink snapshots, site audits
+    (the audit, pages, issues and link summary) and Lighthouse runs no longer expire. Only crawl bookkeeping (a site
+    audit's URL queue, 90 days) and true caches, receipts and locks keep a TTL. The snapshot tables have no TTL.
+  - **Recurring SEO snapshots are Schedules** (Operations › Schedule, `lambda/api/manage-schedule.py`): a schedule's
+    new `kind` is `analysis` (the default and every existing schedule), `domain_snapshots` or `backlink_snapshots`,
+    each one EventBridge Scheduler schedule that starts the snapshot state machine for every owned and competitor
+    domain. Saving an enabled snapshot schedule, or running one now, asks first and names its paid calls. Nothing
+    runs, or costs anything, until an Admin creates one; there is no always-on weekly rule and no on/off setting.
+  - **Each rank tracker has its own schedule**: a one-time EventBridge Scheduler schedule at its next slot
+    (`rank-<tracker id>`, group `citation-analysis-seo-rank`) invokes the jobs function with `rank.due`, which starts
+    the check and moves the schedule to the next slot; saving, archiving or switching a tracker to manual moves or
+    deletes it. It replaces a 15-minute rule that looked for due trackers, and the table's due index (`GSI2`).
+    Operations › Schedule lists the trackers' next checks read-only (`GET /api/schedules?source=rank-trackers`),
+    each linking to its tracker (`/seo/rank-tracking?tracker=<id>`).
+  - **DataForSEO calls back instead of being polled**: the post step of a rank check and of a local SEO job is a
+    `waitForTaskToken` task. It opens a callback gate (`shared/dataforseo_callbacks.py`) and posts every task with
+    the gate's `pingback_url`; the public `CitationAnalysis-SeoCallbacks` function URL counts each callback once and
+    the last one resumes the state machine, which then collects the results with free `task_get` calls. If a
+    callback has not come in time (35 minutes for a rank check, 25 for a local job) the run collects once anyway.
+    The Wait / `task_get` loops are gone. The callback function holds no DataForSEO credentials and may only update
+    gate items and send task success (SECURITY.md).
+  - **SEO working objects have their own bucket** (`citation-analysis-seo-<account>`, `SEO_BUCKET`): oversized
+    cache payloads, Lighthouse reports, domain-snapshot keywords (written once per snapshot time) and robots.txt
+    copies. The SEO stack no longer writes to the raw-responses bucket except the AI Overviews answers, so it stays
+    write-once Bronze (D2).
+  - The callback function reserves 5 concurrent executions (a function URL has no throttle of its own); releasing a
+    gate claims it first and gives the claim back when sending the token fails, so the next pingback resumes the
+    run instead of the safety timeout. A snapshot schedule is refused (400) while the SEO stack's state machines
+    are not deployed, and the dashboard offers the snapshot kinds only where the SEO API is configured.
+  - The README "Data" section lists the SEO tables and the `seo` bucket's key layout (D7).
+  - The Google AI Overviews raw object in `raw-responses` is DataForSEO's task result as returned
+    (`raw_api_response.dataforseo_result`), with the rendered markdown beside it under `extracted`, so the overview's
+    references can be read again (D2, D3).
+  - The callback URL answers 500 when resuming fails, so DataForSEO retries; the rank-tracker schedule list says
+    `truncated` past 100 trackers; a filtered Visibility view counts `unclassified_keywords` whose latest run
+    predates the branded flag; `CitationAnalysis-SeoKeywordMetrics` is documented as a cache of the latest values.
+  - Saving an enabled snapshot schedule or running one now requires `confirm_paid: true` server-side (the dashboard
+    sends it after its confirmation). A site audit sleeps at most 3 s inside a step; a longer 429 pause becomes the
+    state machine's wait. KPI alerts leave a pair unevaluated when any of the previous run's reads failed.
+  - Every new answer row records `citations_version` (2: cited sources only, read pages in `retrieved_urls`),
+    beside `branded_version`, so a later figure can tell which citation rule a row was stored under (D2, D3).
+  - The paid one-off SEO routes count against a per-caller daily limit in the SEO router
+    (`shared/seo_spend_limit.py`, 100 a UTC day, `SEO_PAID_REQUESTS_PER_DAY`); past it they answer 429 and make no
+    DataForSEO call (tenet 4).
+  - A snapshot schedule can be disabled after the SEO stack is gone; run-now refuses a body that is not a JSON object.
+  - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
+    and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
+    action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).
+  - KPI alerts read the previous run's rows within the 2.42.0 time budget; a pair whose previous run cannot be read
+    in time is left for the budget instead of being compared with part of its past.
+  - A `neutral` or `branded` Visibility view no longer compares a keyword with a previous run stored before the
+    branded flag existed (`change_unclassified_keywords` counts them), and each answer row records
+    `branded_version`, the matcher rule that set its flag (D2, D3).
+  - The AI Overviews search role may only put raw answers under `raw-responses/` (no S3 delete), and the SEO keyword
+    metrics and cache tables are granted per action without `DeleteItem`.
+  - Tenet 8 (events, no polling): the SEO stack's four bounded dashboard polling hooks are recorded in the tenet 8 gap
+    of `TENETS.md`; moving them to AppSync Events is tracked in #208.
+  - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
+
+- Dependencies: `jscpd` 5.4.2, `knip` 6.44.1 (root and dashboard), `@stryker-mutator/*` 10.1.1 (the npm group of
+  Dependabot #196, without `@vitest/eslint-plugin` 1.6.28, which wants TypeScript 6); the `minimatch` override is
+  `^11.0.1` in both packages (GHSA-g3hv-75wg-m249). The copy bundled inside `aws-cdk-lib` (10.2.6, also in its
+  latest release) cannot be overridden and stays until AWS CDK ships the fix. Knip 6.44 found the unused
+  `CitationsView` re-export in `components/Citations/index.ts`, now removed.
+- CI: the pinned gitleaks, actionlint and zizmor installs move to `scripts/install-ci-tools.sh`. Each still comes from
+  its GitHub release checked against a committed SHA-256; when the release download fails (GitHub answered 504 for
+  hours), the same version is installed from proxy.golang.org (verified by sum.golang.org) or from PyPI (a
+  hash-pinned wheel) instead of failing the lint lane.
+- `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit
+  list read one newest-first page with it.
+- **GEO KPI corrections** ([docs/geo-corrections.md](docs/geo-corrections.md)): only the sources an answer cites
+  count as citations (OpenAI `url_citation` annotations, Perplexity's numbered markers, Claude's text citations;
+  pages an engine only read are kept as `retrieved_urls` and never count); an engine reply without text is *no
+  answer* and leaves every KPI; KPI alerts compare only the cells both runs answered, over queries that do not name
+  your brand, and a run under 90 % answered raises none. Citation counts and rates usually drop from this release
+  on; earlier results keep the citations they were stored with. KPI alerts keep the 2.42.0 time budget: the
+  like-for-like comparison runs inside each (group, market) pair's evaluation.
+- **Claude and Perplexity are asked to cite.** Every Claude web search (runs and the Settings model check) sends `allowed_callers: ["direct"]`, so its text carries `web_search_result_location` citations (direct mode
+  reads full search results: more input tokens); the dynamic-filtering fallback is gone. Every Perplexity request's
+  `instructions` ask for inline `[1][2]` markers, after any market instructions; the query itself is unchanged.
+- `KPI_VERSION` is 4: KPI alerts do not compare snapshots taken before Google AI Overviews joined the engines or
+  before the corrections above, so the first run after the upgrade sets a new baseline.
+- The main stack's table, Lambda, CORS and permission helpers moved to `lib/constructs/` so the stacks share them
+  (the main stack's template is unchanged).
+- `npm run contracts` resolves module-level string constants and shared-table helpers when matching CDK
+  environment variables to Lambda reads.
+- A deployment of a pre-release SEO stack that already created `CitationAnalysis-SeoPromptExplores` keeps that table
+  after the upgrade (tables are retained); nothing reads it any more, so it can be deleted by hand.
+
+### Fixed
+
+- **Resending an invitation works.** For a user who never signed in, *Resend invite* passed the user's id to Cognito,
+  which takes only the email for a resend and refused it ("Username should be an email") (`lambda/api/manage-users.py`).
+
 ## [2.42.3] - 2026-11-08
 
 ### Changed

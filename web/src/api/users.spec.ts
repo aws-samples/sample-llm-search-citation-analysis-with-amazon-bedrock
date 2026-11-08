@@ -12,6 +12,9 @@ import {
   mockApiDelete, mockApiGet, mockApiPost, mockApiPut
 } from './clientMock-fixtures';
 
+/** The user routes read the server's `{error}` of any failure, a 500 included. */
+const STRUCTURED_ERRORS = { allowStructuredErrors: true };
+
 vi.mock('./client', () => import('./clientMock-fixtures'));
 
 describe('users API', () => {
@@ -59,7 +62,7 @@ describe('users API', () => {
       const result = await inviteUser({ email: 'new@example.com' });
 
       expect(result).toStrictEqual(mockResponse);
-      expect(mockApiPost).toHaveBeenCalledWith('/users', { email: 'new@example.com' });
+      expect(mockApiPost).toHaveBeenCalledWith('/users', { email: 'new@example.com' }, STRUCTURED_ERRORS);
     });
 
     it('invites user with groups', async () => {
@@ -76,7 +79,7 @@ describe('users API', () => {
       expect(mockApiPost).toHaveBeenCalledWith('/users', {
         email: 'new@example.com',
         groups: ['admin'],
-      });
+      }, STRUCTURED_ERRORS);
     });
   });
 
@@ -91,7 +94,7 @@ describe('users API', () => {
       const result = await updateUser('test', { enabled: false });
 
       expect(result.user).toStrictEqual(mockUser);
-      expect(mockApiPut).toHaveBeenCalledWith('/users/test', { enabled: false });
+      expect(mockApiPut).toHaveBeenCalledWith('/users/test', { enabled: false }, STRUCTURED_ERRORS);
     });
 
     it('updates user groups', async () => {
@@ -99,7 +102,7 @@ describe('users API', () => {
 
       await updateUser('test', { groups: ['admin', 'users'] });
 
-      expect(mockApiPut).toHaveBeenCalledWith('/users/test', { groups: ['admin', 'users'] });
+      expect(mockApiPut).toHaveBeenCalledWith('/users/test', { groups: ['admin', 'users'] }, STRUCTURED_ERRORS);
     });
   });
 
@@ -110,7 +113,7 @@ describe('users API', () => {
       const result = await deleteUser('test');
 
       expect(result.message).toBe('User deleted');
-      expect(mockApiDelete).toHaveBeenCalledWith('/users/test');
+      expect(mockApiDelete).toHaveBeenCalledWith('/users/test', STRUCTURED_ERRORS);
     });
   });
 
@@ -137,7 +140,7 @@ describe('users API', () => {
 
       await resetUserPassword('a+b@example.com');
 
-      expect(mockApiPost).toHaveBeenCalledWith('/users/a%2Bb%40example.com/reset-password', {});
+      expect(mockApiPost).toHaveBeenCalledWith('/users/a%2Bb%40example.com/reset-password', {}, STRUCTURED_ERRORS);
     });
   });
 });

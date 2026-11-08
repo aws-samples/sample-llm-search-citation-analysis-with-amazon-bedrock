@@ -18,6 +18,7 @@ import { CHILE } from '../Markets/markets-fixtures';
 describe('formDataFromSchedule', () => {
   it('copies the stored form, scope and state into the editor', () => {
     expect(formDataFromSchedule(buildSchedule())).toStrictEqual({
+      kind: 'analysis',
       display_name: 'Hotel Coruña — weekly',
       frequency: 'weekly',
       time: '09:00',
@@ -125,6 +126,7 @@ describe('toSchedulePayload', () => {
       frequency: 'monthly',
       day_of_month: '15',
     })).toStrictEqual({
+      kind: 'analysis',
       display_name: 'Coruña',
       frequency: 'monthly',
       time: '09:00',

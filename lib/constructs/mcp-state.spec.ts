@@ -56,7 +56,7 @@ describe('grantTo', () => {
 
   it('passes the default limits as MCP_LIMITS', () => {
     expect(extractStateEnvVars(template).MCP_LIMITS).toBe(
-      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}'
+      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"seoCallsPerDay":50}'
     );
   });
 
@@ -69,13 +69,19 @@ describe('grantTo', () => {
 
 describe('readMcpLimits', () => {
   it('keeps the defaults without the context', () => {
-    expect(limitsFromContext(undefined)).toStrictEqual({ runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50 });
+    expect(limitsFromContext(undefined)).toStrictEqual({
+      runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50, seoCallsPerDay: 50,
+    });
   });
 
   it('accepts an object from cdk.json', () => {
     expect(limitsFromContext({ jobsPerDay: 0, maxRunKeywords: 10 })).toStrictEqual({
       ...DEFAULT_MCP_LIMITS, jobsPerDay: 0, maxRunKeywords: 10,
     });
+  });
+
+  it('accepts a daily limit of DataForSEO lookups and SEO jobs', () => {
+    expect(limitsFromContext({ seoCallsPerDay: 10 }).seoCallsPerDay).toBe(10);
   });
 
   it('accepts a JSON string from the command line', () => {

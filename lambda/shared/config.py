@@ -29,6 +29,9 @@ class Provider:
     PERPLEXITY = 'perplexity'
     GEMINI = 'gemini'
     CLAUDE = 'claude'
+    # The AI Overview on a Google results page, read through DataForSEO.
+    # An answer engine: its rows count as answers.
+    GOOGLE_AI_OVERVIEW = 'google_ai_overview'
 
     # Search Providers (return search results directly)
     BRAVE = 'brave'
@@ -44,7 +47,8 @@ LLM_PROVIDERS: list[str] = [
     Provider.OPENAI,
     Provider.PERPLEXITY,
     Provider.GEMINI,
-    Provider.CLAUDE
+    Provider.CLAUDE,
+    Provider.GOOGLE_AI_OVERVIEW,
 ]
 
 # List of search providers (for iteration)

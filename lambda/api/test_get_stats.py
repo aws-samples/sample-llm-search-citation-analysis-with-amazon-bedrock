@@ -100,8 +100,8 @@ class TestResponse:
         status, body = _get_stats(stats_module, tables, {'provider': 'bing'})
 
         assert (status, body) == (400, {
-            'error': 'Invalid provider. Must be one of: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, '
-                     'firecrawl, agentcore',
+            'error': 'Invalid provider. Must be one of: openai, perplexity, gemini, claude, google_ai_overview, brave, '
+                     'tavily, exa, serpapi, firecrawl, agentcore',
             'field': 'provider',
         })
         tables['search_results_table'].scan.assert_not_called()

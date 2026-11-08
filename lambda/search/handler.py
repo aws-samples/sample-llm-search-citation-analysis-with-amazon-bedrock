@@ -11,10 +11,12 @@ import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from branded_query import BRANDED_MATCHER_VERSION, branded_query_matcher_for
+from perplexity_sources import perplexity_sources
 
 # Import lightweight API clients
 from api_clients import (
@@ -46,8 +48,12 @@ from shared.ai_clients import (
 )
 from shared.config import Provider
 from shared.constants import MAX_KEYWORD_LENGTH
+from shared.dataforseo_client import DataForSeoError
+from shared.dataforseo_locations import UnsupportedMarketError, market_codes
+from shared.dataforseo_serp import AIO_MODEL, AIO_TIMEOUT_SECONDS, AiOverviewResult, OrganicItem, ai_overview_search
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
+from shared.kpi_engine import NO_ANSWER
 from shared.markets import GLOBAL_MARKET_ID, Market, brand_config_for_market, market_from_payload
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
@@ -92,6 +98,10 @@ def get_extraction_config() -> dict[str, Any]:
 # Environment variables
 DYNAMODB_TABLE_SEARCH_RESULTS = search_results_table_name()
 RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
+#: The citation rule an answer row was stored under (D2, D3). 2: only the sources the answer cites count
+#: (``citations``), the pages an engine only read are ``retrieved_urls``, and Perplexity and Claude are asked to
+#: cite (2.43.0). Rows without the field predate it and counted every source the engine returned.
+CITATIONS_VERSION = 2
 # Provider config table. Default mirrors the CDK resource name so a bootstrap
 # deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (
@@ -282,12 +292,35 @@ def _merge_citations(citations: list[str], extra: Iterable[str]) -> list[str]:
     return citations
 
 
+class ParsedAnswer(NamedTuple):
+    """What one engine response yields.
+
+    ``citations`` are the URLs the answer cites: annotations, inline citations,
+    grounding chunks and raw URLs written in the text. ``retrieved_urls`` are
+    the URLs the engine only fetched while searching (search results it did not
+    cite); they are stored for inspection but never count as citations, since a
+    page the engine read and did not cite is not a source of the answer.
+    """
+
+    text: str
+    citations: list[str]
+    retrieved_urls: list[str]
+
+
+def _parsed_answer(text: str, cited: Iterable[str], retrieved: Iterable[str] = ()) -> ParsedAnswer:
+    """``text`` with its cited URLs once each, and the retrieved URLs that are not also cited."""
+    citations = list(dict.fromkeys(url for url in cited if url))
+    cited_set = set(citations)
+    retrieved_only = [url for url in dict.fromkeys(retrieved) if url and url not in cited_set]
+    return ParsedAnswer(text, citations, retrieved_only)
+
+
 def _query_llm(
     provider: str,
     keyword: str,
     query_template: str | None,
     request: Callable[[str], dict[str, Any]],
-    parse: Callable[[dict[str, Any]], tuple[str, list[str]]],
+    parse: Callable[[dict[str, Any]], ParsedAnswer],
     *,
     model: str,
     usage_key: str = 'usage',
@@ -297,28 +330,37 @@ def _query_llm(
     """The request/parse/error flow every LLM provider shares.
 
     ``request`` sends the resolved query and returns the raw payload; ``parse``
-    reads ``(response_text, citations)`` out of it. A failure anywhere in that
+    reads the ``ParsedAnswer`` out of it. A failure anywhere in that
     flow becomes the uniform error result rather than an exception, so one dead
     provider cannot take the keyword down and ``_record_provider_outcome`` can
     classify what went wrong. ``model`` labels the metadata (and the error
     result); with ``model_from_response`` the payload's own ``model`` wins.
     ``extra_metadata`` adds provider-specific fields read from the payload.
+
+    A call that returns no answer text (blank after trimming) is ``no_answer``:
+    the engine worked, so it is not a failure, but there is no answer to read
+    a brand from, and counting it would lower every rate.
     """
     start_time = time.time()
     try:
         raw_response = request(build_provider_query(keyword, query_template))
         latency_ms = int((time.time() - start_time) * 1000)
-        response_text, citations = parse(raw_response)
+        parsed = parse(raw_response)
     except Exception as e:
         logger.exception('%s error', provider)
         return provider_error_result(provider, model, e, start_time)
 
-    logger.info("%s found %s citations for '%s'", provider, len(citations), keyword)
+    status = "success" if parsed.text.strip() else NO_ANSWER
+    logger.info(
+        "%s %s: %s cited and %s retrieved URLs for '%s'",
+        provider, status, len(parsed.citations), len(parsed.retrieved_urls), keyword,
+    )
     return {
         "provider": provider,
-        "response": response_text,
-        "citations": citations,
-        "status": "success",
+        "response": parsed.text,
+        "citations": parsed.citations,
+        "retrieved_urls": parsed.retrieved_urls,
+        "status": status,
         "raw_response": raw_response,
         "metadata": {
             "model": raw_response.get('model', model) if model_from_response else model,
@@ -345,10 +387,11 @@ def _openai_message_content(item: dict[str, Any]) -> tuple[str, list[str]]:
     return text, citations
 
 
-def _parse_openai_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """Message text plus the URLs cited in annotations and web-search sources, deduplicated in order."""
+def _parse_openai_response(raw_response: dict[str, Any]) -> ParsedAnswer:
+    """Message text and its ``url_citation`` annotations; the web-search ``sources`` are only retrieved."""
     response_text = ""
     citations: list[str] = []
+    retrieved: list[str] = []
     for item in raw_response.get('output', []):
         if item.get('type') == 'message':
             text, urls = _openai_message_content(item)
@@ -356,9 +399,9 @@ def _parse_openai_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
             citations.extend(urls)
         elif item.get('type') == 'web_search_call':
             sources = item.get('action', {}).get('sources', [])
-            citations.extend(clean_url(source['url']) for source in sources if source.get('url'))
+            retrieved.extend(clean_url(source['url']) for source in sources if source.get('url'))
     # Fallback: extract from output_text if available
-    return response_text or raw_response.get('output_text', ''), list(dict.fromkeys(citations))
+    return _parsed_answer(response_text or raw_response.get('output_text', ''), citations, retrieved)
 
 
 def query_openai(
@@ -374,30 +417,12 @@ def query_openai(
     return _query_llm(Provider.OPENAI, keyword, query_template, request, _parse_openai_response, model=model)
 
 
-def _perplexity_cited_urls(raw_response: dict[str, Any]) -> list[str]:
-    """The ``search_results`` hit URLs, then any message annotation URLs, of an Agent API response."""
-    urls: list[str] = []
-    for item in raw_response.get('output') or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get('type') == 'search_results':
-            urls.extend(result['url'] for result in item.get('results') or [] if isinstance(result, dict) and result.get('url'))
-        elif item.get('type') == 'message':
-            urls.extend(
-                annotation['url']
-                for part in item.get('content') or [] if isinstance(part, dict)
-                for annotation in part.get('annotations') or [] if isinstance(annotation, dict) and annotation.get('url')
-            )
-    return urls
-
-
-def _parse_perplexity_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """Agent API answer text plus the searched and annotated URLs (deduplicated in order), else the text's URLs."""
+def _parse_perplexity_response(raw_response: dict[str, Any]) -> ParsedAnswer:
+    """Agent API answer text; the sources it cites (``perplexity_sources``) and the URLs in the text are cited."""
     response_text = perplexity_agent_text(raw_response)
-    citations = list(dict.fromkeys(clean_url(url) for url in _perplexity_cited_urls(raw_response)))
-    if not citations:
-        citations = extract_citations_from_response(response_text)
-    return response_text, citations
+    sources = perplexity_sources(raw_response, response_text)
+    cited = _merge_citations([clean_url(url) for url in sources.cited], extract_citations_from_response(response_text))
+    return _parsed_answer(response_text, cited, (clean_url(url) for url in sources.retrieved))
 
 
 def _perplexity_cost(raw_response: dict[str, Any]) -> dict[str, Any]:
@@ -486,8 +511,8 @@ def _gemini_grounding_citations(grounding: dict[str, Any]) -> list[str]:
     return citations
 
 
-def _parse_gemini_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """First candidate's text and grounding citations, plus any URLs in the text itself."""
+def _parse_gemini_response(raw_response: dict[str, Any]) -> ParsedAnswer:
+    """First candidate's text; its grounding chunks and the URLs in the text are cited (Gemini reports nothing else)."""
     response_text = ""
     citations: list[str] = []
     candidates = raw_response.get('candidates', [])
@@ -497,7 +522,7 @@ def _parse_gemini_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
             response_text = ' '.join([part.get('text', '') for part in candidate['content']['parts']])
         if 'groundingMetadata' in candidate:
             citations = _gemini_grounding_citations(candidate['groundingMetadata'])
-    return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
+    return _parsed_answer(response_text, _merge_citations(citations, extract_citations_from_response(response_text)))
 
 
 def query_gemini(
@@ -526,8 +551,8 @@ def _log_claude_tool_block(block_type: str | None, content_block: dict[str, Any]
         logger.info("Claude unhandled block type '%s': %s", block_type, json.dumps(content_block, default=str)[:300])
 
 
-def _claude_search_result_urls(content_block: dict[str, Any], citations: list[str]) -> None:
-    """Append the URLs of a ``web_search_tool_result`` block that are not listed yet.
+def _claude_search_result_urls(content_block: dict[str, Any], retrieved: list[str]) -> None:
+    """Append the URLs of a ``web_search_tool_result`` block (pages Claude retrieved) that are not listed yet.
 
     A failed search carries an error object (``{"error_code": ...}``)
     instead of the result list; it adds nothing.
@@ -539,7 +564,7 @@ def _claude_search_result_urls(content_block: dict[str, Any], citations: list[st
     for result in results:
         url = result.get('url') if isinstance(result, dict) and result.get('type') == 'web_search_result' else None
         if url:
-            _merge_citations(citations, [clean_url(url)])
+            _merge_citations(retrieved, [clean_url(url)])
             logger.debug('Claude web search result URL: %s', url)
 
 
@@ -552,12 +577,13 @@ def _claude_text_citation_urls(content_block: dict[str, Any]) -> list[str]:
     ]
 
 
-def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """Text blocks, their cited URLs and the web-search result URLs, plus any URLs in the text itself."""
+def _parse_claude_response(raw_response: dict[str, Any]) -> ParsedAnswer:
+    """Text blocks; their cited URLs and the URLs in the text are cited, the web-search results only retrieved."""
     # Log the full response structure for debugging
     logger.info('Claude raw response structure: %s', json.dumps(raw_response, default=str)[:1000])
     response_text = ""
     citations: list[str] = []
+    retrieved: list[str] = []
     for content_block in raw_response.get('content', []):
         block_type = content_block.get('type')
         logger.debug('Claude content block type: %s', block_type)
@@ -565,10 +591,12 @@ def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
             response_text += content_block.get('text', '')
             _merge_citations(citations, _claude_text_citation_urls(content_block))
         elif block_type == 'web_search_tool_result':
-            _claude_search_result_urls(content_block, citations)
+            _claude_search_result_urls(content_block, retrieved)
         else:
             _log_claude_tool_block(block_type, content_block)
-    return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
+    return _parsed_answer(
+        response_text, _merge_citations(citations, extract_citations_from_response(response_text)), retrieved,
+    )
 
 
 def query_claude(
@@ -585,6 +613,100 @@ def query_claude(
         Provider.CLAUDE, keyword, query_template, request, _parse_claude_response,
         model=model, model_from_response=True,
     )
+
+
+# --- Google AI Overviews (DataForSEO SERP) ------------------------------------
+
+#: The organic results kept on an AI Overviews row (the SERP is fetched at depth 10).
+AIO_ORGANIC_LIMIT = 10
+
+#: ``error_category`` of a market DataForSEO cannot localise: nothing was sent, nothing billed.
+UNSUPPORTED_MARKET = 'unsupported_market'
+
+#: Engines asked the plain keyword once per keyword and run: Google takes no persona
+#: wording, and a long persona prompt rarely triggers an overview. Their single row carries the
+#: unpersonalised prompt (``DEFAULT_QUERY_PROMPT``) even when the run has personas.
+PLAIN_KEYWORD_PROVIDERS = frozenset({Provider.GOOGLE_AI_OVERVIEW})
+
+#: The prompt of an unpersonalised query (also the run's only prompt when it has no personas).
+DEFAULT_QUERY_PROMPT: dict[str, Any] = {"id": "default", "name": "Default", "template": None}
+
+
+def _aio_search_result(item: OrganicItem) -> dict[str, Any]:
+    """One organic result as an entry of a SearchResults row's ``search_results``."""
+    return {
+        "url": item.url,
+        "title": item.title,
+        "snippet": item.description,
+        "position": item.position,
+        "domain": item.domain,
+        "rank_absolute": item.rank_absolute,
+        "source": Provider.GOOGLE_AI_OVERVIEW,
+    }
+
+
+def _aio_result(overview: AiOverviewResult) -> ProviderResult:
+    """The row of an answered (``success``) or overview-less (``no_answer``) results page."""
+    organic = [_aio_search_result(item) for item in overview.organic[:AIO_ORGANIC_LIMIT]]
+    return {
+        "provider": Provider.GOOGLE_AI_OVERVIEW,
+        "provider_type": "llm",
+        "response": overview.answer_text,
+        "citations": list(overview.citations),
+        "status": overview.status,
+        "search_results": organic,
+        # Bronze: DataForSEO's task result as returned (D2), so the overview's references can be read again (D3).
+        # The rendered markdown is kept beside it; the row's `response` is the plain prose brands are read from.
+        "raw_response": {"dataforseo_result": overview.raw_result},
+        "answer_markdown": overview.answer_markdown,
+        "metadata": overview.metadata,
+    }
+
+
+def _aio_error(error: Exception, start_time: float, **fields: Any) -> ProviderResult:
+    """The error row of a failed AI Overviews call, with ``fields`` (``error_code``, ``error_category``) added."""
+    result = provider_error_result(Provider.GOOGLE_AI_OVERVIEW, AIO_MODEL, error, start_time)
+    result["provider_type"] = "llm"
+    return {**result, **fields}
+
+
+def query_google_ai_overview(keyword: str, market: Market | None = None) -> ProviderResult:
+    """The AI Overview Google shows for the plain ``keyword`` in ``market``.
+
+    A market DataForSEO cannot localise is an error row with ``error_category``
+    ``unsupported_market`` and no call. A DataForSEO failure keeps its
+    ``DataForSeoError.code`` as ``error_code`` (provider health maps it) and
+    any billed cost in ``metadata.cost_usd``.
+    """
+    start_time = time.time()
+    try:
+        codes = market_codes(market)
+    except UnsupportedMarketError as error:
+        logger.info('Google AI Overviews skipped: %s', error)
+        return _aio_error(error, start_time, error_category=UNSUPPORTED_MARKET)
+    try:
+        overview = ai_overview_search(keyword, codes)
+    except DataForSeoError as error:
+        logger.warning('Google AI Overviews failed: %s %s', error.code, error.provider_status)
+        result = _aio_error(error, start_time, error_code=error.code)
+        if error.cost_usd:
+            result["metadata"]["cost_usd"] = error.cost_usd
+        return result
+    except Exception as error:
+        logger.exception('Google AI Overviews error')
+        return _aio_error(error, start_time)
+    logger.info(
+        "Google AI Overviews: %s with %s citations for '%s'", overview.status, len(overview.citations), keyword,
+    )
+    return _aio_result(overview)
+
+
+def _run_google_ai_overview_provider(
+    keyword: str, api_key: str, query_template: str | None, market: Market | None,
+) -> ProviderResult:
+    """Google AI Overviews for the plain keyword (no persona template); the DataForSEO
+    client reads the ``dataforseo-key`` login itself, so ``api_key`` only proves it is set."""
+    return query_google_ai_overview(keyword, market)
 
 
 def _run_openai_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
@@ -638,6 +760,8 @@ PROVIDER_RUNNERS: list[tuple[str, str | None, str, ProviderRunner]] = [
     (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', _run_perplexity_provider),
     (Provider.GEMINI, 'gemini-key', 'Gemini', _run_gemini_provider),
     (Provider.CLAUDE, 'claude-key', 'Claude', _run_claude_provider),
+    # The DataForSEO login (`login:password`) shared with the SEO stack.
+    (Provider.GOOGLE_AI_OVERVIEW, 'dataforseo-key', 'Google AI Overviews', _run_google_ai_overview_provider),
     (Provider.BRAVE, 'brave-key', 'Brave Search', _search_provider_runner(BraveSearchClient)),
     (Provider.TAVILY, 'tavily-key', 'Tavily', _search_provider_runner(TavilySearchClient)),
     (Provider.EXA, 'exa-key', 'Exa', _search_provider_runner(ExaSearchClient)),
@@ -671,6 +795,8 @@ PROVIDER_CALL_WORST_CASE_SECONDS: dict[str, float] = {
     # The submit's attempts, then the Search Archive polled until its own deadline.
     Provider.SERPAPI: SERPAPI_REQUEST_ATTEMPTS * SERPAPI_REQUEST_TIMEOUT_SECONDS + SERPAPI_POLL_DEADLINE_SECONDS
     + RETRY_BACKOFF_SECONDS,
+    # One live SERP call, never re-sent (billed): its own timeout.
+    Provider.GOOGLE_AI_OVERVIEW: AIO_TIMEOUT_SECONDS,
     **{
         client.provider_id: DEFAULT_MAX_RETRIES * client.timeout + RETRY_BACKOFF_SECONDS
         for client in (BraveSearchClient, TavilySearchClient, ExaSearchClient, FirecrawlSearchClient, AgentCoreSearchClient)
@@ -728,13 +854,21 @@ def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
     Never raises: a health-bookkeeping failure must not take down a search that
     otherwise succeeded, and `record_provider_*` already swallow their own
     DynamoDB errors.
+
+    A result that already carries `error_category` was refused before any
+    call (an unsupported market): it says nothing about the provider's health
+    and is not recorded. A DataForSEO failure is classified by its
+    `error_code`; a `no_answer` page is a successful call.
     """
     table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
 
     if result.get('status') == 'error':
-        outcome = record_provider_failure(
-            table, provider_id, result.get('error', 'unknown provider error')
-        )
+        if result.get('error_category'):
+            return
+        message = result.get('error', 'unknown provider error')
+        error_code = result.get('error_code')
+        failure: object = DataForSeoError(error_code, message) if error_code else message
+        outcome = record_provider_failure(table, provider_id, failure)
         result['error_category'] = outcome['category']
         return
 
@@ -783,7 +917,7 @@ def execute_all_providers(
     return results
 
 
-def _extraction_brand_config(market: Market | None) -> dict[str, Any] | None:
+def _extraction_brand_config(market: Market | None, stored: dict[str, Any]) -> dict[str, Any] | None:
     """The brand config extraction uses (``market``'s competitors and aliases added), or ``None`` when extraction is off.
 
     Without a market it is the stored config as is; with one, the stored
@@ -793,17 +927,18 @@ def _extraction_brand_config(market: Market | None) -> dict[str, Any] | None:
     extraction_config = get_extraction_config()
     if not extraction_config.get("brand_extraction", {}).get("enabled", True):
         return None
-    stored = get_brand_config()
     brand_config = brand_config_for_market(stored or DEFAULT_EXTRACTION_CONFIG, market) if market else stored
     logger.info('Loaded brand config for extraction: industry=%s', (brand_config or {}).get('industry') or 'default')
     return brand_config
 
 
 def _extracted_brands(result: dict[str, Any], brand_config: dict[str, Any] | None) -> dict[str, Any]:
-    """Brand mentions in an LLM result's text (none for search providers, empty answers or extraction off)."""
+    """Brand mentions in an LLM result's text (none for search providers, non-``success`` rows,
+    empty answers or extraction off)."""
     provider = result.get("provider", "unknown")
     response_text = result.get("response", "")
-    if brand_config is None or not response_text or result.get("provider_type", "llm") != "llm":
+    answered = result.get("status", "success") == "success"
+    if brand_config is None or not answered or not response_text or result.get("provider_type", "llm") != "llm":
         return {"brands": [], "brand_count": 0}
     try:
         logger.info('Starting brand extraction for %s (response length: %s chars)', provider, len(response_text))
@@ -817,8 +952,14 @@ def _extracted_brands(result: dict[str, Any], brand_config: dict[str, Any] | Non
 
 def _result_item(
     keyword: str, timestamp: str, result: dict[str, Any], brand_data: dict[str, Any], market_id: str, s3_uri: str | None,
+    *, is_branded: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
-    """The SearchResults row of one provider result."""
+    """The SearchResults row of one provider result.
+
+    Answer-engine rows carry ``retrieved_urls`` (pages the engine read but did
+    not cite; never counted as citations) and ``branded`` (whether the query
+    named the tracked brand, per ``is_branded``; fixed at write time).
+    """
     # Every runner sets "provider"; "unknown" mirrors deduplication's rollup for a row without one.
     provider: str = result.get("provider", "unknown")
     provider_type = result.get("provider_type", "llm")  # Default to llm for backward compatibility
@@ -838,9 +979,15 @@ def _result_item(
         "brands": brand_data.get("brands", []),
         "brand_count": brand_data.get("brand_count", 0),
     }
-    # Add search results for search providers (convert floats to Decimal for DynamoDB)
-    if provider_type == "search" and result.get("search_results"):
+    # Add search results for search providers and the AI Overviews organic top 10
+    # (convert floats to Decimal for DynamoDB)
+    if (provider_type == "search" or provider in PLAIN_KEYWORD_PROVIDERS) and result.get("search_results"):
         item["search_results"] = convert_floats_to_decimal(result.get("search_results", []))
+    if provider_type == "llm":
+        item["retrieved_urls"] = list(result.get("retrieved_urls") or [])
+        item["branded"] = bool(is_branded and is_branded(str(result.get("query") or keyword)))
+        item["branded_version"] = BRANDED_MATCHER_VERSION
+        item["citations_version"] = CITATIONS_VERSION
     if s3_uri:
         item["raw_response_s3_uri"] = s3_uri
     metadata = result.get("metadata", {})
@@ -863,8 +1010,10 @@ def _store_raw_result(
     extracted_data = {
         "response_text": result.get("response", ""),
         "citations": result.get("citations", []),
+        "retrieved_urls": result.get("retrieved_urls", []),
         "brands": brand_data.get("brands", []),
-        "search_results": result.get("search_results", [])  # For search providers
+        "search_results": result.get("search_results", []),  # For search providers
+        **({"answer_markdown": result["answer_markdown"]} if result.get("answer_markdown") else {}),
     }
     return store_raw_response_to_s3(
         keyword=keyword,
@@ -885,18 +1034,21 @@ def store_search_results(
 
     Every row carries ``market_id`` (``GLOBAL_MARKET_ID`` without a market),
     and brands are extracted with the market's competitors and local brand
-    names added to the tracked lists.
+    names added to the tracked lists; the same names (and the owned domains)
+    decide whether an answer row is ``branded``.
     """
     market_id = market.market_id if market else GLOBAL_MARKET_ID
     try:
         table = dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS)
         # Load brand config once upfront and reuse for all providers (avoids repeated DynamoDB reads)
-        brand_config = _extraction_brand_config(market)
+        stored = get_brand_config()
+        brand_config = _extraction_brand_config(market, stored)
+        is_branded = branded_query_matcher_for(brand_config_for_market(stored, market))
 
         for result in results:
             brand_data = _extracted_brands(result, brand_config)
             s3_uri = _store_raw_result(keyword, timestamp, result, brand_data, market_id)
-            item = _result_item(keyword, timestamp, result, brand_data, market_id, s3_uri)
+            item = _result_item(keyword, timestamp, result, brand_data, market_id, s3_uri, is_branded=is_branded)
             table.put_item(Item=item)
             logger.info(
                 'Stored result for %s (%s) with %s brand mentions, S3: %s',
@@ -989,6 +1141,8 @@ def _run_prompt(
     for result in results:
         result['query_prompt_id'] = prompt_id
         result['query_prompt_name'] = prompt_name
+        # The string the engines were asked: what decides whether the row is branded.
+        result['query'] = build_provider_query(keyword, prompt.get('template'))
     return results
 
 
@@ -998,28 +1152,27 @@ class _SearchRun:
 
     keyword: str
     timestamp: str
-    providers: list[str]
     market: Market | None
     deadline: Deadline
     stored: dict[tuple[str, str], dict[str, Any]]
     prompts_run: int = 0
     pending: list[str] = field(default_factory=list)
 
-    def missing_providers(self, prompt_id: str) -> list[str]:
-        return [provider for provider in self.providers if (provider, prompt_id) not in self.stored]
+    def missing_providers(self, prompt_id: str, providers: list[str]) -> list[str]:
+        return [provider for provider in providers if (provider, prompt_id) not in self.stored]
 
-    def stored_for(self, prompt_id: str) -> list[dict[str, Any]]:
-        return [self.stored[(provider, prompt_id)] for provider in self.providers if (provider, prompt_id) in self.stored]
+    def stored_for(self, prompt_id: str, providers: list[str]) -> list[dict[str, Any]]:
+        return [self.stored[(provider, prompt_id)] for provider in providers if (provider, prompt_id) in self.stored]
 
     def has_time_for(self, providers: list[str]) -> bool:
         """Whether a prompt over ``providers`` can finish in time; the first prompt always runs, so a retry progresses."""
         return self.prompts_run == 0 or self.deadline.remaining() >= prompt_time_needed(providers)
 
-    def answer(self, prompt: dict[str, Any]) -> list[dict[str, Any]]:
-        """``prompt``'s slim results: the stored ones, plus the missing providers' answers asked and stored now."""
+    def answer(self, prompt: dict[str, Any], providers: list[str]) -> list[dict[str, Any]]:
+        """``prompt``'s slim results from ``providers``: the stored ones, plus the missing ones asked and stored now."""
         prompt_id = str(prompt.get('id', 'default'))
-        slims = self.stored_for(prompt_id)
-        missing = self.missing_providers(prompt_id)
+        slims = self.stored_for(prompt_id, providers)
+        missing = self.missing_providers(prompt_id, providers)
         if not missing:
             return slims
         if not self.has_time_for(missing):
@@ -1044,10 +1197,12 @@ class _SearchRun:
 def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> dict[str, Any]:
     """Run every query prompt across the selected providers, storing each prompt's answers as it finishes.
 
-    Prompts whose answers an earlier attempt of the same run stored are not
-    asked again. When ``deadline`` leaves too little time for the next
-    prompt's worst case, no new prompt starts and ``SearchTimeBudgetSpentError``
-    hands the rest to a retry.
+    Plain-keyword engines (``PLAIN_KEYWORD_PROVIDERS``) are asked once, under
+    ``DEFAULT_QUERY_PROMPT``, whatever the personas. Prompts whose answers an
+    earlier attempt of the same run stored are not asked again. When
+    ``deadline`` leaves too little time for the next prompt's worst case, no
+    new prompt starts and ``SearchTimeBudgetSpentError`` hands the rest to a
+    retry.
     """
     keyword = _sanitized_keyword(event)
     market = _event_market(event)
@@ -1055,22 +1210,28 @@ def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> 
     timestamp = event['timestamp'] if resumable else get_timestamp()
     providers = event['providers']
     # If no query prompts, use a single default (backward compatible)
-    query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
+    query_prompts = event.get('query_prompts') or [DEFAULT_QUERY_PROMPT]
 
     logger.info(
         'Processing keyword: %s, market: %s, prompts: %s, providers: %s',
         keyword, market.market_id if market else GLOBAL_MARKET_ID, len(query_prompts), providers,
     )
     run = _SearchRun(
-        keyword, timestamp, providers, market, deadline or invocation_deadline(None),
+        keyword, timestamp, market, deadline or invocation_deadline(None),
         stored_slim_results(keyword, timestamp) if resumable else {},
     )
     if run.stored:
         logger.info('Resuming the run: %d answer(s) already stored are not asked again', len(run.stored))
 
+    # Plain-keyword engines run once, unpersonalised, whatever the personas.
+    prompted = [provider for provider in providers if provider not in PLAIN_KEYWORD_PROVIDERS]
+    plain = [provider for provider in providers if provider in PLAIN_KEYWORD_PROVIDERS]
     all_results: list[dict[str, Any]] = []
-    for prompt in query_prompts:
-        all_results.extend(run.answer(prompt))
+    if prompted:
+        for prompt in query_prompts:
+            all_results.extend(run.answer(prompt, prompted))
+    if plain:
+        all_results.extend(run.answer(DEFAULT_QUERY_PROMPT, plain))
     return run.finished(all_results)
 
 

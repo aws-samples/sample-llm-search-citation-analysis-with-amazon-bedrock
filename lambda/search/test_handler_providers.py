@@ -152,3 +152,73 @@ class TestAgentCoreProvider:
         search_handler.execute_all_providers('latam airlines', providers=['exa'])
 
         agentcore_providers.gateway_url.assert_not_called()
+
+
+# --- What counts as an answer ----------------------------------------------------
+#
+# An engine call that works but writes no answer text is `no_answer`: not an
+# error (the provider is healthy), not an answer (nothing to read a brand from).
+# Each result is tagged with the query the engines were asked, which decides
+# whether its row is branded.
+
+_BEACH = 'hotel near the beach'
+
+
+def _openai_answer(text: str) -> dict[str, object]:
+    """A Responses API payload whose message says ``text`` and cites one page."""
+    annotation = {'type': 'url_citation', 'url': 'https://example.org/beach'}
+    content = {'type': 'output_text', 'text': text, 'annotations': [annotation]}
+    return {'model': 'gpt-5-mini', 'output': [{'type': 'message', 'content': [content]}]}
+
+
+@pytest.fixture
+def ask_openai(search_handler):
+    """``ask(text)``: the result of an OpenAI call whose answer says ``text``."""
+    def ask(text: str) -> dict[str, object]:
+        client = MagicMock()
+        client.responses_with_web_search.return_value = _openai_answer(text)
+        with patch.object(search_handler, 'OpenAIClient', return_value=client):
+            return search_handler.query_openai(_BEACH, 'sk-test')
+    return ask
+
+
+class TestEmptyAnswers:
+    @pytest.mark.parametrize('text', ['', '   \n\t '], ids=['empty', 'whitespace'])
+    def test_files_a_call_without_answer_text_as_no_answer(self, ask_openai, text):
+        assert ask_openai(text)['status'] == 'no_answer'
+
+    def test_files_a_call_with_answer_text_as_success(self, ask_openai):
+        assert ask_openai('Hotel Example is close to the sand.')['status'] == 'success'
+
+    def test_records_a_no_answer_call_as_a_healthy_provider(self, search_handler):
+        with (
+            patch.object(search_handler, 'dynamodb'),
+            patch.object(search_handler, 'record_provider_success') as success,
+            patch.object(search_handler, 'record_provider_failure') as failure,
+        ):
+            search_handler._record_provider_outcome('openai', {'provider': 'openai', 'status': 'no_answer'})
+
+        assert (success.call_count, failure.call_count) == (1, 0)
+
+    def test_extracts_no_brands_from_a_no_answer_row(self, search_handler):
+        with patch.object(search_handler, 'extract_brands_from_response') as extract:
+            brands = search_handler._extracted_brands(
+                {'provider': 'openai', 'provider_type': 'llm', 'status': 'no_answer', 'response': ' '}, {'industry': 'hotels'},
+            )
+
+        assert (brands, extract.call_count) == ({'brands': [], 'brand_count': 0}, 0)
+
+
+class TestQueryTagging:
+    def test_tags_each_result_with_the_personas_query(self, search_handler):
+        prompt = {'id': 'p1', 'name': 'Family', 'template': 'As a family, is {keyword} at Acme good?'}
+        with patch.object(search_handler, 'execute_all_providers', return_value=[{'provider': 'openai'}]):
+            results = search_handler._run_prompt(_BEACH, prompt, ['openai'], None)
+
+        assert results[0]['query'] == 'As a family, is hotel near the beach at Acme good?'
+
+    def test_tags_an_unpersonalised_result_with_the_keyword(self, search_handler):
+        with patch.object(search_handler, 'execute_all_providers', return_value=[{'provider': 'openai'}]):
+            results = search_handler._run_prompt(_BEACH, search_handler.DEFAULT_QUERY_PROMPT, ['openai'], None)
+
+        assert results[0]['query'] == _BEACH

@@ -79,7 +79,10 @@ class TestAnswerFromRow:
         fields = [field.strip() for field in ANSWER_PROJECTION.split(',')]
         resolved = {'.'.join(ANSWER_ATTRIBUTE_NAMES.get(part, part) for part in field.split('.')) for field in fields}
 
-        assert resolved == {'keyword', 'timestamp', 'provider', 'status', 'query_prompt_id', 'brands', 'citations', 'metadata.model'}
+        assert resolved == {
+            'keyword', 'timestamp', 'provider', 'status', 'query_prompt_id', 'brands', 'citations', 'metadata.model',
+            'branded', 'market_id',
+        }
 
     def test_keeps_only_successful_llm_answers(self):
         assert [(answer.keyword, answer.provider) for answer in POOL] == [

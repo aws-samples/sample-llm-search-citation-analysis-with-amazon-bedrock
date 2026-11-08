@@ -12,7 +12,7 @@ import {
   collectCursorPages, withNextToken, type CursorPage
 } from './cursorPages';
 import type {
-  AnalysisScope, Schedule, ScheduleFrequency
+  AnalysisScope, RankTrackerSchedule, Schedule, ScheduleFormData
 } from '../types';
 
 // Re-exported for existing consumers of this module's schedule API.
@@ -23,17 +23,18 @@ interface SchedulesResponse {
   next_token?: string | null;
 }
 
-/** What the API accepts on create and update (every field optional on update). */
-export interface SchedulePayload {
-  display_name: string;
-  frequency: ScheduleFrequency;
-  time: string;
-  timezone: string;
-  day_of_week: string;
+/**
+ * What the API accepts on create and update: the form with the day of month
+ * as a number. `kind` is read on create only (a schedule keeps its kind);
+ * `scope` is sent for analysis schedules only, as snapshot kinds cover every
+ * owned and competitor domain.
+ */
+export type SchedulePayload = Omit<ScheduleFormData, 'day_of_month' | 'scope'> & {
   day_of_month: number;
-  enabled: boolean;
-  scope: AnalysisScope;
-}
+  scope?: AnalysisScope;
+  /** Required by the API to save an enabled paid (snapshot) schedule: sent after the dashboard's confirmation. */
+  confirm_paid?: true;
+};
 
 export interface ScheduleRunResponse {message: string;}
 
@@ -70,7 +71,34 @@ export async function deleteSchedule(id: string): Promise<void> {
   await apiDelete<unknown>(`/schedules/${encodeURIComponent(id)}`, { allowStructured4xx: true });
 }
 
-/** Start an analysis now with the schedule's scope. */
-export async function runSchedule(id: string): Promise<ScheduleRunResponse> {
-  return apiPost<ScheduleRunResponse>(`/schedules/${encodeURIComponent(id)}/run`, {}, { allowStructured4xx: true });
+/**
+ * Start the schedule's run now: an analysis with its scope, or its snapshots. A snapshot run is paid, so the API
+ * requires `confirmPaid` (sent after the dashboard's confirmation).
+ */
+export async function runSchedule(id: string, confirmPaid = false): Promise<ScheduleRunResponse> {
+  const body = confirmPaid ? { confirm_paid: true } : {};
+  return apiPost<ScheduleRunResponse>(`/schedules/${encodeURIComponent(id)}/run`, body, { allowStructured4xx: true });
+}
+
+interface RankTrackerSchedulesResponse {
+  schedules?: RankTrackerSchedule[];
+  truncated?: boolean;
+}
+
+/** The rank trackers' own schedules (next check of each), soonest first; read-only here. */
+export interface RankTrackerScheduleList {
+  schedules: RankTrackerSchedule[];
+  /** More trackers are scheduled than one answer lists (100). */
+  truncated: boolean;
+}
+
+export async function fetchRankTrackerSchedules(signal?: AbortSignal): Promise<RankTrackerScheduleList> {
+  const response = await apiGet<RankTrackerSchedulesResponse>('/schedules', {
+    signal,
+    params: { source: 'rank-trackers' },
+  });
+  return {
+    schedules: response.schedules ?? [],
+    truncated: response.truncated === true,
+  };
 }

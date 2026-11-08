@@ -2,9 +2,10 @@ import {
   Skeleton, SkeletonLines, SkeletonRegion
 } from '../ui/Skeleton';
 
-/** `GET /providers` lists four answer engines and six search providers (the last, agentcore, uses IAM). */
+/** `GET /providers` lists five answer engines (the last, google_ai_overview, borrows the DataForSEO login), six search providers (the last, agentcore, uses IAM) and the DataForSEO credential. */
 const PROVIDER_CARD_IDS = [
-  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl', 'agentcore',
+  'openai', 'perplexity', 'gemini', 'claude', 'google_ai_overview', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl', 'agentcore',
+  'dataforseo',
 ] as const;
 
 /** One provider card: status dot, name and model, description, status pills, and the controls. */

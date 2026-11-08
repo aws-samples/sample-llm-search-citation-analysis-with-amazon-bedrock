@@ -12,8 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, deterministic_alert_id
-from shared.kpi_engine import Answer, answers_from_rows
+from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, KPI_VERSION, deterministic_alert_id
 from shared.request_deadline import Deadline
 from testing.clocks import JumpClock
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
@@ -81,12 +80,12 @@ def _row(provider: str, *brands: tuple[str, str, int]) -> dict:
     )
 
 
-def _answers() -> list[Answer]:
+def _rows() -> list[dict]:
     """Two answers: the hotel 2nd behind the rival, then the rival alone."""
-    return answers_from_rows([
+    return [
         _row('openai', ('Rival', 'competitor', 1), ('Hotel Mine', 'first_party', 2)),
         _row('gemini', ('Rival', 'competitor', 3)),
-    ])
+    ]
 
 
 def _single_group_tables(**tables: MagicMock) -> tuple[MagicMock, MagicMock, MagicMock]:
@@ -128,9 +127,10 @@ def _complete_group_patches(
     worker_module,
     resource: MagicMock,
     settings: dict,
-    answers: list[Answer] | None,
+    rows: list[dict] | None,
     brand_config: dict = _HOTEL_BRAND_CONFIG,
 ):
+    """One complete group whose run rows (the evaluated run's and any earlier run's) are ``rows``."""
     return patch.multiple(
         worker_module,
         query_active_keywords=MagicMock(return_value=[{
@@ -141,7 +141,7 @@ def _complete_group_patches(
         _load_groups=MagicMock(return_value=[{'id': 'group-1', 'name': 'Group One'}]),
         _settings=MagicMock(return_value=settings),
         get_brand_config=MagicMock(return_value=brand_config),
-        _load_run_answers=MagicMock(return_value={'shared keyword': answers}),
+        _load_run_rows=MagicMock(return_value={'shared keyword': rows}),
         dynamodb=resource,
     )
 
@@ -153,12 +153,12 @@ def _complete_group_run(
     settings: dict,
     previous_snapshot: dict | None = None,
     *,
-    answers: list[Answer] | None = None,
+    rows: list[dict] | None = None,
     brand_config: dict = _HOTEL_BRAND_CONFIG,
 ) -> Generator[None, None, None]:
-    """One complete group whose exact-run answers are `_answers()` unless given, with notification stubbed out."""
+    """One complete group whose exact-run rows are `_rows()` unless given, with notification stubbed out."""
     with (
-        _complete_group_patches(worker_module, resource, settings, _answers() if answers is None else answers, brand_config),
+        _complete_group_patches(worker_module, resource, settings, _rows() if rows is None else rows, brand_config),
         patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
         patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
     ):
@@ -171,7 +171,7 @@ def _run_complete_group(
     settings: dict,
     previous_snapshot: dict | None,
 ) -> dict:
-    """Run the worker over one complete group whose exact-run answers are `_answers()`."""
+    """Run the worker over one complete group whose exact-run rows are `_rows()`."""
     with _complete_group_run(worker_module, resource, settings, previous_snapshot):
         return worker_module.handler(_event(), None)
 
@@ -279,21 +279,21 @@ class TestCompleteSnapshotEvaluation:
             {'id': 'group-1', 'name': 'Group One'},
             {'id': 'group-2', 'name': 'Group Two'},
         ]
-        load_answers = MagicMock(return_value={'shared keyword': _answers()})
+        load_rows = MagicMock(return_value={'shared keyword': _rows()})
 
         with (
             patch.object(worker_module, 'query_active_keywords', return_value=_SHARED_KEYWORD_IN_TWO_GROUPS),
             patch.object(worker_module, '_load_groups', return_value=groups),
             patch.object(worker_module, '_settings', return_value=_ALERTS_DISABLED),
             patch.object(worker_module, 'get_brand_config', return_value={}),
-            patch.object(worker_module, '_load_run_answers', load_answers),
+            patch.object(worker_module, '_load_run_rows', load_rows),
             patch.object(worker_module, '_previous_snapshot', return_value=None),
             patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
             patch.object(worker_module, 'dynamodb', resource),
         ):
             result = worker_module.handler(_event(), None)
 
-        assert [call.args[:2] for call in load_answers.call_args_list] == [(['shared keyword'], _RUN_TIMESTAMP)]
+        assert [call.args[:2] for call in load_rows.call_args_list] == [(['shared keyword'], _RUN_TIMESTAMP)]
         assert snapshots.put_item.call_count == 2
         assert result['snapshots_recorded'] == 2
         assert result['skipped_partial'] == 0
@@ -324,7 +324,7 @@ class TestCompleteSnapshotEvaluation:
         _run_complete_group(worker_module, resource, _ALERTS_DISABLED, None)
 
         stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
-        assert (stored_snapshot['kpi_version'], stored_snapshot['kpis']['visibility_score']) == (2, Decimal('45.0'))
+        assert (stored_snapshot['kpi_version'], stored_snapshot['kpis']['visibility_score']) == (KPI_VERSION, Decimal('45.0'))
         assert stored_snapshot['keywords'] == [{
             'keyword': 'shared keyword',
             'mentioned': True,
@@ -351,9 +351,9 @@ class TestCompleteSnapshotEvaluation:
 
     def test_limits_the_snapshot_competitors_to_the_configured_ones(self, worker_module) -> None:
         snapshots, _alerts, resource = _single_group_tables()
-        answers = answers_from_rows([_row('openai', ('Rival', 'competitor', 1), ('Guide', 'competitor', 2))])
+        rows = [_row('openai', ('Rival', 'competitor', 1), ('Guide', 'competitor', 2))]
 
-        with _complete_group_run(worker_module, resource, _ALERTS_DISABLED, answers=answers,
+        with _complete_group_run(worker_module, resource, _ALERTS_DISABLED, rows=rows,
                                  brand_config={'tracked_brands': {'competitors': ['rival']}}):
             worker_module.handler(_event(), None)
 
@@ -365,13 +365,13 @@ class TestCompleteSnapshotEvaluation:
 
         with (
             patch.object(worker_module, '_content_change', return_value=None),
-            patch.object(worker_module, 'compare_snapshots', return_value=[specification]),
+            patch.object(worker_module, 'comparison_alerts', return_value=[specification]),
         ):
             result = _run_complete_group(
                 worker_module,
                 resource,
                 DEFAULT_ALERT_SETTINGS,
-                {'snapshot_at': '2026-09-01T10:00:00Z'},
+                {'snapshot_at': '2026-09-01T10:00:00Z', 'kpi_version': KPI_VERSION},
             )
 
         assert alerts.put_item.call_args.kwargs == {
@@ -422,15 +422,15 @@ class TestCompleteSnapshotEvaluation:
 
         assert (result['run_timestamp'], result['snapshot_group_ids']) == (_RUN_TIMESTAMP, [])
 
-    @pytest.mark.parametrize('answers', [None, []], ids=['read failed', 'no engine answered'])
-    def test_skips_group_when_a_keyword_has_no_exact_run_answers(self, worker_module, answers) -> None:
+    @pytest.mark.parametrize('rows', [None, []], ids=['read failed', 'no engine answered'])
+    def test_skips_group_when_a_keyword_has_no_exact_run_answers(self, worker_module, rows) -> None:
         resource = fake_dynamodb_resource()
 
         with _complete_group_patches(
             worker_module,
             resource,
             DEFAULT_ALERT_SETTINGS,
-            answers,
+            rows,
         ):
             result = worker_module.handler(_event(), None)
 
@@ -439,15 +439,16 @@ class TestCompleteSnapshotEvaluation:
         assert result['skipped_partial'] == 1
 
 
-class TestLoadRunAnswers:
-    def test_reads_each_keywords_answers_in_the_run(self, worker_module) -> None:
+class TestLoadRunRows:
+    def test_reads_each_keywords_rows_in_the_run_failed_calls_included(self, worker_module) -> None:
         search = MagicMock()
-        search.query.return_value = {'Items': [_row('openai', ('Rival', 'competitor', 1)), _row('brave')]}
+        failed = {**_row('claude'), 'status': 'error'}
+        search.query.return_value = {'Items': [_row('openai', ('Rival', 'competitor', 1)), failed]}
         worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
 
-        answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP)
+        rows = worker_module._load_run_rows(['shared keyword'], _RUN_TIMESTAMP)
 
-        assert [(answer.provider, answer.timestamp) for answer in answers['shared keyword']] == [('openai', _RUN_TIMESTAMP)]
+        assert [(row['provider'], row['status']) for row in rows['shared keyword']] == [('openai', 'success'), ('claude', 'error')]
 
     def test_marks_a_keyword_that_cannot_be_read(self, worker_module, caplog) -> None:
         search = MagicMock()
@@ -455,13 +456,13 @@ class TestLoadRunAnswers:
         worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
 
         with caplog.at_level(logging.ERROR):
-            answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP)
+            rows = worker_module._load_run_rows(['shared keyword'], _RUN_TIMESTAMP)
 
-        assert answers == {'shared keyword': None}
+        assert rows == {'shared keyword': None}
         assert [record.getMessage() for record in caplog.records] == ['Exact-run answers query failed for one keyword']
 
     def test_reads_nothing_for_no_keywords(self, worker_module) -> None:
-        assert worker_module._load_run_answers([], _RUN_TIMESTAMP) == {}
+        assert worker_module._load_run_rows([], _RUN_TIMESTAMP) == {}
 
 
 class TestIdempotentAlertWrites:
@@ -605,24 +606,24 @@ class MarketRun:
         specifications: list | None = None,
         brand_config: dict | None = None,
         markets: tuple[dict, ...] = (),
-        answers: list[Answer] | None = None,
+        rows: list[dict] | None = None,
     ) -> None:
         self.brand_config_table = fake_table(get_item={'Item': markets_item(*markets)})
         self.snapshots, self.alerts, resource = _single_group_tables(**{'brand-config': self.brand_config_table})
-        self.previous = MagicMock(return_value={'snapshot_at': '2026-09-01T10:00:00Z'})
+        self.previous = MagicMock(return_value={'snapshot_at': '2026-09-01T10:00:00Z', 'kpi_version': KPI_VERSION})
         self.content_change = MagicMock(return_value=None)
-        run_answers = {keyword: _answers() if answers is None else answers for keyword in _ALL_MARKETS_PROCESSED}
+        run_rows = {keyword: _rows() if rows is None else rows for keyword in _ALL_MARKETS_PROCESSED}
         with patch.multiple(
             module,
             query_active_keywords=MagicMock(return_value=_MARKET_KEYWORDS),
             _load_groups=MagicMock(return_value=[{'id': 'altiplano', 'name': 'Altiplano'}]),
             _settings=MagicMock(return_value=settings),
             get_brand_config=MagicMock(return_value=brand_config or {}),
-            _load_run_answers=MagicMock(return_value=run_answers),
+            _load_run_rows=MagicMock(return_value=run_rows),
             _previous_snapshot=self.previous,
             _content_change=self.content_change,
             _notify=MagicMock(return_value={'status': 'not_sent'}),
-            compare_snapshots=MagicMock(return_value=specifications or []),
+            comparison_alerts=MagicMock(return_value=specifications or []),
             dynamodb=resource,
         ):
             self.result = module.handler(event, None)
@@ -692,15 +693,15 @@ class TestTrackedCompetitorsPerMarket:
 
     @pytest.fixture
     def run(self, worker_module) -> MarketRun:
-        answers = answers_from_rows([
+        rows = [
             _row('openai', ('Sky Airline', 'competitor', 1), ('Condor Sur', 'competitor', 2), ('JetPuma', 'competitor', 3)),
-        ])
+        ]
         return MarketRun(
             worker_module,
             _market_event(_ALL_MARKETS_PROCESSED),
             brand_config={'tracked_brands': {'competitors': ['Condor Sur']}},
             markets=(CHILE,),
-            answers=answers,
+            rows=rows,
         )
 
     def test_keeps_the_markets_extra_competitor_in_that_markets_snapshot(self, run) -> None:
@@ -773,7 +774,7 @@ def _two_group_run(worker_module, load, **patches) -> Generator[MagicMock, None,
             _load_groups=MagicMock(return_value=[{'id': 'group-small'}, {'id': 'group-big'}]),
             _settings=MagicMock(return_value=_ALERTS_DISABLED),
             get_brand_config=MagicMock(return_value=_HOTEL_BRAND_CONFIG),
-            _load_run_answers=load,
+            _load_run_rows=load,
             _previous_snapshot=MagicMock(return_value=None),
             _notify=MagicMock(return_value={'status': 'not_sent'}),
             dynamodb=resource,
@@ -799,7 +800,7 @@ class TestTimeBudget:
 
         def load(keywords: list[str], *_args: object) -> dict:
             clock.jump()
-            return {keyword: _answers() for keyword in keywords}
+            return {keyword: _rows() for keyword in keywords}
 
         with _two_group_run(
             worker_module, MagicMock(side_effect=load),
@@ -818,7 +819,7 @@ class TestTimeBudget:
         )
 
     def test_snapshots_every_pair_when_the_budget_lasts(self, worker_module) -> None:
-        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _answers() for keyword in keywords})
+        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _rows() for keyword in keywords})
         with _two_group_run(worker_module, load) as snapshots:
             result = worker_module.handler(_two_group_event(), None)
 
@@ -829,7 +830,7 @@ class TestTimeBudget:
     def test_keeps_the_reserve_out_of_the_read_budget(self, worker_module) -> None:
         context = MagicMock()
         context.get_remaining_time_in_millis.return_value = 300_000
-        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _answers() for keyword in keywords})
+        load = MagicMock(side_effect=lambda keywords, *_args: {keyword: _rows() for keyword in keywords})
         with _two_group_run(worker_module, load):
             worker_module.handler(_two_group_event(), context)
 
@@ -839,6 +840,6 @@ class TestTimeBudget:
         search = MagicMock()
         worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
 
-        answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP, Deadline(0))
+        rows = worker_module._load_run_rows(['shared keyword'], _RUN_TIMESTAMP, Deadline(0))
 
-        assert (answers, search.query.call_count) == ({'shared keyword': None}, 0)
+        assert (rows, search.query.call_count) == ({'shared keyword': None}, 0)

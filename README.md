@@ -98,7 +98,23 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | RecommendationStatus | recommendation_id | Action Center item status (TTL) |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
 
-S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
+The SEO stack (`CitationAnalysisSeoStack`) adds its own tables, with the same settings. Measurements are kept and
+never expire (Silver); only caches, receipts, locks and crawl bookkeeping carry a TTL:
+
+| Table (`CitationAnalysis-…`) | Key | Holds |
+|---|---|---|
+| SeoKeywordMetrics | keyword_id / market_id | The latest search volume, CPC, difficulty and intent per keyword and market: a cache of DataForSEO's values, replaced whole on each refresh, not a history |
+| SeoCache | cache_key | Paid-answer cache (TTL per answer; payloads over 350 KB in the `seo` bucket), local SEO jobs, Lighthouse runs and IndexNow history (kept), DataForSEO callback gates (`callback#<id>`, 2-day TTL) |
+| SeoRankTracking | pk / sk, GSI1 | Trackers (`TRACKER#<id>` / `META`), their extra keywords (`KW#`), runs (`RUN#`), per-keyword state (`STATE#`) and each check's results (`RUN#<run>` / `PAIR#<keyword>#<device>`, history through GSI1) (Silver, kept); the run lock (`ACTIVE_RUN`, TTL) |
+| SeoDomainSnapshots | `<domain>#<market_id>` / snapshot_at | Each traffic snapshot's overview figures (Silver, kept); its ranked keywords are in the `seo` bucket |
+| SeoBacklinkSnapshots | domain / snapshot_at | Each backlink snapshot's overview metrics (Silver, kept) |
+| SeoAudits | pk / sk, GSI1 | Site audits, their pages, issues and link summary (kept); the crawl's frontier URLs (90-day TTL) |
+
+The `seo` bucket (`citation-analysis-seo-<account>`) holds `seo/cache/<key>.json` (oversized cache payloads),
+`seo/lighthouse/<run>-<index>.json` (full Lighthouse reports), `seo/domain-snapshots/<domain>/<market>/<snapshot_at>.json`
+(a snapshot's ranked keywords, written once) and `seo/site-audit/<id>/robots.txt`.
+
+S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). The SEO stack adds `seo` (its oversized cache payloads, Lighthouse reports, domain-snapshot keywords and robots.txt copies), so `raw-responses` holds only the providers' answers. KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
 
 ### API and hosting
 
@@ -231,9 +247,9 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
    | Provider | Default model | Web search |
    |---|---|---|
    | OpenAI | `gpt-5-mini` | Responses API `web_search` tool, `tool_choice: required` (every answer searches) |
-   | Perplexity | `perplexity/sonar` | Agent API (`POST /v1/agent`) with the `web_search` tool; the Sonar Chat Completions API it replaced was retired on 2026-09-27 |
+   | Perplexity | `perplexity/sonar` | Agent API (`POST /v1/agent`) with the `web_search` tool, asked to cite inline (`[1][2]`); the Sonar Chat Completions API it replaced was retired on 2026-09-27 |
    | Google Gemini | `gemini-3.6-flash` | Google Search grounding (`generateContent`) |
-   | Anthropic Claude | `claude-sonnet-5-5` | `web_search_20260318` tool with dynamic filtering, no cap on searches, 4,096 output tokens |
+   | Anthropic Claude | `claude-sonnet-5-5` | `web_search_20260318` tool in direct mode (`allowed_callers: ["direct"]`, so its text cites its sources; it reads full search results, so more input tokens), no cap on searches, 4,096 output tokens |
 
    **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity lists the Agent API models (`perplexity/sonar`, `openai/gpt-6-luna`, ...), and you can type any id. A Perplexity model saved before 2.37.0 (`sonar`, `sonar-pro`, `sonar-reasoning-pro`) is read as `perplexity/sonar`. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
 
@@ -249,7 +265,7 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
 
 6. **Operations > Run Analysis.** Pick a keyword group, tick keywords, or leave everything unticked to run all active keywords, then **Start Analysis**.
 
-7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection, with **Run now**.
+7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, with **Run now**. An analysis run is scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection. With the SEO stack deployed, a schedule can instead take paid **domain traffic** or **backlink snapshots** of every owned and competitor domain; saving or running one asks first and names its paid calls. The page also lists each rank tracker's next check, read-only (a tracker's frequency is set on the tracker).
 
 8. **Settings > Alerts** (optional). After every run the KpiAlerts step compares each keyword group's KPIs with its previous complete run and raises alerts for a mention-rate drop, a loss of average position, a competitor entering the top positions, a keyword that stops naming you, and a visibility gain after a content change you recorded. Alerts appear on the Dashboard and can be emailed.
 

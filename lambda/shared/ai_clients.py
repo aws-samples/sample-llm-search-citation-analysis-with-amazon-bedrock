@@ -110,6 +110,8 @@ PERPLEXITY_API_BASE = "https://api.perplexity.ai"
 PERPLEXITY_AGENT_URL = f"{PERPLEXITY_API_BASE}/v1/agent"
 PERPLEXITY_MODELS_URL = f"{PERPLEXITY_API_BASE}/v1/models"
 PERPLEXITY_MAX_OUTPUT_TOKENS = 4096
+#: Always in the Agent API ``instructions``: without it answers rarely mark which results they cite.
+PERPLEXITY_CITATION_INSTRUCTION = "Cite your sources inline using bracketed markers, one source per bracket, like [1][2]."
 ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -121,8 +123,11 @@ def perplexity_agent_payload(
 
     The Sonar Chat Completions API was retired on 2026-09-27. On the Agent
     API a model answers from memory unless it is given the ``web_search``
-    tool, so the tool is always sent. A market adds its ``instructions`` and
-    the tool's ``user_location``.
+    tool, so the tool is always sent. ``instructions`` always ask for inline
+    ``[n]`` markers (``PERPLEXITY_CITATION_INSTRUCTION``), so the answer says
+    which results it cites; a market's instructions come first and the tool
+    gets its ``user_location``. ``input`` is the query alone, as for every
+    other engine.
     """
     payload: dict[str, Any] = {
         "model": model,
@@ -130,7 +135,11 @@ def perplexity_agent_payload(
         "tools": [{"type": "web_search"}],
         "max_output_tokens": max_output_tokens,
     }
-    return _with_market(payload, market, perplexity_user_location)
+    payload = _with_market(payload, market, perplexity_user_location)
+    payload["instructions"] = "\n\n".join(
+        part for part in (payload.get("instructions"), PERPLEXITY_CITATION_INSTRUCTION) if part
+    )
+    return payload
 
 
 def perplexity_agent_text(response: dict[str, Any]) -> str:
@@ -166,21 +175,24 @@ def claude_web_search_payload(
     system_prompt: str | None = None,
     max_tokens: int = CLAUDE_MAX_TOKENS,
     market: Market | None = None,
-    allowed_callers: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """The Messages API body with the web search tool, shared with the Settings model check.
 
     A model without web-search support answers 400 to exactly this body, so
     the check proves the tool configuration analysis runs use. The newest
-    tool version, with its default dynamic filtering (``allowed_callers``
-    unset; ``CLAUDE_DIRECT_CALLERS`` is the fallback for a model that refuses
-    it), the full ``response_inclusion`` (``excluded`` drops every citation)
-    and no ``max_uses``: citations are not capped. A market goes into
-    ``system`` ahead of ``system_prompt`` and into the tool's ``user_location``.
+    tool version in direct mode (``allowed_callers: ["direct"]``,
+    ``CLAUDE_DIRECT_CALLERS``): with dynamic filtering, the tool's default,
+    answers carry almost no text-block citations, while direct mode puts a
+    ``web_search_result_location`` citation on the text it backs. Direct mode
+    reads the full search results into the context, so it costs more input
+    tokens per answer. The full ``response_inclusion`` (``excluded`` drops
+    every citation) and no ``max_uses``: citations are not capped. A market
+    goes into ``system`` ahead of ``system_prompt`` and into the tool's
+    ``user_location``.
     """
-    tool: dict[str, Any] = {"type": CLAUDE_WEB_SEARCH_TOOL, "name": "web_search"}
-    if allowed_callers:
-        tool["allowed_callers"] = list(allowed_callers)
+    tool: dict[str, Any] = {
+        "type": CLAUDE_WEB_SEARCH_TOOL, "name": "web_search", "allowed_callers": list(CLAUDE_DIRECT_CALLERS),
+    }
     if market is not None:
         tool["user_location"] = claude_user_location(market)
     payload: dict[str, Any] = {
@@ -193,11 +205,6 @@ def claude_web_search_payload(
     if system:
         payload["system"] = system
     return payload
-
-
-def is_claude_caller_refusal(status_code: int, body: str) -> bool:
-    """Whether a reply is a model refusing dynamic filtering (a 400 naming ``allowed_callers``)."""
-    return status_code == 400 and "allowed_callers" in body
 
 
 #: In-body web search errors (HTTP 200) worth asking again for.
@@ -623,18 +630,6 @@ class ClaudeClient(_ProviderClient):
             timeout=timeout
         )
 
-    def _send(self, payload: dict[str, Any], max_retries: int) -> tuple[dict[str, Any], dict[str, Any]]:
-        """``(response, payload actually sent)``: once more with direct callers if the model refuses dynamic filtering."""
-        try:
-            return self._send_payload(payload, max_retries), payload
-        except requests.exceptions.HTTPError as error:
-            response = error.response
-            if response is None or not is_claude_caller_refusal(response.status_code, response.text or ''):
-                raise
-        logger.warning('[CLAUDE_CALLERS_FALLBACK] %s refused dynamic filtering; retrying with direct callers', self.model)
-        direct = {**payload, "tools": [{**tool, "allowed_callers": list(CLAUDE_DIRECT_CALLERS)} for tool in payload["tools"]]}
-        return self._send_payload(direct, max_retries), direct
-
     def generate_content(
         self, prompt: str, system_prompt: str | None = None, max_retries: int = 5, market: Market | None = None,
     ) -> dict[str, Any]:
@@ -649,7 +644,7 @@ class ClaudeClient(_ProviderClient):
         payload = claude_web_search_payload(prompt, self.model, system_prompt=system_prompt, market=market)
         attempt = 0
         while True:
-            response, payload = self._send(payload, max_retries)
+            response = self._send_payload(payload, max_retries)
             retryable = [code for code in claude_search_error_codes(response) if code in CLAUDE_RETRYABLE_SEARCH_ERRORS]
             if not retryable:
                 return response
