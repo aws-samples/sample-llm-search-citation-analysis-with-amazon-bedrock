@@ -580,7 +580,13 @@ class _Evaluation:
         snapshot = _snapshot(
             pair, group.name, self.execution_id, self.execution_input, self.report, self.run_timestamp, metrics,
         )
-        self.new_alerts.extend(_record_snapshot(group, snapshot, self))
+        alerts = _record_snapshot(group, snapshot, self)
+        if alerts is None:
+            # The previous run's rows could not be read before the deadline: a like-for-like comparison is
+            # impossible, so the pair is left for the time budget rather than compared with part of its past.
+            self.out_of_time.append(pair)
+            return
+        self.new_alerts.extend(alerts)
         self.snapshotted.add(pair)
 
     @property
@@ -602,14 +608,22 @@ class _GroupRun(NamedTuple):
     tracked_competitors: list[str]
 
 
-def _previous_run_rows(group: _GroupRun, previous: dict[str, Any]) -> list[dict[str, Any]]:
-    """The rows of the group's current keywords in the previous snapshot's run (a keyword that cannot be read adds none)."""
-    rows_by_keyword = _load_run_rows(group.keywords, str(previous['snapshot_at']))
+def _previous_run_rows(group: _GroupRun, previous: dict[str, Any], deadline: Deadline) -> list[dict[str, Any]] | None:
+    """The rows of the group's current keywords in the previous snapshot's run, read within ``deadline``.
+
+    A keyword whose read failed adds none. ``None`` when the deadline ran out before every keyword was read:
+    the caller then leaves the pair unevaluated instead of comparing against part of the previous run.
+    """
+    rows_by_keyword = _load_run_rows(group.keywords, str(previous['snapshot_at']), deadline)
+    if deadline.expired() and any(rows_by_keyword.get(keyword) is None for keyword in group.keywords):
+        return None
     return [row for keyword in group.keywords for row in rows_by_keyword.get(keyword) or []]
 
 
-def _record_snapshot(group: _GroupRun, snapshot: dict[str, Any], evaluation: _Evaluation) -> list[dict[str, Any]]:
+def _record_snapshot(group: _GroupRun, snapshot: dict[str, Any], evaluation: _Evaluation) -> list[dict[str, Any]] | None:
     """Store one (group, market) snapshot and the alerts it raises against the previous one; the new alerts.
+
+    ``None`` (nothing stored) when the previous run's rows could not be read within the time budget.
 
     The snapshot records its ``comparison`` with the previous snapshot
     (``shared.kpi_comparison``): the state, the matched cells, both runs'
@@ -622,7 +636,12 @@ def _record_snapshot(group: _GroupRun, snapshot: dict[str, Any], evaluation: _Ev
     previous = _previous_snapshot(pair.snapshot_key, evaluation.run_timestamp)
     if previous is not None and previous.get('kpi_version') != KPI_VERSION:
         previous = None
-    comparison = compare_runs(None if previous is None else _previous_run_rows(group, previous), group.rows)
+    previous_rows = None
+    if previous is not None:
+        previous_rows = _previous_run_rows(group, previous, evaluation.deadline)
+        if previous_rows is None:
+            return None
+    comparison = compare_runs(previous_rows, group.rows)
     snapshot['comparison'] = {
         **comparison.to_json(),
         'previous_snapshot_at': None if previous is None else previous.get('snapshot_at'),

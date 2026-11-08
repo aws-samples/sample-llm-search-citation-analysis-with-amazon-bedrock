@@ -19,6 +19,9 @@ const SNAPSHOT_TASK_TIMEOUT = cdk.Duration.minutes(5);
 const LIST_TASK_TIMEOUT = cdk.Duration.minutes(1);
 const EXECUTION_TIMEOUT = cdk.Duration.hours(3);
 
+/** What both functions do on the snapshots table: read snapshots and the setting, put a snapshot or the setting. */
+const SNAPSHOT_TABLE_ACTIONS = ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem'];
+
 /** Errors of an invocation Lambda refused before running the function: safe to retry, nothing was billed. */
 const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.ServiceException'];
 
@@ -26,7 +29,7 @@ const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.Servi
  * Domain Overview, estimated-traffic snapshots and the SEO recommendations.
  *
  * - `CitationAnalysis-SeoDomainSnapshots` (pk `domain#market_id`, sk
- *   `snapshot_at`, TTL `ttl`, 400 days): the summary of each snapshot; its
+ *   `snapshot_at`, kept, never expired): the summary of each snapshot; its
  *   ranked keywords live under `seo/domain-snapshots/` in the raw-responses
  *   bucket (already granted to both functions under `seo/*`).
  * - The `CitationAnalysis-SeoDomainSnapshots` state machine: list the targets
@@ -35,7 +38,10 @@ const LAMBDA_THROTTLE_ERRORS = ['Lambda.TooManyRequestsException', 'Lambda.Servi
  *   error (the call may already have been sent); a failed snapshot is caught
  *   so the others still run. Only the free listing retries throttles.
  * - A weekly EventBridge rule (Monday 04:00 UTC) starts it over every owned
- *   and competitor domain; the Admin route starts it for one target.
+ *   and competitor domain, and the listing step does nothing until an Admin
+ *   turns the weekly sweep on (`PUT /api/seo/domains/snapshots/schedule`; off
+ *   by default, since it is recurring paid work). The Admin route starts it
+ *   for one target whatever the setting.
  * - The router reads snapshots, starts executions and reads the
  *   recommendation statuses; the jobs function writes snapshots.
  */
@@ -44,12 +50,13 @@ export class SeoDomain extends SeoFeatureConstruct {
     const { router, jobs } = this.props;
     const snapshotsTable = citationAnalysisTable(this, 'SnapshotsTable', {
       tableName: SEO_DOMAIN_SNAPSHOTS_TABLE,
-      timeToLiveAttribute: 'ttl',
       partitionKey: stringKey('pk'),
       sortKey: stringKey('snapshot_at'),
     });
-    snapshotsTable.grantReadData(router);
-    snapshotsTable.grantReadWriteData(jobs);
+    // Per action, no delete (TENETS.md, tenet 6 and D5): both read snapshots; the router writes the Admin's
+    // weekly-sweep setting, the jobs function writes snapshots.
+    snapshotsTable.grant(router, ...SNAPSHOT_TABLE_ACTIONS);
+    snapshotsTable.grant(jobs, ...SNAPSHOT_TABLE_ACTIONS);
 
     const stateMachine = this.snapshotStateMachine();
     stateMachine.grantStartExecution(router);
@@ -77,6 +84,7 @@ export class SeoDomain extends SeoFeatureConstruct {
       ['domains/pages', ['POST']],
       ['domains/competitors', ['POST']],
       ['domains/snapshots', ['GET', 'POST']],
+      ['domains/snapshots/schedule', ['GET', 'PUT']],
       ['insights', ['GET']],
     );
   }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -14,6 +14,8 @@ from shared.domain_snapshots import (
     keyword_traffic,
     latest_snapshot,
     load_snapshot_keywords,
+    schedule_enabled,
+    set_schedule,
     summary_json,
     take_snapshot,
 )
@@ -62,13 +64,13 @@ class TestTakeSnapshot:
 
         assert (s3.payload(KEY)['estimated'], s3.payload(KEY)['source']) == (True, 'dataforseo_labs')
 
-    def test_writes_the_summary_item_with_its_pointer_and_a_400_day_ttl(self):
+    def test_writes_the_summary_item_with_its_pointer_and_no_expiry(self):
         table = FakeSnapshots()
 
         run_snapshot(table, FakeS3())
 
         item = table.items[0]
-        assert (item['pk'], item['keywords_s3_key'], item['ttl']) == ('example.com#global', KEY, int(NOW.timestamp()) + 400 * 86_400)
+        assert (item['pk'], item['keywords_s3_key'], 'ttl' in item) == ('example.com#global', KEY, False)
 
     def test_keeps_the_previous_snapshot_when_the_answer_is_empty(self):
         table = FakeSnapshots([stored_snapshot(snapshot_at=OLDER_SNAPSHOT_AT)])
@@ -117,3 +119,23 @@ class TestReads:
 ])
 def test_distinct_domains_drops_domains_another_entry_covers(domains, expected):
     assert distinct_domains(domains) == expected
+
+
+class TestScheduleSetting:
+    def test_is_off_until_an_admin_turns_it_on(self):
+        table = MagicMock()
+        table.get_item.return_value = {}
+
+        assert schedule_enabled(table) is False
+        table.get_item.assert_called_once_with(Key={'pk': '#settings', 'snapshot_at': 'schedule'})
+
+    def test_records_who_turned_it_on_and_when(self):
+        table = MagicMock()
+        set_schedule(table, enabled=True, updated_by='admin-sub', updated_at='2026-11-08T00:00:00Z')
+
+        assert table.put_item.call_args.kwargs['Item'] == {
+            'pk': '#settings', 'snapshot_at': 'schedule', 'enabled': True,
+            'updated_by': 'admin-sub', 'updated_at': '2026-11-08T00:00:00Z',
+        }
+        table.get_item.return_value = {'Item': table.put_item.call_args.kwargs['Item']}
+        assert schedule_enabled(table) is True

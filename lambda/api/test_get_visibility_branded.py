@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from shared.kpi_engine import answer_from_row, answers_from_rows
 from testing.events import parse_response
 from testing.report_scope_fixtures import brand, load_scoped_handler, result, scoped_report
 
@@ -60,3 +61,23 @@ class TestBrandedFilter:
         status, body = parse_response(visibility_env.call({'keyword': 'hotel coruna spa', 'branded': 'yes'}))
 
         assert (status, body['field']) == (400, 'branded')
+
+
+class TestUnclassifiedPreviousRun:
+    def test_a_row_without_the_branded_flag_is_unclassified(self):
+        old, new = answer_from_row(result('hotel coruna spa', 'openai', [_HOTEL])), answer_from_row(_branded(result('x', 'openai', [])))
+
+        assert (old.branded_classified, new.branded_classified) == (False, True)
+
+    def test_names_the_keywords_whose_run_predates_the_flag(self, visibility):
+        run = {
+            'old': answers_from_rows([result('old', 'openai', [_HOTEL])]),
+            'new': answers_from_rows([{**result('new', 'openai', [_HOTEL]), 'branded': False}]),
+        }
+
+        assert visibility._unclassified_keywords(run) == ['old']
+
+    def test_reports_how_many_keywords_a_filtered_view_could_not_compare(self, visibility_env):
+        body = visibility_env.body({'keyword': 'hotel coruna spa', 'branded': 'neutral'})
+
+        assert body['change_unclassified_keywords'] == 0

@@ -182,8 +182,8 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
    * `CitationAnalysis-Search-google_ai_overview`: the main stack's provider
    * search function (same code, handler, environment keys) for Google AI
    * Overviews, with a role shaped like the main `SearchLambdaRole` for one
-   * provider: write SearchResults and raw responses, read BrandConfig,
-   * read/write ProviderConfig (enablement, health, saved Bedrock models),
+   * provider: put (and on a retry query) SearchResults and write raw responses, read BrandConfig,
+   * get and update its ProviderConfig row (enablement, health, pacing, saved Bedrock models),
    * Claude for brand extraction, and only the DataForSEO secret.
    */
   private aiOverviewSearch(
@@ -201,10 +201,13 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       'Role for the Google AI Overviews search Lambda to access Secrets Manager, DynamoDB, S3 and Bedrock'
     );
     resources.dataForSeoSecret.grantRead(role);
-    resources.mainTables.searchResults.grantWriteData(role);
+    // Per action, no delete (TENETS.md, tenet 6 and D5): the handler stores each answer (PutItem) and, on a
+    // retried invocation, reads what an earlier attempt stored (Query); it reads and updates the provider's
+    // config row (enablement, saved model, pacing and health).
+    resources.mainTables.searchResults.grant(role, 'dynamodb:PutItem', 'dynamodb:Query');
     resources.rawResponsesBucket.grantWrite(role);
     resources.mainTables.brandConfig.grantReadData(role);
-    resources.mainTables.providerConfig.grantReadWriteData(role);
+    resources.mainTables.providerConfig.grant(role, 'dynamodb:GetItem', 'dynamodb:UpdateItem');
     role.addToPolicy(claudeInvokeModelStatement(this));
 
     const names: ProviderSearchResourceNames = {

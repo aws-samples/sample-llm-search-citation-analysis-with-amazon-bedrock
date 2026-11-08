@@ -45,6 +45,9 @@ interface SeoStackSnapshot {
   aiOverviewEnvKeys: string[];
   mainProviderEnvKeys: string[];
   aiOverviewReservedConcurrency: number | undefined;
+  /** DynamoDB actions of the AI Overviews search role on SearchResults and on ProviderConfig. */
+  aiOverviewSearchResultsActions: string[];
+  aiOverviewProviderConfigActions: string[];
   mainResourceCount: number;
   mainResourceCountWithSeoEngine: number;
   /** SearchAllProviders branch start states without and with `-c seoEngine=true`. */
@@ -78,6 +81,17 @@ function mainTablesOfRole(template: Template, functionName: string): string[] {
   const statements = JSON.stringify(allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName)));
   const names = [...statements.matchAll(/table\/(CitationAnalysis-[A-Za-z]+)/g)].map((match) => match[1]);
   return [...new Set(names)].sort((left, right) => left.localeCompare(right));
+}
+
+/** The DynamoDB actions the function's role is allowed on the main stack table `tableName`, sorted. */
+function mainTableActionsOfRole(template: Template, functionName: string, tableName: string): string[] {
+  const statements = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName));
+  const onTable = statements.filter((statement) => JSON.stringify(resolvePath(statement, ['Resource'])).includes(`table/${tableName}`));
+  const actions = onTable.flatMap((statement) => {
+    const action = resolvePath(statement, ['Action']);
+    return Array.isArray(action) ? action.map(String) : [String(action)];
+  });
+  return [...new Set(actions)].filter((action) => action.startsWith('dynamodb:')).sort((left, right) => left.localeCompare(right));
 }
 
 function sortedEnvKeys(template: Template, functionName: string): string[] {
@@ -131,6 +145,8 @@ export function synthesizeSeoStackSnapshot(): SeoStackSnapshot {
     aiOverviewEnvKeys: sortedEnvKeys(template, AI_OVERVIEW_SEARCH),
     mainProviderEnvKeys: sortedEnvKeys(mainTemplate, searchFunctionName('openai')),
     aiOverviewReservedConcurrency: extractReservedConcurrency(template, AI_OVERVIEW_SEARCH),
+    aiOverviewSearchResultsActions: mainTableActionsOfRole(template, AI_OVERVIEW_SEARCH, 'CitationAnalysis-SearchResults'),
+    aiOverviewProviderConfigActions: mainTableActionsOfRole(template, AI_OVERVIEW_SEARCH, 'CitationAnalysis-ProviderConfig'),
     mainResourceCount: resourceCount(mainTemplate),
     mainResourceCountWithSeoEngine: resourceCount(mainWithSeoEngine),
     mainBranchStarts: branchStarts(mainTemplate),

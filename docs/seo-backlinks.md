@@ -62,7 +62,7 @@ The filter panel shows how many conditions you have used. If the filters go over
 
 ## Authority over time
 
-Weekly snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept for 800 days. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
+Weekly snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept, never expired. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
 
 Admins can:
 

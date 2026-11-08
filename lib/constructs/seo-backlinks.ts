@@ -19,7 +19,7 @@ const SNAPSHOT_RUN_TIMEOUT = cdk.Duration.minutes(20);
  * of the brand's own and its competitors' domains.
  *
  * Snapshots live in `CitationAnalysis-SeoBacklinkSnapshots` (pk `domain`,
- * sk `snapshot_at`, TTL `ttl`, 800 days). One state machine with one task
+ * sk `snapshot_at`, kept, never expired). One state machine with one task
  * runs the jobs step `backlinks.snapshot_all`: a weekly EventBridge rule
  * starts it with `{"scheduled": true}` (the step does nothing until an Admin
  * turns the schedule on) and the Admin route "snapshot now" with
@@ -34,7 +34,6 @@ export class SeoBacklinks extends SeoFeatureConstruct {
       tableName: BACKLINK_SNAPSHOTS_TABLE_NAME,
       partitionKey: stringKey('domain'),
       sortKey: stringKey('snapshot_at'),
-      timeToLiveAttribute: 'ttl',
     });
 
     const { router } = this.props;

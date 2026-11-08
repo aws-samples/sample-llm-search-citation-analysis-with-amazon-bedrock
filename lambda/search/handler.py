@@ -15,7 +15,7 @@ from typing import Any, NamedTuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
-from branded_query import branded_query_matcher_for
+from branded_query import BRANDED_MATCHER_VERSION, branded_query_matcher_for
 from perplexity_sources import perplexity_sources
 
 # Import lightweight API clients
@@ -980,6 +980,7 @@ def _result_item(
     if provider_type == "llm":
         item["retrieved_urls"] = list(result.get("retrieved_urls") or [])
         item["branded"] = bool(is_branded and is_branded(str(result.get("query") or keyword)))
+        item["branded_version"] = BRANDED_MATCHER_VERSION
     if s3_uri:
         item["raw_response_s3_uri"] = s3_uri
     metadata = result.get("metadata", {})

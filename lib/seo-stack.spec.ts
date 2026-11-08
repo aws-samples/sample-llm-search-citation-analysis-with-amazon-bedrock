@@ -172,3 +172,13 @@ describe('Main stack with the seoEngine context', () => {
       .toStrictEqual(new Set([JSON.stringify(['States.TaskFailed', 'States.Timeout'])]));
   });
 });
+
+describe('Google AI Overviews search role', () => {
+  it('may only put and query answers, never delete or batch-write them (TENETS.md, tenet 6 and D5)', () => {
+    expect(snapshot.aiOverviewSearchResultsActions).toStrictEqual(['dynamodb:PutItem', 'dynamodb:Query']);
+  });
+
+  it('may only read and update its provider config row', () => {
+    expect(snapshot.aiOverviewProviderConfigActions).toStrictEqual(['dynamodb:GetItem', 'dynamodb:UpdateItem']);
+  });
+});

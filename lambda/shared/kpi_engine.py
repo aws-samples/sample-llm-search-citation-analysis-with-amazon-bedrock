@@ -114,6 +114,8 @@ class Answer:
     """The URLs the answer cites, each once, in the order cited (``cited_domains`` are their hosts)."""
     branded: bool = False
     """Whether the query named the tracked brand (fixed when the row was written; rows from before 2.43 are neutral)."""
+    branded_classified: bool = True
+    """Whether the row carried a ``branded`` flag at all; rows from before 2.43 did not, so their ``branded`` is a default."""
     market_id: str = GLOBAL_MARKET_ID
 
     def first_party(self) -> tuple[Sighting, ...]:
@@ -234,6 +236,7 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
         model=model if isinstance(model, str) and model else None,
         cited_urls=_cited_urls(row.get('citations')),
         branded=row.get('branded') is True,
+        branded_classified='branded' in row,
         market_id=str(row.get('market_id') or GLOBAL_MARKET_ID),
     )
 

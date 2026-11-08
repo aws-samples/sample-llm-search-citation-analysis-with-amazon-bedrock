@@ -2,8 +2,9 @@
 
 * ``domain.snapshot_all``: the targets of one execution, ``[{domain, market_id}]``, from the execution
   input (``input``). An Admin's manual snapshot passes its one target in ``input.targets`` (checked again
-  here); the weekly rule passes none, and the
-  step lists every owned and competitor domain (brand config ``first_party_domains`` and
+  here); the weekly rule passes none, and then the step does nothing unless an Admin turned the weekly
+  sweep on (``shared.domain_snapshots.schedule_enabled``, off by default: it is recurring paid work). When on, it
+  lists every owned and competitor domain (brand config ``first_party_domains`` and
   ``competitor_domains``; a domain covered by another as its subdomain once) in the global market and every
   configured market DataForSEO Labs serves (Google-Ads-only countries have no Labs data and would be a
   billed failure). Free: reads BrandConfig only. At most ``MAX_TARGETS`` targets, so the list stays far
@@ -24,7 +25,7 @@ import boto3
 
 from shared.dataforseo_domain_scope import InvalidTargetError, parse_research_target
 from shared.dataforseo_locations import UnsupportedMarketError, market_codes
-from shared.domain_snapshots import BUCKET_ENV, distinct_domains, take_snapshot
+from shared.domain_snapshots import BUCKET_ENV, distinct_domains, schedule_enabled, take_snapshot
 from shared.env_vars import resolve_table_env
 from shared.insights_citations import competitor_domains_from
 from shared.kpi_engine import owned_domains_from
@@ -87,6 +88,9 @@ def snapshot_all(event: dict[str, Any]) -> dict[str, Any]:
     requested = execution_input.get('targets') if isinstance(execution_input, dict) else None
     if isinstance(requested, list):
         targets = [target for target in map(_manual_target, requested) if target and target['market_id'] in markets]
+    elif not schedule_enabled(snapshots_table()):
+        logger.info('domain snapshots: the weekly sweep is off; nothing to do')
+        return {'targets': [], 'count': 0}
     else:
         targets = [{'domain': domain, 'market_id': market_id} for domain in _brand_domains() for market_id in markets]
     if len(targets) > MAX_TARGETS:

@@ -34,7 +34,7 @@ minutes of Lambda time.
 - Pages are not rendered with JavaScript. A page whose HTML is an empty app container is reported as *Content
   may require JavaScript* and skipped by the content checks.
 
-Results are kept for 90 days.
+Results (the audit, its pages, issues and link summary) are kept, never expired; only the crawl's internal URL queue expires, 90 days after it is queued.
 
 ## Score
 

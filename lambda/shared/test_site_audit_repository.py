@@ -38,12 +38,22 @@ def test_a_new_audit_is_listed_newest_first_through_gsi1():
     )
 
 
-def test_every_item_expires_after_ninety_days():
+def test_the_audit_record_never_expires():
     store, table = store_with()
     store.create_audit({'audit_id': AUDIT, 'started_at': 'x'})
     item = table.put_item.call_args.kwargs['Item']
 
-    assert 89 * 86_400 < item['ttl'] - time.time() <= 90 * 86_400
+    assert 'ttl' not in item
+
+
+def test_only_frontier_urls_expire_after_ninety_days():
+    store, table = store_with()
+    store.add_frontier(AUDIT, [FrontierEntry('https://www.example.com/l', 1, 'link', False)], limit=10)
+    store.put_link_summary(AUDIT, {'internal_links': 1})
+
+    (frontier,) = written_items(table)
+    assert 89 * 86_400 < frontier['ttl'] - time.time() <= 90 * 86_400
+    assert 'ttl' not in table.put_item.call_args.kwargs['Item']
 
 
 def test_pending_links_sort_before_sitemap_urls():

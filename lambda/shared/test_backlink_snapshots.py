@@ -5,7 +5,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 from shared.backlink_snapshots import (
-    TTL_SECONDS,
     TrackedDomain,
     domain_history,
     latest_snapshot_at,
@@ -45,11 +44,10 @@ def test_tracks_nothing_before_a_brand_config_is_saved():
     assert tracked_domains({}) == []
 
 
-def test_stores_the_metrics_with_an_800_day_expiry_and_leaves_out_unknown_ones():
-    item = snapshot_item('example.com', {**SUMMARY_ROW, 'target_spam_score': None, 'rank': 41.5}, '2026-10-05T06:00:00Z',
-                         now=1_000)
+def test_stores_the_metrics_without_an_expiry_and_leaves_out_unknown_ones():
+    item = snapshot_item('example.com', {**SUMMARY_ROW, 'target_spam_score': None, 'rank': 41.5}, '2026-10-05T06:00:00Z')
 
-    assert (item['ttl'], item['rank'], 'target_spam_score' in item) == (1_000 + TTL_SECONDS, Decimal('41.5'), False)
+    assert ('ttl' in item, item['rank'], 'target_spam_score' in item) == (False, Decimal('41.5'), False)
 
 
 def test_reads_the_latest_snapshots_oldest_first_with_whole_numbers_as_ints():

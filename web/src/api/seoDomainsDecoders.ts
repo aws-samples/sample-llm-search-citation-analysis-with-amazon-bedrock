@@ -17,6 +17,7 @@ import type {
   DomainPagesResponse,
   DomainScope,
   DomainSnapshotSummary,
+  DomainSnapshotScheduleResponse,
   DomainSnapshotsResponse,
   DomainTarget,
   PositionBucket,
@@ -157,6 +158,10 @@ export function isDomainSnapshotsResponse(value: unknown): value is DomainSnapsh
     && isString(value.source)
     && typeof value.estimated === 'boolean'
     && isListOf(value.snapshots, isDomainSnapshotSummary);
+}
+
+export function isDomainSnapshotScheduleResponse(value: unknown): value is DomainSnapshotScheduleResponse {
+  return isRecord(value) && typeof value.schedule_enabled === 'boolean';
 }
 
 export function isTakeSnapshotResponse(value: unknown): value is TakeSnapshotResponse {

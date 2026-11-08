@@ -53,13 +53,15 @@ ever re-sent automatically: DataForSEO bills at request time. Nothing is fetched
 
 ## Estimated traffic snapshots
 
-Every Monday at 04:00 UTC the SEO stack snapshots every domain in Brand Tracking (your domains and your
-competitors' domains; a domain covered by another as its subdomain once) in the global market and every configured
-market Labs serves, at most 40 domain x market pairs, two at a time. An Admin can also snapshot the analyzed domain
+When an Admin turns the weekly snapshot on (Domain Overview, after a confirmation; off by default, because it is
+recurring paid work: `PUT /api/seo/domains/snapshots/schedule`), every Monday at 04:00 UTC the SEO stack snapshots
+every domain in Brand Tracking (your domains and your competitors' domains; a domain covered by another as its
+subdomain once) in the global market and every configured market Labs serves, at most 40 domain x market pairs, two
+at a time. While it is off the Monday rule runs and does nothing. An Admin can also snapshot the analyzed domain
 now from the Domain Overview (a confirmation names its two paid calls, without a price; at most once per domain and market per hour).
 
 A snapshot stores the overview figures and the top 1,000 ranked keywords by estimated traffic (keyword, organic
-position, estimated visits, URL, search volume), kept 400 days. A failed snapshot does not stop the others and is
+position, estimated visits, URL, search volume). Snapshots are kept, never expired. A failed snapshot does not stop the others and is
 never retried. When DataForSEO answers a known domain with nothing, the previous snapshot is kept instead of a
 "zero traffic" one.
 

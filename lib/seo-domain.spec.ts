@@ -3,7 +3,6 @@ import {
 } from 'vitest';
 import { resolvePath } from './citation-analysis-stack-fixtures';
 import { synthesizeSeoDomainSnapshot } from './seo-domain-fixtures';
-import { TTL_ON_TTL_ATTRIBUTE } from './seo-feature-fixtures';
 
 /** `SeoDomain`: Domain Overview routes, estimated-traffic snapshots and SEO recommendations. */
 const snapshot = synthesizeSeoDomainSnapshot();
@@ -12,12 +11,14 @@ describe('SeoDomain routes', () => {
   it('serves the domain and insights routes', () => {
     expect(snapshot.routes).toStrictEqual([
       'GET /api/seo/domains/snapshots',
+      'GET /api/seo/domains/snapshots/schedule',
       'GET /api/seo/insights',
       'POST /api/seo/domains/competitors',
       'POST /api/seo/domains/keywords',
       'POST /api/seo/domains/overview',
       'POST /api/seo/domains/pages',
       'POST /api/seo/domains/snapshots',
+      'PUT /api/seo/domains/snapshots/schedule',
     ]);
   });
 });
@@ -30,16 +31,20 @@ describe('CitationAnalysis-SeoDomainSnapshots table', () => {
     ]);
   });
 
-  it('expires snapshots on their ttl attribute', () => {
-    expect(snapshot.tableTimeToLive).toStrictEqual(TTL_ON_TTL_ATTRIBUTE);
+  it('never expires a snapshot: no TimeToLiveSpecification (TENETS.md, D5)', () => {
+    expect(snapshot).not.toHaveProperty('tableTimeToLive.Enabled');
   });
 
   it('lets the router read it', () => {
     expect(snapshot.routerTableActions).toStrictEqual(expect.arrayContaining(['dynamodb:Query', 'dynamodb:GetItem']));
   });
 
-  it('never lets the router write it', () => {
-    expect(snapshot.routerTableActions.filter((action) => /Put|Update|Delete|Write/.test(action))).toStrictEqual([]);
+  it('lets the router write only whole items (the weekly-sweep setting), never update, batch or delete', () => {
+    expect(snapshot.routerTableActions.filter((action) => /Put|Update|Delete|Write/.test(action))).toStrictEqual(['dynamodb:PutItem']);
+  });
+
+  it('never lets either function delete a snapshot (TENETS.md, D5)', () => {
+    expect([...snapshot.routerTableActions, ...snapshot.jobsTableActions].filter((action) => /Delete|BatchWrite/.test(action))).toStrictEqual([]);
   });
 
   it('lets the jobs function write it', () => {

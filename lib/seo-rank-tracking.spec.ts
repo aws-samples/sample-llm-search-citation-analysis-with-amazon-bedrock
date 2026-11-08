@@ -3,8 +3,9 @@ import {
 } from 'vitest';
 import { LAMBDA_SERVICE_ERRORS, resolvePath } from './citation-analysis-stack-fixtures';
 import {
-  DYNAMODB_READ_WRITE_ACTIONS, TTL_ON_TTL_ATTRIBUTE, taskRetriers
+  TTL_ON_TTL_ATTRIBUTE, taskRetriers
 } from './seo-feature-fixtures';
+import { sharedTableActions } from './constructs/seo-feature';
 import { PAID_STATES, synthesizeRankTrackingSnapshot } from './seo-rank-tracking-fixtures';
 
 const snapshot = synthesizeRankTrackingSnapshot();
@@ -39,9 +40,10 @@ describe('CitationAnalysis-SeoRankTracking table', () => {
     expect(snapshot.timeToLive).toStrictEqual(TTL_ON_TTL_ATTRIBUTE);
   });
 
-  it('lets the router and the jobs function read and write it, and nothing more', () => {
-    expect(snapshot.routerTableActions).toStrictEqual(DYNAMODB_READ_WRITE_ACTIONS);
-    expect(snapshot.jobsTableActions).toStrictEqual(DYNAMODB_READ_WRITE_ACTIONS);
+  it('lets the router and the jobs function read, write, batch and delete items (locks, removed keywords), and nothing more', () => {
+    const actions = sharedTableActions({ batchWrites: true, deletes: true });
+    expect(snapshot.routerTableActions).toStrictEqual(actions);
+    expect(snapshot.jobsTableActions).toStrictEqual(actions);
   });
 
   it('names the table and state machine in both functions environments', () => {

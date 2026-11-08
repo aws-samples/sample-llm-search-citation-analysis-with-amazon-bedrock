@@ -49,7 +49,9 @@ const STEPS: Record<'start' | 'crawl' | 'finalize' | 'fail', StepSpec> = {
  *
  * - Table `CitationAnalysis-SeoAudits`: audits, frontier URLs, pages, issues
  *   and the link-graph summary under `pk`/`sk`, the `GSI1` index for the audit
- *   list and frontier claims, 90-day TTL on every item.
+ *   list and frontier claims. Only frontier URLs (crawl bookkeeping) expire,
+ *   90 days after they are queued; audits, pages, issues and link summaries
+ *   are kept (TENETS.md, D2 and D5).
  * - State machine `CitationAnalysis-SiteAudit`: Start (discovery) -> Crawl
  *   chunk loop (a Wait state honours the site's rate-limit pauses) ->
  *   Finalize; any failure -> Fail (recorded on the audit). Its input is the
@@ -66,7 +68,7 @@ export class SeoSiteAudit extends SeoFeatureConstruct {
       sortKey: stringKey('sk'),
       timeToLiveAttribute: 'ttl',
       globalSecondaryIndexes: [{ indexName: 'GSI1', partitionKey: stringKey('gsi1pk'), sortKey: stringKey('gsi1sk') }],
-    });
+    }, { batchWrites: true });
 
     const { router } = this.props;
     const stateMachine = this.auditStateMachine();

@@ -15,22 +15,6 @@ import {
 import { SEO_ROUTER_FUNCTION_NAME } from './constructs/seo-api';
 import { CitationAnalysisSeoStack, SEO_JOBS_FUNCTION_NAME } from './seo-stack';
 
-/** Every action `grantReadWriteData` gives on a table: item reads and writes, never table management. */
-export const DYNAMODB_READ_WRITE_ACTIONS = [
-  'dynamodb:BatchGetItem',
-  'dynamodb:BatchWriteItem',
-  'dynamodb:ConditionCheckItem',
-  'dynamodb:DeleteItem',
-  'dynamodb:DescribeTable',
-  'dynamodb:GetItem',
-  'dynamodb:GetRecords',
-  'dynamodb:GetShardIterator',
-  'dynamodb:PutItem',
-  'dynamodb:Query',
-  'dynamodb:Scan',
-  'dynamodb:UpdateItem',
-];
-
 /** The role of a SEO state machine: invoke the jobs function, deliver its logs, send its X-Ray traces. */
 export const JOBS_STATE_MACHINE_ROLE_ACTIONS = [
   'lambda:InvokeFunction',

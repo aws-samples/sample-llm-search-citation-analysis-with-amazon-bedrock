@@ -2,8 +2,9 @@
 Storage of site audits: table ``CitationAnalysis-SeoAudits`` (env ``DYNAMODB_TABLE_SEO_AUDITS``) and the
 robots.txt copy in the raw-responses bucket.
 
-One table, keys ``pk`` / ``sk``, a sparse index ``GSI1`` (``gsi1pk`` / ``gsi1sk``) and TTL ``ttl`` (90 days on
-every item, so an audit disappears whole):
+One table, keys ``pk`` / ``sk``, a sparse index ``GSI1`` (``gsi1pk`` / ``gsi1sk``) and TTL ``ttl``. Only the
+frontier URLs (crawl bookkeeping) expire, 90 days after they are queued; the audit, its pages, issues and link
+summary are kept like every other crawl (TENETS.md, D2 and D5):
 
 | item | pk | sk | GSI1 |
 |---|---|---|---|
@@ -125,7 +126,7 @@ class AuditStore:
         audit_id = audit['audit_id']
         item = {
             **audit, 'pk': audit_pk(audit_id), 'sk': META, 'gsi1pk': AUDITS_LIST_KEY,
-            'gsi1sk': f"{audit['started_at']}#{audit_id}", 'ttl': _expires(), 'seq': 0,
+            'gsi1sk': f"{audit['started_at']}#{audit_id}", 'seq': 0,
         }
         self.table.put_item(Item=item, ConditionExpression=Attr('pk').not_exists())
 
@@ -243,7 +244,7 @@ class AuditStore:
     # -- pages and issues --------------------------------------------------------
     def put_page(self, audit_id: str, page: Item) -> None:
         self.table.put_item(Item={
-            **page, 'pk': f'{audit_pk(audit_id)}#PAGE', 'sk': url_hash(page['url']), 'ttl': _expires(),
+            **page, 'pk': f'{audit_pk(audit_id)}#PAGE', 'sk': url_hash(page['url']),
         })
 
     def page(self, audit_id: str, url: str) -> Item | None:
@@ -267,7 +268,6 @@ class AuditStore:
             for issue in issues:
                 writer.put_item(Item={
                     **issue_item(issue), 'pk': partition, 'sk': f'{issue.issue_type}#{issue.issue_id(audit_id)}',
-                    'ttl': _expires(),
                 })
 
     def issues(self, audit_id: str) -> Iterator[Item]:
@@ -279,7 +279,7 @@ class AuditStore:
         return self._query_batch(partition, token, {'KeyConditionExpression': condition, 'Limit': limit})
 
     def put_link_summary(self, audit_id: str, summary: Item) -> None:
-        self.table.put_item(Item={**summary, 'pk': audit_pk(audit_id), 'sk': LINKS, 'ttl': _expires()})
+        self.table.put_item(Item={**summary, 'pk': audit_pk(audit_id), 'sk': LINKS})
 
 
 def _bucket() -> str:

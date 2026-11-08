@@ -32,7 +32,10 @@ def brand_table(default=BRAND):
 def jobs(monkeypatch):
     monkeypatch.setenv('RAW_RESPONSES_BUCKET', 'raw')
     module = load_handler_module(str(JOBS_DIR), 'jobs_domain.py')
-    with patch.object(module, 'brand_config_table', return_value=brand_table()):
+    # The weekly sweep is on in these tests; TestWeeklySweepSetting covers it off.
+    with patch.object(module, 'brand_config_table', return_value=brand_table()), \
+            patch.object(module, 'schedule_enabled', return_value=True), \
+            patch.object(module, 'snapshots_table', return_value=MagicMock()):
         yield module
 
 
@@ -64,6 +67,18 @@ class TestSnapshotAll:
         many = {'first_party_domains': [f'site{index}.example' for index in range(50)]}
         with patch.object(jobs, 'brand_config_table', return_value=brand_table(many)):
             assert jobs.snapshot_all({})['count'] == jobs.MAX_TARGETS
+
+
+class TestWeeklySweepSetting:
+    def test_the_weekly_sweep_lists_nothing_while_the_setting_is_off(self, jobs):
+        with patch.object(jobs, 'schedule_enabled', return_value=False), \
+                patch.object(jobs, 'snapshots_table', return_value=MagicMock()):
+            assert jobs.snapshot_all({'step': 'domain.snapshot_all', 'input': {}}) == {'targets': [], 'count': 0}
+
+    def test_a_manual_snapshot_runs_whatever_the_setting(self, jobs):
+        with patch.object(jobs, 'schedule_enabled', return_value=False), \
+                patch.object(jobs, 'market_codes', return_value=LABS_CHILE):
+            assert jobs.snapshot_all({'input': {'targets': [{'domain': 'example.com', 'market_id': 'global'}]}})['count'] == 1
 
 
 class TestSnapshotOne:

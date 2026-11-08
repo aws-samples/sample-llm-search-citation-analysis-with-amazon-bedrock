@@ -64,6 +64,11 @@ def load_last_two_runs(keywords: list[str]) -> tuple[dict[str, list[Answer]], di
     return latest, previous, runs.skipped
 
 
+def _unclassified_keywords(run: dict[str, list[Answer]]) -> list[str]:
+    """The keywords whose run holds an answer stored before the branded flag existed."""
+    return [keyword for keyword, answers in run.items() if any(not answer.branded_classified for answer in answers)]
+
+
 def scope_visibility(
     scope: ReportScope,
     owned_domains: list[str],
@@ -84,6 +89,11 @@ def scope_visibility(
         {keyword: filter_branded(answers, branded) for keyword, answers in run.items()}
         for run in (latest_run, previous_run)
     )
+    # Like for like: a filtered view compares a keyword with its previous run only when that run's rows were
+    # classified (2.43+). An older run reads every answer as neutral, so its delta would mix two definitions.
+    unclassified = _unclassified_keywords(previous_run) if branded != 'all' else []
+    for keyword in unclassified:
+        previous[keyword] = []
     view = visibility_view(
         list(latest), latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand,
         tracked_brands=tracked_brands or (),
@@ -91,6 +101,7 @@ def scope_visibility(
     return {
         **scope_read_fields(scope_fields, skipped),
         'branded': branded,
+        'change_unclassified_keywords': len(unclassified),
         'citations_configured': bool(owned_domains),
         **view,
     }

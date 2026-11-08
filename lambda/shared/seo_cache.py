@@ -7,7 +7,9 @@ only the pointer.
 
 Rules: the key is ``<namespace>#v<version>#sha256(canonical params)``, with keys sorted at every depth and
 ``None`` values dropped, so equivalent nested params share an entry; an expired or
-unparsable entry is a miss; a write never replaces an unexpired non-empty payload with an empty one (enforced
+unparsable entry is a miss; an entry written with ``ttl_seconds=None`` is kept (no ``expires_at`` or
+``ttl``, ``permanent: true``): measured results stored here, such as Lighthouse runs, are records, not cache, and
+never expire (TENETS.md, D2 and D5); a write never replaces an unexpired non-empty payload with an empty one (enforced
 with a conditional put, so it also holds under concurrent writers); the write is synchronous, because a Lambda
 freezes after it returns and a background write could be lost. A failing cache read or write is
 logged and never fails the paid call around it.
@@ -112,7 +114,7 @@ def get_cached(namespace: str, version: int, params: Mapping[str, Any]) -> Any |
         if not item:
             return None
         expires_at = _expires_at(item)
-        if expires_at is None or expires_at <= _now():
+        if item.get('permanent') is not True and (expires_at is None or expires_at <= _now()):
             return None
         body = _read_body(item)
     except (ClientError, BotoCoreError, KeyError) as exc:
@@ -140,14 +142,18 @@ def _stored_body(key: str, body: str) -> dict[str, str] | None:
     return {'s3_key': s3_key}
 
 
-def _write(key: str, payload: Any, ttl_seconds: int) -> None:
+def _write(key: str, payload: Any, ttl_seconds: int | None) -> None:
     empty = is_empty_payload(payload)
     now = _now()
-    expires_at = now + ttl_seconds
     stored = _stored_body(key, json.dumps(payload, ensure_ascii=False))
     if stored is None:
         return
-    item = {'cache_key': key, **stored, 'expires_at': expires_at, 'ttl': expires_at, 'empty': empty}
+    if ttl_seconds is None:
+        expiry: dict[str, Any] = {'permanent': True}
+    else:
+        expires_at = now + ttl_seconds
+        expiry = {'expires_at': expires_at, 'ttl': expires_at}
+    item = {'cache_key': key, **stored, **expiry, 'empty': empty}
     if not empty:
         _table().put_item(Item=item)
         return
@@ -159,8 +165,8 @@ def _write(key: str, payload: Any, ttl_seconds: int) -> None:
     )
 
 
-def put_cached(namespace: str, version: int, params: Mapping[str, Any], payload: Any, ttl_seconds: int) -> None:
-    """Store ``payload`` for ``ttl_seconds``; an empty payload never replaces an unexpired non-empty one."""
+def put_cached(namespace: str, version: int, params: Mapping[str, Any], payload: Any, ttl_seconds: int | None) -> None:
+    """Store ``payload`` for ``ttl_seconds`` (``None``: keep it); an empty payload never replaces an unexpired non-empty one."""
     key = cache_key(namespace, version, params)
     try:
         _write(key, payload, ttl_seconds)

@@ -163,6 +163,9 @@ export interface DomainSnapshotsResponse {
   snapshots: DomainSnapshotSummary[];
 }
 
+/** Whether the weekly sweep of every tracked domain is on (off until an Admin turns it on: it is paid). */
+export interface DomainSnapshotScheduleResponse {readonly schedule_enabled: boolean;}
+
 export interface TakeSnapshotResponse {
   domain: string;
   market_id: string;

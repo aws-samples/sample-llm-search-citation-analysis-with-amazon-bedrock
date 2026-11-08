@@ -25,7 +25,7 @@ describe('CitationAnalysis-SeoAudits table', () => {
     expect(snapshot.tableKeys).toStrictEqual(['pk HASH', 'sk RANGE']);
   });
 
-  it('expires items through the ttl attribute', () => {
+  it('expires frontier URLs through the ttl attribute', () => {
     expect(snapshot.tableTimeToLive).toStrictEqual(TTL_ON_TTL_ATTRIBUTE);
   });
 

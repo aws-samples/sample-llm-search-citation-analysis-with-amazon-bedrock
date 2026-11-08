@@ -180,6 +180,33 @@ class TestSnapshots:
         assert (status, body['code']) == (409, 'ALREADY_RUNNING')
 
 
+class TestSnapshotSchedule:
+    def test_reads_the_weekly_sweep_setting_off_by_default(self, domains_module):
+        table = MagicMock()
+        table.get_item.return_value = {}
+
+        status, body = call(domains_module, 'GET', '/api/seo/domains/snapshots/schedule',
+                            snapshots_table=MagicMock(return_value=table))
+
+        assert (status, body) == (200, {'schedule_enabled': False})
+
+    def test_refuses_a_user_who_is_not_an_admin(self, domains_module):
+        table = MagicMock()
+
+        status, body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
+                            snapshots_table=MagicMock(return_value=table))
+
+        assert (status, body['code'], table.put_item.called) == (403, 'FORBIDDEN', False)
+
+    def test_an_admin_turns_it_on(self, domains_module):
+        table = MagicMock()
+
+        status, body = call(domains_module, 'PUT', '/api/seo/domains/snapshots/schedule', body={'enabled': True},
+                            groups='Admin', snapshots_table=MagicMock(return_value=table))
+
+        assert (status, body, table.put_item.call_args.kwargs['Item']['enabled']) == (200, {'schedule_enabled': True}, True)
+
+
 class TestInsights:
     ROWS = [{'keyword': 'cheap flights', 'search_volume': 100, 'quadrant': 'ai_gap', 'organic_position': 5}]
 

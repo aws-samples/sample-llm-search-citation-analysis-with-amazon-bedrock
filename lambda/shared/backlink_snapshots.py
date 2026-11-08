@@ -1,7 +1,7 @@
 """Weekly backlink snapshots of the brand's own and its competitors' domains (``CitationAnalysis-SeoBacklinkSnapshots``).
 
 One item per domain and snapshot (pk ``domain``, sk ``snapshot_at`` ISO-8601 Z) holding the overview metrics of the
-domain with its subdomains, expiring after 800 days (``ttl``) so two years of weekly points stay comparable. Reading
+domain with its subdomains. Snapshots never expire: measured history is kept (TENETS.md, D2 and D5). Reading
 them is free; only taking one calls DataForSEO (``summary/live``, about $0.024 a domain).
 
 The tracked domains are the brand config's ``first_party_domains`` (``owned``) and ``competitor_domains``
@@ -15,7 +15,6 @@ The weekly schedule is off until an Admin turns it on: its setting is the item `
 from __future__ import annotations
 
 import functools
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -29,7 +28,6 @@ from shared.env_vars import resolve_table_env
 from shared.kpi_engine import normalize_domain
 
 TABLE_ENV = 'DYNAMODB_TABLE_SEO_BACKLINK_SNAPSHOTS'
-TTL_SECONDS = 800 * 86_400
 SETTINGS_DOMAIN = '#settings'
 SCHEDULE_SORT_KEY = 'schedule'
 HISTORY_POINTS = 110
@@ -94,12 +92,11 @@ def tracked_domains(config: Mapping[str, Any]) -> list[TrackedDomain]:
     return list(tracked.values())
 
 
-def snapshot_item(domain: str, metrics: Mapping[str, Any], snapshot_at: str, now: float | None = None) -> dict[str, Any]:
+def snapshot_item(domain: str, metrics: Mapping[str, Any], snapshot_at: str) -> dict[str, Any]:
     """The table item of one snapshot (floats as ``Decimal``, missing metrics left out)."""
-    stamp = time.time() if now is None else now
     values = {field: metrics.get(field) for field in METRIC_FIELDS if metrics.get(field) is not None}
     return convert_floats_to_decimal({
-        'domain': domain, 'snapshot_at': snapshot_at, 'ttl': int(stamp) + TTL_SECONDS, **values,
+        'domain': domain, 'snapshot_at': snapshot_at, **values,
     })
 
 

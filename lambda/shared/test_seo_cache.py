@@ -86,6 +86,22 @@ def test_returns_miss_when_entry_is_expired(table, monkeypatch):
     assert get_cached('kw:research', 1, PARAMS) is None
 
 
+def test_a_permanent_entry_has_no_expiry_and_is_read_years_later(table, monkeypatch):
+    put_cached('lighthouse-run', 1, PARAMS, ROWS, ttl_seconds=None)
+
+    item = table.items[cache_key('lighthouse-run', 1, PARAMS)]
+    assert (item.get('permanent'), 'ttl' in item, 'expires_at' in item) == (True, False, False)
+    monkeypatch.setattr(seo_cache, '_now', lambda: NOW + 10 * 365 * 86_400)
+    assert get_cached('lighthouse-run', 1, PARAMS) == ROWS
+
+
+def test_an_empty_write_never_replaces_a_permanent_entry(table):
+    put_cached('lighthouse-run', 1, PARAMS, ROWS, ttl_seconds=None)
+    put_cached('lighthouse-run', 1, PARAMS, [], ttl_seconds=60)
+
+    assert get_cached('lighthouse-run', 1, PARAMS) == ROWS
+
+
 def test_returns_miss_when_nothing_is_cached(table):
     assert get_cached('kw:research', 1, PARAMS) is None
 

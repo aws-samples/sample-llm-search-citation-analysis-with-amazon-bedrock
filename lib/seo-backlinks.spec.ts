@@ -4,8 +4,9 @@ import {
 import { resolvePath } from './citation-analysis-stack-fixtures';
 import { synthesizeBacklinksSnapshot } from './seo-backlinks-fixtures';
 import {
-  DYNAMODB_READ_WRITE_ACTIONS, JOBS_STATE_MACHINE_ROLE_ACTIONS, TTL_ON_TTL_ATTRIBUTE
+  JOBS_STATE_MACHINE_ROLE_ACTIONS
 } from './seo-feature-fixtures';
+import { sharedTableActions } from './constructs/seo-feature';
 
 /** `SeoBacklinks`: the backlinks explorer routes and the weekly snapshots, inside the SEO stack. */
 const snapshot = synthesizeBacklinksSnapshot();
@@ -38,8 +39,8 @@ describe('CitationAnalysis-SeoBacklinkSnapshots table', () => {
     ]);
   });
 
-  it('expires snapshots on the ttl attribute', () => {
-    expect(snapshot.tableTimeToLive).toStrictEqual(TTL_ON_TTL_ATTRIBUTE);
+  it('keeps snapshots: the table has no TTL (TENETS.md, D2 and D5)', () => {
+    expect(snapshot.tableTimeToLive).toBeUndefined();
   });
 
   it('names the table to the router and the jobs function', () => {
@@ -48,8 +49,8 @@ describe('CitationAnalysis-SeoBacklinkSnapshots table', () => {
     expect(names).toStrictEqual([{ Ref: expect.stringMatching(/SnapshotsTable/) }, { Ref: expect.stringMatching(/SnapshotsTable/) }]);
   });
 
-  it('lets the router read and write snapshot items only, never manage the table', () => {
-    expect(snapshot.routerTableActions).toStrictEqual(DYNAMODB_READ_WRITE_ACTIONS);
+  it('lets the router read, put and update snapshot items, never delete one or manage the table', () => {
+    expect(snapshot.routerTableActions).toStrictEqual(sharedTableActions({}));
   });
 });
 

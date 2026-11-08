@@ -20,7 +20,7 @@ import { useSeoGeo } from '../../../hooks/useSeoGeo';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 
 vi.mock('../../../hooks/useSeoGeo', () => ({ useSeoGeo: vi.fn() }));
-vi.mock('../../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
+vi.mock('../../../hooks/useKeywordGroups');
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 vi.mock('../../../hooks/usePrintMode', () => ({ usePrintMode: vi.fn(() => ({ isPrintMode: false })) }));
 

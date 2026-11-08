@@ -48,7 +48,7 @@ export class SeoRankTracking extends SeoFeatureConstruct {
         { indexName: 'GSI1', ...stringKeys('gsi1pk', 'gsi1sk') },
         { indexName: 'GSI2', ...stringKeys('gsi2pk', 'gsi2sk') },
       ],
-    });
+    }, { batchWrites: true, deletes: true }); // deletes: the run lock on release, a keyword an Admin removes from a tracker
 
     const stateMachineArn = cdk.Stack.of(this).formatArn({
       service: 'states',

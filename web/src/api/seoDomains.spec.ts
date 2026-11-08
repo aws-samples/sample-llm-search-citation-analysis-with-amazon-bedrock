@@ -5,7 +5,8 @@ import {
 } from 'vitest';
 import { InvalidSeoResponseError } from './seoDecoders';
 import {
-  fetchDomainKeywords, fetchDomainOverview, fetchDomainSnapshots, fetchSeoInsights, takeDomainSnapshot
+  fetchDomainKeywords, fetchDomainOverview, fetchDomainSnapshotSchedule, fetchDomainSnapshots, fetchSeoInsights, setDomainSnapshotSchedule,
+  takeDomainSnapshot
 } from './seoDomains';
 import {
   buildDomainKeywords, buildDomainOverview, buildDomainSnapshots, buildSeoInsights, SNAPSHOT_STARTED
@@ -88,6 +89,10 @@ describe('snapshots', () => {
       buildDomainSnapshots(), 'https://seo.test.com/api/seo/domains/snapshots?domain=example.com'],
     ['posts a snapshot start to the snapshots route', () => takeDomainSnapshot({ domain: 'example.com' }),
       SNAPSHOT_STARTED, 'https://seo.test.com/api/seo/domains/snapshots'],
+    ['reads the weekly sweep setting', () => fetchDomainSnapshotSchedule(),
+      { schedule_enabled: false }, 'https://seo.test.com/api/seo/domains/snapshots/schedule'],
+    ['puts the weekly sweep setting', () => setDomainSnapshotSchedule(true),
+      { schedule_enabled: true }, 'https://seo.test.com/api/seo/domains/snapshots/schedule'],
   ])('%s', async (_name, send, answer, url) => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(answer));
 

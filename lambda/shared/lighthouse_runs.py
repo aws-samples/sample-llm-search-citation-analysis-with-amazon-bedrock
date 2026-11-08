@@ -33,7 +33,8 @@ from shared.utils import get_timestamp
 
 RUN_NAMESPACE = 'lighthouse-run'
 RUN_VERSION = 1
-RUN_TTL_SECONDS = 30 * 86_400
+#: Runs and the recent-runs list are records: kept, never expired (TENETS.md, D2 and D5).
+RUN_TTL_SECONDS = None
 RECEIPT_NAMESPACE = 'lighthouse-receipt'
 RECEIPT_VERSION = 1
 RECEIPT_TTL_SECONDS = 15 * 60

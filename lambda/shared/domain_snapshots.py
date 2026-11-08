@@ -7,10 +7,13 @@ measured clicks.
 
 * Item: ``pk = <domain>#<market_id>``, ``snapshot_at`` (ISO-8601 UTC), the summary figures, and
   ``keywords_s3_key`` pointing at the ranked keywords (``seo/domain-snapshots/<domain>/<market>/<at>.json``
-  in the raw-responses bucket: a page of 1,000 keywords does not fit a 400 KB item). ``ttl`` = 400 days, so a
-  year of weekly history stays comparable.
+  in the raw-responses bucket: a page of 1,000 keywords does not fit a 400 KB item). Snapshots never expire:
+  measured history is kept like every other record (TENETS.md, D2 and D5).
 * Stored keyword: ``keyword``, ``position`` (organic rank, ``rank_group``, 1-100), ``etv``, ``url``,
   ``search_volume``.
+* The weekly sweep over every owned and competitor domain is paid, so it is off until an Admin turns it on:
+  the setting is the item ``pk='#settings'``, ``snapshot_at='schedule'`` (``#`` never starts a domain), the same
+  way the backlink snapshots keep theirs. An Admin's one-off snapshot runs whatever the setting.
 * An empty answer (no keyword, no traffic) is not stored when the previous snapshot of the pair had data:
   DataForSEO occasionally answers a known domain with nothing, and a stored empty snapshot would read as
   "all traffic lost" in every comparison. A pair with no history keeps its empty first snapshot, so it shows
@@ -23,7 +26,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -38,7 +41,6 @@ logger = logging.getLogger(__name__)
 TABLE_ENV = 'DYNAMODB_TABLE_SEO_DOMAIN_SNAPSHOTS'
 BUCKET_ENV = 'RAW_RESPONSES_BUCKET'
 S3_PREFIX = 'seo/domain-snapshots'
-TTL_DAYS = 400
 #: The most rows one Labs ``ranked_keywords`` call returns.
 SNAPSHOT_KEYWORD_LIMIT = 1000
 #: Positions deeper than this are not reported by Labs ranked keywords.
@@ -83,7 +85,7 @@ def snapshot_keyword(row: RankedKeyword) -> dict[str, Any]:
 
 
 def snapshot_item(
-    domain: str, market_id: str, snapshot_at: str, overview: DomainOverview, keyword_count: int, now: datetime,
+    domain: str, market_id: str, snapshot_at: str, overview: DomainOverview, keyword_count: int,
 ) -> dict[str, Any]:
     """The DynamoDB item of one snapshot."""
     return {
@@ -98,7 +100,6 @@ def snapshot_item(
         'position_buckets': dict(overview.position_buckets),
         'keywords_stored': keyword_count,
         'keywords_s3_key': snapshot_s3_key(domain, market_id, snapshot_at),
-        'ttl': int((now + timedelta(days=TTL_DAYS)).timestamp()),
     }
 
 
@@ -204,8 +205,26 @@ def take_snapshot(
             'estimated': True, 'keywords': keywords,
         }).encode('utf-8'),
     )
-    table.put_item(Item=snapshot_item(domain, market_id, snapshot_at, overview, len(keywords), moment))
+    table.put_item(Item=snapshot_item(domain, market_id, snapshot_at, overview, len(keywords)))
     return {'status': 'stored', 'keywords': len(keywords)}
+
+
+SETTINGS_PK = '#settings'
+SCHEDULE_SORT_KEY = 'schedule'
+
+
+def schedule_enabled(table: Any) -> bool:
+    """Whether an Admin turned the weekly sweep on (off when never set)."""
+    item = table.get_item(Key={'pk': SETTINGS_PK, 'snapshot_at': SCHEDULE_SORT_KEY}).get('Item') or {}
+    return item.get('enabled') is True
+
+
+def set_schedule(table: Any, *, enabled: bool, updated_by: str | None, updated_at: str) -> None:
+    """Record an Admin's choice, with who made it and when."""
+    table.put_item(Item={
+        'pk': SETTINGS_PK, 'snapshot_at': SCHEDULE_SORT_KEY, 'enabled': enabled,
+        'updated_by': updated_by or 'unknown', 'updated_at': updated_at,
+    })
 
 
 def distinct_domains(domains: Sequence[str]) -> list[str]:
@@ -224,6 +243,8 @@ __all__ = [
     'latest_snapshot',
     'list_snapshots',
     'load_snapshot_keywords',
+    'schedule_enabled',
+    'set_schedule',
     'snapshot_item',
     'snapshot_s3_key',
     'summary_json',

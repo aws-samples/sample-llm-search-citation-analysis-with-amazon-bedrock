@@ -35,7 +35,7 @@ Lighthouse** is pressed. A run takes up to a minute; the page shows its progress
 audit loaded cleanly are used, so a bot challenge is never measured. The page lists the pages and asks for
 confirmation first, naming the paid calls (one per page and device; no price is shown).
 
-**Recent runs** lists the 20 newest runs; **Show** reopens one at no cost. Runs are kept for 30 days. The full
+**Recent runs** lists the 20 newest runs; **Show** reopens one at no cost. Runs are kept, never expired. The full
 Lighthouse report of every page is kept in the raw-responses bucket (`seo/lighthouse/`).
 
 Asking again for the same page and device, or the same audit sample, within 15 minutes shows the run already

@@ -72,6 +72,24 @@ type JobsTaskOptions = Omit<tasks.LambdaInvokeProps, 'lambdaFunction' | 'payload
  * The constructor runs `build` before any subclass field initializer, so a
  * feature keeps what it creates in locals, not in instance fields.
  */
+/** What a feature's code does to its table beyond reading, putting and updating items. */
+export interface SharedTableAccess {
+  /** It writes through a batch writer (`BatchWriteItem`; IAM cannot tell a batched put from a batched delete). */
+  readonly batchWrites?: boolean;
+  /** It deletes items (`DeleteItem`): name what in the feature's docs. */
+  readonly deletes?: boolean;
+}
+
+/** The item actions of a feature table: reads, puts and updates, plus the batch writes and deletes `access` names. */
+export function sharedTableActions(access: SharedTableAccess): string[] {
+  return [
+    'dynamodb:BatchGetItem', 'dynamodb:ConditionCheckItem', 'dynamodb:DescribeTable', 'dynamodb:GetItem',
+    'dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:UpdateItem',
+    ...(access.batchWrites === true ? ['dynamodb:BatchWriteItem'] : []),
+    ...(access.deletes === true ? ['dynamodb:DeleteItem'] : []),
+  ].sort((a, b) => a.localeCompare(b));
+}
+
 export abstract class SeoFeatureConstruct extends Construct implements SeoFeature {
   public readonly routes: SeoRoutes;
   protected readonly props: SeoFeatureProps;
@@ -91,15 +109,21 @@ export abstract class SeoFeatureConstruct extends Construct implements SeoFeatur
     this.served.push(...routes);
   }
 
-  /** A feature table both shared functions read and write, its name given to them as `environmentVariable`. */
+  /**
+   * A feature table both shared functions read and write, its name given to them as `environmentVariable`.
+   * Granted per action (TENETS.md, tenet 6 and D5): item reads, puts and updates; `BatchWriteItem` only for a
+   * feature that batches its writes, and `DeleteItem` only for one whose code deletes (`access`).
+   */
   protected sharedTable(
     id: string,
     environmentVariable: string,
     spec: Parameters<typeof citationAnalysisTable>[2],
+    access: SharedTableAccess = {},
   ): dynamodb.Table {
     const table = citationAnalysisTable(this, id, spec);
+    const actions = sharedTableActions(access);
     for (const fn of [this.props.router, this.props.jobs]) {
-      table.grantReadWriteData(fn);
+      table.grant(fn, ...actions);
       fn.addEnvironment(environmentVariable, table.tableName);
     }
     return table;

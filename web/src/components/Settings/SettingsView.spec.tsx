@@ -19,11 +19,11 @@ import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildProviderConfigHookResult } from '../ProviderHealth/ProviderHealthBanner-fixtures';
 
 vi.mock('../Keywords/KeywordsManager', () => ({ KeywordsManager: () => <div data-testid="keywords-manager">Keywords Manager</div> }));
-vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
+vi.mock('../../hooks/useBrandConfig');
 vi.mock('../Brands/BrandConfigContent', () => ({ BrandConfigContent: () => <div data-testid="brand-config">Brand Config</div> }));
-vi.mock('../../hooks/useProviderConfig', () => ({ useProviderConfig: vi.fn() }));
+vi.mock('../../hooks/useProviderConfig');
 vi.mock('../AiAssistants', () => ({ AiAssistantsView: () => <div data-testid="ai-assistants-guide">AI Assistants Guide</div> }));
-vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
+vi.mock('../../hooks/useIsAdmin');
 vi.mock('./AlertsConfig', () => ({
   AlertsConfig: ({ isAdmin }: { isAdmin: boolean }) => (
     <div data-testid="alerts-config">Alerts Config admin: {String(isAdmin)}</div>

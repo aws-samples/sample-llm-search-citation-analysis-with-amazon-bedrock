@@ -151,7 +151,9 @@ class InMemoryCacheTable:
         existing = self.items.get(Item['cache_key'])
         if condition and existing is not None:
             now = condition['ExpressionAttributeValues'][':now']
-            if existing['expires_at'] > now and existing['empty'] is not True:
+            # A permanent item has no ``expires_at``; DynamoDB's ``expires_at <= :now`` is then false, as here.
+            unexpired = 'expires_at' not in existing or existing['expires_at'] > now
+            if unexpired and existing['empty'] is not True:
                 raise conditional_check_failure('PutItem')
         self.items[Item['cache_key']] = dict(Item)
 

@@ -9,7 +9,7 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
-## [2.43.0] - 2026-11-07
+## [2.43.0] - 2026-11-08
 
 ### Added
 
@@ -90,6 +90,23 @@ process.
 
 ### Changed
 
+- **Review fixes before release** (Kiro review of the 2.43.0 pull request, TENETS.md):
+  - SEO measurements are records, not cache, so they are kept (D2, D5): domain and backlink snapshots, site audits
+    (the audit, pages, issues and link summary) and Lighthouse runs no longer expire. Only crawl bookkeeping (a site
+    audit's URL queue, 90 days) and true caches, receipts and locks keep a TTL. The snapshot tables have no TTL.
+  - The weekly domain snapshot of every owned and competitor domain is paid, so it is **off by default**: an Admin
+    turns it on in the Domain Overview after a confirmation (`GET`/`PUT /api/seo/domains/snapshots/schedule`, stored
+    with who and when), like the backlink snapshots. An Admin's one-off snapshot runs whatever the setting.
+  - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
+    and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
+    action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).
+  - KPI alerts read the previous run's rows within the 2.42.0 time budget; a pair whose previous run cannot be read
+    in time is left for the budget instead of being compared with part of its past.
+  - A `neutral` or `branded` Visibility view no longer compares a keyword with a previous run stored before the
+    branded flag existed (`change_unclassified_keywords` counts them), and each answer row records
+    `branded_version`, the matcher rule that set its flag (D2, D3).
+  - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
+
 - `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit
   list read one newest-first page with it.
 - **GEO KPI corrections** ([docs/geo-corrections.md](docs/geo-corrections.md)): only the sources an answer cites
@@ -110,6 +127,12 @@ process.
   environment variables to Lambda reads.
 - A deployment of a pre-release SEO stack that already created `CitationAnalysis-SeoPromptExplores` keeps that table
   after the upgrade (tables are retained); nothing reads it any more, so it can be deleted by hand.
+
+### Fixed
+
+- **Resending an invitation works.** For a user who never signed in, *Resend invite* passed the user's id to Cognito,
+  which takes only the email for a resend and refused it ("Username should be an email") (`lambda/api/manage-users.py`).
+
 ## [2.42.2] - 2026-11-08
 
 ### Changed

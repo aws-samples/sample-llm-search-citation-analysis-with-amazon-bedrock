@@ -11,7 +11,9 @@ whole word (case-, accent- and whitespace-insensitive, any script), or names
 an owned domain or a subdomain of one. Domains are label-guarded, so
 ``example.com.evil.test`` and ``notexample.com`` do not name ``example.com``.
 The decision is fixed when the row is written: later brand-configuration
-edits do not rewrite history.
+edits do not rewrite history. The row also records ``branded_version``
+(``BRANDED_MATCHER_VERSION``), so a later matcher can tell which rule decided
+a stored flag and reprocess or compare by version (TENETS.md, D2 and D3).
 """
 
 from __future__ import annotations
@@ -22,6 +24,9 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from shared.kpi_engine import owned_domains_from
+
+#: The matching rule above; bump it when the rule changes, so stored flags say which rule decided them.
+BRANDED_MATCHER_VERSION = 1
 
 #: Names shorter than this are not matched: a one-letter alias would mark almost every query.
 MIN_NAME_LENGTH = 2
