@@ -9,6 +9,19 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.42.3] - 2026-11-08
+
+### Changed
+
+- **The Kiro PR review follows the conversation instead of starting over** (`scripts/kiro-review/conversation.mjs`).
+  Each run now reads the PR's comments, reviews and inline review comments, oldest first, with each author's role
+  (maintainer, contributor, bot) and its own previous review marked. The review opens with a **Since the last
+  review** section that says, for each earlier point, whether it is resolved, partly resolved, still open or settled
+  by a maintainer; it drops a point an answer settles and treats a maintainer's explicit decision on a trade-off as
+  final, unless the change breaks a data lake tenet or creates a security problem. The conversation is untrusted
+  text: capped in size, read as data, and a comment that tries to steer the reviewer is reported as blocking.
+- The lockfile excerpt the reviewer reads is cut to 300 characters per line.
+
 ## [2.42.2] - 2026-11-08
 
 ### Changed

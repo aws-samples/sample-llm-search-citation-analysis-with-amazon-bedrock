@@ -52,6 +52,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read # the trusted checkout and the PR head checkout
+      pull-requests: read # the PR's comments, reviews and inline review comments
     outputs:
       body: ${{ steps.comment.outputs.body }}
       verdict: ${{ steps.comment.outputs.verdict }}
@@ -98,6 +99,9 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # Workspace configuration a PR could add, and that Kiro might load, is removed before Kiro starts.
           rm -rf pr/.kiro pr/.amazonq pr/AGENTS.md
@@ -121,10 +125,24 @@ jobs:
             printf 'lines added, removed, file:\n%s\n' "$locks" >> data/lockfiles.txt
             for lock in package-lock.json web/package-lock.json; do
               git -C pr diff --no-color --unified=0 "$base" HEAD -- "$lock" \
-                | grep -E '^[+-] ' | head -n 40 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
+                | grep -E '^[+-] ' | head -n 40 | cut -c1-300 | sed "s|^|[${lock}] |" >> data/lockfiles.txt || true
             done
           fi
           { printf '# %s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > data/pr.md
+          # The conversation so far (comments, reviews, inline comments, the last Kiro review), so the reviewer
+          # follows up instead of starting over. Untrusted text, read as data and capped by conversation.mjs.
+          api="$RUNNER_TEMP/api"
+          mkdir -p "$api"
+          gh api --paginate --slurp "repos/$REPO/issues/$PR_NUMBER/comments" > "$api/issue-comments.json"
+          gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUMBER/reviews" > "$api/reviews.json"
+          gh api --paginate --slurp "repos/$REPO/pulls/$PR_NUMBER/comments" > "$api/review-comments.json"
+          if [ -f trusted/scripts/kiro-review/conversation.mjs ]; then
+            node trusted/scripts/kiro-review/conversation.mjs \
+              "$api/issue-comments.json" "$api/reviews.json" "$api/review-comments.json" data/conversation.md
+          else
+            # The default branch predates conversation.mjs (the PR that adds it).
+            echo 'No conversation available to this review.' > data/conversation.md
+          fi
           wc -c data/*
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
