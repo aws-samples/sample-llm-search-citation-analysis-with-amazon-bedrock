@@ -24,6 +24,8 @@ from typing import Any
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
+from botocore.exceptions import BotoCoreError, ClientError
+
 from shared.dataforseo_callbacks import arrive, is_gate_id, is_task_id, release_if_due
 
 logger = logging.getLogger(__name__)
@@ -53,8 +55,8 @@ def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     if arrival is None or arrival.remaining <= 0:
         try:
             released = release_if_due(gate_id)
-        except Exception:  # noqa: BLE001 (any failure: the claim is given back and DataForSEO retries)
-            logger.warning('callback gate could not resume its state machine; the next pingback retries')
+        except (ClientError, BotoCoreError):
+            logger.exception('callback gate could not resume its state machine; the next pingback retries')
             return _answer(500)
         if released:
             logger.info('callback gate emptied; state machine resumed')

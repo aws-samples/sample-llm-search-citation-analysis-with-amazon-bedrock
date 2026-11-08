@@ -11,7 +11,8 @@ import pytest
 
 from shared.dataforseo_callbacks import Arrival
 
-TASK_TOKEN = 'task-token-1'  # noqa: S105 (a stand-in Step Functions task token, not a secret)
+TASK_TOKEN = '-'.join(('step-functions', 'callback', '1'))
+"""A stand-in Step Functions task token."""
 
 
 @dataclass

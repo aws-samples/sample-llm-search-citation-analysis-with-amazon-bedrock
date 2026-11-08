@@ -361,7 +361,7 @@ describe('ScheduleManager', () => {
 
       await runScheduleNow('Hotel Coruña — weekly');
 
-      expect(mockRunSchedule).toHaveBeenCalledWith('sch-1a2b3c4d');
+      expect(mockRunSchedule).toHaveBeenCalledWith('sch-1a2b3c4d', false);
       expect(screen.getByText('Analysis started for Hotel Coruña — weekly (1 group(s))')).toBeInTheDocument();
     });
 
@@ -530,7 +530,9 @@ describe('ScheduleManager kinds', () => {
 
       await waitFor(() => expect(mockCreateSchedule).toHaveBeenCalledTimes(1));
       const payload = mockCreateSchedule.mock.calls[0][0];
-      expect([payload.kind, payload.display_name, 'scope' in payload]).toStrictEqual(['backlink_snapshots', 'Weekly backlink snapshots', false]);
+      expect([payload.kind, payload.display_name, 'scope' in payload, payload.confirm_paid]).toStrictEqual([
+        'backlink_snapshots', 'Weekly backlink snapshots', false, true,
+      ]);
     });
 
     it('saves nothing when the paid confirmation is cancelled', async () => {
@@ -559,7 +561,7 @@ describe('ScheduleManager kinds', () => {
       expect(mockRunSchedule).not.toHaveBeenCalled();
       await renderAnswerToDialog('Run');
 
-      await waitFor(() => expect(mockRunSchedule).toHaveBeenCalledWith('sch-b1'));
+      await waitFor(() => expect(mockRunSchedule).toHaveBeenCalledWith('sch-b1', true));
     });
 
     it('shows the kind without a picker when editing: a schedule keeps its kind', async () => {

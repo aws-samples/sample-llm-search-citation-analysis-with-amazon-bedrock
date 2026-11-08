@@ -611,11 +611,11 @@ class _GroupRun(NamedTuple):
 def _previous_run_rows(group: _GroupRun, previous: dict[str, Any], deadline: Deadline) -> list[dict[str, Any]] | None:
     """The rows of the group's current keywords in the previous snapshot's run, read within ``deadline``.
 
-    A keyword whose read failed adds none. ``None`` when the deadline ran out before every keyword was read:
-    the caller then leaves the pair unevaluated instead of comparing against part of the previous run.
+    ``None`` when any keyword could not be read (the deadline ran out, or its read failed): the caller then leaves
+    the pair unevaluated instead of comparing against part of the previous run.
     """
     rows_by_keyword = _load_run_rows(group.keywords, str(previous['snapshot_at']), deadline)
-    if deadline.expired() and any(rows_by_keyword.get(keyword) is None for keyword in group.keywords):
+    if any(rows_by_keyword.get(keyword) is None for keyword in group.keywords):
         return None
     return [row for keyword in group.keywords for row in rows_by_keyword.get(keyword) or []]
 

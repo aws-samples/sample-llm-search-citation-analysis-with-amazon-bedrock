@@ -35,7 +35,7 @@ Routes (mutations are Admin-only):
     GET    /api/schedules/{id}
     PUT    /api/schedules/{id}         full update (name, form, scope, enabled)
     DELETE /api/schedules/{id}
-    POST   /api/schedules/{id}/run     start the schedule's run now
+    POST   /api/schedules/{id}/run     start the schedule's run now (a snapshot schedule needs ``confirm_paid: true``, as does saving it enabled)
     GET    /api/schedules?source=rank-trackers  the rank trackers' schedules (read-only; edited on the tracker)
 """
 
@@ -414,6 +414,22 @@ def _state_machine_exists(arn: str) -> bool:
     return True
 
 
+PAID_CONFIRMATION_FIELD = 'confirm_paid'
+
+
+def _require_paid_confirmation(kind: str, body: Mapping[str, Any], enabled: bool = True) -> None:
+    """A snapshot schedule spends money on its own, so the server asks for the acknowledgement (tenet 4).
+
+    Saving an enabled snapshot schedule, or running one now, needs ``confirm_paid: true``: what the dashboard sends
+    after its confirmation, and what a headless client must send knowingly. A disabled one never runs.
+    """
+    if kind != 'analysis' and enabled and body.get(PAID_CONFIRMATION_FIELD) is not True:
+        raise _InvalidRequest(
+            f'{kind} schedules make paid DataForSEO calls on every run: send {PAID_CONFIRMATION_FIELD}: true',
+            PAID_CONFIRMATION_FIELD,
+        )
+
+
 def _validate_kind(value: Any) -> str:
     """A known kind whose state machine is deployed (``analysis`` when absent)."""
     kind = 'analysis' if value is None else value
@@ -570,6 +586,7 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         # A snapshot run covers every owned and competitor domain: it has no keyword scope.
         scope = _validate_scope_request(body.get('scope') or {'mode': 'all'}) if kind == 'analysis' else None
         enabled = _validate_enabled(body.get('enabled'), True)
+        _require_paid_confirmation(kind, body, enabled)
     except _InvalidRequest as exc:
         return exc.response(event)
 
@@ -634,6 +651,7 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         scope = _validate_scope_request(_scope_to_update(body, current)) if kind == 'analysis' else None
         enabled = _validate_enabled(body.get('enabled'), current['enabled'])
         _validate_kind(kind)
+        _require_paid_confirmation(kind, body, enabled)
     except _InvalidRequest as exc:
         return exc.response(event)
 
@@ -665,7 +683,8 @@ def _delete_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, A
 
 
 @require_group(ADMIN_GROUP)
-def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+@parse_json_body
+def _run_schedule_handler(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
     """POST /api/schedules/{id}/run — start an analysis now with the schedule's scope.
 
     The execution input is what EventBridge would have sent, so ParseKeywords
@@ -679,7 +698,7 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
         return not_found_response(resource='Schedule', event=event)
     schedule = describe_schedule(detail)
     if schedule['kind'] != 'analysis':
-        return _run_snapshots_now(event, schedule)
+        return _run_snapshots_now(event, schedule, body)
 
     execution_input: dict[str, Any] = {
         'schedule_id': schedule_id,
@@ -709,9 +728,10 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
     }, event, 202)
 
 
-def _run_snapshots_now(event: dict[str, Any], schedule: dict[str, Any]) -> dict[str, Any]:
-    """Start a snapshot schedule's run now (paid; the dashboard confirms first), as a timed run would."""
+def _run_snapshots_now(event: dict[str, Any], schedule: dict[str, Any], body: Mapping[str, Any]) -> dict[str, Any]:
+    """Start a snapshot schedule's run now (paid: ``confirm_paid`` is required), as a timed run would."""
     try:
+        _require_paid_confirmation(schedule['kind'], body)
         arn = KINDS[_validate_kind(schedule['kind'])][0]
     except _InvalidRequest as exc:
         return exc.response(event)

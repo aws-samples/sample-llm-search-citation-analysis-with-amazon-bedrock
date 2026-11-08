@@ -5,7 +5,7 @@ import {
   getErrorMessage, isAbortError 
 } from '../../infrastructure';
 import {
-  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
+  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule, type SchedulePayload
 } from '../../api/executions';
 import type {
   Keyword, Schedule, ScheduleFormData 
@@ -110,10 +110,16 @@ export const ScheduleManager = ({
     setSchedules(await fetchSchedules());
   };
 
-  const persistSchedule = async (target: Editor) => {
+  /** `confirmed`: the Admin said yes to the paid confirmation, which the API requires for a paid schedule. */
+  const persistSchedule = async (target: Editor, confirmed = false) => {
     setSaving(true);
     try {
-      const payload = toSchedulePayload(formData);
+      const payload: SchedulePayload = confirmed
+        ? {
+          ...toSchedulePayload(formData),
+          confirm_paid: true,
+        }
+        : toSchedulePayload(formData);
       if (target.mode === 'create') {
         await createSchedule(payload);
         showAlert('Success', 'Schedule created successfully', 'success');
@@ -147,14 +153,14 @@ export const ScheduleManager = ({
       title: 'Save a paid schedule?',
       message: `"${formData.display_name.trim()}" runs on its own until it is disabled or deleted. ${notice} Continue?`,
       confirmText: 'Save',
-      action: () => persistSchedule(editor),
+      action: () => persistSchedule(editor, true),
     });
   };
 
-  const startRun = async (schedule: Schedule) => {
+  const startRun = async (schedule: Schedule, confirmed = false) => {
     setRunningId(schedule.id);
     try {
-      const result = await runSchedule(schedule.id);
+      const result = await runSchedule(schedule.id, confirmed);
       showAlert(kindOf(schedule) === 'analysis' ? 'Analysis started' : 'Snapshots started', result.message, 'success');
     } catch (err) {
       console.error('Error running schedule:', err);
@@ -174,7 +180,7 @@ export const ScheduleManager = ({
       title: 'Run now?',
       message: `${notice} Continue?`,
       confirmText: 'Run',
-      action: () => startRun(schedule),
+      action: () => startRun(schedule, true),
     });
   };
 

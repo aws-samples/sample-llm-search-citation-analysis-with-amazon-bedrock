@@ -109,7 +109,7 @@ class TestPreviousRunWithinTheBudget:
 
     @pytest.mark.parametrize(('seconds_left', 'expected'), [
         (0, None),  # the deadline ran out before every keyword was read: no comparison with part of the past
-        (60, _PREVIOUS_MENTION),  # a failed read with time left adds no rows
+        (60, None),  # a read that failed with time left: no comparison with part of the past either
     ])
     def test_reads_the_previous_run_like_for_like(self, worker_module, seconds_left, expected):
         partly = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': None})
@@ -117,3 +117,10 @@ class TestPreviousRunWithinTheBudget:
             rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(seconds_left))
 
         assert rows == expected
+
+    def test_compares_with_every_keyword_of_the_previous_run_when_all_were_read(self, worker_module):
+        whole = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': []})
+        with patch.object(worker_module, '_load_run_rows', whole):
+            rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(60))
+
+        assert rows == _PREVIOUS_MENTION

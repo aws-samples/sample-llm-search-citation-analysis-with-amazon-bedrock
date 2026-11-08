@@ -635,7 +635,7 @@ class TestSnapshotKinds:
     def test_a_snapshot_schedule_starts_its_seo_state_machine_with_no_keyword_scope(self, handler_module):
         status, body = parse_response(handler_module.handler(make_event('POST', body={
             'kind': 'domain_snapshots', 'frequency': 'weekly', 'time': '04:00', 'day_of_week': 'MON',
-            'scope': {'mode': 'keywords', 'keyword_ids': ['ignored']},
+            'scope': {'mode': 'keywords', 'keyword_ids': ['ignored']}, 'confirm_paid': True,
         }), {}))
 
         assert status == 201
@@ -654,8 +654,10 @@ class TestSnapshotKinds:
         mock_scheduler.create_schedule.assert_not_called()
 
     @pytest.mark.parametrize(('event', 'paid_call'), [
-        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots'}), mock_scheduler.create_schedule, id='create'),
-        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), mock_stepfunctions.start_execution, id='run-now'),
+        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots', 'confirm_paid': True}),
+                     mock_scheduler.create_schedule, id='create'),
+        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={'confirm_paid': True}, suffix='/run'),
+                     mock_stepfunctions.start_execution, id='run-now'),
     ])
     def test_refuses_a_snapshot_schedule_while_the_seo_stack_is_not_deployed(self, handler_module, event, paid_call):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
@@ -665,11 +667,30 @@ class TestSnapshotKinds:
 
         assert (status, paid_call.call_count) == (400, 0)
 
+    @pytest.mark.parametrize(('event', 'paid_call'), [
+        pytest.param(make_event('POST', body={'kind': 'backlink_snapshots'}), mock_scheduler.create_schedule, id='create'),
+        pytest.param(id_event('PUT', 'sch-0d0d0d0d', body={'time': '05:00'}), mock_scheduler.update_schedule, id='update'),
+        pytest.param(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), mock_stepfunctions.start_execution,
+                     id='run-now'),
+    ])
+    def test_refuses_an_enabled_paid_schedule_without_the_acknowledgement(self, handler_module, event, paid_call):
+        mock_scheduler.get_schedule.return_value = snapshot_detail()
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert (status, body['field'], paid_call.call_count) == (400, 'confirm_paid', 0)
+
+    def test_saves_a_disabled_snapshot_schedule_without_the_acknowledgement(self, handler_module):
+        status = parse_response(handler_module.handler(
+            make_event('POST', body={'kind': 'backlink_snapshots', 'enabled': False}), {}))[0]
+
+        assert (status, mock_scheduler.create_schedule.call_count) == (201, 1)
+
     def test_an_update_keeps_the_kind_and_its_target(self, handler_module):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
 
         status, body = parse_response(handler_module.handler(
-            id_event('PUT', 'sch-0d0d0d0d', body={'kind': 'analysis', 'time': '05:00'}), {},
+            id_event('PUT', 'sch-0d0d0d0d', body={'kind': 'analysis', 'time': '05:00', 'confirm_paid': True}), {},
         ))
 
         kwargs = mock_scheduler.update_schedule.call_args.kwargs
@@ -678,7 +699,8 @@ class TestSnapshotKinds:
     def test_run_now_starts_the_snapshot_state_machine(self, handler_module):
         mock_scheduler.get_schedule.return_value = snapshot_detail()
 
-        status, _body = parse_response(handler_module.handler(id_event('POST', 'sch-0d0d0d0d', body={}, suffix='/run'), {}))
+        status, _body = parse_response(handler_module.handler(
+            id_event('POST', 'sch-0d0d0d0d', body={'confirm_paid': True}, suffix='/run'), {}))
 
         kwargs = mock_stepfunctions.start_execution.call_args.kwargs
         assert (status, kwargs['stateMachineArn'], json.loads(kwargs['input'])['kind']) == (202, DOMAIN_SNAPSHOTS_ARN, 'domain_snapshots')

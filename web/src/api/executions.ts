@@ -32,6 +32,8 @@ interface SchedulesResponse {
 export type SchedulePayload = Omit<ScheduleFormData, 'day_of_month' | 'scope'> & {
   day_of_month: number;
   scope?: AnalysisScope;
+  /** Required by the API to save an enabled paid (snapshot) schedule: sent after the dashboard's confirmation. */
+  confirm_paid?: true;
 };
 
 export interface ScheduleRunResponse {message: string;}
@@ -69,9 +71,13 @@ export async function deleteSchedule(id: string): Promise<void> {
   await apiDelete<unknown>(`/schedules/${encodeURIComponent(id)}`, { allowStructured4xx: true });
 }
 
-/** Start the schedule's run now: an analysis with its scope, or its snapshots. */
-export async function runSchedule(id: string): Promise<ScheduleRunResponse> {
-  return apiPost<ScheduleRunResponse>(`/schedules/${encodeURIComponent(id)}/run`, {}, { allowStructured4xx: true });
+/**
+ * Start the schedule's run now: an analysis with its scope, or its snapshots. A snapshot run is paid, so the API
+ * requires `confirmPaid` (sent after the dashboard's confirmation).
+ */
+export async function runSchedule(id: string, confirmPaid = false): Promise<ScheduleRunResponse> {
+  const body = confirmPaid ? { confirm_paid: true } : {};
+  return apiPost<ScheduleRunResponse>(`/schedules/${encodeURIComponent(id)}/run`, body, { allowStructured4xx: true });
 }
 
 interface RankTrackerSchedulesResponse {

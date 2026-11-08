@@ -127,6 +127,9 @@ process.
   - The callback URL answers 500 when resuming fails, so DataForSEO retries; the rank-tracker schedule list says
     `truncated` past 100 trackers; a filtered Visibility view counts `unclassified_keywords` whose latest run
     predates the branded flag; `CitationAnalysis-SeoKeywordMetrics` is documented as a cache of the latest values.
+  - Saving an enabled snapshot schedule or running one now requires `confirm_paid: true` server-side (the dashboard
+    sends it after its confirmation). A site audit sleeps at most 3 s inside a step; a longer 429 pause becomes the
+    state machine's wait. KPI alerts leave a pair unevaluated when any of the previous run's reads failed.
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).

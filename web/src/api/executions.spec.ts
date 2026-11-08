@@ -139,6 +139,14 @@ describe('executions API', () => {
       expect(mockApiPost).toHaveBeenCalledWith('/schedules/sch-1/run', {}, { allowStructured4xx: true });
       expect(result.message).toBe('started');
     });
+
+    it('acknowledges a paid run when the caller confirmed it', async () => {
+      mockApiPost.mockResolvedValue({ message: 'started' });
+
+      await runSchedule('sch-1', true);
+
+      expect(mockApiPost).toHaveBeenCalledWith('/schedules/sch-1/run', { confirm_paid: true }, { allowStructured4xx: true });
+    });
   });
 
   describe('fetchRankTrackerSchedules', () => {

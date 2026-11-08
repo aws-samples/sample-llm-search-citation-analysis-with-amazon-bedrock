@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Any, TypeGuard
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
@@ -184,6 +184,6 @@ def release_if_due(gate_id: str, table: Any = None, states: Any = None) -> bool:
         return False
     try:
         return release(gate.task_token, gate.output, states)
-    except Exception:
+    except (ClientError, BotoCoreError):
         gates.update_item(Key={'cache_key': gate_key(gate_id)}, UpdateExpression='REMOVE released')
         raise

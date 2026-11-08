@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
 
 from shared.dataforseo_callbacks import Arrival
 from testing.module_loader import load_handler_module
@@ -67,6 +68,6 @@ def test_refuses_other_methods(callbacks, gate):
 
 def test_answers_500_when_the_resume_fails_so_dataforseo_retries(callbacks, gate):
     gate.arrival = Arrival(remaining=0, task_token='token', output='{}')
-    gate.release_if_due.side_effect = RuntimeError('throttled')
+    gate.release_if_due.side_effect = ClientError({'Error': {'Code': 'ThrottlingException', 'Message': 'slow'}}, 'SendTaskSuccess')
 
     assert _ping(callbacks, {'gate': GATE, 'id': TASK})['statusCode'] == 500

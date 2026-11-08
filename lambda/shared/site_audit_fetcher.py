@@ -17,8 +17,10 @@ from shared.audit_fetch import FetchResult, fetch_following, fetch_once
 from shared.audit_throttle import MAX_URL_RETRIES, Throttle, now_ms
 from shared.audit_urls import is_crawlable
 
-#: Waits shorter than this happen inside the step; longer ones end it (``FetchDeferredError``).
-MAX_IN_STEP_WAIT_MS = 30_000
+#: Waits up to this happen inside the step (the 1 request/s spacing, a short Retry-After); a longer one ends the
+#: step (``FetchDeferredError``) and becomes the state machine's ``wait_seconds``, so no Lambda sleeps through it.
+#: (TENETS.md, tenets 7 and 8: a short, bounded backoff only).
+MAX_IN_STEP_WAIT_MS = 3_000
 
 
 class FetchDeferredError(Exception):
