@@ -55,8 +55,8 @@ tooling that is not bundled into the dashboard or the Lambda layers is not liste
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
 | [requests](https://requests.readthedocs.io/) | ≥2.31.0 | Apache-2.0 | HTTP calls to the AI engines, search providers and crawled pages |
-| [beautifulsoup4](https://www.crummy.com/software/BeautifulSoup/) | ≥4.12.0 | MIT | HTML parsing |
-| [tzdata](https://github.com/python/tzdata) | ≥2024.1 | Apache-2.0 | IANA time zone database for schedule validation |
+| [beautifulsoup4](https://www.crummy.com/software/BeautifulSoup/) | ≥4.15.0 | MIT | HTML parsing |
+| [tzdata](https://github.com/python/tzdata) | ≥2026.6 | Apache-2.0 | IANA time zone database for schedule validation |
 
 OpenAI, Perplexity, Gemini and Claude (Anthropic API) and the web-search providers are called over their REST APIs with
 `requests`, without vendor SDKs; internal model calls use Amazon Bedrock through boto3. The shared layer uses the boto3
@@ -66,14 +66,14 @@ provided by the Lambda runtime.
 
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
-| [bedrock-agentcore](https://github.com/aws/bedrock-agentcore-sdk-python) | 1.23.1 | Apache-2.0 | Bedrock AgentCore browser sessions |
-| [Playwright](https://playwright.dev/python/) | 1.63.0 | Apache-2.0 | CDP client for the remote browser |
+| [bedrock-agentcore](https://github.com/aws/bedrock-agentcore-sdk-python) | 1.25.2 | Apache-2.0 | Bedrock AgentCore browser sessions |
+| [Playwright](https://playwright.dev/python/) | 1.64.1 | Apache-2.0 | CDP client for the remote browser |
 | [greenlet](https://github.com/python-greenlet/greenlet) | 3.5.6 | MIT AND PSF-2.0 | Playwright dependency |
 | [pyee](https://github.com/jfhbrook/pyee) | 13.0.1 | MIT | Playwright dependency |
-| [websockets](https://github.com/python-websockets/websockets) | 17.1 | BSD-3-Clause | Browser automation stream |
-| [boto3](https://github.com/boto/boto3) | 1.43.98 | Apache-2.0 | AWS SDK for Python (bundled; AgentCore needs a newer SDK than the runtime ships) |
-| [botocore](https://github.com/boto/botocore) | 1.43.98 | Apache-2.0 | boto3 core |
-| [s3transfer](https://github.com/boto/s3transfer) | 0.19.2 | Apache-2.0 | boto3 dependency |
+| [websockets](https://github.com/python-websockets/websockets) | 17.4 | BSD-3-Clause | Browser automation stream |
+| [boto3](https://github.com/boto/boto3) | 1.43.123 | Apache-2.0 | AWS SDK for Python (bundled; AgentCore needs a newer SDK than the runtime ships) |
+| [botocore](https://github.com/boto/botocore) | 1.43.123 | Apache-2.0 | boto3 core |
+| [s3transfer](https://github.com/boto/s3transfer) | 0.19.3 | Apache-2.0 | boto3 dependency |
 | [jmespath](https://github.com/jmespath/jmespath.py) | 1.1.0 | MIT | boto3 dependency |
 
 ## License compliance

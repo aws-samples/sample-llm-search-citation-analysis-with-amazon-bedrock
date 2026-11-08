@@ -243,8 +243,8 @@ def estimate_seo(caller: Caller, route: Route, _arguments: JsonObject) -> Estima
     calls = seo_calls(route, lambda request: _answer(caller, request))
     counts = {'dataforseo_calls': calls.calls, 'price_per_call': calls.per_call}
     summary = f'at most {calls.calls} DataForSEO call(s); {calls.per_call}'
-    notes = ['A cached answer costs nothing. DataForSEO bills every call it makes, also one that finds nothing, '
-             'and the SEO API never re-sends a billed call.']
+    notes = [('A cached answer costs nothing. DataForSEO bills every call it makes, also one that finds nothing, '
+             'and the SEO API never re-sends a billed call.')]
     return Estimate(counts, summary, calls.blocker, notes)
 
 

@@ -1,1 +1,3 @@
+# Not bundled: CDK packages only the handler files, so this function runs the Lambda runtime's boto3
+# (1.42.x on Python 3.12). Keep the floor at what the runtime ships; the crawler layer bundles its own SDK.
 boto3>=1.34.0

@@ -98,8 +98,8 @@ def test_bot_specific_robots_meta_is_kept():
 
 
 def test_json_ld_graph_is_flattened_and_types_shortened():
-    data = read_json_ld(['{"@graph": [{"@type": "schema:Organization", "sameAs": ["https://x.example.org/"]},'
-                         ' {"@type": ["WebSite", "https://schema.org/WebPage"]}]}'])
+    data = read_json_ld([('{"@graph": [{"@type": "schema:Organization", "sameAs": ["https://x.example.org/"]},'
+                         ' {"@type": ["WebSite", "https://schema.org/WebPage"]}]}')])
 
     assert (data.types, data.organizations, data.organizations_with_same_as) == (
         ('Organization', 'WebPage', 'WebSite'), 1, 1,

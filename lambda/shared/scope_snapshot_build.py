@@ -179,7 +179,7 @@ class _Fold:
         if isinstance(error, NotImplementedError):
             logger.info('Scope snapshot: the %s artifacts are not implemented yet; skipped', name)
         else:
-            logger.exception('Scope snapshot: the %s artifacts failed; skipped for this build', name, exc_info=error)
+            logger.error('Scope snapshot: the %s artifacts failed; skipped for this build', name, exc_info=error)
 
     def add(self, doc: KeywordLatestDoc, scope_keys: list[str]) -> None:
         for key in scope_keys:
