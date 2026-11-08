@@ -79,10 +79,14 @@ test('the Markdown names author and role, strips the marker, and keeps the revie
 })
 
 test('a long conversation keeps the newest entries and the reviewer\'s last review, and says what it left out', () => {
-  const many = Array.from({ length: MAX_ENTRIES + 5 }, (_, i) => comment('bob', 'NONE', `c${i}`, `2026-11-08T${String(i % 24).padStart(2, '0')}:${String(i).padStart(2, '0')}:00Z`))
+  const at = (i) => new Date(Date.UTC(2026, 10, 8, 0, i)).toISOString()
+  const many = Array.from({ length: MAX_ENTRIES + 5 }, (_, i) => comment('bob', 'NONE', `c${i}`, at(i)))
   const md = conversationMarkdown([own('old review', '2026-11-07T00:00:00Z'), ...many], [], [])
   assert.match(md, /^\(5 older entries omitted\)/)
   assert.match(md, /old review/)
+  assert.match(md, new RegExp(`^> c${MAX_ENTRIES + 4}$`, 'm'))
+  assert.match(md, /^> c5$/m)
+  assert.doesNotMatch(md, /^> c4$/m)
 })
 
 test('a forged heading inside a comment stays quoted, so only generated headings carry a role', () => {
