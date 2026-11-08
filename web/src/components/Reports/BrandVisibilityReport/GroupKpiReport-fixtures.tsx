@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { ListRequest } from '../../../api/scopedListPages';
 import {
   render, screen
 } from '@testing-library/react';
@@ -7,11 +8,10 @@ import type {
 } from '../../../types/domain/groupKpiHistory';
 import userEvent from '@testing-library/user-event';
 import { GroupKpiReport } from './GroupKpiReport';
-import { GroupKpiExportButton } from './GroupKpiExportButton';
 import {
   buildDetail, buildHistory, detailWithKeywordRun, historyWithKeywordRun, RUN_1
 } from './groupKpiHistory-fixtures';
-import type { GroupKpiDetail } from './groupKpiDetail';
+import type { GroupKpiDetail } from './groupKpiHistory-fixtures';
 import { stubGroupDetail } from './groupKpiDetail-fixtures';
 import { sectionTable } from '../layout/reportQueries-fixtures';
 
@@ -30,6 +30,8 @@ interface Options {
   readonly history?: GroupKpiHistoryResponse | null;
   readonly loading?: boolean;
   readonly error?: string | null;
+  /** The request `history` answered, for the keyword list's next pages. */
+  readonly request?: ListRequest | null;
   /** What the drivers and keyword detail sections read on demand (the spec mocks `hooks/useGroupKpiDetail`). */
   readonly detail?: GroupKpiDetail;
   /** The on-demand reads still loading, or failed with `error`. */
@@ -44,15 +46,15 @@ interface Options {
  * `buildDetail()` unless told otherwise; returns the period callback.
  */
 export function renderGroupKpiReport({
-  history = buildHistory(), loading = false, error = null, detail = buildDetail(), detailState = {}
+  history = buildHistory(), loading = false, error = null, request = null, detail = buildDetail(), detailState = {}
 }: Options = {}) {
   stubGroupDetail(detail, detailState);
   const onDaysChange = vi.fn<(days: number) => void>();
   render(
     <GroupKpiReport
       scope={HOTEL_SOL_SCOPE}
-      scopeLabel="Hotel Sol"
       history={history}
+      request={request}
       loading={loading}
       error={error}
       days={90}
@@ -96,11 +98,4 @@ export async function renderGroupKpiReportAt(timestamp: string): Promise<void> {
 /** The "Brand mentioned" cell of each body row of the keyword detail table, top to bottom. */
 export function keywordDetailMentions(): string[] {
   return sectionTable('Keyword detail').slice(1).map((row) => row[1]);
-}
-
-/** Mount the export button on the second run of `buildHistory()` and click it. */
-export async function clickGroupKpiExport(): Promise<void> {
-  const history = buildHistory();
-  render(<GroupKpiExportButton scope={HOTEL_SOL_SCOPE} scopeLabel="Hotel Sol" history={history} run={history.runs[1]} />);
-  await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
 }

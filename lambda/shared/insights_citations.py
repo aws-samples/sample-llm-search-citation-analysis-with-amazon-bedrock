@@ -12,13 +12,14 @@ so a page cited twice in one answer counts once, as every citation KPI does:
   downloads) told apart from web pages. The grouping knows no brand: a
   document is recognised from its path alone.
 
-Pure functions, no I/O; ``shared.insights_engine`` assembles them with the
-other facts.
+Each fact is counted per keyword (``*_partial``), summed over a scope
+(``merge_*``) and shaped (``*_from``), so a scope snapshot and a live request
+compute it the same way. Pure functions, no I/O; ``shared.insights_engine``
+assembles them with the other facts.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlparse
@@ -29,7 +30,7 @@ from shared.kpi_engine import COMPETITOR, Answer, matches_domain, normalize_doma
 DOCUMENT_SUFFIXES: tuple[str, ...] = ('.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx')
 #: Path segments under which sites serve file downloads.
 DOCUMENT_SEGMENTS = frozenset({'static-files', 'files', 'download', 'downloads', 'dam'})
-#: How many of the most-cited owned URLs the owned-pages fact lists.
+#: How many of the most-cited owned URLs an answer's owned-pages fact lists first (``shared.insights_pages``).
 OWNED_PAGES_LIMIT = 25
 
 OWNED = 'owned'
@@ -58,13 +59,6 @@ def competitor_domains_from(brand_config: Mapping[str, Any]) -> dict[str, list[s
     return dict(sorted(domains_by_brand.items()))
 
 
-def _by_engine(answers: Iterable[Answer]) -> dict[str, list[Answer]]:
-    grouped: dict[str, list[Answer]] = defaultdict(list)
-    for answer in answers:
-        grouped[answer.provider].append(answer)
-    return dict(sorted(grouped.items()))
-
-
 def _host(url: str) -> str:
     """The host of a cited URL; ``cited_urls`` only holds URLs with one."""
     return normalize_domain(url) or ''
@@ -82,39 +76,57 @@ def _owner(domain: str, owned_domains: Sequence[str], competitor_domains: Compet
     return (COMPETITOR, brand) if brand is not None else (THIRD_PARTY, '')
 
 
-def _ownership_row(engine: str, answers: list[Answer], owned_domains: Sequence[str], competitor_domains: CompetitorDomains) -> dict[str, Any]:
-    counts: dict[tuple[str, str], int] = defaultdict(int)
+def ownership_partial(answers: Iterable[Answer], owned_domains: Sequence[str], competitor_domains: CompetitorDomains) -> dict[str, dict[str, Any]]:
+    """Per AI engine of one keyword's answers: answers, and the (answer, URL) citations of the owned domains, each competitor and third parties."""
+    rows: dict[str, dict[str, Any]] = {}
     for answer in answers:
+        row = rows.setdefault(answer.provider, {'answers': 0, 'owned': 0, 'third_party': 0, 'competitors': {}})
+        row['answers'] += 1
         for url in answer.cited_urls:
-            counts[_owner(_host(url), owned_domains, competitor_domains)] += 1
-    return {
-        'engine': engine,
-        'answers': len(answers),
-        'citations': sum(counts.values()),
-        'owned': counts[OWNED, ''],
-        'competitors': {brand: counts[COMPETITOR, brand] for brand in competitor_domains},
-        'third_party': counts[THIRD_PARTY, ''],
-    }
+            owner, brand = _owner(_host(url), owned_domains, competitor_domains)
+            if owner == COMPETITOR:
+                row['competitors'][brand] = row['competitors'].get(brand, 0) + 1
+            else:
+                row[owner] += 1
+    return rows
 
 
-def citation_ownership_facts(
-    answers: Iterable[Answer],
-    owned_domains: Iterable[str] = (),
-    competitor_domains: CompetitorDomains | None = None,
+def merge_ownership(acc: dict[str, dict[str, Any]], part: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """``acc`` with ``part``'s counts added (``ownership_partial`` shapes); ``part`` is left as it is."""
+    for engine, counts in part.items():
+        row = acc.setdefault(engine, {'answers': 0, 'owned': 0, 'third_party': 0, 'competitors': {}})
+        for key in ('answers', 'owned', 'third_party'):
+            row[key] += int(counts[key])
+        for brand, cited in counts['competitors'].items():
+            row['competitors'][brand] = row['competitors'].get(brand, 0) + int(cited)
+    return acc
+
+
+def citation_ownership_from(
+    ownership: Mapping[str, Mapping[str, Any]], owned_configured: bool, competitor_domains: CompetitorDomains | None = None,
 ) -> dict[str, Any]:
-    """Per AI engine (in name order), the (answer, URL) citations of the owned domains, each competitor and third parties.
+    """The citation-ownership fact of a scope's merged ``ownership_partial`` counts.
 
-    ``citations`` is their total, so ``owned + sum(competitors) + third_party``.
-    Without competitor domains every non-owned citation is third party; the
-    two flags say which of the split is measured.
+    Per AI engine (in name order), the (answer, URL) citations of the owned
+    domains, each competitor and third parties; ``citations`` is their total,
+    so ``owned + sum(competitors) + third_party``. Without competitor domains
+    every non-owned citation is third party; the two flags say which of the
+    split is measured.
     """
-    owned = [domain for domain in owned_domains if normalize_domain(domain)]
     competitors = dict(competitor_domains or {})
-    return {
-        'owned_configured': bool(owned),
-        'competitors_configured': bool(competitors),
-        'engines': [_ownership_row(engine, rows, owned, competitors) for engine, rows in _by_engine(answers).items()],
-    }
+    engines = []
+    for engine in sorted(ownership):
+        row = ownership[engine]
+        by_brand = {brand: int(row['competitors'].get(brand, 0)) for brand in competitors}
+        engines.append({
+            'engine': engine,
+            'answers': int(row['answers']),
+            'citations': int(row['owned']) + int(row['third_party']) + sum(by_brand.values()),
+            'owned': int(row['owned']),
+            'competitors': by_brand,
+            'third_party': int(row['third_party']),
+        })
+    return {'owned_configured': owned_configured, 'competitors_configured': bool(competitors), 'engines': engines}
 
 
 # ---------------------------------------------------------------------------
@@ -143,33 +155,41 @@ def page_of(url: str) -> tuple[str, str, bool]:
     return page, section, is_document
 
 
-def _owned_citations(answers: Iterable[Answer], owned_domains: Sequence[str]) -> list[tuple[Answer, str, str, bool]]:
-    """Every (answer, owned page) pair once, with the page's section and kind."""
-    pairs: list[tuple[Answer, str, str, bool]] = []
+def owned_pages_partial(answers: Iterable[Answer], owned_domains: Sequence[str]) -> dict[str, Any]:
+    """One keyword's owned pages: per page its section, kind, citing answers and engines; per engine its document and page citations.
+
+    Every (answer, owned page) pair counts once. Empty without owned domains.
+    """
+    pages: dict[str, dict[str, Any]] = {}
+    engines: dict[str, list[int]] = {}
+    if not owned_domains:
+        return {'pages': pages, 'engines': engines}
     for answer in answers:
-        pages = {page_of(url) for url in answer.cited_urls if matches_domain(_host(url), owned_domains)}
-        pairs.extend((answer, page, section, is_document) for page, section, is_document in sorted(pages))
-    return pairs
+        cited = {page_of(url) for url in answer.cited_urls if matches_domain(_host(url), owned_domains)}
+        for page, section, is_document in sorted(cited):
+            row = pages.setdefault(page, {'section': section, 'is_document': is_document, 'citations': 0, 'engines': []})
+            row['citations'] += 1
+            if answer.provider not in row['engines']:
+                row['engines'] = sorted([*row['engines'], answer.provider])
+            split = engines.setdefault(answer.provider, [0, 0])
+            split[0 if is_document else 1] += 1
+    return {'pages': pages, 'engines': engines}
 
 
-def _page_rows(pairs: list[tuple[Answer, str, str, bool]]) -> list[dict[str, Any]]:
-    citing: dict[str, list[Answer]] = defaultdict(list)
-    kinds: dict[str, tuple[str, bool]] = {}
-    for answer, page, section, is_document in pairs:
-        citing[page].append(answer)
-        kinds[page] = (section, is_document)
-    rows = [
-        {
-            'url': page,
-            'section': kinds[page][0],
-            'is_document': kinds[page][1],
-            'citations': len(answers),
-            'engines': sorted({answer.provider for answer in answers}),
-        }
-        for page, answers in citing.items()
-    ]
-    rows.sort(key=lambda row: (-row['citations'], row['url']))
-    return rows
+def merge_owned_pages(acc: dict[str, Any], part: Mapping[str, Any]) -> dict[str, Any]:
+    """``acc`` with ``part``'s pages and engine counts added (``owned_pages_partial`` shapes); ``part`` is left as it is."""
+    for page, counted in part['pages'].items():
+        row = acc['pages'].get(page)
+        if row is None:
+            acc['pages'][page] = {**counted, 'engines': list(counted['engines'])}
+            continue
+        row['citations'] += int(counted['citations'])
+        row['engines'] = sorted({*row['engines'], *counted['engines']})
+    for engine, (documents, web_pages) in part['engines'].items():
+        split = acc['engines'].setdefault(engine, [0, 0])
+        split[0] += int(documents)
+        split[1] += int(web_pages)
+    return acc
 
 
 def _section_rows(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -182,32 +202,30 @@ def _section_rows(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(totals.values(), key=lambda row: (-row['citations'], row['section']))
 
 
-def _split(pairs: Iterable[tuple[Answer, str, str, bool]]) -> dict[str, int]:
-    kinds = [is_document for _answer, _page, _section, is_document in pairs]
-    return {'document_citations': sum(kinds), 'page_citations': len(kinds) - sum(kinds)}
+def _split(documents: int, web_pages: int) -> dict[str, int]:
+    return {'document_citations': documents, 'page_citations': web_pages}
 
 
-def owned_pages_facts(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> dict[str, Any]:
-    """The brand's most-cited owned pages, their sections, and documents against web pages per AI engine.
+def owned_pages_from(owned: Mapping[str, Any]) -> dict[str, Any]:
+    """The owned-pages fact of a scope's merged ``owned_pages_partial``.
 
-    ``pages`` holds the ``OWNED_PAGES_LIMIT`` most-cited pages (citations =
-    answers citing the page), ``sections`` every section's totals over all
+    ``pages`` holds every owned page, most cited first (citations = answers
+    citing the page; an answer lists the first ``OWNED_PAGES_LIMIT``,
+    ``shared.insights_pages``), ``sections`` every section's totals over all
     owned pages, ``engines`` each engine citing an owned page with its
     document and web-page citations, and the two totals cover every engine.
-    Empty without owned domains.
     """
-    owned = [domain for domain in owned_domains if normalize_domain(domain)]
-    pairs = _owned_citations(answers, owned) if owned else []
-    pages = _page_rows(pairs)
-    by_engine: dict[str, list[tuple[Answer, str, str, bool]]] = defaultdict(list)
-    for pair in pairs:
-        by_engine[pair[0].provider].append(pair)
+    pages = [
+        {'url': page, 'section': row['section'], 'is_document': bool(row['is_document']), 'citations': int(row['citations']), 'engines': list(row['engines'])}
+        for page, row in owned['pages'].items()
+    ]
+    pages.sort(key=lambda row: (-row['citations'], row['url']))
+    engines = owned['engines']
     return {
-        'pages': pages[:OWNED_PAGES_LIMIT],
-        'pages_omitted': max(len(pages) - OWNED_PAGES_LIMIT, 0),
+        'pages': pages,
         'sections': _section_rows(pages),
-        'engines': [{'engine': engine, **_split(by_engine[engine])} for engine in sorted(by_engine)],
-        **_split(pairs),
+        'engines': [{'engine': engine, **_split(int(engines[engine][0]), int(engines[engine][1]))} for engine in sorted(engines)],
+        **_split(sum(int(split[0]) for split in engines.values()), sum(int(split[1]) for split in engines.values())),
     }
 
 
@@ -216,8 +234,12 @@ __all__ = [
     'DOCUMENT_SUFFIXES',
     'OWNED_PAGES_LIMIT',
     'CompetitorDomains',
-    'citation_ownership_facts',
+    'citation_ownership_from',
     'competitor_domains_from',
-    'owned_pages_facts',
+    'merge_owned_pages',
+    'merge_ownership',
+    'owned_pages_from',
+    'owned_pages_partial',
+    'ownership_partial',
     'page_of',
 ]

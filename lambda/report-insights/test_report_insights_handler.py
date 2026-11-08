@@ -11,10 +11,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared import scoped_reports
+from shared import partial_insights, scoped_reports
+from shared.artifact_insights import InsightsBuilder
+from shared.artifact_registry import fold_scope
 from shared.markets import markets_from_item
 from shared.models import BedrockInvocationError
+from shared.partial_contract import KeywordLatest, PartialConfig
 from shared.request_deadline import Deadline
+from shared.snapshot_artifacts import SnapshotScope
+from testing.action_handler_fixtures import snapshot_route
 from testing.clocks import JumpClock, SteppedClock
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
@@ -27,6 +32,7 @@ from testing.report_insights_fixtures import (
     ranked_answer_row,
     recommendation_item,
 )
+from testing.snapshot_fakes import FakeSnapshotArtifacts
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENGINE_ID = 'engine_play:openai'
@@ -453,3 +459,44 @@ class TestTimeBudget:
             worker_module.handler(_MAP_ITEM, context)
 
         assert budgets == [120 - worker_module.NARRATIVE_RESERVE_SECONDS]
+
+
+def _stored_insights(timestamp: str = RUN_TIMESTAMP, *, stale: bool = False) -> FakeSnapshotArtifacts:
+    """A group build whose insights artifact holds `_ROWS` stamped `timestamp`."""
+    rows = [{**row, 'timestamp': timestamp} for row in _ROWS]
+    part = partial_insights.build(rows, PartialConfig(brand_config=_BRAND_CONFIG, personas=()))
+    assert part is not None
+    latest: KeywordLatest = {
+        'v': 1, 'keyword': rows[0]['keyword'], 'keyword_id': 'k1', 'config': '',
+        'latest': {'timestamp': timestamp, 'parts': {'insights': part}}, 'previous': None,
+    }
+    scope = SnapshotScope(scope_dir='group-1', kind='group', group_id='group-1', market_id='global', keywords_total=2)
+    return FakeSnapshotArtifacts(fold_scope([InsightsBuilder()], [latest], scope), keywords_total=2, stale=stale)
+
+
+class TestLargeGroupsReadTheSnapshot:
+    @staticmethod
+    def _answer_reads(module: ModuleType, stored: FakeSnapshotArtifacts) -> tuple[int, int]:
+        """``(narratives written, SearchResults reads)`` of one group-1 run whose scope snapshot is ``stored``."""
+        search = MagicMock()
+        search.query.return_value = {'Items': _ROWS}
+        with snapshot_route(stored), _worker(module, _model_reply(model_narrative([_VALID_INSIGHT])), search=search) as narratives:
+            module.handler(_workflow_event('group-1'), None)
+        return narratives.put_item.call_count, search.query.call_count
+
+    def test_writes_a_large_groups_narrative_from_its_snapshot_without_reading_answers(self, worker_module) -> None:
+        assert self._answer_reads(worker_module, _stored_insights()) == (1, 0)
+
+    @pytest.mark.parametrize('stored', [
+        pytest.param(_stored_insights(stale=True), id='stale'),
+        pytest.param(_stored_insights('2026-01-01T00:00:00Z'), id='older-than-the-run'),
+    ])
+    def test_reads_the_answers_when_the_snapshot_cannot_serve_the_run(self, worker_module, stored: FakeSnapshotArtifacts) -> None:
+        assert self._answer_reads(worker_module, stored)[1] > 0
+
+    def test_a_group_keeps_every_keyword_beyond_the_old_cap(self, worker_module) -> None:
+        crowd = [{'id': f'k{i}', 'keyword': f'kw {i:03d}', 'group_ids': {'group-1'}} for i in range(101)]
+        with _worker(worker_module, _model_reply(model_narrative()), keywords=crowd):
+            members = worker_module._group_keywords([('group-1', 'global')])
+
+        assert len(members[('group-1', 'global')]) == 101

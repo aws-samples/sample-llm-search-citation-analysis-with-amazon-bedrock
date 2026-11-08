@@ -1,3 +1,5 @@
+import type { ScopeCoverage } from './scopeCoverage';
+
 export interface Stats {
   total_searches: number;
   total_citations: number;
@@ -47,11 +49,15 @@ export interface CitationsPage extends Citations {
   /** The server hit a read cap: the totals cover part of the scope. */
   truncated: boolean;
   /** Where the page came from: the citation rollup built after the last run, or a live read. Absent from older API builds. */
-  source?: 'rollup' | 'live';
+  source?: 'rollup' | 'snapshot' | 'live';
   /** When the rollup that answered was built (ISO 8601); `null` for a live read. */
   as_of?: string | null;
   /** A rollup exists but no longer matches the scope or the brand config: this page was read live while it is rebuilt. */
   stale?: boolean;
+  /** A rebuild is running (2.45.0); the page refetches until `stale` is false. */
+  refreshing?: boolean;
+  /** How many of the scope's keywords the totals include (2.45.0). */
+  coverage?: ScopeCoverage;
 }
 
 export interface Search {

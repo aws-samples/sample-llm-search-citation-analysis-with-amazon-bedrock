@@ -15,6 +15,7 @@ import type {
   HistoricalTrendsResponse, Recommendation, ReportScopeInfo
 } from '../types';
 import type { BrandKpis } from '../types/domain/groupKpiHistory';
+import type { ScopedResponseFields } from '../types/domain/scopeCoverage';
 
 /** A keyword whose visibility score moved most since its previous period. */
 export interface ReportsOverviewMover {
@@ -35,7 +36,7 @@ interface ReportsOverviewSummary {
  * (`lambda/api/get-reports-overview.py`), the top movers and the top
  * recommendations.
  */
-export interface ReportsOverviewResponse {
+export interface ReportsOverviewResponse extends ScopedResponseFields {
   generated_at: string;
   scope: ReportScopeInfo;
   period_type: 'day' | 'week' | 'month';
@@ -78,19 +79,27 @@ export interface CompetitorExclusiveSource {
 
 export interface CompetitorRollup {
   competitor: string;
+  /** The first page of outranked keywords (all of them before 2.45.0). */
   outranked_keywords: CompetitorOutrankedKeyword[];
+  /** The next page (`next_token=`); `null`/absent on the last. */
+  outranked_keywords_next_token?: string | null;
+  outranked_keywords_total?: number;
   /** Every source citing the competitor but no first-party brand (only the best ten are listed). */
   exclusive_source_count: number;
   /** How many of those sources are high priority (cited by two engines or more). */
   high_priority_source_count: number;
-  /** The ten exclusive sources with the best outreach lift. */
+  /** The first page of exclusive sources, best outreach lift first (the best ten before 2.45.0). */
   outreach_targets: CompetitorExclusiveSource[];
+  /** The next page of every exclusive source (`view=outreach&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  outreach_targets_next_token?: string | null;
+  /** How many exclusive sources there are in all (else `exclusive_source_count`). */
+  outreach_targets_total?: number;
 }
 
 /** `GET /reports/competitor?competitor=…`: the rollup of that one competitor. */
-export interface CompetitorReportResponse {
+export interface CompetitorReportResponse extends ScopedResponseFields {
   keywords_analyzed: number;
-  /** Whether active keywords beyond `keyword_limit` were left out. */
+  /** Whether a live read the time budget cut left keywords out (before 2.45.0: beyond `keyword_limit`). */
   keywords_truncated?: boolean;
   rollup: CompetitorRollup;
 }

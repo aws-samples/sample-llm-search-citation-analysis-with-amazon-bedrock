@@ -14,6 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import {
   getChartTheme, themedAxis, themedTooltip, type ChartTheme
 } from '../ui/chartTheme';
+import { ExportAllButton } from '../ui/ExportAllButton';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -131,7 +132,10 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-      <h3 className="text-sm font-medium text-gray-900 mb-4">Brand Ranking by Persona</h3>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-gray-900">Brand Ranking by Persona</h3>
+        <ExportAllButton view="persona-rankings" params={{ keyword: data.keyword }} />
+      </div>
       <Bar data={chartData} options={options} />
     </div>
   );

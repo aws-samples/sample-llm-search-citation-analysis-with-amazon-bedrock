@@ -2,7 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import type * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { allow } from './permissions';
-import { SeoFeatureConstruct, stringKey } from './seo-feature';
+import { SeoFeatureConstruct } from './seo-feature';
+import { stringKey } from './tables';
 
 export const SITE_AUDIT_STATE_MACHINE_NAME = 'CitationAnalysis-SiteAudit';
 export const SEO_AUDITS_TABLE_NAME = 'CitationAnalysis-SeoAudits';

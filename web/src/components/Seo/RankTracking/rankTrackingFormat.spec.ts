@@ -1,11 +1,9 @@
 import {
   describe, expect, it
 } from 'vitest';
+import {buildRankCell} from '../../../api/seoRankTracking-fixtures';
 import {
-  buildRankCell, buildResultRow
-} from '../../../api/seoRankTracking-fixtures';
-import {
-  featureLabels, inMarketText, positionDisplay, sortByPosition
+  featureLabels, inMarketText, positionDisplay
 } from './rankTrackingFormat';
 
 describe('positionDisplay', () => {
@@ -78,30 +76,6 @@ describe('positionDisplay', () => {
       position: null,
       previous_position: null 
     })).text).toBe('Not found');
-  });
-});
-
-describe('sortByPosition', () => {
-  it('puts keywords without a position last', () => {
-    const rows = [
-      buildResultRow({
-        keyword_id: 'a',
-        keyword: 'a',
-        desktop: buildRankCell({ position: null }) 
-      }),
-      buildResultRow({
-        keyword_id: 'b',
-        keyword: 'b',
-        desktop: buildRankCell({ position: 9 }) 
-      }),
-      buildResultRow({
-        keyword_id: 'c',
-        keyword: 'c',
-        desktop: buildRankCell({ position: 2 }) 
-      }),
-    ];
-
-    expect(sortByPosition(rows, 'desktop').map((row) => row.keyword)).toStrictEqual(['c', 'b', 'a']);
   });
 });
 

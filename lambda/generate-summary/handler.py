@@ -18,10 +18,14 @@ from typing import Any
 import boto3
 from citation_rollup_action import build_citation_rollup
 from map_run_results import load_keyword_results
+from scope_snapshot_action import build_scope_snapshots, view_job
+from snapshot_build_steps import STEP_ACTIONS, build_step
 
 from shared.citation_rollup import BUILD_ACTION
 from shared.dynamo_decimal import positive_int
 from shared.provider_counts import add_error_categories, empty_provider_counts
+from shared.scope_snapshot import BUILD_ACTION as SCOPE_SNAPSHOT_ACTION
+from shared.scope_snapshot import VIEW_JOB_ACTION
 from shared.step_function_response import log_error
 from shared.utils import get_timestamp, get_timestamp_compact
 
@@ -397,7 +401,11 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     Lambda handler for generating execution summary.
 
     ``{"action": "build_citation_rollup", ...}`` builds the citation rollup
-    instead (``citation_rollup_action``); every other event is a summary.
+    instead (``citation_rollup_action``), ``{"action": "build_scope_snapshots", ...}``
+    the scope snapshots, ``{"action": "view_job", "job_id": ...}`` one view
+    job (``scope_snapshot_action``) and the ``snapshot_build_*`` actions one
+    step of the distributed build (``snapshot_build_steps``); every other
+    event is a summary.
 
     Input (as the state machine actually delivers it):
     {
@@ -454,6 +462,12 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     logger.info('Received event: %s', json.dumps(event, default=str)[:2000])
     if isinstance(event, dict) and event.get('action') == BUILD_ACTION:
         return build_citation_rollup(event, context)
+    if isinstance(event, dict) and event.get('action') == SCOPE_SNAPSHOT_ACTION:
+        return build_scope_snapshots(event, context)
+    if isinstance(event, dict) and event.get('action') == VIEW_JOB_ACTION:
+        return view_job(event, context)
+    if isinstance(event, dict) and event.get('action') in STEP_ACTIONS:
+        return build_step(event, context)
 
     try:
         execution_id, keyword_results, requested_summary_bucket, from_map_run = _event_keyword_results(event, context)

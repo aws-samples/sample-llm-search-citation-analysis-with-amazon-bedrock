@@ -9,19 +9,19 @@ import {
   cancelAudit, fetchAudit, fetchIssuePages, startAudit
 } from '../../../api/seoAudits';
 import {
-  AUDIT_ID, PAGE_URL, buildAiReadiness, buildAuditDetail, buildIssuesResponse, buildSiteAudit
+  AUDIT_ID, PAGE_URL, buildAuditDetail, buildSiteAudit
 } from '../../../api/seoAudits-fixtures';
 import { AUDIT_POLL_MS } from '../../../hooks/useSiteAuditDetail';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
 import { findBrandTrackingLinkElement } from '../settingsDomains-fixtures';
 import {
-  ISSUE_TYPES, openAffectedPages, renderSiteAudit, setupSiteAudit
+  openAffectedPages, renderSiteAudit, setupSiteAudit
 } from './SiteAuditView-fixtures';
 import {
-  lastExcelExport, stubExcelExport
-} from '../../../test/tableExcelExport';
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 
-vi.mock('../../../exporters/tableExcel', { spy: true });
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoAudits');
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
@@ -38,7 +38,6 @@ const RUNNING = buildAuditDetail({
 beforeEach(() => {
   vi.mocked(isSeoApiConfigured).mockReturnValue(true);
   setupSiteAudit();
-  stubExcelExport();
 });
 
 afterEach(() => {
@@ -197,41 +196,30 @@ describe('SiteAuditView running audit', () => {
   });
 });
 
-describe('SiteAuditView Excel exports', () => {
-  it('exports every issue type of the audit named after the site host', async () => {
-    const { user } = renderSiteAudit();
-    await user.click(await screen.findByTitle('Every issue type of this audit'));
-
-    const exported = lastExcelExport();
-    expect(exported.rows).toStrictEqual(ISSUE_TYPES);
-    expect(exported.file).toStrictEqual(['Site audit issues', 'site-audit-issues', 'www.example.com']);
-  });
-
-  it('exports the loaded affected pages of the open issue type', async () => {
-    const {
-      user, dialog
-    } = await openAffectedPages();
-    await user.click(within(dialog).getByRole('button', { name: 'Export to Excel' }));
-
-    const exported = lastExcelExport();
-    expect(exported.rows).toStrictEqual(buildIssuesResponse().items);
-    expect(exported.file).toStrictEqual(['Affected pages', 'site-audit-pages', 'www.example.com']);
-  });
-
-  it('exports the AI crawlers of the readiness panel', async () => {
-    const { user } = renderSiteAudit();
-    await user.click(await screen.findByTitle('Each AI crawler with its robots.txt access'));
-
-    const exported = lastExcelExport();
-    expect(exported.rows).toStrictEqual(buildAiReadiness().bots);
-    expect(exported.file).toStrictEqual(['AI crawler access', 'site-audit-ai-crawlers', 'www.example.com']);
-  });
-
-  it('offers no AI crawler export when robots.txt did not answer', async () => {
-    setupSiteAudit({ detail: buildAuditDetail({ ai_readiness: buildAiReadiness({ robots_kind: 'disallow_all' }) }) });
+describe('SiteAuditView export', () => {
+  it('exports the finished audit from the server', async () => {
     renderSiteAudit();
-    await screen.findByText(/robots.txt did not answer/);
 
-    expect(screen.queryByTitle('Each AI crawler with its robots.txt access')).not.toBeInTheDocument();
+    await chooseExportFormat('csv');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'seo-site-audit',
+      params: { audit_id: AUDIT_ID },
+      format: 'csv',
+    });
+  });
+
+  it('offers no export while the audit runs', async () => {
+    setupSiteAudit({ detail: RUNNING });
+    renderSiteAudit();
+    await screen.findByRole('button', { name: 'Cancel audit' });
+
+    expect(screen.queryByRole('button', { name: 'Export all' })).not.toBeInTheDocument();
+  });
+
+  it('offers no export inside the affected pages dialog', async () => {
+    const { dialog } = await openAffectedPages();
+
+    expect(within(dialog).queryByRole('button', { name: 'Export all' })).not.toBeInTheDocument();
   });
 });

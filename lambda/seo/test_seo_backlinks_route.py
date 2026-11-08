@@ -272,9 +272,9 @@ class TestExportChunks:
 
         assert answer.body['has_more'] is False
 
-    def test_carries_the_backlinks_export_prices(self, table):
+    def test_carries_the_backlinks_export_prices_and_six_hour_cache(self, table):
         assert table({'target': 'example.com'}).body['export'] == {
-            'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.024, 'row_usd': 0.000036,
+            'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.024, 'row_usd': 0.000036, 'cache_hours': 6,
         }
 
     @pytest.mark.parametrize(('overrides', 'field'), [
@@ -290,6 +290,24 @@ class TestExportChunks:
         assert (answer.status, answer.body['code'], answer.body['field'], answer.table.call_count) == (
             400, 'VALIDATION_ERROR', field, 0,
         )
+
+
+
+class TestCachedOnly:
+    def test_answers_a_cached_only_miss_409_not_cached_without_calling_dataforseo(self, table):
+        answer = table({**EXPORT_CHUNK, 'cached_only': True})
+
+        assert (answer.status, answer.body['code'], answer.table.call_count) == (409, 'NOT_CACHED', 0)
+
+    def test_answers_a_cached_only_hit_from_the_cache_for_free(self, table):
+        answer = table({**EXPORT_CHUNK, 'cached_only': True}, cached={'rows': [LINK], 'total_count': 1, 'fetched_at': 'x'})
+
+        assert (answer.status, answer.body['rows'], answer.table.call_count) == (200, [LINK], 0)
+
+    def test_stores_nothing_on_a_cached_only_miss(self, table):
+        answer = table({**EXPORT_CHUNK, 'cached_only': True})
+
+        assert answer.put_cached.call_count == 0
 
 
 class TestSnapshots:

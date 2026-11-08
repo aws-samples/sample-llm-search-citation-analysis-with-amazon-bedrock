@@ -24,21 +24,41 @@ Takes the scope every KPI endpoint takes — one of ``group_id``,
 over. A scope without an active keyword is refused: there is nothing to draw
 an insight from.
 
-Reads stop at the request's time budget: keywords left unread are left out
-of the facts and ``keywords_truncated`` is true; a history the budget or the
-row cap shortened says where in ``history_truncated_before``.
+Complete for every scope (2.45.0): a scope whose latest runs fit the live
+budget is read whole for the request (``shared.action_scope_serve``); a
+larger one is served from its scope snapshot (``shared.artifact_insights``:
+the facts of every keyword, a group's stability for the ``days`` presets),
+or answers 202 while a view job computes it (any other ``days`` of a large
+group). Every body carries ``coverage``, ``source``, ``as_of``, ``stale`` and
+``refreshing``.
+
+Full lists (2.45.0 wave 5): the facts list the first 25 owned pages and 50
+prompt-by-engine keywords of their whole lists, with ``pages_total`` /
+``keywords_total`` and ``pages_next_token`` / ``keywords_next_token`` (in
+``facts.owned_pages`` / ``facts.prompt_engine``); ``view=owned_pages`` /
+``view=prompt_engine`` with that ``next_token`` answers the next page
+(``shared.insights_pages``, 100 a page, its own ``next_token``).
+
+On the live path reads stop at the request's time budget:
+keywords left unread are left out of the facts and ``keywords_truncated`` is
+true; a history the budget or the row cap shortened says where in
+``history_truncated_before``.
 """
 
 import functools
 from collections.abc import Callable
 from typing import Any
 
+from shared import action_scope_serve
+from shared.action_scope_serve import SnapshotRequest, live_build_id, page_offset, serve_snapshot
 from shared.answer_queries import history_since, query_latest_run_rows
 from shared.api_response import success_response, validation_error
+from shared.cursors import CURSOR_QUERY_PARAM
 from shared.decorators import api_handler, validate
 from shared.insights_citations import competitor_domains_from
-from shared.insights_engine import compute_insights
+from shared.insights_engine import compute_facts, insights_from_facts
 from shared.insights_narrative import group_scope_key, load_narrative
+from shared.insights_pages import PAGED_FACTS, facts_page, with_page_tokens
 from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.markets import market_scoped_key
@@ -47,18 +67,16 @@ from shared.scoped_reports import (
     TREND_WINDOW_PARAMS,
     ScopeRead,
     WindowRuns,
-    capped_scope,
     read_scope_keywords,
     required_report_scope,
-    scope_read_fields,
     window_histories,
 )
 from shared.search_results import search_results_table_name
+from shared.snapshot_artifacts import SOURCE_SNAPSHOT, coverage, live_envelope, with_scope_contract
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
 
-# One read per keyword, SCOPE_MAX_WORKERS at a time, over at most
-# SCOPE_KEYWORDS_CAP keywords (the /visibility group bounds).
+# One read per keyword, SCOPE_MAX_WORKERS at a time.
 dynamodb = scoped_dynamodb_resource()
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
@@ -68,6 +86,9 @@ HISTORY_WINDOW_PARAMS: dict[str, dict[str, Any]] = {'days': {**TREND_WINDOW_PARA
 
 #: The scope kind with a run history to compare: only a keyword group has stability facts.
 GROUP_SCOPE = 'group'
+
+#: The route's name for view jobs.
+ROUTE = 'reports-insights'
 
 #: The fields of ``GET /api/visibility`` that say which latest runs the facts rest on.
 COVERAGE_FIELDS = ('timestamp', 'keywords_analyzed', 'keywords_with_data')
@@ -121,16 +142,14 @@ def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, A
     return load_narrative(key, run_timestamp)
 
 
-@api_handler
-@validate({**SCOPE_QUERY_PARAMS, **HISTORY_WINDOW_PARAMS})
-@required_report_scope(keywords_table)
-def handler(event, context, report_scope, *, days):
-    """GET /api/reports/insights — the facts and insights of a scope (``days`` defaults to 90 in ``@validate``)."""
-    if not report_scope.keywords:
-        return validation_error(f'No active keywords match the selected scope ({report_scope.label}).', event, 'scope')
-    keywords, scope_fields = capped_scope(report_scope)
-    brand_config = get_brand_config()
+#: The views: the whole answer, or one page of a long fact list.
+VIEWS = ('summary', *PAGED_FACTS)
+
+
+def live_insights(report_scope: Any, brand_config: dict[str, Any], days: int, view: str = 'summary', offset: int = 0) -> dict[str, Any]:
+    """The insights body (or ``view`` page) of ``report_scope`` read for this request: every keyword, cut only by the time budget."""
     owned_domains = owned_domains_from(brand_config)
+    keywords = list(report_scope.keywords)
     latest_read = load_latest_answers(keywords)
     latest = latest_read.values
     skipped = set(latest_read.skipped)
@@ -141,15 +160,52 @@ def handler(event, context, report_scope, *, days):
         history_truncated_before = window.truncated_before
         skipped.update(window.skipped)
     # The latest-run coverage, computed by the view behind /visibility so both pages say the same.
-    coverage = visibility_view(latest_read.keywords, latest)
-    insights = compute_insights(
+    coverage_view = visibility_view(latest_read.keywords, latest)
+    facts = compute_facts(
         (answer for answers in latest.values() for answer in answers), owned_domains, history, competitor_domains_from(brand_config),
     )
-    return success_response({
-        **scope_read_fields(scope_fields, sorted(skipped)),
-        **{key: coverage[key] for key in COVERAGE_FIELDS},
-        'citations_configured': bool(owned_domains),
-        **insights,
+    build_id = live_build_id(report_scope)
+    analyzed = len(keywords) - len(set(latest_read.skipped))
+    if view in PAGED_FACTS:
+        page = {'keywords_truncated': bool(skipped), **facts_page(facts, view, offset, build_id)}
+        return with_scope_contract(page, coverage(len(keywords), analyzed), live_envelope())
+    body = {
+        'keywords_truncated': bool(skipped),
+        **{key: coverage_view[key] for key in COVERAGE_FIELDS},
+        **with_page_tokens(insights_from_facts(facts), build_id),
         'history_truncated_before': history_truncated_before,
-        'narrative': group_narrative(report_scope, coverage['timestamp']),
+    }
+    return with_scope_contract(body, coverage(len(keywords), analyzed), live_envelope())
+
+
+@api_handler
+@validate({**SCOPE_QUERY_PARAMS, **HISTORY_WINDOW_PARAMS, 'view': {'type': str, 'choices': list(VIEWS), 'default': VIEWS[0]}, **CURSOR_QUERY_PARAM})
+@required_report_scope(keywords_table)
+def handler(event, context, report_scope, *, days, view='summary', next_token=None):
+    """GET /api/reports/insights — the facts and insights of a scope, or one page of a long fact list (``days`` defaults to 90)."""
+    if not report_scope.keywords:
+        return validation_error(f'No active keywords match the selected scope ({report_scope.label}).', event, 'scope')
+    brand_config = get_brand_config()
+    owned_domains = owned_domains_from(brand_config)
+    if action_scope_serve.action_route(report_scope, dynamodb) == SOURCE_SNAPSHOT:
+        job_params = {'days': days, 'owned_domains': owned_domains, 'competitor_domains': competitor_domains_from(brand_config)}
+        answer = serve_snapshot(SnapshotRequest(
+            route=ROUTE, builder='insights', report_scope=report_scope, brand_config_updated_at=brand_config.get('updated_at'), event=event,
+            params={**job_params, 'view': view}, next_token=next_token, job_params=job_params,
+        ))
+        if answer.body is None:
+            return answer.response or {}
+        body = answer.body
+    else:
+        offset, rejected = page_offset(next_token, live_build_id(report_scope), event)
+        if rejected is not None:
+            return rejected
+        body = live_insights(report_scope, brand_config, days, view, offset)
+    if view in PAGED_FACTS:
+        return success_response({'scope': report_scope.describe(), **body}, event)
+    return success_response({
+        'scope': report_scope.describe(),
+        **body,
+        'citations_configured': bool(owned_domains),
+        'narrative': group_narrative(report_scope, body['timestamp']),
     }, event)

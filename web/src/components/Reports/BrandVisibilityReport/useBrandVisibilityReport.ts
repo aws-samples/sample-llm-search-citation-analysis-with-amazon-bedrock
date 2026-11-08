@@ -51,12 +51,21 @@ export function useBrandVisibilityReport(scope: ReportScope, days: number) {
     visibility: isKeyword ? visibility.data : null,
     visibilityLoading: visibility.loading,
     visibilityError: visibility.error,
+    visibilityComputing: visibility.computing,
+    /** The request `visibility` answered: the brand rankings page and export with it. */
+    visibilityRequest: visibility.request,
     trends: trends.data,
     trendsLoading: trends.loading,
     trendsError: trends.error,
+    trendsComputing: trends.computing,
+    /** The request `trends` answered: the per-keyword table loads more keyword trends with it. */
+    trendsRequest: trends.request,
     groupHistory: groupHistory.data,
     groupHistoryLoading: groupHistory.loading,
     groupHistoryError: groupHistory.error,
+    groupHistoryComputing: groupHistory.computing,
+    /** The request `groupHistory` answered: the keyword list loads its next pages with it. */
+    groupHistoryRequest: groupHistory.request,
     ready,
   };
 }

@@ -6,9 +6,7 @@
  * `include_response=true` is asked for (the keyword detail renders answers).
  */
 import { apiGet } from './client';
-import {
-  collectCursorPages, withNextToken, type CursorPage
-} from './cursorPages';
+import { withNextToken } from './cursorPages';
 import type { Search } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
 
@@ -53,22 +51,11 @@ export async function fetchSearchesPage(
   return payload;
 }
 
-/** Every run `params` selects, over every page, newest first (the Recent Searches export). */
-export async function fetchAllSearches(params: Readonly<Record<string, string>> = {}): Promise<Search[]> {
-  const pageParams = {
-    ...params,
-    limit: String(MAX_SEARCHES_PAGE),
-  };
-  return collectCursorPages(
-    async (nextToken: string | null): Promise<CursorPage<Search>> => {
-      const page = await fetchSearchesPage(withNextToken(pageParams, nextToken) ?? pageParams);
-      return {
-        items: page.searches,
-        nextToken: page.next_token,
-      };
-    },
-    () => new SearchPageError('Searches API repeated a continuation token')
-  );
+
+/** A batch of a keyword's runs and the token to continue after it (`null` once every run is read). */
+export interface KeywordSearchBatch {
+  readonly searches: Search[];
+  readonly nextToken: string | null;
 }
 
 async function collectUpTo(
@@ -77,27 +64,32 @@ async function collectUpTo(
   nextToken: string | null,
   collected: Search[],
   seenTokens: Set<string>
-): Promise<Search[]> {
+): Promise<KeywordSearchBatch> {
   const page = await fetchSearchesPage(withNextToken(params, nextToken) ?? params);
   collected.push(...page.searches);
-  if (page.next_token === null || collected.length >= maxRows) return collected.slice(0, maxRows);
+  if (page.next_token === null || collected.length >= maxRows) return {
+    searches: collected,
+    nextToken: page.next_token,
+  };
   if (seenTokens.has(page.next_token)) throw new SearchPageError('Searches API repeated a continuation token');
   seenTokens.add(page.next_token);
   return collectUpTo(params, maxRows, page.next_token, collected, seenTokens);
 }
 
 /**
- * The newest `maxRows` runs of `keyword` with their answer text, read page by
- * page (a page of whole rows is cut to the API's page budget).
+ * The next batch of `keyword`'s runs with their answer text, newest first: whole pages from
+ * `nextToken` until the batch holds at least `maxRows` runs or the last page is read. The
+ * keyword detail shows the first batch and loads the older ones on demand.
  */
 export async function fetchKeywordSearches(
   keyword: string,
+  nextToken: string | null = null,
   maxRows: number = KEYWORD_DETAIL_MAX_RUNS
-): Promise<Search[]> {
+): Promise<KeywordSearchBatch> {
   const params = {
     keyword,
     include_response: 'true',
     limit: String(Math.min(maxRows, MAX_SEARCHES_PAGE)),
   };
-  return collectUpTo(params, maxRows, null, [], new Set<string>());
+  return collectUpTo(params, maxRows, nextToken, [], new Set<string>());
 }

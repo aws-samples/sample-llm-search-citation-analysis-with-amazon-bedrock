@@ -175,7 +175,7 @@ function ConfiguredDomainOverview() {
             </div>
             <div hidden={tab !== 'competitors'}>
               <DomainCompetitorsPanel keywords={shownKeywords} marketId={analysis.target.market_id}
-                scopeLabel={analysis.target.target} request={competitors} />
+                request={competitors} />
             </div>
           </TabPanel>
         </section>

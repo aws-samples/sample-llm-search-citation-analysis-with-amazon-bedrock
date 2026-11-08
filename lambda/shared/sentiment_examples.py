@@ -18,8 +18,10 @@ text of every answer in the scope.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
+from shared.keyword_major_pages import PageRequest, keyword_major_page
 from shared.kpi_engine import (
     ANSWER_ATTRIBUTE_NAMES,
     ANSWER_PROJECTION,
@@ -124,6 +126,70 @@ def _row_examples(
     ]
 
 
+Candidate = tuple[Mapping[str, Any], dict[str, Any]]
+"""An example without its answer text and the row it comes from."""
+
+
+@dataclass(frozen=True)
+class ExampleFilter:
+    """Which sightings are examples: labelled ``sentiment``, of ``classification``, of one engine unless ``provider`` is ``None``."""
+
+    sentiment: str
+    provider: str | None = None
+    classification: ExampleClassification = FIRST_PARTY
+
+
+def ordered_examples(rows: Iterable[Mapping[str, Any]], wanted: ExampleFilter) -> list[Candidate]:
+    """Every sighting in ``rows`` that ``wanted`` keeps, in the examples' order.
+
+    Newest run first, then keyword, provider and brand (keyword and brand
+    case-insensitively), ties in the order of ``rows``. Within one keyword's
+    latest run every example shares the timestamp, so the whole order is
+    keyword-major over ``order_keywords`` and this order within each keyword.
+    """
+    found = [pair for row in rows for pair in _row_examples(row, wanted.sentiment, wanted.provider, wanted.classification)]
+    found.sort(key=lambda pair: (pair[1]['keyword'].lower(), pair[1]['provider'], pair[1]['brand'].lower()))
+    found.sort(key=lambda pair: pair[1]['timestamp'], reverse=True)
+    return found
+
+
+def order_keywords(keywords: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """``(keyword, latest run timestamp)`` pairs in the examples' order: newest run first, then keyword."""
+    ordered = sorted(keywords, key=lambda pair: (pair[0].lower(), pair[0]))
+    ordered.sort(key=lambda pair: pair[1], reverse=True)
+    return ordered
+
+
+def with_answers(
+    candidates: list[Candidate],
+    *,
+    limit: int,
+    max_bytes: int = PAGE_BUDGET_BYTES,
+    answer_texts: AnswerTexts | None = None,
+) -> list[dict[str, Any]]:
+    """The first ``candidates`` with their answer text, as many as ``limit`` and ``max_bytes`` allow (at least one)."""
+    chosen = candidates[:limit]
+    texts = _answer_texts([row for row, _example in chosen], answer_texts)
+    examples = [{**example, **_answer_fields(text)} for (_row, example), text in zip(chosen, texts, strict=True)]
+    page, _truncated = take_within_budget(examples, max_bytes=max_bytes, max_items=limit)
+    return page
+
+
+def examples_page(request: PageRequest[Candidate], answer_texts: AnswerTexts | None = None) -> tuple[list[dict[str, Any]], str | None]:
+    """One keyword-major page of examples and the ``next_token`` after it.
+
+    ``request.slots`` are the keywords holding examples (index in
+    ``order_keywords`` order, expected count); ``request.read(index)`` lists
+    one keyword's candidates (``ordered_examples`` of its latest run). Only
+    the keywords the page covers are read, and only the page's answers are
+    read for their text.
+    """
+    def with_texts(candidates: list[Candidate]) -> list[dict[str, Any]]:
+        return with_answers(candidates, limit=request.limit, answer_texts=answer_texts)
+
+    return keyword_major_page(request, with_texts)
+
+
 def sentiment_examples(
     rows: Iterable[Mapping[str, Any]],
     sentiment: str,
@@ -149,13 +215,8 @@ def sentiment_examples(
     the rows are sightings without it (``SIGHTING_PROJECTION``) and only the
     page's rows are read for it, so the text of every other answer is never read.
     """
-    found = [pair for row in rows for pair in _row_examples(row, sentiment, provider, classification)]
-    found.sort(key=lambda pair: (pair[1]['keyword'].lower(), pair[1]['provider'], pair[1]['brand'].lower()))
-    found.sort(key=lambda pair: pair[1]['timestamp'], reverse=True)
-    candidates = found[offset:offset + limit]
-    texts = _answer_texts([row for row, _example in candidates], answer_texts)
-    examples = [{**example, **_answer_fields(text)} for (_row, example), text in zip(candidates, texts, strict=True)]
-    page, _truncated = take_within_budget(examples, max_bytes=max_bytes, max_items=limit)
+    found = ordered_examples(rows, ExampleFilter(sentiment, provider, classification))
+    page = with_answers(found[offset:], limit=limit, max_bytes=max_bytes, answer_texts=answer_texts)
     return len(found), page
 
 
@@ -167,7 +228,13 @@ __all__ = [
     'SIGHTING_ATTRIBUTE_NAMES',
     'SIGHTING_PROJECTION',
     'AnswerTexts',
+    'Candidate',
     'ExampleClassification',
+    'ExampleFilter',
     'RowKey',
+    'examples_page',
+    'order_keywords',
+    'ordered_examples',
     'sentiment_examples',
+    'with_answers',
 ]

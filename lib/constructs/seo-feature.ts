@@ -44,11 +44,6 @@ export interface SeoFeature {
   readonly routes: SeoRoutes;
 }
 
-/** A string key attribute (every SEO table key is a string). */
-export function stringKey(name: string): dynamodb.Attribute {
-  return { name, type: dynamodb.AttributeType.STRING };
-}
-
 /** One feature state machine: its name, first state and execution timeout. */
 interface SeoStateMachineSpec {
   readonly stateMachineName: string;

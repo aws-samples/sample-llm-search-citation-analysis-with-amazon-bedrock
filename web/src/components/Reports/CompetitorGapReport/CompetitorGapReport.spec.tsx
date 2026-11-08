@@ -128,7 +128,7 @@ describe('CompetitorGapReport', () => {
       </MemoryRouter>,
     );
 
-    expect(mockGap).toHaveBeenCalledWith(null);
+    expect(mockGap).toHaveBeenCalledWith(null, { kind: 'all' });
   });
 
   it('renders loading placeholders when the rollup is loading', () => {

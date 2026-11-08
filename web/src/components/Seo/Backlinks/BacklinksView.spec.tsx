@@ -7,16 +7,17 @@ import {
   render, screen, waitFor
 } from '@testing-library/react';
 import {
-  buildBacklinkRow, buildOverview, buildSnapshots, buildTablePage
+  BACKLINKS_EXPORT, buildBacklinkRow, buildOverview, buildSnapshots, buildTablePage
 } from '../../../api/seoBacklinks-fixtures';
 import {
   fetchBacklinkSnapshots, fetchBacklinksOverview, fetchBacklinksTable, startBacklinkSnapshots
 } from '../../../api/seoBacklinks';
 import {
-  SOURCE_DOMAIN, clickExportDownload, downloadBacklinksExport, findExpandButton, openBacklinksExport, renderBacklinksView,
+  SOURCE_DOMAIN, clickExportStart, findExpandButton, openBacklinksExport, pressInBacklinksExport, renderBacklinksView,
   renderExpanded, renderExportReady, renderSearched, renderSpamIncluded, searchTarget, submitTarget, waitForLastTableRequest
 } from './BacklinksView-fixtures';
-import { exportBacklinksExcel } from './backlinksExcel';
+import { mockStartExport } from '../../../test/exportsApiMock';
+import { exportPlan } from '../../../exporters/paidExport';
 import { mockAdminRole } from '../../../test/useIsAdminMock';
 import {
   findBrandTrackingLinkElement, getAnalyzeOwnDomainElement, mockBrandSettings, NO_OWN_DOMAIN, OWN_DOMAIN, quickPickDomains
@@ -24,7 +25,7 @@ import {
 
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoBacklinks');
-vi.mock('./backlinksExcel', () => ({ exportBacklinksExcel: vi.fn() }));
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
 vi.mock('../../../hooks/useSeoSettings');
 
@@ -35,7 +36,7 @@ class ValidationFailure extends Error {
   }
 }
 
-const SCREEN_DOWNLOAD = 'Download the 1 rows on screen (free)';
+const SCREEN_EXPORT = 'Export the 1 rows on screen (free)';
 
 /** The backlinks table a search of example.com shows first, without its page. */
 const EXPORT_LIST = {
@@ -45,6 +46,18 @@ const EXPORT_LIST = {
   sort_order: 'desc',
   filters: {},
   include_spam: false,
+  mode: 'one_per_domain',
+} as const;
+
+/** `EXPORT_LIST` as `seo-backlinks` export params (strings, filters as JSON). */
+const EXPORT_PARAMS = {
+  tab: 'backlinks',
+  target: 'example.com',
+  scope: 'subdomains',
+  sort_field: 'first_seen',
+  sort_order: 'desc',
+  filters: '{}',
+  include_spam: 'false',
   mode: 'one_per_domain',
 } as const;
 
@@ -122,8 +135,8 @@ describe('BacklinksView starting from Settings › Brand Tracking', () => {
   });
 });
 
-describe('BacklinksView Excel export', () => {
-  it('offers Export to Excel in the table toolbar and no CSV export', async () => {
+describe('BacklinksView export', () => {
+  it('offers one Export in the table toolbar and no CSV button', async () => {
     await renderExportReady();
 
     expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
@@ -132,45 +145,49 @@ describe('BacklinksView Excel export', () => {
   it('prices the backlinks export at the backlinks rates', async () => {
     await openBacklinksExport();
 
-    expect(screen.getByRole('dialog', { name: 'Export backlinks to Excel' })).toHaveTextContent('Price: up to $0.03 · 1 DataForSEO request');
+    expect(screen.getByRole('dialog', { name: 'Export backlinks' })).toHaveTextContent('Price: up to $0.03 · 1 DataForSEO request');
   });
 
   it.each([
     ['opening the export dialog', openBacklinksExport],
-    ['downloading the rows on screen', () => downloadBacklinksExport(SCREEN_DOWNLOAD)],
-  ])('asks no new page when %s', async (_step, step) => {
+    ['exporting the rows on screen', () => pressInBacklinksExport(SCREEN_EXPORT)],
+    ['starting the paid export', () => pressInBacklinksExport('Start export')],
+  ])('asks DataForSEO for no new page when %s', async (_step, step) => {
     await step();
 
     expect(vi.mocked(fetchBacklinksTable).mock.calls).toHaveLength(1);
   });
 
-  it('exports the backlinks rows on screen for the searched target', async () => {
-    await downloadBacklinksExport(SCREEN_DOWNLOAD);
-
-    expect(exportBacklinksExcel).toHaveBeenCalledWith('backlinks', [buildBacklinkRow()], 'example.com');
-  });
-
-  it('asks the export from the first row with the spam setting, sort and link mode on screen', async () => {
-    await clickExportDownload(await renderSpamIncluded());
+  it('queues the page on screen of the searched target for free', async () => {
+    await pressInBacklinksExport(SCREEN_EXPORT);
 
     await waitFor(() => {
-      expect(fetchBacklinksTable).toHaveBeenLastCalledWith('backlinks', {
-        ...EXPORT_LIST,
-        include_spam: true,
-        offset: 0,
-        limit: 120,
-      }, expect.anything());
+      expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'seo-backlinks',
+        params: {
+          ...EXPORT_PARAMS,
+          page: '1',
+          page_size: '50',
+        },
+        format: 'xlsx',
+      });
     });
   });
 
-  it('exports every backlink the export fetched', async () => {
-    const fetched = [buildBacklinkRow({ url_from: 'https://news.example.org/a' }), buildBacklinkRow({ url_from: 'https://news.example.org/b' })];
-    vi.mocked(fetchBacklinksTable).mockResolvedValueOnce(buildTablePage('backlinks', [buildBacklinkRow()]))
-      .mockResolvedValueOnce(buildTablePage('backlinks', fetched));
-    await downloadBacklinksExport('Download');
+  it('queues the confirmed rows with the spam setting, sort and link mode on screen', async () => {
+    await clickExportStart(await renderSpamIncluded());
 
     await waitFor(() => {
-      expect(exportBacklinksExcel).toHaveBeenCalledWith('backlinks', fetched, 'example.com');
+      expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'seo-backlinks',
+        params: {
+          ...EXPORT_PARAMS,
+          include_spam: 'true',
+          rows: '120',
+          price_usd: String(exportPlan(120, BACKLINKS_EXPORT).priceUsd),
+        },
+        format: 'xlsx',
+      });
     });
   });
 });

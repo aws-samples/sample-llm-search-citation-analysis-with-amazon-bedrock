@@ -14,6 +14,18 @@ import {
   type TrendSectionProps,
 } from '../../layout';
 import { gateKeywordTrendRows } from './keywordTrendRows';
+import { useScopedList } from '../../../../hooks/useScopedList';
+import {
+  isKeywordTrend, KEYWORD_TRENDS_PAGING
+} from '../../../../api/scopedListPagings';
+import type { ListRequest } from '../../../../api/scopedListPages';
+import { SectionExport } from '../../scopeReport/ScopeLists';
+import { ScopedListFooter } from '../../../ui/ScopedListFooter';
+
+interface Props extends TrendSectionProps {
+  /** The request `trends` answered: the table loads more keyword trends with it (2.45.0). */
+  readonly request?: ListRequest | null;
+}
 
 /** A keyword's visibility-score trend since its previous period; `undefined` before it has one. */
 function visibilityTrend(row: KeywordTrend): TrendDirection | undefined {
@@ -51,20 +63,25 @@ function keywordColumns(): ReadonlyArray<ReportTableColumn<KeywordTrend>> {
   ];
 }
 
+/** The anchor of the per-keyword leaderboard, for the movers' "See all keywords". */
+export const PER_KEYWORD_ANCHOR = 'per-keyword-leaderboard';
+
 /**
  * Per-keyword leaderboard for the all-keywords variant, in the API's order
- * (best visibility score first): each keyword's latest period and its
+ * (best visibility score first), page by page on a large scope: each keyword's latest period and its
  * change since the keyword's previous one. Keywords whose visibility score
  * improves or declines (2 points or more) are tinted.
  */
 export function PerKeywordTableSection({
-  trends, loading, error 
-}: TrendSectionProps) {
+  trends, loading, error, computing, request = null
+}: Props) {
+  const keywordTrends = useScopedList(trends, request, KEYWORD_TRENDS_PAGING, isKeywordTrend);
   const gate = gateKeywordTrendRows({
     title: 'Per-keyword leaderboard',
     loading,
     loadingMessage: 'Loading per-keyword rankings…',
     error,
+    computing,
     trends,
   });
   if (!gate.ready) return gate.placeholder;
@@ -74,13 +91,17 @@ export function PerKeywordTableSection({
       title="Per-keyword leaderboard"
       subtitle="Every keyword's latest period, strongest visibility score first. Keywords whose visibility score improved or declined by 2 points or more are highlighted."
     >
+      <div id={PER_KEYWORD_ANCHOR}>
+        <SectionExport view="keyword-trends" request={request} />
+      </div>
       <ReportTable
         columns={keywordColumns()}
-        rows={gate.rows}
+        rows={keywordTrends.items}
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(row) => row.keyword}
         rowClassName={(row) => trendRowClass(visibilityTrend(row))}
       />
+      <ScopedListFooter list={keywordTrends} noun="keywords" />
     </ReportSection>
   );
 }

@@ -16,7 +16,9 @@ the group answer built from per-keyword DynamoDB partitions:
 
 from __future__ import annotations
 
+import json
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -494,138 +496,26 @@ class TestTrendsScopeRouting:
 
         assert ([row['keyword'] for row in body['keyword_trends']], body['keywords_with_data']) == (['hotel coruna spa'], 1)
 
-    def test_caps_an_unscoped_request_at_the_scope_keyword_cap(self, trends):
-        cap = trends.SCOPE_KEYWORDS_CAP
-        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active'} for i in range(cap + 5)]
+    def test_reads_every_keyword_of_an_unscoped_request_within_the_live_budget(self, trends):
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active'} for i in range(100)]
         with scoped_report(trends, {}, active=many) as report:
             body = report.body(None)
 
-        assert (body['keywords_analyzed'], body['keywords_truncated']) == (cap, True)
+        assert (body['keywords_analyzed'], body['keywords_truncated'], body['coverage']) == (
+            100, False, {'keywords_total': 100, 'keywords_analyzed': 100, 'complete': True},
+        )
 
-
-# ---------------------------------------------------------------------------
-# /citation-gaps
-# ---------------------------------------------------------------------------
-
-GAPS_CONFIG = {
-    'tracked_brands': {
-        'first_party': ['Hotel Coruna'],
-        'competitors': ['Rival Inn'],
-    },
-}
-
-
-@pytest.fixture(scope='module')
-def gaps():
-    return _load('get-citation-gaps.py')
-
-
-@pytest.fixture(params=[
-    pytest.param({'scope': 'all'}, id='all-scope'),
-    pytest.param({'group_id': 'coruna'}, id='group-scope'),
-])
-def missing_first_party_aggregate(gaps, request):
-    keyword_analysis = MagicMock()
-    enrichment = MagicMock()
-    with (
-        scoped_report(gaps, {'tracked_brands': {}}) as report,
-        patch.object(gaps, '_build_citation_gap_result', keyword_analysis),
-        patch.object(gaps, '_enrich_sources', enrichment),
-    ):
-        response = report.call(request.param)
-    return response, keyword_analysis, enrichment
-
-
-class TestCitationGapsScope:
-    @staticmethod
-    def _analyze(
-        gaps, params: dict, summary: dict, keyword_gaps: dict[str, list[dict]] | None = None,
-    ) -> tuple[list[str], dict]:
-        """Call the handler with `_build_citation_gap_result` recording its keywords.
-
-        Every keyword answers `summary` and its entry of `keyword_gaps` (none
-        by default), with source enrichment stubbed out; returns the keywords
-        analysed, in call order, and the decoded response body.
-        """
-        analyzed: list[str] = []
-
-        def record(keyword, _config):
-            analyzed.append(keyword)
-            return {'summary': summary, 'gaps': (keyword_gaps or {}).get(keyword, [])}
-
+    def test_serves_an_unscoped_request_over_the_live_budget_from_the_snapshot(self, trends):
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active'} for i in range(101)]
+        computing = {'statusCode': 202, 'headers': {}, 'body': json.dumps({'status': 'computing'})}
         with (
-            scoped_report(gaps, GAPS_CONFIG) as report,
-            patch.object(gaps, '_build_citation_gap_result', record),
-            patch.object(gaps, '_enrich_sources', MagicMock()),
+            scoped_report(trends, {}, active=many) as report,
+            patch('shared.scope_snapshot_serve.open_snapshot', return_value=None),
+            patch('shared.scope_snapshot_serve.view_job_artifacts', return_value=(None, computing)),
         ):
-            body = report.body(params)
-        return analyzed, body
+            response = report.call(None)
 
-    def test_group_scope_ranks_top_gaps_by_priority_before_citation_count(self, gaps):
-        _, body = self._analyze(
-            gaps, {'group_id': 'coruna'},
-            {'gap_count': 1, 'high_priority_gaps': 0, 'coverage_rate': 0},
-            {
-                'hotel coruna spa': [{'url': 'https://low.example', 'priority': 'low', 'citation_count': 9}],
-                'best hotels galicia': [{'url': 'https://high.example', 'priority': 'high', 'citation_count': 1}],
-            },
-        )
-
-        assert [gap['url'] for gap in body['top_gaps']] == ['https://high.example', 'https://low.example']
-
-    def test_group_scope_analyzes_every_keyword_of_the_group(self, gaps):
-        analyzed, body = self._analyze(
-            gaps, {'group_id': 'coruna', 'limit': '1'},
-            {'gap_count': 1, 'high_priority_gaps': 0, 'coverage_rate': 50},
-        )
-
-        assert sorted(analyzed) == ['best hotels galicia', 'hotel coruna spa']
-        assert body['scope']['kind'] == 'group'
-        assert body['keywords_analyzed'] == 2
-
-    def test_unscoped_request_keeps_the_limit_over_active_keywords(self, gaps):
-        analyzed, body = self._analyze(
-            gaps, {'limit': '2'},
-            {'gap_count': 0, 'high_priority_gaps': 0, 'coverage_rate': 0},
-        )
-
-        assert analyzed == ['best hotels galicia', 'hotel coruna spa']
-        assert body['scope']['kind'] == 'all'
-
-    def test_returns_missing_first_party_error_when_aggregate_scope_has_no_first_party_brand(
-        self,
-        missing_first_party_aggregate,
-    ):
-        response, _, _ = missing_first_party_aggregate
-
-        assert parse_response(response) == (200, {'error': 'No first-party brands configured'})
-
-    def test_omits_keyword_analysis_when_aggregate_scope_has_no_first_party_brand(
-        self,
-        missing_first_party_aggregate,
-    ):
-        _, keyword_analysis, _ = missing_first_party_aggregate
-
-        keyword_analysis.assert_not_called()
-
-    def test_omits_enrichment_when_aggregate_scope_has_no_first_party_brand(
-        self,
-        missing_first_party_aggregate,
-    ):
-        _, _, enrichment = missing_first_party_aggregate
-
-        enrichment.assert_not_called()
-
-    def test_keeps_successful_group_summary_when_another_keyword_has_no_data(self, gaps):
-        with scoped_report(gaps, GAPS_CONFIG) as report, patch.object(gaps, '_enrich_sources', MagicMock()):
-            body = report.body({'group_id': 'marino'})
-
-        assert body['keyword_summaries'] == [{
-            'keyword': 'best hotels galicia',
-            'gap_count': 0,
-            'high_priority_gaps': 0,
-            'coverage_rate': 0,
-        }]
+        assert response['statusCode'] == 202
 
 
 # ---------------------------------------------------------------------------
@@ -641,17 +531,19 @@ class TestOverviewScope:
     def test_threads_the_scope_into_trends_and_recommendations(self, overview):
         seen: dict = {}
 
-        def fake_trends(scope: ReportScope | None, period, days, owned_domains, tracked_brands=None):
+        def fake_trends(scope: ReportScope | None, period, days, owned_domains, **_options):
             report_scope = present(scope)
             seen['scope'] = report_scope
             seen['owned_domains'] = owned_domains
-            return {
+            return SimpleNamespace(response=None, body={
+                'coverage': {'keywords_total': 2, 'keywords_analyzed': 2, 'complete': True},
+                'source': 'live', 'as_of': None, 'stale': False, 'refreshing': False,
                 'scope': report_scope.describe(), 'keywords_truncated': False,
                 'keywords_analyzed': len(report_scope.keywords), 'keywords_with_data': 0,
                 'citations_configured': bool(owned_domains), 'latest': {}, 'latest_brands': [], 'trend_data': [], 'change': None,
                 'keyword_trends': [],
                 'overall': {'improving_count': 0, 'declining_count': 0, 'stable_count': 0},
-            }
+            })
 
         def fake_recs(config, keywords=None):
             seen['keywords'] = keywords

@@ -1,10 +1,8 @@
-import { vi } from 'vitest';
-import { exportTableToExcel } from '../../../exporters/tableExcel';
-import { EXPORT_EXCEL_LABEL } from '../../ui/ExportExcelButton';
 import {
-  render, screen, within
+  render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { chooseExportFormat } from '../../../test/exportsApiMock';
 import { MemoryRouter } from 'react-router-dom';
 import type { BrandSettings } from '../../../api/brandSettings';
 import type { Market } from '../../../types';
@@ -102,17 +100,8 @@ export async function runGrid() {
   return user;
 }
 
-/** The first-column text of every body row of the page's table. */
-export function firstColumnTexts(): (string | null)[] {
-  return screen.getAllByRole('row').slice(1).map((row) => row.querySelector('td')?.textContent ?? null);
-}
-
-/**
- * Presses "Export to Excel" in the card titled `region` and returns what was exported (the specs mock
- * `exportTableToExcel`).
- */
-export async function exportTableIn(user: ReturnType<typeof userEvent.setup>, region: string) {
-  const card = await screen.findByRole('region', { name: region });
-  await user.click(within(card).getByRole('button', { name: EXPORT_EXCEL_LABEL }));
-  return vi.mocked(exportTableToExcel).mock.lastCall?.[0];
+/** Waits for the card titled `region` and picks Excel in its "Export all" (the specs mock `api/exports`). */
+export async function exportTableIn(region: string): Promise<void> {
+  await screen.findByRole('region', { name: region });
+  await chooseExportFormat('xlsx');
 }

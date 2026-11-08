@@ -4,15 +4,20 @@ each paid route is a one-off lookup, nothing here schedules recurring spend.
 
 - GET  /api/seo/local/categories   - business categories (free), cached 7 d as one entry, filtered here
 - POST /api/seo/local/businesses   - business listings near a point (cached 24 h)
+- GET  /api/seo/local/businesses   - the same search from the cache only (``count`` = ``limit``); 404 ``NOT_CACHED``
 - POST /api/seo/local/profile      - one Google Business Profile (cached 24 h)
 - POST /api/seo/local/questions    - its questions and answers (cached 24 h)
 - POST /api/seo/local/serp         - Maps / Local Finder results and where a business sits in them (cached 12 h)
+- GET  /api/seo/local/serp         - the same results from the cache only; 404 ``NOT_CACHED``
 - POST /api/seo/local/jobs         - start a queued job: reviews, profile updates or a rank grid
 - GET  /api/seo/local/jobs/{id}    - a job's status and results (free; the dashboard polls it)
 
 Paid answers carry ``estimated_cost_usd`` (0 when served from the cache). An empty answer is cached for 1 h only,
-and never replaces a cached non-empty one. Jobs run in the ``CitationAnalysis-SeoLocalJob`` state machine; a
-repeated job request within the hour reuses its receipt (``shared.local_seo_jobs``) instead of buying again.
+and never replaces a cached non-empty one. The GET twins of the paid searches never call DataForSEO: the export
+service replays them (``shared.export_source_seo_stored``), so an export never pays. Listings come sorted by
+``sort_by`` (rating or reviews, highest first, unknown last), as the table shows them. Jobs run in the
+``CitationAnalysis-SeoLocalJob`` state machine; a repeated job request within the hour reuses its receipt
+(``shared.local_seo_jobs``) instead of buying again.
 """
 
 import json
@@ -20,7 +25,7 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import cache
 from typing import Any
 
@@ -94,6 +99,28 @@ JOB_SCHEMA = {
     'device': {'type': str, 'choices': ['mobile', 'desktop'], 'default': 'mobile'},
 }
 DEPTH_LIMITS = {'reviews': (10, 200, 20), 'updates': (10, 100, 10)}
+#: The listing field each ``sort_by`` orders the listings table by (``relevance`` keeps DataForSEO's order).
+LISTING_SORT_FIELDS = {'rating': 'rating', 'reviews': 'reviews_count'}
+
+_PAGING_FIELDS = ('limit', 'offset')
+#: ``GET /businesses``: a POST's search as query parameters; ``count`` is its ``limit`` (exports drop paging names).
+CACHED_BUSINESSES_SCHEMA = {
+    **{name: rules for name, rules in BUSINESSES_SCHEMA.items() if name not in _PAGING_FIELDS},
+    'count': BUSINESSES_SCHEMA['limit'], 'categories': {'type': str, 'max_length': 1_000},
+}
+
+
+def cached_read(policy: CachePolicy, params: Mapping[str, Any], fetch: Callable[[], tuple[list[Any], dict[str, Any]]],
+                *, cache_only: bool) -> tuple[Mapping[str, Any] | None, bool]:
+    """``read_through``; with ``cache_only``, the cached payload or ``(None, False)``, never a paid call."""
+    if not cache_only:
+        return read_through(policy, params, fetch)
+    payload = cached_or(policy, params)
+    return payload, payload is not None
+
+
+def not_cached(event: dict[str, Any], what: str) -> dict[str, Any]:
+    return seo_error(404, 'NOT_CACHED', f'This {what} is no longer cached: search again, then export', event)
 
 
 def cached_or(policy: CachePolicy, params: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -138,21 +165,56 @@ def handle_categories(event: dict[str, Any], _context: Any, *, query: str | None
 @req.local_errors
 @json_object_body
 @validate(BUSINESSES_SCHEMA)
-def handle_businesses(event: dict[str, Any], _context: Any, *, body: dict[str, Any], query: str | None,
-                      latitude: float | None, longitude: float | None, radius_km: float, market_id: str | None,
-                      min_rating: float | None, min_reviews: int | None, is_claimed: bool | None, sort_by: str,
-                      limit: int, offset: int, **_r: Any) -> dict[str, Any]:
+def handle_businesses(event: dict[str, Any], _context: Any, *, body: dict[str, Any], **fields: Any) -> dict[str, Any]:
     """POST /businesses - listings near a point, by name and/or category."""
-    near = req.required_near(latitude, longitude, radius_km, req.local_market(market_id))
+    return listings_answer(event, fields, req.categories(body.get('categories')), cache_only=False)
+
+
+@req.local_errors
+@validate(CACHED_BUSINESSES_SCHEMA)
+def handle_cached_businesses(event: dict[str, Any], _context: Any, *, count: int, categories: str | None,
+                             **fields: Any) -> dict[str, Any]:
+    """GET /businesses - the listings a POST cached, from the cache only (the export of the listings table)."""
+    named = req.categories([part for part in (categories or '').split(',') if part.strip()])
+    return listings_answer(event, {**fields, 'limit': count, 'offset': 0}, named, cache_only=True)
+
+
+def sorted_listings(items: Sequence[Any], sort_by: str) -> list[Any]:
+    """
+    The listings as the table shows them: by rating or reviews, highest first, unknown values last.
+
+    DataForSEO's own order only roughly follows ``order_by``; equal values (and ``relevance``) keep its order.
+    """
+    field = LISTING_SORT_FIELDS.get(sort_by)
+    if field is None:
+        return list(items)
+    ranked = sorted((item for item in items if _number_at(item, field) is not None),
+                    key=lambda item: _number_at(item, field) or 0.0, reverse=True)
+    return [*ranked, *(item for item in items if _number_at(item, field) is None)]
+
+
+def _number_at(item: Any, field: str) -> float | None:
+    value = item.get(field) if isinstance(item, Mapping) else None
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def listings_answer(event: dict[str, Any], fields: Mapping[str, Any], categories: tuple[str, ...], *,
+                    cache_only: bool) -> dict[str, Any]:
+    """The listings of a search (``fields`` as ``BUSINESSES_SCHEMA`` validates them), fetched unless ``cache_only``."""
+    near = req.required_near(fields['latitude'], fields['longitude'], fields['radius_km'],
+                             req.local_market(fields['market_id']))
     search = business.ListingsQuery(
-        near=near, title=(query or '').strip() or None, categories=req.categories(body.get('categories')),
-        min_rating=min_rating, min_reviews=min_reviews, is_claimed=is_claimed, sort_by=sort_by, limit=limit,
-        offset=offset,
+        near=near, title=(fields['query'] or '').strip() or None, categories=categories,
+        min_rating=fields['min_rating'], min_reviews=fields['min_reviews'], is_claimed=fields['is_claimed'],
+        sort_by=fields['sort_by'], limit=fields['limit'], offset=fields['offset'],
     )
-    payload, hit = read_through(LISTINGS_CACHE, business.listings_body(search),
-                                lambda: (business.search_listings(search)[0], {}))
-    return paid_answer(event, {'businesses': payload['items'], 'center': req.near_json(near),
-                               'fetched_at': payload['fetched_at']}, hit, pricing.listings_search_usd(limit))
+    payload, hit = cached_read(LISTINGS_CACHE, business.listings_body(search),
+                               lambda: (business.search_listings(search)[0], {}), cache_only=cache_only)
+    if payload is None:
+        return not_cached(event, 'business search')
+    return paid_answer(event, {'businesses': sorted_listings(payload['items'], search.sort_by),
+                               'center': req.near_json(near), 'fetched_at': payload['fetched_at']},
+                       hit, pricing.listings_search_usd(search.limit))
 
 
 def identity_and_market(fields: Mapping[str, Any]) -> tuple[business.BusinessIdentifier, req.LocalMarket]:
@@ -206,27 +268,39 @@ def match_json(items: list[dict[str, Any]], target: local_serp.BusinessTarget) -
 @req.local_errors
 @json_object_body
 @validate(SERP_SCHEMA)
-def handle_serp(event: dict[str, Any], _context: Any, *, keyword: str, latitude: float | None,
-                longitude: float | None, market_id: str | None, name: str | None, cid: str | None,
-                place_id: str | None, domain: str | None, zoom: int, search_type: str, device: str, depth: int,
-                **_r: Any) -> dict[str, Any]:
+def handle_serp(event: dict[str, Any], _context: Any, **fields: Any) -> dict[str, Any]:
     """POST /serp - the target only decides which result is "yours", so it is not part of the cache key."""
-    market = req.local_market(market_id)
-    near = req.required_near(latitude, longitude, None, market)
-    search = local_serp.LocalSearch(keyword=keyword.strip(), latitude=near.latitude, longitude=near.longitude,
+    return serp_answer(event, fields, cache_only=False)
+
+
+@req.local_errors
+@validate(SERP_SCHEMA)
+def handle_cached_serp(event: dict[str, Any], _context: Any, **fields: Any) -> dict[str, Any]:
+    """GET /serp - the results a POST cached, from the cache only (the export of the local results table)."""
+    return serp_answer(event, fields, cache_only=True)
+
+
+def serp_answer(event: dict[str, Any], fields: Mapping[str, Any], *, cache_only: bool) -> dict[str, Any]:
+    """The Maps / Local Finder results of ``fields`` (as ``SERP_SCHEMA`` validates them), fetched unless ``cache_only``."""
+    market = req.local_market(fields['market_id'])
+    near = req.required_near(fields['latitude'], fields['longitude'], None, market)
+    search_type = fields['search_type']
+    search = local_serp.LocalSearch(keyword=fields['keyword'].strip(), latitude=near.latitude, longitude=near.longitude,
                                     language_code=market.codes.language_code, search_type=search_type,
-                                    device=device, depth=depth, zoom=zoom)
+                                    device=fields['device'], depth=fields['depth'], zoom=fields['zoom'])
     def fetch() -> tuple[list[Any], dict[str, Any]]:
         items, check_url, _cost = local_serp.local_serp(search)
         return items, {'check_url': check_url}
 
-    payload, hit = read_through(SERP_CACHE, local_serp.local_body(search), fetch)
+    payload, hit = cached_read(SERP_CACHE, local_serp.local_body(search), fetch, cache_only=cache_only)
+    if payload is None:
+        return not_cached(event, 'local results search')
     items = payload['items']
     return paid_answer(event, {
         'keyword': search.keyword, 'search_type': search_type, 'items': items,
-        'match': match_json(items, req.target(cid, place_id, domain, name)),
+        'match': match_json(items, req.target(fields['cid'], fields['place_id'], fields['domain'], fields['name'])),
         'check_url': payload.get('check_url'), 'fetched_at': payload['fetched_at'],
-    }, hit, pricing.local_serp_usd(search_type, depth))
+    }, hit, pricing.local_serp_usd(search_type, search.depth))
 
 
 @cache
@@ -324,9 +398,11 @@ def handle_job(event: dict[str, Any], _context: Any, *, name: str | None, cid: s
 handler = seo_route({
     ('GET', '/categories'): handle_categories,
     ('POST', '/businesses'): handle_businesses,
+    ('GET', '/businesses'): handle_cached_businesses,
     ('POST', '/profile'): handle_profile,
     ('POST', '/questions'): handle_questions,
     ('POST', '/serp'): handle_serp,
+    ('GET', '/serp'): handle_cached_serp,
     ('POST', '/jobs'): handle_start_job,
     ('GET', '/jobs'): handle_job,
 })

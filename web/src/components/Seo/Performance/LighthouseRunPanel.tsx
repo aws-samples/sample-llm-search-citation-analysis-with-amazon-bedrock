@@ -28,6 +28,7 @@ export function LighthouseRunPanel({ state }: { readonly state: RunState }) {
       {run.targets.map((target, index) => (
         <LighthouseReport
           key={`${target.url}-${target.device}`}
+          runId={run.run_id}
           url={target.url}
           device={target.device}
           result={run.results[index] ?? null}

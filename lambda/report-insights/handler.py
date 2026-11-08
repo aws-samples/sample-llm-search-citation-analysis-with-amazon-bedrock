@@ -49,10 +49,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
+from shared import action_scope_serve, scope_snapshot_serve
 from shared.answer_queries import history_since, query_keyword_run_rows, query_latest_run_rows
+from shared.artifact_insights import ARTIFACT_KEY as INSIGHTS_ARTIFACT
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.insights_citations import competitor_domains_from
-from shared.insights_engine import compute_insights
+from shared.insights_engine import compute_insights, insights_from_facts
 from shared.insights_narrative import (
     LANGUAGE_NAMES,
     MAX_NARRATIVE_INSIGHTS,
@@ -84,9 +86,10 @@ from shared.request_deadline import (
     clear_request_deadline,
     current_deadline,
 )
-from shared.scope_params import SCOPE_KEYWORDS_CAP, map_scope_keywords, scoped_dynamodb_resource
+from shared.scope_params import ReportScope, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import load_window_histories
 from shared.search_results import search_results_table_name
+from shared.snapshot_artifacts import SOURCE_SNAPSHOT
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -168,7 +171,7 @@ def _requests(event: Any) -> tuple[list[tuple[str, str]], str | None]:
 
 
 def _group_keywords(requests: Iterable[tuple[str, str]]) -> dict[tuple[str, str], list[str]]:
-    """The active keywords of each (group, market) pair, in name order and capped as a report scope is."""
+    """The active keywords of each (group, market) pair, in name order: every one (a large group reads its snapshot)."""
     wanted = set(requests)
     members: dict[tuple[str, str], list[str]] = {pair: [] for pair in wanted}
     for item in query_active_keywords(dynamodb.Table(KEYWORDS_TABLE)):
@@ -179,7 +182,7 @@ def _group_keywords(requests: Iterable[tuple[str, str]]) -> dict[tuple[str, str]
                 if (group_id, market_id) in wanted:
                     members[(group_id, market_id)].append(keyword)
     return {
-        pair: sorted(set(keywords), key=str.casefold)[:SCOPE_KEYWORDS_CAP]
+        pair: sorted(set(keywords), key=str.casefold)
         for pair, keywords in members.items()
     }
 
@@ -321,29 +324,74 @@ def _language(run: GroupRun) -> str:
     return keyword_language(run.keywords)
 
 
-def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
-    """Write, validate and store the narrative of one group; the outcome as the step reports it."""
+@dataclass(frozen=True)
+class GroupFacts:
+    """What a group's narrative is written from: its computed insights, its KPIs and the run they describe."""
+
+    computed: dict[str, Any]
+    kpis: dict[str, Any]
+    timestamp: str
+    truncation: dict[str, Any]
+
+
+def _group_scope(run: GroupRun) -> ReportScope:
+    """The report scope of the group's keywords in its market (``global``: the keywords without one)."""
+    return ReportScope(
+        kind='group', keywords=tuple(run.keywords), scope={'mode': 'groups', 'group_ids': [run.group_id]},
+        label=run.group_id, market_id=run.market_id,
+    )
+
+
+def _snapshot_facts(run: GroupRun, brand_config: Mapping[str, Any]) -> GroupFacts | None:
+    """The facts of a group too large to read live, from its fresh scope snapshot when it holds this run; ``None`` otherwise.
+
+    The snapshot is built right before this step (BuildScopeSnapshots), from
+    every keyword: the facts, the KPIs and the ``HISTORY_DAYS`` stability.
+    """
+    scope = _group_scope(run)
+    if action_scope_serve.action_route(scope, dynamodb) != SOURCE_SNAPSHOT:
+        return None
+    artifacts = scope_snapshot_serve.open_snapshot(scope, brand_config.get('updated_at'))
+    stored = artifacts.load(INSIGHTS_ARTIFACT) if artifacts is not None and not artifacts.stale else None
+    timestamp = stored['coverage']['timestamp'] if stored else None
+    if stored is None or not timestamp or (run.run_timestamp is not None and timestamp < run.run_timestamp):
+        return None
+    stability = list(stored['stability'].get(str(HISTORY_DAYS), []))
+    return GroupFacts(insights_from_facts({**stored['facts'], 'stability': stability}), dict(stored['kpis']), str(timestamp), {})
+
+
+def _live_facts(run: GroupRun, brand_config: Mapping[str, Any]) -> GroupFacts | None:
+    """The facts of the group read for this invocation, every keyword (``None`` when the run has no answer)."""
     keywords, run_timestamp = run.keywords, run.run_timestamp
-    brand_config = brand_config_for_market(brand_config, run.market)
     owned_domains = owned_domains_from(brand_config)
     answers = _run_answers(keywords, run_timestamp)
     if not answers:
-        return run.outcome(status='skipped', reason='no_answers')
+        return None
     history, history_truncated_before = _history(keywords, owned_domains)
     truncation: dict[str, Any] = {} if history_truncated_before is None else {'history_truncated_before': history_truncated_before}
     if current_deadline().cut:
         truncation['history_partial'] = True
     computed = compute_insights(answers, owned_domains, history, competitor_domains_from(brand_config))
+    timestamp = run_timestamp or max(answer.timestamp for answer in answers)
+    return GroupFacts(computed, brand_kpis(answers, owned_domains), timestamp, truncation)
+
+
+def generate_group_narrative(run: GroupRun, brand_config: Mapping[str, Any]) -> dict[str, Any]:
+    """Write, validate and store the narrative of one group; the outcome as the step reports it."""
+    brand_config = brand_config_for_market(brand_config, run.market)
+    facts = _snapshot_facts(run, brand_config) or _live_facts(run, brand_config)
+    if facts is None:
+        return run.outcome(status='skipped', reason='no_answers')
+    computed, kpis, truncation = facts.computed, facts.kpis, facts.truncation
     if not computed['insights']:
         return run.outcome(status='skipped', reason='no_insights', **truncation)
-    kpis = brand_kpis(answers, owned_domains)
     language = _language(run)
     narrative, dropped = validate_narrative(
         _narrative(narrative_prompt(brand_config, language, kpis, computed['insights'])),
         computed['insights'],
         kpis,
     )
-    timestamp = run_timestamp or max(answer.timestamp for answer in answers)
+    timestamp = facts.timestamp
     dynamodb.Table(REPORT_INSIGHTS_TABLE).put_item(Item=convert_floats_to_decimal(narrative_item(
         scope_key=market_scoped_key(group_scope_key(run.group_id), run.market_id),
         run_timestamp=timestamp,

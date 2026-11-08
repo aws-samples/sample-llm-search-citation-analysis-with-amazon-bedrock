@@ -1,25 +1,30 @@
 import { useState } from 'react';
 import { useBrandMentions } from '../../hooks/useBrandMentions';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
-import { BrandMentionsTable } from './BrandMentionsTable';
+import { PagedBrandMentionsTable } from './PagedBrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
-import { exportBrandMentionsFor } from './brandMentionsExport';
 import {
   countTrackedBrands, describeIndustry
 } from './brandConfigSummary';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { BrandMentionsSkeleton } from './BrandMentionsSkeleton';
+import { ComputingState } from '../ui/ComputingState';
+import { ExportAllButton } from '../ui/ExportAllButton';
+import { ScopeCoverageNote } from '../ui/ScopeCoverageNote';
+import type { ComputingResponse } from '../../types/domain/scopeCoverage';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { describeReportScope } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
-import { useExportAction } from '../ui/useExportAction';
 import type {
   Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
 import { useSelectedMarketId } from '../Markets/marketSelectionContext';
-import type { BrandAppearancesRequest } from '../../api/brandMentions';
+import {
+  brandMentionsExportParams, brandMentionSummaryExportParams, type BrandAppearancesRequest
+} from '../../api/brandMentions';
+import type { ListRequest } from '../../api/scopedListPages';
 
 interface BrandsViewProps {keywords: Keyword[];}
 
@@ -132,21 +137,13 @@ const getFilterCounts = (data: BrandMentionsResponse | null) => ({
 });
 
 const BrandReportControls = ({
-  data, exportRequest, scopeLabel, selectedTimestamp, onTimestampChange
+  data, exportRequest, selectedTimestamp, onTimestampChange
 }: {
   data: BrandMentionsResponse;
   exportRequest: BrandAppearancesRequest;
-  scopeLabel: string;
   selectedTimestamp: string | null;
   onTimestampChange: (timestamp: string | null) => void;
 }) => {
-  const {
-    exporting, handleExport 
-  } = useExportAction(
-    () => exportBrandMentionsFor(exportRequest, scopeLabel),
-    '[brands] Excel export failed:',
-  );
-
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -162,14 +159,10 @@ const BrandReportControls = ({
           {data.available_runs.map((run) => <option key={run} value={run}>{run}</option>)}
         </select>
       </div>
-      <button
-        type="button"
-        onClick={handleExport}
-        disabled={exporting}
-        className="px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
-      >
-        {exporting ? 'Exporting…' : 'Export to Excel'}
-      </button>
+      <div className="flex flex-wrap items-start gap-2">
+        <ExportAllButton view="brand-mention-summary" params={brandMentionSummaryExportParams(exportRequest)} />
+        <ExportAllButton view="brand-appearances" params={brandMentionsExportParams(exportRequest)} label="Export all mentions" />
+      </div>
     </div>
   );
 };
@@ -202,19 +195,17 @@ const AnalysisRunContext = ({
   );
 };
 
-const BrandsCapNote = ({ aggregated }: { aggregated: BrandMentionsResponse['aggregated'] }) => (aggregated.brands_truncated ? (
-  <p className="text-xs text-gray-500 px-1">
-    Showing the top {aggregated.brands.length} of {aggregated.matching_brands} brands by aggregate score; the Excel export has every mention.
-  </p>
-) : null);
-
 const BrandContent = ({
-  data, loading, error, appearancesRequest, scopeLabel, classificationFilter, selectedTimestamp,
+  data, loading, error, computing, request, appearancesRequest, scopeLabel, classificationFilter, selectedTimestamp,
   onFilterChange, onTimestampChange, onBrandClick, config
 }: {
   data: BrandMentionsResponse | null;
   loading: boolean;
   error: string | null;
+  /** The view job of a `202` answer (an older run of a large scope, 2.45.0). */
+  computing: ComputingResponse | null;
+  /** The GET `data` answered: the brand list's next pages repeat it. */
+  request: ListRequest | null;
   appearancesRequest: BrandAppearancesRequest | null;
   scopeLabel: string;
   classificationFilter: string | null;
@@ -226,6 +217,8 @@ const BrandContent = ({
 }) => {
   // The first answer gets a placeholder; a refetch (filter, run, persona)
   // keeps the previous results on screen, dimmed, so nothing collapses.
+  // A view job (an older run of a large scope) replaces the figures of the previous choice.
+  if (loading && computing !== null) return <ComputingState subject="brand mentions" />;
   if (loading && !data) return <BrandMentionsSkeleton />;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm text-red-700">{error}</p></div>;
   if (appearancesRequest === null) return <EmptyState />;
@@ -238,7 +231,6 @@ const BrandContent = ({
       <BrandReportControls
         data={data}
         exportRequest={appearancesRequest}
-        scopeLabel={scopeLabel}
         selectedTimestamp={selectedTimestamp}
         onTimestampChange={onTimestampChange}
       />
@@ -248,8 +240,8 @@ const BrandContent = ({
         onFilterChange={onFilterChange}
         counts={counts}
       />
-      <BrandsCapNote aggregated={data.aggregated} />
-      <BrandMentionsTable brands={data.aggregated.brands} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
+      <ScopeCoverageNote response={data} />
+      <PagedBrandMentionsTable data={data} request={request} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
     </div>
   );
 };
@@ -341,7 +333,7 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
   };
 
   const {
-    data, loading, error
+    data, loading, error, computing, request
   } = useBrandMentions(scope, classificationFilter, selectedPersonaId, selectedTimestamp);
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors
@@ -379,6 +371,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         data={data}
         loading={loading}
         error={error}
+        computing={computing}
+        request={request}
         appearancesRequest={appearancesRequest}
         scopeLabel={scopeLabel}
         classificationFilter={classificationFilter}

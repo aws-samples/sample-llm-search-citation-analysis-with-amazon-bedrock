@@ -62,6 +62,11 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
   readonly failures: readonly [EndpointFailureCase<NoInfer<TResponse>>, ...EndpointFailureCase<NoInfer<TResponse>>[]];
   /** What the hook logs, with which error, when the request returns HTTP 500. */
   readonly loggedHttpError?: LoggedHttpError;
+  /**
+   * The hook also returns `computing` (a 202 view job, `null` here) and the `request` its
+   * `data` answered (2.45.0 scoped hooks).
+   */
+  readonly scoped?: boolean;
 }
 
 /** The `console.error` call a failed request makes: the hook's log prefix and the error it built. */
@@ -91,10 +96,20 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
   failures,
   loggedHttpError,
   otherState = {},
+  scoped = false,
 }: EndpointHookContract<THook, TArgs, TResponse>): void {
   const anyFunction: unknown = expect.any(Function);
+  const anyPath: unknown = expect.any(String);
+  const answeredRequest: unknown = expect.objectContaining({ path: anyPath });
+  const scopedState = (state: EndpointHookState<TResponse>): Record<string, unknown> => (scoped
+    ? {
+      computing: null,
+      request: state.data === null ? null : answeredRequest,
+    }
+    : {});
   const hookState = (state: EndpointHookState<TResponse>): Record<string, unknown> => ({
     ...state,
+    ...scopedState(state),
     ...otherState,
     ...Object.fromEntries([fetchName, ...otherFunctions].map((name) => [name, anyFunction])),
   });

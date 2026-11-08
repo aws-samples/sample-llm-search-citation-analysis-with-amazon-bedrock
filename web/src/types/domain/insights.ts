@@ -5,6 +5,7 @@
  * recomputes none.
  */
 import type { ReportScopeInfo } from './baseTypes';
+import type { ScopedResponseFields } from './scopeCoverage';
 import type { BrandKpis } from './groupKpiHistory';
 import type { InsightsNarrative } from './insightsNarrative';
 
@@ -71,6 +72,9 @@ export interface PromptEngineFacts {
   keywords: PromptEngineRow[];
   /** Keywords left out beyond the 50. */
   omitted: number;
+  /** The next page of keywords (`view=prompt_engine&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  keywords_next_token?: string | null;
+  keywords_total?: number;
 }
 
 /** One AI engine's (answer, URL) citations split by whose site they point at. */
@@ -123,6 +127,9 @@ export interface OwnedPagesFacts {
   pages: OwnedPageRow[];
   /** Owned pages left out beyond the 25. */
   pages_omitted: number;
+  /** The next page of owned pages (`view=owned_pages&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  pages_next_token?: string | null;
+  pages_total?: number;
   sections: OwnedSectionRow[];
   /** Each engine citing an owned page. */
   engines: OwnedPagesEngineRow[];
@@ -138,8 +145,26 @@ export interface CompetitorCaveatRow {
   negative: number;
   /** Mixed and negative mentions as a percent of all its mentions. */
   caveat_share: number | null;
-  /** Up to three distinct reasons the answers give. */
+  /** The first three distinct reasons the answers give. */
   reasons: string[];
+  /** Every distinct reason (2.45.0 wave 5); `caveat_reasons` holds them all. Absent before. */
+  reasons_total?: number;
+}
+
+/** One reason the answers give for a competitor's mixed or negative wording. */
+export interface CaveatReason {
+  competitor: string;
+  reason: string;
+}
+
+/**
+ * Every competitor caveat reason (2.45.0 wave 5): an answer lists none, `view=caveat_reasons`
+ * pages them all, in the competitor caveats' order.
+ */
+export interface CaveatReasonsFacts {
+  reasons: CaveatReason[];
+  reasons_total?: number;
+  reasons_next_token?: string | null;
 }
 
 export interface InsightFacts {
@@ -150,6 +175,8 @@ export interface InsightFacts {
   owned_pages: OwnedPagesFacts;
   /** Most-mentioned competitor first. */
   competitor_caveats: CompetitorCaveatRow[];
+  /** Absent from a build older than 2.45.0 wave 5. */
+  caveat_reasons?: CaveatReasonsFacts;
   /** Empty unless two first-party brands qualify. */
   portfolio: PortfolioBrandRow[];
   /** Group scope only; empty for every other scope. */
@@ -179,7 +206,7 @@ export interface Insight {
   block: InsightBlock;
 }
 
-export interface ReportInsightsResponse {
+export interface ReportInsightsResponse extends ScopedResponseFields {
   scope: ReportScopeInfo;
   keywords_truncated: boolean;
   /** The newest run among the keywords. */

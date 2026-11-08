@@ -2,8 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import { allow } from './permissions';
-import { SeoFeatureConstruct, stringKey } from './seo-feature';
-import { citationAnalysisTable } from './tables';
+import { SeoFeatureConstruct } from './seo-feature';
+import { stringKey, citationAnalysisTable  } from './tables';
 
 export const SEO_DOMAIN_SNAPSHOTS_TABLE = 'CitationAnalysis-SeoDomainSnapshots';
 export const SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE = 'CitationAnalysis-SeoDomainSnapshots';

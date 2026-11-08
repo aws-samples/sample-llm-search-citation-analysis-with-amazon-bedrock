@@ -18,21 +18,18 @@ import {
   parseApiResponse, 
   safeJsonParse,
   fetchBreakdownData,
-  citationExportRows,
-  CITATION_EXPORT_COLUMNS,
 } from '../../exporters/citationParser';
 import type {
   ContentTypeFilter, SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
-import { exportToExcel } from '../../exporters/excelGenerator';
-import { datedExcelFileName } from '../../exporters/excelFileName';
-import { fetchAllCitationUrls } from '../../api/citationPages';
+import { citationListParams } from '../../api/citationPages';
 import {
   useMarketCitations, type MarketCitations
 } from '../../hooks/useMarketCitations';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useSelectedMarketId } from '../Markets/marketSelectionContext';
 import { ErrorAlert } from '../ui/ErrorAlert';
+import { ExportAllButton } from '../ui/ExportAllButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 
 /** How long the URL search waits for typing to pause before asking the API. */
@@ -76,6 +73,11 @@ function isFiltered(searchQuery: string, minCitations: number | '', contentType:
   return searchQuery !== '' || minCitations !== '' || contentType !== 'all';
 }
 
+/** The breakdown cache key: a URL's keyword × engine rows differ per market. */
+function breakdownKey(url: string, marketId: string | null): string {
+  return `${marketId ?? '*'} ${url}`;
+}
+
 export const CitationsView = ({
   placeholder, onNavigateToRawResponses 
 }: CitationsViewProps) => {
@@ -90,7 +92,6 @@ export const CitationsView = ({
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<CrawledContent | null>(null);
   const [loadingCitation, setLoadingCitation] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortConfig>({
     column: 'citations',
     direction: 'desc' 
@@ -128,24 +129,25 @@ export const CitationsView = ({
       return;
     }
     setExpandedRow(idx);
-    if (breakdownData[url]) {
+    const key = breakdownKey(url, marketId);
+    if (breakdownData[key]) {
       return;
     }
     
     setLoadingBreakdown(prev => ({
       ...prev,
-      [url]: true,
+      [key]: true,
     }));
     
-    const breakdown = await fetchBreakdownData(url);
+    const breakdown = await fetchBreakdownData(url, marketId);
     
     setBreakdownData(prev => ({
       ...prev,
-      [url]: breakdown,
+      [key]: breakdown,
     }));
     setLoadingBreakdown(prev => ({
       ...prev,
-      [url]: false,
+      [key]: false,
     }));
   };
 
@@ -166,27 +168,11 @@ export const CitationsView = ({
     }
   };
 
-  const downloadToExcel = async () => {
-    setExportError(null);
-    try {
-      const everyUrl = await fetchAllCitationUrls({
-        ...listQuery,
-        urlContains: searchQuery,
-        marketId,
-      }, { includeKeywords: true });
-      await exportToExcel({
-        data: citationExportRows(everyUrl),
-        columns: CITATION_EXPORT_COLUMNS,
-        sheetName: 'Citations',
-        fileName: datedExcelFileName('citations', new Date()),
-      });
-    } catch (err) {
-      console.error('Error exporting citations:', err);
-      setExportError('The citations could not be exported. Please try again.');
-    }
-  };
-
   const hasFilters = isFiltered(searchQuery, minCitations, contentType);
+  const exportFilters = citationListParams({
+    ...listQuery,
+    marketId,
+  });
 
   return (
     <>
@@ -210,7 +196,7 @@ export const CitationsView = ({
           </div>
         </div>
 
-        <ErrorAlert message={view.error ?? exportError} />
+        <ErrorAlert message={view.error} />
 
         {view.totals?.truncated === true && (
           <output className="block text-sm text-amber-700">
@@ -239,7 +225,7 @@ export const CitationsView = ({
           contentType={contentType}
           setContentType={setContentType}
           setCurrentPage={setCurrentPage}
-          onDownloadExcel={downloadToExcel}
+          exportButton={<ExportAllButton view="citations" params={exportFilters} />}
         />
 
         {/* Table */}
@@ -261,8 +247,8 @@ export const CitationsView = ({
                 {pageCitations.map((citation, idx) => {
                   const globalRank = startIndex + idx + 1;
                   const isExpanded = expandedRow === idx;
-                  const breakdown = breakdownData[citation.url] ?? [];
-                  const isLoading = loadingBreakdown[citation.url] ?? false;
+                  const breakdown = breakdownData[breakdownKey(citation.url, marketId)] ?? [];
+                  const isLoading = loadingBreakdown[breakdownKey(citation.url, marketId)] ?? false;
                 
                   return (
                     <CitationRow
@@ -276,6 +262,7 @@ export const CitationsView = ({
                       onToggleRow={toggleRow}
                       onViewDetails={handleViewDetails}
                       onKeywordClick={setSelectedKeyword}
+                      marketId={marketId}
                     />
                   );
                 })}

@@ -2,8 +2,10 @@ import { useEffect } from 'react';
 import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
 import { useReportReady } from '../layout/useReportReady';
 import type { CompetitorRollup } from '../../../api/reports';
-
-const DEFAULT_KEYWORD_LIMIT = 50;
+import type { ReportScope } from '../../../types';
+import {
+  ALL_SCOPE, decodeReportScope, encodeReportScope
+} from '../../ui/reportScope';
 
 /**
  * Composes the single backend slice that powers the Competitor Gap
@@ -16,15 +18,17 @@ const DEFAULT_KEYWORD_LIMIT = 50;
  * case so we don't spin up a network call until the user picks a
  * target.
  */
-export function useCompetitorGap(competitor: string | null) {
+export function useCompetitorGap(competitor: string | null, scope: ReportScope = ALL_SCOPE) {
   const rollup = useCompetitorRollup();
   const { fetchCompetitorRollup } = rollup;
+  // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
+  const scopeKey = encodeReportScope(scope);
 
   useEffect(() => {
     if (competitor) {
-      fetchCompetitorRollup(competitor, DEFAULT_KEYWORD_LIMIT);
+      fetchCompetitorRollup(competitor, decodeReportScope(scopeKey));
     }
-  }, [competitor, fetchCompetitorRollup]);
+  }, [competitor, scopeKey, fetchCompetitorRollup]);
 
   const currentRollup: CompetitorRollup | null = rollup.data?.rollup ?? null;
 
@@ -42,8 +46,13 @@ export function useCompetitorGap(competitor: string | null) {
   return {
     rollup: currentRollup,
     keywordsAnalyzed: rollup.data?.keywords_analyzed ?? 0,
+    /** The whole answer, for its coverage and source fields. */
+    response: rollup.data,
+    /** The request the rollup answered: the outranked keywords load their next pages with it. */
+    request: rollup.request,
     loading: rollup.loading,
     error: rollup.error,
+    computing: rollup.computing,
     ready,
   };
 }

@@ -6,7 +6,6 @@ import {
   deleteKeywordResearch,
   deleteResearchTemplate,
   fetchKeywordResearch,
-  fetchKeywordResearchHistory,
   fetchKeywordResearchHistoryPage,
   fetchResearchTemplates,
   InvalidKeywordResearchResponseError,
@@ -129,10 +128,10 @@ describe('keyword research client', () => {
   it('reads history with the type filter and the page size', async () => {
     respondWith(200, { items: [PENDING_JOB, { junk: true }] });
 
-    const items = await fetchKeywordResearchHistory('expansion');
+    const page = await fetchKeywordResearchHistoryPage('expansion');
 
     expect(lastRequest().url).toBe('https://api.test.com/keyword-research/history?limit=50&type=expansion');
-    expect(items.map((item) => item.id)).toStrictEqual(['job-1']);
+    expect(page.items.map((item) => item.id)).toStrictEqual(['job-1']);
   });
 
   it('reads the history page after next_token and returns the next page token', async () => {
@@ -158,8 +157,8 @@ describe('keyword research client', () => {
   it('throws InvalidKeywordResearchResponseError when history has no items list', async () => {
     respondWith(200, { count: 0 });
 
-    await expect(fetchKeywordResearchHistory()).rejects.toThrow(InvalidKeywordResearchResponseError);
-    await expect(fetchKeywordResearchHistory()).rejects.toThrow('Keyword research API returned an invalid history');
+    await expect(fetchKeywordResearchHistoryPage()).rejects.toThrow(InvalidKeywordResearchResponseError);
+    await expect(fetchKeywordResearchHistoryPage()).rejects.toThrow('Keyword research API returned an invalid history');
   });
 
   it('throws InvalidKeywordResearchResponseError naming the template list when it has no items list', async () => {

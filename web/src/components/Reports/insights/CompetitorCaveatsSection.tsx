@@ -2,8 +2,14 @@ import {
   EMPTY_KPI, formatKpi
 } from '../../../formatting/kpiFormatter';
 import type {
-  CompetitorCaveatRow, ReportInsightsResponse
+  CaveatReason, CompetitorCaveatRow, ReportInsightsResponse
 } from '../../../types/domain/insights';
+import type { ListPaging } from '../../../api/scopedListPages';
+import {
+  useScopedList, type ScopedList
+} from '../../../hooks/useScopedList';
+import { isCaveatReason } from '../../../types/domain/insightFactDecoders';
+import { LoadMoreButton } from '../../ui/LoadMoreButton';
 import type { ReportTableColumn } from '../layout';
 import {
   InsightsTableSection, type InsightsSectionProps
@@ -24,8 +30,50 @@ function Reasons({ reasons }: { readonly reasons: readonly string[] }) {
   );
 }
 
-/** Built per response: a competitor carrying a competitor-caveat insight is marked. */
-function caveatColumns({ insights }: ReportInsightsResponse): ReadonlyArray<ReportTableColumn<CompetitorCaveatRow>> {
+/** Every caveat reason (2.45.0 wave 5): an answer lists none, `view=caveat_reasons` pages them all. */
+const CAVEAT_REASONS_PAGING: ListPaging = {
+  list: 'facts.caveat_reasons.reasons',
+  token: 'facts.caveat_reasons.reasons_next_token',
+  total: 'facts.caveat_reasons.reasons_total',
+  view: 'caveat_reasons',
+};
+
+/** The row's first reasons, then each loaded reason of the competitor not among them, in answer order. */
+function rowReasons(row: CompetitorCaveatRow, loaded: readonly CaveatReason[]): string[] {
+  const reasons = [...row.reasons];
+  loaded.forEach(({
+    competitor, reason
+  }) => {
+    if (competitor === row.name && !reasons.includes(reason)) reasons.push(reason);
+  });
+  return reasons;
+}
+
+/** How many reasons the rows list beyond what is on screen. */
+function hiddenReasons(rows: readonly CompetitorCaveatRow[], loaded: readonly CaveatReason[]): number {
+  return rows.reduce((hidden, row) => hidden + Math.max(0, (row.reasons_total ?? row.reasons.length) - rowReasons(row, loaded).length), 0);
+}
+
+/** Under the table while reasons are left out: how many, the button that loads them, and a page error. */
+function CaveatReasonsFooter({
+  rows, list
+}: {
+  readonly rows: readonly CompetitorCaveatRow[];
+  readonly list: ScopedList<CaveatReason>
+}) {
+  const hidden = hiddenReasons(rows, list.items);
+  if (hidden === 0 && list.error === null) return null;
+  return (
+    <div className="print-hidden mt-3 space-y-2">
+      {hidden > 0 && <p className="text-xs text-gray-500">{hidden === 1 ? '1 more reason is not shown.' : `${hidden} more reasons are not shown.`}</p>}
+      {list.error !== null && <p role="alert" className="text-xs text-red-700">{list.error}</p>}
+      <LoadMoreButton onLoadMore={hidden > 0 ? list.loadMore : undefined} loading={list.loadingMore} label="Load more reasons" />
+    </div>
+  );
+}
+
+/** Built per response: a competitor carrying a competitor-caveat insight is marked; `loaded` adds the paged reasons. */
+function caveatColumns({ insights }: ReportInsightsResponse, loaded: readonly CaveatReason[]): ReadonlyArray<ReportTableColumn<CompetitorCaveatRow>> {
   const flagged = new Set(insights.filter((insight) => insight.kind === 'competitor_caveat').map((insight) => insight.subject));
   return [
     {
@@ -52,14 +100,15 @@ function caveatColumns({ insights }: ReportInsightsResponse): ReadonlyArray<Repo
     },
     {
       header: 'Reasons',
-      info: 'Up to three reasons the answers give for the mixed or negative wording.',
-      render: (row) => <Reasons reasons={row.reasons} />,
+      info: 'The reasons the answers give for the mixed or negative wording: the first three, then every reason "Load more reasons" reads.',
+      render: (row) => <Reasons reasons={rowReasons(row, loaded)} />,
     },
   ];
 }
 
 /** Per competitor, how often the AI engines word it mixed or negative, and why. */
 export function CompetitorCaveatsSection(slice: InsightsSectionProps) {
+  const reasons = useScopedList(slice.data, slice.request ?? null, CAVEAT_REASONS_PAGING, isCaveatReason);
   return (
     <InsightsTableSection
       title={COMPETITOR_CAVEATS_TITLE}
@@ -67,10 +116,11 @@ export function CompetitorCaveatsSection(slice: InsightsSectionProps) {
       block="insights_competitor_caveats"
       slice={slice}
       rows={({ facts }) => facts.competitor_caveats}
-      columns={caveatColumns}
+      columns={(response) => caveatColumns(response, reasons.items)}
       // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
       rowKey={(row) => row.name}
       emptyMessage={CAVEATS_EMPTY}
+      footer={slice.data !== null && <CaveatReasonsFooter rows={slice.data.facts.competitor_caveats} list={reasons} />}
     />
   );
 }

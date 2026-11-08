@@ -18,9 +18,13 @@ import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import {
   cutNoteText, getCutNoteElement
 } from '../layout/HistoryCutNote-fixtures';
+import {
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 vi.mock('../../../hooks/useGroupKpiDetail', () => import('./groupKpiDetail-fixtures'));
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 
 const CHARTED = 'Mention rate, Share of voice, Visibility score, Top-1 share, Citation rate';
 
@@ -199,22 +203,61 @@ describe('GroupKpiReport period and states', () => {
 });
 
 describe('GroupKpiReport download and coverage notes', () => {
-  it('offers the whole report as an Excel download', () => {
+  it('exports the whole report of the group and period', async () => {
     renderGroupKpiReport();
 
-    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument();
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'group-kpis',
+      params: {
+        days: '90',
+        group_id: 'hotel-sol',
+      },
+      format: 'xlsx',
+    });
   });
 
-  it('offers no download before there is a run to export', () => {
+  it('offers no export before there is a run to export', () => {
     renderGroupKpiReport(NO_RUN_HISTORY);
 
-    expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export all' })).not.toBeInTheDocument();
   });
 
-  it('warns when the group has more keywords than the report covers', () => {
+  it('says how many of the group\'s keywords a cut live read covers', () => {
+    renderGroupKpiReport({
+      history: buildHistory({
+        keywords_truncated: true,
+        coverage: {
+          keywords_total: 3,
+          keywords_analyzed: 2,
+          complete: false,
+        },
+      }),
+    });
+
+    expect(screen.getByRole('note')).toHaveTextContent('Covers 2 of 3 keywords. The request ran out of time');
+  });
+
+  it('never claims only the first keywords are included', () => {
     renderGroupKpiReport({ history: buildHistory({ keywords_truncated: true }) });
 
-    expect(screen.getByRole('note')).toHaveTextContent('only the first 2 are included');
+    expect(screen.queryByText(/only the first/u)).not.toBeInTheDocument();
+  });
+
+  it('says how many of the group\'s keywords the keyword list shows', () => {
+    renderGroupKpiReport({
+      history: buildHistory({
+        keywords_next_token: 'tok-2',
+        keywords_total: 160,
+      }),
+      request: {
+        path: '/reports/group-kpis',
+        params: new URLSearchParams({ group_id: 'hotel-sol' }),
+      },
+    });
+
+    expect(screen.getByText('Showing 2 of 160 keywords')).toBeInTheDocument();
   });
 
   it('adds no warning when every keyword is covered', () => {

@@ -24,6 +24,7 @@ import boto3
 import run_kpis_action
 
 from shared import youtube
+from shared.bounded_writes import map_writes
 from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
 from shared.keyword_run_kpis_backfill import BACKFILL_ACTION
@@ -217,7 +218,9 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
     then fell back to a second update on conflict; two overlapping executions
     could both hit the put, one fails the condition, and the fallback update
     from the slower run overwrote the faster run's `priority` field
-    (last-writer-wins). See audit item 21.
+    (last-writer-wins). See audit item 21. The updates run
+    ``shared.bounded_writes.WRITE_WORKERS`` at a time (``map_writes``): a
+    keyword at 10 personas cites ~500 URLs, ~5 s one by one.
 
     Args:
         keyword: Search keyword
@@ -225,7 +228,7 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
     """
     timestamp = get_timestamp()
 
-    for citation in citations:
+    def store(citation: dict[str, Any]) -> None:
         try:
             citations_table.update_item(
                 Key={
@@ -256,6 +259,10 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
             )
         except Exception:
             logger.exception("Error storing citation %s", citation['normalized_url'])
+
+    writes = map_writes(lambda index: store(citations[index]), range(len(citations)), what='the citation writes')
+    for index in writes.pending:
+        logger.error("Citation %s not stored: the time budget ran out", citations[index]['normalized_url'])
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

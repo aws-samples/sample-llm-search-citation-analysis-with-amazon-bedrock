@@ -1,11 +1,8 @@
 import { useState } from 'react';
-import {
-  GLOBAL_MARKET_ID,
-  type AlertItem, type AlertMetricValue, type AlertSeverity, type AlertType, type Market
-} from '../../types';
-import { MarketBadge } from '../Markets/MarketBadge';
+import type { AlertItem } from '../../types';
 import { useMarketSelection } from '../Markets/marketSelectionContext';
-import { formatDate } from '../../formatting/dateFormatter';
+import { AlertRow } from './AlertRow';
+import { AllAlerts } from './AllAlerts';
 import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { ErrorAlert } from '../ui/ErrorAlert';
@@ -13,25 +10,6 @@ import { RefreshTextButton } from '../ui/RefreshTextButton';
 import {
   Skeleton, SkeletonRegion
 } from '../ui/Skeleton';
-
-const ALERT_TYPE_LABELS: Record<AlertType, string> = {
-  mention_rate_drop: 'Mention-rate drop',
-  citation_rate_drop: 'Keyword-coverage drop (before 2.21)',
-  position_loss: 'Position loss',
-  new_competitor_top: 'New competitor in top results',
-  keyword_lost_mention: 'Keyword lost mention',
-  improvement_after_content_change: 'Improvement after content change',
-};
-
-const SEVERITY_LABELS: Record<AlertSeverity, string> = {
-  info: 'Info',
-  warning: 'Warning',
-};
-
-const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
-  info: 'border-blue-200 bg-blue-50 text-blue-800',
-  warning: 'border-amber-200 bg-amber-50 text-amber-800',
-};
 
 function countLabel(count: number): string {
   return count === 1 ? '1 open alert' : `${count} open alerts`;
@@ -43,84 +21,6 @@ export const DASHBOARD_ALERT_PREVIEW = 5;
 /** Newest run first; alerts of one run keep the order the API gave them. */
 function newestFirst(items: readonly AlertItem[]): AlertItem[] {
   return [...items].sort((left, right) => right.run_timestamp.localeCompare(left.run_timestamp));
-}
-
-function metricValueLabel(metricValue: AlertMetricValue): string {
-  if (metricValue === null) return 'Not available';
-  return String(metricValue);
-}
-
-function MetricChange({ alertItem }: { readonly alertItem: AlertItem }) {
-  if (alertItem.previous === null && alertItem.current === null) return null;
-  return (
-    <p className="mt-2 text-xs text-gray-600" aria-label="Metric change">
-      <span className="font-medium">Previous:</span> {metricValueLabel(alertItem.previous)}
-      <span aria-hidden="true"> → </span>
-      <span className="sr-only"> to </span>
-      <span className="font-medium">Current:</span> {metricValueLabel(alertItem.current)}
-    </p>
-  );
-}
-
-interface AlertRowProps {
-  readonly alertItem: AlertItem;
-  readonly isAdmin: boolean;
-  readonly acknowledging: boolean;
-  readonly onAcknowledge: (id: string) => Promise<unknown>;
-  /** Configured markets, to name the market of an alert raised in one. */
-  readonly markets: readonly Market[];
-}
-
-function AlertRow({
-  alertItem, isAdmin, acknowledging, onAcknowledge, markets
-}: AlertRowProps) {
-  return (
-    <li className="p-4 sm:p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-sm border px-2 py-0.5 text-xs font-medium ${SEVERITY_CLASSES[alertItem.severity]}`}>
-              {SEVERITY_LABELS[alertItem.severity]}
-            </span>
-            <span className="text-xs font-medium text-gray-700">
-              {ALERT_TYPE_LABELS[alertItem.type]}
-            </span>
-          </div>
-          <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
-            {alertItem.group_name}
-            {alertItem.market_id && alertItem.market_id !== GLOBAL_MARKET_ID && (
-              <MarketBadge marketId={alertItem.market_id} markets={markets} />
-            )}
-          </p>
-          <p className="mt-1 text-sm text-gray-700">{alertItem.message}</p>
-          <MetricChange alertItem={alertItem} />
-          {alertItem.content_change !== undefined && (
-            <p className="mt-2 text-xs text-gray-500">
-              Attributed content change: {alertItem.content_change.description}
-            </p>
-          )}
-        </div>
-        <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-          <time
-            className="text-xs text-gray-500"
-            dateTime={alertItem.run_timestamp}
-          >
-            {formatDate(alertItem.run_timestamp)}
-          </time>
-          {isAdmin && alertItem.status === 'open' && (
-            <button
-              type="button"
-              onClick={() => { void onAcknowledge(alertItem.id); }}
-              disabled={acknowledging}
-              className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {acknowledging ? 'Acknowledging…' : 'Acknowledge'}
-            </button>
-          )}
-        </div>
-      </div>
-    </li>
-  );
 }
 
 export function AlertsPanel() {
@@ -138,8 +38,8 @@ export function AlertsPanel() {
   const { catalog } = useMarketSelection();
   const [showAll, setShowAll] = useState(false);
   const sorted = newestFirst(items);
-  const visible = showAll ? sorted : sorted.slice(0, DASHBOARD_ALERT_PREVIEW);
-  const hidden = sorted.length - visible.length;
+  const visible = sorted.slice(0, DASHBOARD_ALERT_PREVIEW);
+  const hidden = Math.max(count, sorted.length) - visible.length;
 
   return (
     <section
@@ -170,24 +70,30 @@ export function AlertsPanel() {
           <div className="mt-1 flex h-5 items-center"><Skeleton className="h-3.5 w-2/3" /></div>
         </SkeletonRegion>
       )}
-      {!loading && error === null && items.length === 0 && (
-        <p className="p-6 text-center text-sm text-gray-500">No open alerts.</p>
+      {showAll ? (
+        <AllAlerts isAdmin={isAdmin} acknowledgingIds={acknowledgingIds} onAcknowledge={acknowledge} markets={catalog.markets} />
+      ) : (
+        <>
+          {!loading && error === null && items.length === 0 && (
+            <p className="p-6 text-center text-sm text-gray-500">No open alerts.</p>
+          )}
+          {items.length > 0 && (
+            <ul className="divide-y divide-gray-200">
+              {visible.map((alertItem) => (
+                <AlertRow
+                  key={alertItem.id}
+                  alertItem={alertItem}
+                  isAdmin={isAdmin}
+                  acknowledging={acknowledgingIds.includes(alertItem.id)}
+                  onAcknowledge={acknowledge}
+                  markets={catalog.markets}
+                />
+              ))}
+            </ul>
+          )}
+        </>
       )}
-      {items.length > 0 && (
-        <ul className="divide-y divide-gray-200">
-          {visible.map((alertItem) => (
-            <AlertRow
-              key={alertItem.id}
-              alertItem={alertItem}
-              isAdmin={isAdmin}
-              acknowledging={acknowledgingIds.includes(alertItem.id)}
-              onAcknowledge={acknowledge}
-              markets={catalog.markets}
-            />
-          ))}
-        </ul>
-      )}
-      {(hidden > 0 || showAll) && sorted.length > DASHBOARD_ALERT_PREVIEW && (
+      {(hidden > 0 || showAll) && (
         <div className="border-t border-gray-200 p-3 text-center">
           <button
             type="button"
@@ -195,7 +101,7 @@ export function AlertsPanel() {
             aria-expanded={showAll}
             className="text-sm font-medium text-blue-600 hover:text-blue-800"
           >
-            {showAll ? `Show the newest ${DASHBOARD_ALERT_PREVIEW}` : `Show all ${sorted.length} alerts`}
+            {showAll ? `Show the newest ${DASHBOARD_ALERT_PREVIEW}` : 'See all alerts'}
           </button>
         </div>
       )}

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.cursors import decode_offset_cursor
+from shared.snapshot_artifacts import decode_keyword_cursor
 from testing.events import parse_response
 from testing.search_results_fixtures import active_keywords_table, report_dynamodb
 from testing.window_budget_fixtures import one_scope_worker, spent_request_budget, ticking_deadline, window_read_budget
@@ -126,7 +126,8 @@ class TestGroupKpis:
         with one_scope_worker(), window_read_budget(lambda: ticking_deadline(2)):
             _status, body = _call(_group_kpis, '/api/reports/group-kpis', {'group_id': 'coruna', 'view': 'keywords'})
 
-        assert ([entry['keyword'] for entry in body['keywords']], body['truncated'], decode_offset_cursor(body['next_token'])) == (
+        cursor = decode_keyword_cursor(body['next_token'])
+        assert ([entry['keyword'] for entry in body['keywords']], body['truncated'], cursor.keyword_index if cursor else None) == (
             [GROUP.keywords[0]], True, 1,
         )
 

@@ -1,8 +1,31 @@
 import {
-  MoverColumn, ReportSection, type TrendSectionProps
+  MoverColumn, ReportSection, type KeywordMover, type TrendSectionProps
 } from '../../layout';
 import { gateKeywordTrendRows } from './keywordTrendRows';
 import { keywordMovers } from './keywordMovers';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
+import { PER_KEYWORD_ANCHOR } from './PerKeywordTableSection';
+import type { HistoricalTrendsResponse } from '../../../../types';
+
+/**
+ * The movers each way: the server's, ranked over every keyword of the scope (2.45.0 wave 5); an
+ * older answer without them is ranked here over the keywords it lists.
+ */
+function moversOf(trends: HistoricalTrendsResponse | null, rows: Parameters<typeof keywordMovers>[0]): {
+  improvers: KeywordMover[];
+  decliners: KeywordMover[];
+} {
+  if (trends?.top_movers !== undefined) {
+    return {
+      improvers: trends.top_movers.improving,
+      decliners: trends.top_movers.declining,
+    };
+  }
+  return {
+    improvers: keywordMovers(rows, 'improving'),
+    decliners: keywordMovers(rows, 'declining'),
+  };
+}
 
 const NO_MOVERS_MESSAGE = 'No keyword\'s visibility score moved this way.';
 
@@ -24,8 +47,9 @@ export function MoversSection({
   });
   if (!gate.ready) return gate.placeholder;
 
-  const improvers = keywordMovers(gate.rows, 'improving');
-  const decliners = keywordMovers(gate.rows, 'declining');
+  const {
+    improvers, decliners
+  } = moversOf(trends, gate.rows);
   if (improvers.length === 0 && decliners.length === 0) return null;
 
   return (
@@ -47,6 +71,7 @@ export function MoversSection({
           emptyMessage={NO_MOVERS_MESSAGE}
         />
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to={`#${PER_KEYWORD_ANCHOR}`}>See all keywords</SeeAllLink></p>
     </ReportSection>
   );
 }

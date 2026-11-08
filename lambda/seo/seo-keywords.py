@@ -2,6 +2,8 @@
 SEO Keyword Explorer API (response shapes in ``web/src/types/api/seo.ts``):
 
 - POST /api/seo/keywords/research - keyword ideas for one seed in one market
+- GET  /api/seo/keywords/research - the same research read from the cache only (never a DataForSEO call), with the
+                                    Keyword Explorer's table filters and sort applied: the export of the table
 - POST /api/seo/serp              - the organic Google results of one keyword in one market
 
 Research: the request takes one seed, a limit of 150/300/500, one of the four modes and the clickstream and
@@ -12,6 +14,12 @@ zero-result seed is free for an hour but a new crawl is soon possible (an empty 
 A cache hit costs nothing (``estimated_cost_usd`` 0). Every fresh research stores its rows' metrics in
 ``CitationAnalysis-SeoKeywordMetrics``, so tracking a researched keyword needs no second paid metrics call; a
 failed write is logged and never fails the answer.
+
+Cache-only read: the query takes the research parameters (``keyword``, ``market_id``, ``mode``, ``count`` = the
+POST's ``limit``, ``group_keywords``, ``clickstream``) and the table's filters and sort (``EXPLORER_SCHEMA``). It
+answers the cached rows, filtered and sorted by ``explorer_rows``, and ``total`` (every cached row); without a cached
+answer it is 404 ``NOT_CACHED``. The filter and sort rules are the dashboard's (``keywordExplorerFilters.ts``); the
+shared cases in ``lambda/testing/keyword_explorer_filter_cases.json`` pin both to the same rows.
 
 SERP: cached 12 h (namespace ``serp`` v1) *without* the depth in the key: DataForSEO has no offset, so a deeper
 snapshot also answers a shallower request (served as stored, with its own depth) and a deeper request replaces the
@@ -25,16 +33,18 @@ SERP depths are 20 | 50, not 100: a depth-100 live call does not reliably fit th
 import functools
 import logging
 import math
+import re
 import sys
-from collections.abc import Mapping
+import unicodedata
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
 import boto3
-from seo_http import KEYWORD_FIELD, MARKET_ID_FIELD, CachePolicy, MarketRequest, market_request, seo_route
+from seo_http import KEYWORD_FIELD, MARKET_ID_FIELD, CachePolicy, MarketRequest, market_request, seo_error, seo_route
 
 from shared.api_response import success_response
 from shared.dataforseo_keywords import KeywordRow, research_keywords
@@ -62,6 +72,32 @@ RESEARCH_SCHEMA: dict[str, dict[str, Any]] = {
     'limit': {'type': int, 'choices': LIMITS, 'default': 150},
     'group_keywords': {'type': bool, 'default': False},
     'clickstream': {'type': bool, 'default': False},
+}
+
+SORT_FIELDS = ['keyword', 'search_volume', 'keyword_difficulty', 'cpc', 'competition']
+INTENTS = ['informational', 'commercial', 'transactional', 'navigational', 'unknown']
+_BOUND: dict[str, Any] = {'type': float}
+_TERMS: dict[str, Any] = {'type': str, 'max_length': 500}
+
+#: The Keyword Explorer table's filters and sort (the dashboard's ``KeywordFilters`` / ``KeywordSort``).
+EXPLORER_SCHEMA: dict[str, dict[str, Any]] = {
+    'include': _TERMS,
+    'exclude': _TERMS,
+    'min_volume': _BOUND,
+    'max_volume': _BOUND,
+    'max_difficulty': _BOUND,
+    'min_cpc': _BOUND,
+    'max_cpc': _BOUND,
+    'intents': {'type': str, 'max_length': 200},
+    'sort': {'type': str, 'choices': SORT_FIELDS, 'default': 'search_volume'},
+    'direction': {'type': str, 'choices': ['asc', 'desc'], 'default': 'desc'},
+}
+
+#: ``GET /research``: the research parameters (``count`` is its ``limit``: exports drop paging names) and the filters.
+CACHED_RESEARCH_SCHEMA: dict[str, dict[str, Any]] = {
+    **{name: rules for name, rules in RESEARCH_SCHEMA.items() if name != 'limit'},
+    'count': RESEARCH_SCHEMA['limit'],
+    **EXPLORER_SCHEMA,
 }
 
 SERP_SCHEMA: dict[str, dict[str, Any]] = {
@@ -163,6 +199,24 @@ def fresh_research(request: MarketRequest, options: ResearchOptions) -> dict[str
     return payload
 
 
+def research_body(request: MarketRequest, options: ResearchOptions, payload: Mapping[str, Any],
+                  cached: bool) -> dict[str, Any]:
+    """The research answer of ``payload`` (fresh or cached)."""
+    return {
+        'keyword': request.keyword,
+        'market_id': request.market_id,
+        'location_code': request.codes.location_code,
+        'language_code': request.codes.language_code,
+        'data_source': request.codes.keyword_data,
+        'source': payload.get('source'),
+        'used_fallback': bool(payload.get('used_fallback')),
+        'rows': payload.get('rows'),
+        'cached': cached,
+        'fetched_at': payload.get('fetched_at'),
+        'estimated_cost_usd': 0.0 if cached else estimated_cost_usd(request, options),
+    }
+
+
 @json_object_body
 @validate(RESEARCH_SCHEMA)
 def handle_research(event: dict[str, Any], _context: Any, *, keyword: str, market_id: str | None, mode: str,
@@ -172,19 +226,108 @@ def handle_research(event: dict[str, Any], _context: Any, *, keyword: str, marke
     options = effective_options(request, mode, limit, group_keywords=group_keywords, clickstream=clickstream)
     cached = usable_research(RESEARCH_CACHE.get(research_cache_params(request, options)))
     payload = cached if cached is not None else fresh_research(request, options)
-    return success_response({
-        'keyword': request.keyword,
-        'market_id': request.market_id,
-        'location_code': request.codes.location_code,
-        'language_code': request.codes.language_code,
-        'data_source': request.codes.keyword_data,
-        'source': payload.get('source'),
-        'used_fallback': bool(payload.get('used_fallback')),
-        'rows': payload.get('rows'),
-        'cached': cached is not None,
-        'fetched_at': payload.get('fetched_at'),
-        'estimated_cost_usd': 0.0 if cached is not None else estimated_cost_usd(request, options),
-    }, event)
+    return success_response(research_body(request, options, payload, cached is not None), event)
+
+
+# ---------------------------------------------------------------------------
+# Cache-only research read: the Keyword Explorer table's rows
+# ---------------------------------------------------------------------------
+
+def _terms(text: str | None) -> list[str]:
+    """The terms of an include / exclude field (comma or plus separated), lower case."""
+    return [term.strip().lower() for term in re.split(r'[,+]', text or '') if term.strip()]
+
+
+def _is_number(value: object) -> TypeGuard[int | float]:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _within(value: object, low: float | None, high: float | None) -> bool:
+    """Whether ``value`` passes the bounds; an unknown value fails any active bound (null never compares as 0)."""
+    if low is None and high is None:
+        return True
+    if not _is_number(value):
+        return False
+    return (low is None or value >= low) and (high is None or value <= high)
+
+
+@dataclass(frozen=True)
+class ExplorerFilters:
+    """The table's filters: every include term, no exclude term, the metric bounds, any of the intents."""
+
+    include: Sequence[str] = ()
+    exclude: Sequence[str] = ()
+    min_volume: float | None = None
+    max_volume: float | None = None
+    max_difficulty: float | None = None
+    min_cpc: float | None = None
+    max_cpc: float | None = None
+    intents: frozenset[str] = frozenset()
+
+    def keeps(self, row: Mapping[str, Any]) -> bool:
+        text = str(row.get('keyword') or '').lower()
+        return (
+            all(term in text for term in self.include) and not any(term in text for term in self.exclude)
+            and _within(row.get('search_volume'), self.min_volume, self.max_volume)
+            and _within(row.get('keyword_difficulty'), None, self.max_difficulty)
+            and _within(row.get('cpc'), self.min_cpc, self.max_cpc)
+            and (not self.intents or row.get('intent') in self.intents)
+        )
+
+
+def explorer_filters(params: Mapping[str, Any]) -> ExplorerFilters:
+    """The filters of the validated ``EXPLORER_SCHEMA`` parameters."""
+    return ExplorerFilters(
+        include=_terms(params.get('include')), exclude=_terms(params.get('exclude')),
+        min_volume=params.get('min_volume'), max_volume=params.get('max_volume'),
+        max_difficulty=params.get('max_difficulty'), min_cpc=params.get('min_cpc'), max_cpc=params.get('max_cpc'),
+        intents=frozenset(term for term in _terms(params.get('intents')) if term in INTENTS),
+    )
+
+
+def _text_key(row: Mapping[str, Any]) -> tuple[str, str]:
+    """A keyword's sort key: accents and case folded first (as a locale compare does), the exact text second."""
+    text = str(row.get('keyword') or '')
+    folded = ''.join(char for char in unicodedata.normalize('NFKD', text) if not unicodedata.combining(char))
+    return folded.casefold(), text
+
+
+def _metric_key(field: str) -> Callable[[Mapping[str, Any]], float]:
+    return lambda row: float(row[field])
+
+
+def explorer_rows(rows: Sequence[Any], filters: ExplorerFilters, sort: str,
+                  direction: str) -> list[Mapping[str, Any]]:
+    """
+    The rows the table shows: those ``filters`` keep, sorted by ``sort`` in ``direction``.
+
+    Rows without the sort value come last in either direction; equal rows keep the research's order.
+    """
+    kept = [row for row in rows if isinstance(row, Mapping) and filters.keeps(row)]
+    descending = direction == 'desc'
+    if sort == 'keyword':
+        return sorted(kept, key=_text_key, reverse=descending)
+    known = [row for row in kept if _is_number(row.get(sort))]
+    unknown = [row for row in kept if not _is_number(row.get(sort))]
+    return [*sorted(known, key=_metric_key(sort), reverse=descending), *unknown]
+
+
+@validate(CACHED_RESEARCH_SCHEMA)
+def handle_cached_research(event: dict[str, Any], _context: Any, *, keyword: str, market_id: str | None, mode: str,
+                           count: int, group_keywords: bool, clickstream: bool, sort: str, direction: str,
+                           **params: Any) -> dict[str, Any]:
+    """GET /api/seo/keywords/research - the cached research only, as the Keyword Explorer table shows it."""
+    limit = count
+    request = market_request(keyword, market_id)
+    options = effective_options(request, mode, limit, group_keywords=group_keywords, clickstream=clickstream)
+    cached = usable_research(RESEARCH_CACHE.get(research_cache_params(request, options)))
+    if cached is None:
+        return seo_error(404, 'NOT_CACHED', f'The research of "{request.keyword}" is no longer cached: research it '
+                         'again in the Keyword Explorer, then export', event)
+    rows = cached.get('rows') or []
+    body = research_body(request, options, cached, True)
+    return success_response({**body, 'rows': explorer_rows(rows, explorer_filters(params), sort, direction),
+                             'total': len(rows)}, event)
 
 
 # ---------------------------------------------------------------------------
@@ -274,5 +417,6 @@ def handle_serp(event: dict[str, Any], _context: Any, *, keyword: str, market_id
 
 handler = seo_route({
     ('POST', '/research'): handle_research,
+    ('GET', '/research'): handle_cached_research,
     ('POST', '/serp'): handle_serp,
 })

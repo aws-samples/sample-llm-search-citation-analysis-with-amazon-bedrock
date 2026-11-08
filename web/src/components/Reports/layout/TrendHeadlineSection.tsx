@@ -9,9 +9,11 @@ import {
   NO_PREVIOUS_PERIOD, periodComparison
 } from './periodComparison';
 import { ReportSection } from './ReportSection';
+import { ScopeCoverageNote } from '../../ui/ScopeCoverageNote';
+import type { ScopedResponseFields } from '../../../types/domain/scopeCoverage';
 
 /** What `GET /trends` and `GET /reports/overview` both say about a scope's latest standing. */
-type TrendStanding = Pick<
+type TrendStanding = ScopedResponseFields & Pick<
   HistoricalTrendsResponse,
   'change' | 'citations_configured' | 'days_analyzed' | 'keywords_analyzed' | 'keywords_with_data' | 'period_type' | 'truncated_before'
 >;
@@ -38,6 +40,7 @@ export function TrendHeadlineSection({
 }: Props) {
   return (
     <ReportSection title="Headline" subtitle={headlineSubtitle(kpis, standing)}>
+      <ScopeCoverageNote response={standing} className="mb-4" />
       <TruncatedHistoryNote truncatedBefore={standing.truncated_before} />
       <KpiHeadline
         kpis={kpis}

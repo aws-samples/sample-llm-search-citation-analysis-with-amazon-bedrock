@@ -7,11 +7,12 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from shared.artifact_recommendations import content_ideas_builder
 from shared.content_brief import CONTENT_OUTPUT_CONTRACT
 from shared.models import BedrockInvocationError, ModelRole
 from shared.prompt_safety import untrusted_input_system_instruction
-from shared.request_deadline import Deadline
 from shared.utils import get_timestamp
+from testing.action_handler_fixtures import action_tables, rows_by_keyword, snapshot_of, snapshot_route, ticking_budget
 from testing.content_studio_fixtures import (
     load_content_studio_module,
     queue_content_for_test,
@@ -20,6 +21,7 @@ from testing.content_studio_fixtures import (
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.env import cleared_env
 from testing.events import api_gateway_event, parse_response
+from testing.search_results_fixtures import search_result_row
 
 _mod = load_content_studio_module('content_studio_dispatch_under_test')
 
@@ -127,13 +129,7 @@ def _search_result(
     timestamp: str = '2026-04-18T10:00:00Z',
 ) -> dict:
     """One SearchResults row as the search Lambda stores it."""
-    return {
-        'keyword': keyword,
-        'timestamp': timestamp,
-        'provider': provider,
-        'brands': brands or [],
-        'citations': citations or [],
-    }
+    return search_result_row(keyword, provider, brands or [], timestamp=timestamp, citations=citations or [])
 
 
 def _first_party(rank: int, sentiment: str = 'neutral') -> dict:
@@ -144,13 +140,19 @@ def _competitor(name: str = 'Rival Inn', rank: int = 1) -> dict:
     return {'name': name, 'rank': rank, 'sentiment': 'neutral', 'classification': 'competitor'}
 
 
-def _ideas(items: list[dict], config: dict | None = None) -> list[dict]:
-    """Run `generate_content_ideas` over `items` with the calendar-driven seasonal ideas switched off."""
+def _ideas_body(items: list[dict], config: dict | None = None) -> dict:
+    """``GET /ideas`` over the keywords of `items` (their SearchResults rows), with the calendar-driven seasonal ideas switched off."""
     with (
-        patch.object(_mod, 'load_recent_search_results', MagicMock(return_value=items)),
-        patch.object(_mod, '_get_seasonal_suggestions', MagicMock(return_value=[])),
+        patch.object(_mod, 'dynamodb', action_tables(rows_by_keyword(items), _mod.SEARCH_RESULTS_TABLE)),
+        patch.object(_mod, 'get_brand_config', return_value=config or _BRAND_CONFIG),
+        patch('shared.content_idea_rules.seasonal_suggestions', MagicMock(return_value=[])),
     ):
-        return _mod.generate_content_ideas(config or _BRAND_CONFIG)
+        return parse_response(_mod._get_ideas(api_gateway_event('GET', '/api/content-studio/ideas'), None))[1]
+
+
+def _ideas(items: list[dict], config: dict | None = None) -> list[dict]:
+    """The ideas of ``_ideas_body``."""
+    return _ideas_body(items, config)['ideas']
 
 
 def _type_and_priority(ideas: list[dict]) -> list[tuple[str, str]]:
@@ -198,29 +200,12 @@ class TestGenerateContentIdeasWithoutBrandData:
 
         assert [idea['keyword'] for idea in ideas] == ['cited']
 
-    def test_caps_citation_opportunities_at_thirty(self):
+    def test_lists_a_citation_opportunity_for_every_cited_keyword(self):
         items = [_search_result(f'kw{n:02d}', citations=['https://a.example']) for n in range(40)]
 
         ideas = _ideas(items)
 
-        assert len(ideas) == 30
-
-
-class TestGenerateContentIdeasKeywordFilter:
-    """Blank keywords are dropped whether or not brand extraction ran."""
-
-    @pytest.mark.parametrize(
-        'items',
-        [
-            [_search_result('', citations=['https://a.example']), _search_result('kw', citations=['https://b.example'])],
-            [_search_result('', brands=[_competitor()]), _search_result('kw', brands=[_competitor()])],
-        ],
-        ids=['rows_without_brand_data', 'rows_with_brand_data'],
-    )
-    def test_skips_rows_with_a_blank_keyword(self, items):
-        ideas = _ideas(items)
-
-        assert [idea['keyword'] for idea in ideas] == ['kw']
+        assert len(ideas) == 40
 
 
 class TestGenerateContentIdeasFromBrandVisibility:
@@ -334,13 +319,14 @@ class TestGenerateContentIdeasFromBrandVisibility:
         items = [_search_result('kw', brands=[_first_party(rank=5)])]
 
         with (
-            patch.object(_mod, 'load_recent_search_results', MagicMock(return_value=items)),
-            patch.object(_mod, '_get_seasonal_suggestions', MagicMock(return_value=[seasonal])) as suggest,
+            patch.object(_mod, 'dynamodb', action_tables({'kw': items}, _mod.SEARCH_RESULTS_TABLE)),
+            patch.object(_mod, 'get_brand_config', return_value=_BRAND_CONFIG),
+            patch('shared.content_idea_rules.seasonal_suggestions', MagicMock(return_value=[seasonal])) as suggest,
         ):
-            ideas = _mod.generate_content_ideas(_BRAND_CONFIG)
+            ideas = parse_response(_mod._get_ideas(api_gateway_event('GET', '/api/content-studio/ideas'), None))[1]['ideas']
 
         assert ideas == [seasonal]
-        assert suggest.call_args == call(['kw'], _BRAND_CONFIG)
+        assert suggest.call_args == call(['kw'], 'general')
 
     @pytest.mark.parametrize(
         ('first_party_rank', 'expected_copy'),
@@ -1069,24 +1055,34 @@ class TestGeneratedOutputValidation:
 
 
 class TestContentIdeasTimeBudget:
-    def test_reads_only_the_attributes_the_ideas_use(self):
-        load = MagicMock(return_value=[])
+    def test_covers_every_active_keyword(self):
+        body = _ideas_body([_search_result(f'kw{n:02d}', brands=[_competitor()]) for n in range(40)])
 
-        with patch.object(_mod, 'load_recent_search_results', load):
-            _mod.generate_content_ideas(_BRAND_CONFIG)
+        assert (body['coverage'], body['source'], body['truncated']) == ({'keywords_total': 40, 'keywords_analyzed': 40, 'complete': True}, 'live', False)
 
-        assert load.call_args.kwargs == {'max_keywords': 30, 'projection': '#ts, keyword, provider, brands, citations'}
+    def test_answers_200_flagging_ideas_the_deadline_cut_short_as_truncated(self):
+        with ticking_budget():
+            with (
+                patch.object(_mod, 'dynamodb', action_tables({f'kw{n}': [_search_result(f'kw{n}', brands=[_competitor()])] for n in range(6)}, _mod.SEARCH_RESULTS_TABLE)),
+                patch.object(_mod, 'get_brand_config', return_value=_BRAND_CONFIG),
+            ):
+                status, body = parse_response(_mod.handler(api_gateway_event('GET', '/api/content-studio/ideas'), None))
 
-    @pytest.mark.parametrize(('cut', 'truncated'), [(False, False), (True, True)], ids=['complete', 'deadline-cut'])
-    def test_answers_200_flagging_ideas_the_deadline_cut_short_as_truncated(self, cut, truncated):
-        deadline = Deadline(60)
-        deadline.cut = cut
+        assert (status, body['truncated'], body['coverage']['complete']) == (200, True, False)
 
-        with (
-            patch.object(_mod, 'current_deadline', return_value=deadline),
-            patch.object(_mod, 'get_brand_config', return_value=_BRAND_CONFIG),
-            patch.object(_mod, 'generate_content_ideas', return_value=[]),
-        ):
-            status, body = parse_response(_mod._get_ideas(api_gateway_event('GET', '/api/content-studio/ideas'), None))
 
-        assert (status, body['truncated']) == (200, truncated)
+class TestContentIdeasFromTheSnapshot:
+    def test_a_large_tenant_is_served_from_the_scope_all_snapshot(self):
+        rows = [_search_result('kw', brands=[_competitor()])]
+        stored = snapshot_of([content_ideas_builder()], rows, _BRAND_CONFIG, keywords_total=1)
+
+        with snapshot_route(stored):
+            body = _ideas_body(rows)
+
+        assert (body['source'], [idea['type'] for idea in body['ideas']]) == ('snapshot', ['visibility_gap'])
+
+    def test_a_tenant_without_a_build_answers_202_computing(self):
+        with snapshot_route(None) as calls, patch.object(_mod, 'dynamodb', action_tables({}, _mod.SEARCH_RESULTS_TABLE)), patch.object(_mod, 'get_brand_config', return_value=_BRAND_CONFIG):
+            status, _body = parse_response(_mod._get_ideas(api_gateway_event('GET', '/api/content-studio/ideas'), None))
+
+        assert (status, calls.jobs) == (202, [('content-studio-ideas', {'industry': 'general'})])

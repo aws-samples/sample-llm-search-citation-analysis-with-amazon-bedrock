@@ -39,9 +39,6 @@ function vendorChunk(id: string): string | undefined {
   if (/[\\/]node_modules[\\/](chart\.js|react-chartjs-2)[\\/]/.test(id)) {
     return 'vendor-charts';
   }
-  if (/[\\/]node_modules[\\/]xlsx-js-style[\\/]/.test(id)) {
-    return 'vendor-xlsx';
-  }
   return undefined;
 }
 

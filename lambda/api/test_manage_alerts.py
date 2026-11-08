@@ -143,6 +143,13 @@ def ops_settings(tables: AlertTables) -> AlertTables:
     return tables
 
 
+def _status_partition(stored: dict, **kwargs) -> dict:
+    """A ``StatusCreatedIndex`` query over ``stored`` (status -> items newest first): a page, or its ``Select=COUNT``."""
+    status = kwargs['KeyConditionExpression'].get_expression()['values'][1]
+    items = stored.get(status, [])
+    return {'Count': len(items)} if kwargs.get('Select') == 'COUNT' else {'Items': items[:kwargs['Limit']]}
+
+
 class TestAlertHistory:
     def test_returns_open_alerts_newest_first_through_status_index(self, alert_api, tables) -> None:
         tables.alerts.query.return_value = {'Items': [
@@ -153,9 +160,7 @@ class TestAlertHistory:
         status, body = _call(alert_api, 'GET', '/api/alerts', query={'status': 'open', 'limit': '1'})
 
         assert status == 200
-        assert body == {'items': [
-            {'id': 'new', 'status': 'open', 'created_at': '2026-10-02T10:00:00Z'},
-        ], 'count': 1}
+        assert (body['items'], body['count']) == ([{'id': 'new', 'status': 'open', 'created_at': '2026-10-02T10:00:00Z'}], 1)
         assert tables.alerts.query.call_args.kwargs['IndexName'] == 'StatusCreatedIndex'
         assert tables.alerts.scan.call_count == 0
 
@@ -185,31 +190,30 @@ class TestAlertHistory:
         status, body = _call(alert_api, 'GET', '/api/alerts')
 
         assert status == 200
-        assert body == {'items': [expected], 'count': 1}
+        assert (body['items'], body['count']) == ([expected], 1)
 
     def test_merges_open_and_acknowledged_alerts_newest_first(self, alert_api, tables) -> None:
-        tables.alerts.query.side_effect = [
-            {'Items': [{'id': 'open', 'status': 'open', 'created_at': '2026-10-01T10:00:00Z'}]},
-            {'Items': [{'id': 'ack', 'status': 'acknowledged', 'created_at': '2026-10-02T10:00:00Z'}]},
-        ]
+        stored = {
+            'open': [{'id': 'open', 'status': 'open', 'created_at': '2026-10-01T10:00:00Z'}],
+            'acknowledged': [{'id': 'ack', 'status': 'acknowledged', 'created_at': '2026-10-02T10:00:00Z'}],
+        }
+        tables.alerts.query.side_effect = lambda **kwargs: _status_partition(stored, **kwargs)
 
         _status, body = _call(alert_api, 'GET', '/api/alerts', query={'status': 'all', 'limit': '10'})
 
-        assert [item['id'] for item in body['items']] == ['ack', 'open']
-        assert body['count'] == 2
-        assert tables.alerts.query.call_count == 2
+        assert ([item['id'] for item in body['items']], body['count'], body['total'], body['next_token']) == (['ack', 'open'], 2, 2, None)
 
     def test_queries_fifty_open_alerts_when_no_status_or_limit_is_given(self, alert_api, tables) -> None:
         tables.alerts.query.return_value = {'Items': []}
 
         _call(alert_api, 'GET', '/api/alerts')
 
-        assert tables.alerts.query.call_args_list == [call(
+        assert tables.alerts.query.call_args_list[0] == call(
             IndexName='StatusCreatedIndex',
             KeyConditionExpression=Key('status').eq('open'),
             ScanIndexForward=False,
             Limit=50,
-        )]
+        )
 
     @pytest.mark.parametrize(
         ('limit', 'message'),
@@ -498,17 +502,14 @@ class TestContentChanges:
         status, body = _call(alert_api, 'GET', '/api/alerts/content-changes', query={'group_id': 'group-1', 'limit': '10'})
 
         assert status == 200
-        assert body == {
-            'items': [{
-                'id': 'change-9a43216f26b0ec30a5155fa455915c49',
-                'group_id': 'group-1',
-                'changed_at': '2026-10-01T10:00:00Z',
-                'description': 'Published landing page',
-                'ttl': '1822384800',
-            }],
-            'count': 1,
-        }
-        assert tables.changes.query.call_args.kwargs['ScanIndexForward'] is False
+        assert (body['items'], body['count']) == ([{
+            'id': 'change-9a43216f26b0ec30a5155fa455915c49',
+            'group_id': 'group-1',
+            'changed_at': '2026-10-01T10:00:00Z',
+            'description': 'Published landing page',
+            'ttl': '1822384800',
+        }], 1)
+        assert tables.changes.query.call_args_list[0].kwargs['ScanIndexForward'] is False
 
     def test_writes_server_timestamped_marker_for_existing_group(self, alert_api, tables) -> None:
         tables.groups.get_item.return_value = {'Item': {'id': 'group-1'}}

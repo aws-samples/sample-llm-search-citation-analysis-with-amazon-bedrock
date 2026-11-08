@@ -12,7 +12,9 @@ cannot finish raises before switching ``current.json``.
 
 Environment: ``CITATION_ROLLUP_BUCKET`` (else ``SUMMARY_BUCKET``, the same
 keywords bucket), ``DYNAMODB_TABLE_CITATIONS``, ``DYNAMODB_TABLE_KEYWORDS``
-and ``DYNAMODB_TABLE_BRAND_CONFIG``.
+and ``DYNAMODB_TABLE_BRAND_CONFIG``; with ``SCOPE_SNAPSHOT_BUILD_STATE_MACHINE_ARN``
+a tenant too large for one invocation starts the distributed build instead
+(which builds this rollup with the snapshots, ``shared.citation_rollup_dist``).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from typing import Any
 
 import boto3
 from botocore.config import Config
+from scope_snapshot_action import build_state_machine_arn, snapshot_sources, start_distributed_build
 
 from shared.citation_rollup_build import WRITE_WORKERS, RollupSources, build_rollup
 from shared.request_deadline import Deadline, activate_deadline, budget_from_context, clear_request_deadline
@@ -67,11 +70,17 @@ def rollup_sources() -> RollupSources:
 
 
 def build_citation_rollup(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Build and publish the rollup; the build summary (``status``, ``build_id``, counts, ``seconds``)."""
+    """Build and publish the rollup; the build summary (``status``, ``build_id``, counts, ``seconds``).
+
+    A tenant the distributed build serves (``shared.scope_snapshot_dist.needs_distribution``: its rollup
+    or its snapshots are too large for one invocation) starts that build instead, which builds the
+    rollup with the snapshots (``scope_snapshot_action.start_distributed_build``).
+    """
     logger.info('Building the citation rollup (%s)', event.get('reason') or event.get('execution_id') or 'direct')
-    activate_deadline(Deadline(budget_from_context(context, BUILD_MARGIN_SECONDS)))
+    deadline = activate_deadline(Deadline(budget_from_context(context, BUILD_MARGIN_SECONDS)))
     try:
-        summary = build_rollup(rollup_sources())
+        distributed = start_distributed_build(snapshot_sources(deadline, event), event) if build_state_machine_arn() else None
+        summary = distributed or build_rollup(rollup_sources())
     finally:
         clear_request_deadline()
     logger.info('Citation rollup: %s', summary)

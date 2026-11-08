@@ -41,6 +41,14 @@ describe('SentimentExamplesModal', () => {
     expect(screen.getByRole('dialog', { name: 'Negative answers · OpenAI' })).toBeInTheDocument();
   });
 
+  it('offers Export all of the answers once they are listed', async () => {
+    answerEveryFetch(buildSentimentExamplesResponse());
+    renderExamplesModal();
+    await waitForAnswersList();
+
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeEnabled();
+  });
+
   it('names every engine in its title when no engine is picked', () => {
     answerEveryFetch(buildSentimentExamplesResponse({ provider: null }));
     renderExamplesModal({
@@ -75,11 +83,25 @@ describe('SentimentExamplesModal', () => {
     expect(screen.getByText('Hotel Sol · each keyword\'s latest run')).toBeInTheDocument();
   });
 
-  it('notes a scope whose keywords were capped once the answer says so', async () => {
+  it('says how many keywords a cut live read covers once the answer says so', async () => {
+    answerEveryFetch(buildSentimentExamplesResponse({
+      keywords_truncated: true,
+      coverage: {
+        keywords_total: 160,
+        keywords_analyzed: 100,
+        complete: false,
+      },
+    }));
+    renderExamplesModal();
+
+    expect(await screen.findByRole('note')).toHaveTextContent('Covers 100 of 160 keywords. The request ran out of time');
+  });
+
+  it('drops the vague cap note for a truncated answer from an older API', async () => {
     answerEveryFetch(buildSentimentExamplesResponse({ keywords_truncated: true }));
     renderExamplesModal();
 
-    expect(await screen.findByText('Hotel Sol · each keyword\'s latest run · not every keyword of the scope is included')).toBeInTheDocument();
+    expect(await screen.findByText('Hotel Sol · each keyword\'s latest run')).toBeInTheDocument();
   });
 
   it('says the answers are loading while the request is in flight', () => {

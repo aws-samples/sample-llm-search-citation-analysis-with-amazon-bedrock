@@ -48,12 +48,6 @@ const FRONTEND_DEPS = [
     desc: 'Charts' 
   },
   {
-    name: 'xlsx-js-style',
-    version: '1.x',
-    license: 'Apache-2.0',
-    desc: 'Excel export' 
-  },
-  {
     name: 'AWS Amplify',
     version: '6.x',
     license: 'Apache-2.0',

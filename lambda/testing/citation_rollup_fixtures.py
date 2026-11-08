@@ -3,19 +3,31 @@
 from __future__ import annotations
 
 import io
+import json
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.citation_rollup import CURRENT_KEY, decode_json
 from shared.citation_rollup_build import RollupSources, build_rollup
+from shared.citation_rollup_dist import (
+    plan_rollup,
+    publish_rollup,
+    run_rollup_merge,
+    run_rollup_shard,
+    write_rollup_plan,
+)
+from shared.scope_snapshot import snapshot_store
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.partition_tables import PagedTable
+from testing.scope_snapshot_fixtures import ListedBucket
 
 CITATIONS_KEY: Mapping[str | None, tuple[str, ...]] = {None: ('keyword', 'normalized_url')}
 
@@ -33,6 +45,8 @@ class SegmentedTable:
     max_page_rows: int
     on_scan: Callable[[], None] | None = None
     scans: list[dict[str, Any]] = field(default_factory=list)
+    item_count: int = 0
+    """What ``DescribeTable`` would say (``shared.citation_rollup_dist.citation_rows_estimate``)."""
 
     def _table(self, rows: list[dict[str, Any]]) -> PagedTable:
         return PagedTable(rows, CITATIONS_KEY, max_page_rows=self.max_page_rows)
@@ -91,25 +105,26 @@ def lambda_context(remaining_ms: int) -> MagicMock:
 
 def get_citations(
     module: Any, citations_table: Any, query: Mapping[str, str] | None, *,
-    active_keywords: list[dict[str, Any]], context: Any = None,
+    active_keywords: list[dict[str, Any]], context: Any = None, brand_config: Mapping[str, Any] | None = None,
 ) -> tuple[int, Any]:
     """``GET /api/citations`` on ``module`` over ``citations_table``, scopes resolving to ``active_keywords``.
 
-    The brand config is empty (no brands, no ``updated_at``) whatever the environment.
+    The brand config is ``brand_config`` (default: empty, no brands and no ``updated_at``) whatever the environment.
     """
-    resource = fake_dynamodb_resource(fake_table(), by_name={'test-keywords': fake_table(query={'Items': active_keywords})})
+    keywords = fake_table(query={'Items': active_keywords, 'Count': len(active_keywords)})
+    resource = fake_dynamodb_resource(fake_table(), by_name={'test-keywords': keywords})
     with (
         patch.object(module, 'dynamodb', resource),
         patch.object(module, 'citations_table', citations_table),
         patch.object(module, '_get_tracked_brands', return_value=[]),
-        patch.object(module, '_brand_config', return_value={}),
+        patch.object(module, '_brand_config', return_value=dict(brand_config or {})),
     ):
         event = api_gateway_event('GET', '/api/citations', query=dict(query or {}))
         return parse_response(module.handler(event, context))
 
 
 @dataclass
-class FakeS3:
+class FakeS3(ListedBucket):
     """An in-memory S3 bucket: put/get/list/delete the way the rollup builder and reader call them.
 
     ``reads`` records every ``get_object`` key; ``failing_keys`` raise a 500 on read.
@@ -140,18 +155,6 @@ class FakeS3:
             self.objects.pop(item['Key'], None)
         return {}
 
-    def get_paginator(self, _operation: str) -> FakeS3:
-        return self
-
-    def paginate(self, **params: Any) -> Iterator[dict[str, Any]]:
-        prefix, delimiter = params['Prefix'], params.get('Delimiter')
-        keys = sorted(key for key in self.objects if key.startswith(prefix))
-        if delimiter is None:
-            yield {'Contents': [{'Key': key} for key in keys]}
-            return
-        tails = {key[len(prefix):] for key in keys}
-        prefixes = sorted({prefix + tail.split(delimiter, 1)[0] + delimiter for tail in tails if delimiter in tail})
-        yield {'CommonPrefixes': [{'Prefix': name} for name in prefixes]}
 
 
 ROLLUP_BUCKET = 'citation-analysis-keywords-123456789012'
@@ -204,3 +207,45 @@ def rollup_bucket_fixture():
 
 #: 30 keywords x 100 URLs folded onto 2,500 distinct URLs: three 'all' chunks per scope.
 ROLLUP_TEST_ROWS = citation_rows(keywords=30, urls_per_keyword=100, shared_urls=2_500)
+
+#: Where a distributed test build keeps its plan and fragments (a snapshot build's ``_build/`` directory).
+DIST_BUILD_DIR = 'scope-snapshots/20261105T100000Z-test/_build/'
+
+
+def distributed_rollup(
+    rows: list[dict[str, Any]], active: list[dict[str, Any]], s3: FakeS3, brand_config: Mapping[str, Any] | None = None,
+    now: Callable[[], datetime] = lambda: datetime(2026, 11, 5, 10, 0, tzinfo=UTC),
+) -> dict[str, Any] | None:
+    """Plan, every shard, every merge and the publish of a distributed rollup over ``rows`` and ``active``; the publish summary."""
+    table = SegmentedTable(rows, max_page_rows=200, item_count=len(rows))
+    keywords = fake_table(query={'Items': active})
+    store = snapshot_store(s3, ROLLUP_BUCKET)
+    plan = plan_rollup(table, keywords, s3, ROLLUP_BUCKET, dict(brand_config or {}), now)
+    write_rollup_plan(store, DIST_BUILD_DIR, plan)
+    for shard in range(len(plan.shards) + 1):
+        run_rollup_shard(store, DIST_BUILD_DIR, table, s3, ROLLUP_BUCKET, shard)
+    for item in range(len(plan.merges)):
+        run_rollup_merge(store, DIST_BUILD_DIR, s3, ROLLUP_BUCKET, item)
+    return publish_rollup(store, DIST_BUILD_DIR, s3, ROLLUP_BUCKET, now)
+
+
+def _sorted_stats(manifest: dict[str, Any]) -> dict[str, Any]:
+    """A manifest with its provider and brand stats in one order (both builds list them in the order rows arrived)."""
+    totals = dict(manifest['totals'])
+    for name in ('provider_stats', 'brand_stats'):
+        totals[name] = sorted(totals[name], key=lambda stat: json.dumps(stat, sort_keys=True))
+    return {**manifest, 'totals': totals}
+
+
+def published_view(s3: FakeS3) -> dict[str, Any]:
+    """The published rollup as a reader sees it, build ids left out: each scope's index entry and every file under its directory."""
+    current = json.loads(s3.objects[CURRENT_KEY])
+    view: dict[str, Any] = {}
+    for key, entry in current['scopes'].items():
+        path = entry['path']
+        files = {
+            name.removeprefix(f'{path}/'): decode_json(body) for name, body in s3.objects.items() if name.startswith(f'{path}/')
+        }
+        files['manifest.json.gz'] = _sorted_stats(files['manifest.json.gz'])
+        view[key] = {'fingerprint': entry['fingerprint'], 'urls': entry['urls'], 'dir': path.rsplit('/', 1)[-1], 'files': files}
+    return view

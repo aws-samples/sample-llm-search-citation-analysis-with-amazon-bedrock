@@ -1,0 +1,60 @@
+{
+  "description": "Keyword Explorer table filters and sort: the same cases run against the dashboard (web/src/components/KeywordResearch/explorer/keywordExplorerFilters.ts) and the cache-only research route (lambda/seo/seo-keywords.py explorer_rows), so the table and its export list the same rows in the same order. Filters use the dashboard's field names; the route reads them as include, exclude, min_volume, max_volume, max_difficulty, min_cpc, max_cpc, intents (comma separated), sort and direction.",
+  "rows": [
+    {"keyword": "cheap flights", "search_volume": 900, "keyword_difficulty": 40, "cpc": 1.2, "competition": 0.5, "intent": "commercial"},
+    {"keyword": "flights to lima", "search_volume": null, "keyword_difficulty": 20, "cpc": 0.4, "competition": 0.3, "intent": "informational"},
+    {"keyword": "café lima", "search_volume": 300, "keyword_difficulty": null, "cpc": null, "competition": 0.1, "intent": "transactional"},
+    {"keyword": "Zebra tours", "search_volume": 50, "keyword_difficulty": 10, "cpc": 2.0, "competition": null, "intent": "navigational"},
+    {"keyword": "best flights deals", "search_volume": 900, "keyword_difficulty": 55, "cpc": 0.9, "competition": 0.7, "intent": "commercial"}
+  ],
+  "cases": [
+    {
+      "name": "lists every row by volume, highest first, equal volumes in research order and unknown volume last",
+      "filters": {},
+      "sort": {"field": "search_volume", "direction": "desc"},
+      "keywords": ["cheap flights", "best flights deals", "café lima", "Zebra tours", "flights to lima"]
+    },
+    {
+      "name": "keeps only rows holding every include term",
+      "filters": {"include": "flights + lima"},
+      "sort": {"field": "search_volume", "direction": "desc"},
+      "keywords": ["flights to lima"]
+    },
+    {
+      "name": "drops rows holding any exclude term and sorts keywords alphabetically ignoring case and accents",
+      "filters": {"exclude": "cheap, deals"},
+      "sort": {"field": "keyword", "direction": "asc"},
+      "keywords": ["café lima", "flights to lima", "Zebra tours"]
+    },
+    {
+      "name": "drops rows of unknown difficulty under a max difficulty",
+      "filters": {"maxDifficulty": "30"},
+      "sort": {"field": "search_volume", "direction": "desc"},
+      "keywords": ["Zebra tours", "flights to lima"]
+    },
+    {
+      "name": "keeps rows from a minimum CPC, cheapest first",
+      "filters": {"minCpc": "1"},
+      "sort": {"field": "cpc", "direction": "asc"},
+      "keywords": ["cheap flights", "Zebra tours"]
+    },
+    {
+      "name": "keeps rows of any chosen intent, keywords in reverse alphabetical order",
+      "filters": {"intents": ["commercial", "navigational"]},
+      "sort": {"field": "keyword", "direction": "desc"},
+      "keywords": ["Zebra tours", "cheap flights", "best flights deals"]
+    },
+    {
+      "name": "keeps rows within the volume bounds, lowest competition first",
+      "filters": {"minVolume": "100", "maxVolume": "900"},
+      "sort": {"field": "competition", "direction": "asc"},
+      "keywords": ["café lima", "cheap flights", "best flights deals"]
+    },
+    {
+      "name": "lists unknown competition last when sorting by competition descending",
+      "filters": {},
+      "sort": {"field": "competition", "direction": "desc"},
+      "keywords": ["best flights deals", "cheap flights", "flights to lima", "café lima", "Zebra tours"]
+    }
+  ]
+}

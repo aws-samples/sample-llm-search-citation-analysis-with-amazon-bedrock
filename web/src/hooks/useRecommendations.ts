@@ -2,9 +2,13 @@ import {
   useState, useCallback,
 } from 'react';
 import {
-  API_BASE_URL, authenticatedFetch, getErrorMessage,
+  API_BASE_URL, getErrorMessage,
 } from '../infrastructure';
 import { saveRecommendationStatus } from '../api/recommendations';
+import { fetchUntilReady } from '../api/viewJobs';
+import type { ListRequest } from '../api/scopedListPages';
+import type { ComputingResponse } from '../types/domain/scopeCoverage';
+import { hasScopedResponseFields } from '../types/domain/scopeCoverageDecoders';
 import {
   ALL_SCOPE, decodeReportScope, encodeReportScope, reportScopeParams
 } from '../components/ui/reportScope';
@@ -26,7 +30,20 @@ function isRecommendationsResponse(data: unknown): data is RecommendationsRespon
     && data !== null
     && 'recommendations' in data
     && 'total_count' in data
+    && hasScopedResponseFields({ ...data })
   );
+}
+
+/** One GET of the recommendations, repeated while a view job computes it (`awaitViewJob`). */
+async function readRecommendations(
+  url: string,
+  onComputing: (computing: ComputingResponse) => void,
+): Promise<RecommendationsResponse> {
+  const json = await fetchUntilReady(url, {}, () => new RecommendationsFetchError(), { onComputing });
+  if (!isRecommendationsResponse(json)) {
+    throw new RecommendationsFetchError('Invalid response format');
+  }
+  return json;
 }
 
 function withStatus(
@@ -55,6 +72,10 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
   const [error, setError] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<readonly string[]>([]);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [computing, setComputing] = useState<ComputingResponse | null>(null);
+  /** Statuses saved since the list loaded, by id: they apply to rows of later pages too. */
+  const [savedStatuses, setSavedStatuses] = useState<Readonly<Record<string, RecommendationStatus>>>({});
+  const [request, setRequest] = useState<ListRequest | null>(null);
   // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
   const scopeKey = encodeReportScope(scope);
   const marketId = useSelectedMarketId();
@@ -68,16 +89,12 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
         ...reportScopeParams(decodeReportScope(scopeKey), marketId),
         use_llm: useLlm.toString(),
       });
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/recommendations?${params}`,
-      );
-      if (!response.ok) throw new RecommendationsFetchError();
-
-      const json: unknown = await response.json();
-      if (!isRecommendationsResponse(json)) {
-        throw new RecommendationsFetchError('Invalid response format');
-      }
+      const json = await readRecommendations(`${API_BASE_URL}/recommendations?${params}`, setComputing);
       setData(json);
+      setRequest({
+        path: '/recommendations',
+        params,
+      });
       return json;
     } catch (err) {
       const message = getErrorMessage(err, 'visibility');
@@ -86,6 +103,7 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
       return null;
     } finally {
       setLoading(false);
+      setComputing(null);
     }
   }, [scopeKey, marketId]);
 
@@ -100,6 +118,10 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
     try {
       const saved = await saveRecommendationStatus(recommendation, status);
       setData((current) => (current === null ? current : withStatus(current, id, saved)));
+      setSavedStatuses((current) => ({
+        ...current,
+        [id]: saved,
+      }));
       return true;
     } catch (err) {
       setStatusError(getErrorMessage(err));
@@ -114,6 +136,11 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
     data,
     loading,
     error,
+    /** The view job of a `202` answer the fetch waits for; `null` otherwise. */
+    computing,
+    /** The request `data` answered: the list loads its next pages with it (2.45.0). */
+    request,
+    savedStatuses,
     fetchRecommendations,
     updateStatus,
     updatingIds,

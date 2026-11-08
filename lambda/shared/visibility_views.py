@@ -84,7 +84,7 @@ def _run_change(
         return None
     latest = brand_kpis((answer for keyword in compared for answer in latest_by_keyword[keyword]), domains)
     previous = brand_kpis((answer for keyword in compared for answer in previous_by_keyword[keyword]), domains)
-    return {'keywords_compared': len(compared), **_change(latest, previous)}
+    return {'keywords_compared': len(compared), **run_change_fields(latest, previous)}
 
 
 def visibility_view(
@@ -162,9 +162,12 @@ def _by_period(runs: Iterable[RunTally], period: str) -> dict[str, list[RunTally
     return dict(sorted(buckets.items()))
 
 
-def _change(current: Mapping[str, Any], previous: Mapping[str, Any]) -> dict[str, Any]:
+def run_change_fields(current: Mapping[str, Any], previous: Mapping[str, Any]) -> dict[str, Any]:
+    """``deltas`` and ``trends`` of the KPIs ``current`` against ``previous``: the body of every ``change``."""
     deltas = kpi_changes(current, previous)
     return {'deltas': deltas, 'trends': kpi_trends(deltas)}
+
+
 
 
 def _keyword_trend(keyword: str, periods: dict[str, list[RunTally]], domains: list[str]) -> dict[str, Any]:
@@ -173,7 +176,7 @@ def _keyword_trend(keyword: str, periods: dict[str, list[RunTally]], domains: li
     latest = tally_kpis(periods[keys[-1]], domains)
     change = None
     if len(keys) > 1:
-        change = {'previous_period': keys[-2], **_change(latest, tally_kpis(periods[keys[-2]], domains))}
+        change = {'previous_period': keys[-2], **run_change_fields(latest, tally_kpis(periods[keys[-2]], domains))}
     return {'keyword': keyword, 'period': keys[-1], 'kpis': latest, 'change': change}
 
 
@@ -184,7 +187,7 @@ def _group_change(per_keyword: Mapping[str, dict[str, list[RunTally]]], domains:
         return None
     latest = [run for periods in compared for run in list(periods.values())[-1]]
     previous = [run for periods in compared for run in list(periods.values())[-2]]
-    return {'keywords_compared': len(compared), **_change(tally_kpis(latest, domains), tally_kpis(previous, domains))}
+    return {'keywords_compared': len(compared), **run_change_fields(tally_kpis(latest, domains), tally_kpis(previous, domains))}
 
 
 def _brand_point(period: str, kpis: Mapping[str, Any]) -> dict[str, Any]:
@@ -197,29 +200,50 @@ def _absent_brand(runs: list[RunTally]) -> dict[str, Any]:
     return {'share_of_voice': 0.0 if named else None, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None}
 
 
-def _brand_trends(series: Mapping[str, list[RunTally]], tracked_kpis: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+def _period_tables(series: Mapping[str, list[RunTally]]) -> tuple[list[dict[str, Any]], dict[str, dict[str, dict[str, Any]]]]:
+    """The window's leaderboard and each period's brand rows by lower-cased name."""
+    pools = {key: BrandPool.of(runs) for key, runs in series.items()}
+    window = BrandPool()
+    for pool in pools.values():
+        window.add_pool(pool)
+    return window.table(), {key: {row['name'].lower(): row for row in pool.table()} for key, pool in pools.items()}
+
+
+def _brand_trends(
+    series: Mapping[str, list[RunTally]], tracked_kpis: Mapping[str, Mapping[str, Any]],
+    tables: tuple[list[dict[str, Any]], dict[str, dict[str, dict[str, Any]]]],
+) -> dict[str, Any]:
     """Share of voice, mention rate, visibility score and position per period: the tracked brand and its leading competitors.
 
     The competitors are the ``BRAND_TREND_COMPETITORS`` with the best
     visibility score over the whole window; a period whose answers do not
     name one scores it 0 (no position).
     """
-    pools = {key: BrandPool.of(runs) for key, runs in series.items()}
-    window = BrandPool()
-    for pool in pools.values():
-        window.add_pool(pool)
-    leaders = [row['name'] for row in window.table() if row['classification'] == COMPETITOR][:BRAND_TREND_COMPETITORS]
-    tables = {key: {row['name'].lower(): row for row in pool.table()} for key, pool in pools.items()}
+    window, periods = tables
+    leaders = [row['name'] for row in window if row['classification'] == COMPETITOR][:BRAND_TREND_COMPETITORS]
     return {
         'tracked': [_brand_point(key, tracked_kpis[key]) for key in series],
         'competitors': [
             {
                 'name': name,
-                'points': [_brand_point(key, tables[key].get(name.lower()) or _absent_brand(series[key])) for key in series],
+                'points': [_brand_point(key, periods[key].get(name.lower()) or _absent_brand(series[key])) for key in series],
             }
             for name in leaders
         ],
     }
+
+
+def brand_series(tables: tuple[list[dict[str, Any]], dict[str, dict[str, dict[str, Any]]]]) -> list[dict[str, Any]]:
+    """Every brand of the window, in leaderboard order, with its KPIs in each period whose answers name it (2.45.0: S4)."""
+    window, periods = tables
+    return [
+        {
+            'name': row['name'],
+            'classification': row['classification'],
+            'points': [_brand_point(key, table[row['name'].lower()]) for key, table in periods.items() if row['name'].lower() in table],
+        }
+        for row in window
+    ]
 
 
 def trend_view(
@@ -227,6 +251,8 @@ def trend_view(
     runs_by_keyword: Mapping[str, Iterable[RunTally]],
     period: str,
     owned_domains: Iterable[str] = (),
+    *,
+    with_brand_series: bool = False,
 ) -> dict[str, Any]:
     """Every KPI per period, the scope's latest standing and move, and each keyword's move.
 
@@ -234,11 +260,13 @@ def trend_view(
     oldest first, counted against ``owned_domains``.
 
     - ``trend_data``: one point per period holding every answer of the scope in it.
-    - ``latest``: every KPI over each keyword's latest period, pooled; ``latest_brands``: its leaderboard.
+    - ``latest``: every KPI over each keyword's latest period, pooled; ``latest_brands``: its whole leaderboard
+      (a body lists its first ``LATEST_BRANDS_LIMIT``, ``shared.artifact_trends.trend_answer``).
     - ``change``: the latest period against the previous one, over the keywords measured in both.
     - ``keyword_trends``: each keyword's latest period and change, best visibility score first.
     - ``overall``: how many keywords improve, decline or hold on the visibility score.
     - ``brand_trends``: the tracked brand and its leading competitors per period.
+    - ``brand_series`` (only ``with_brand_series``): every brand of the window and its KPIs per period (``brand_series``).
     - ``brands_truncated``: some run kept only its top brands (``shared.keyword_run_kpis.BRANDS_PER_RUN``, first-party
       and tracked brands always), so a competitor outside them reads as not named in that run.
     """
@@ -253,7 +281,8 @@ def trend_view(
     keyword_trends.sort(key=lambda row: (-row['kpis']['visibility_score'], row['keyword'].lower()))
     directions = [row['change']['trends']['visibility_score'] if row['change'] else 'stable' for row in keyword_trends]
     latest = [run for periods in per_keyword.values() for run in list(periods.values())[-1]]
-    return {
+    tables = _period_tables(series)
+    body = {
         'keywords_with_data': len(per_keyword),
         'trend_data': [
             {
@@ -265,7 +294,7 @@ def trend_view(
             for key, runs in series.items()
         ],
         'latest': tally_kpis(latest, domains),
-        'latest_brands': tally_brand_table(latest)[:LATEST_BRANDS_LIMIT],
+        'latest_brands': tally_brand_table(latest),
         'change': _group_change(per_keyword, domains),
         'keyword_trends': keyword_trends,
         'overall': {
@@ -273,9 +302,12 @@ def trend_view(
             'declining_count': directions.count('declining'),
             'stable_count': directions.count('stable'),
         },
-        'brand_trends': _brand_trends(series, series_kpis),
+        'brand_trends': _brand_trends(series, series_kpis, tables),
         'brands_truncated': brands_truncated(run for periods in per_keyword.values() for bucket in periods.values() for run in bucket),
     }
+    if with_brand_series:
+        body['brand_series'] = brand_series(tables)
+    return body
 
 
 __all__ = [
@@ -284,7 +316,9 @@ __all__ = [
     'LATEST_BRANDS_LIMIT',
     'PERIODS',
     'SOURCES_LIMIT',
+    'brand_series',
     'period_key',
+    'run_change_fields',
     'trend_view',
     'visibility_view',
 ]

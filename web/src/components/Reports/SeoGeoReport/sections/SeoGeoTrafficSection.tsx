@@ -11,8 +11,7 @@ import {
 import {
   SeoGeoSectionFrame, type SeoGeoSectionProps 
 } from './seoGeoGate';
-import { seoGeoTrafficExport } from '../seoGeoExcel';
-import { SeoGeoExcelToolbar } from './SeoGeoExcelToolbar';
+import { SeoGeoExportToolbar } from './SeoGeoExportToolbar';
 
 const TITLE = 'Share of estimated search traffic vs share of AI mentions';
 
@@ -48,7 +47,7 @@ function snapshotNote(snapshotAt: string | null): string {
 
 /** You and each competitor: estimated organic traffic share beside the AI share of voice, as bars and a table. */
 export function SeoGeoTrafficSection({
-  state, scopeLabel
+  state, exportScope
 }: SeoGeoSectionProps) {
   return (
     <SeoGeoSectionFrame title={TITLE} subtitle={(response) => snapshotNote(response.traffic_snapshot_at)} state={state}>
@@ -58,7 +57,7 @@ export function SeoGeoTrafficSection({
             <SeoGeoTrafficChart entries={response.traffic_comparison} />
           </ChartPanel>
           <div>
-            <SeoGeoExcelToolbar table={seoGeoTrafficExport(response, scopeLabel)} />
+            <SeoGeoExportToolbar scope={exportScope} table="Traffic share" />
             <ReportTable columns={COLUMNS} rows={response.traffic_comparison} rowKey={(entry) => entry.name} />
           </div>
         </div>

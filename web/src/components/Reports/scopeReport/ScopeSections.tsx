@@ -4,6 +4,7 @@ import type {
 } from '../../../types';
 import { ReportSection } from '../layout/ReportSection';
 import { TruncatedHistoryNote } from '../layout/HistoryCutNote';
+import { ScopeCoverageNote } from '../../ui/ScopeCoverageNote';
 import { ReportSectionPlaceholder } from '../layout/ReportSectionPlaceholder';
 import { ReportStatGrid } from '../layout/ReportStatGrid';
 import type { SectionGate } from '../layout/sectionGate';
@@ -82,6 +83,7 @@ export function LatestRunHeadline({
 
   return (
     <ReportSection title="Headline" subtitle={latestRunsSubtitle(gate.value)}>
+      <ScopeCoverageNote response={gate.value} className="mb-4" />
       <ReportStatGrid columns={4}>{cards(gate.value)}</ReportStatGrid>
       {children}
     </ReportSection>

@@ -1,4 +1,6 @@
-import { screen } from '@testing-library/react';
+import {
+  screen, waitFor
+} from '@testing-library/react';
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
@@ -7,7 +9,7 @@ import {
   startLighthouseBatch, submitIndexNow
 } from '../../../api/seoPerformance';
 import {
-  AUDIT_ID, PAGE, buildCompletedResult, buildRun, buildSetup, buildSite, buildStartRunResponse
+  AUDIT_ID, PAGE, buildRun, buildSetup, buildSite, buildStartRunResponse
 } from '../../../api/seoPerformance-fixtures';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
 import {
@@ -15,21 +17,20 @@ import {
   renderPerformance, renderUnconfiguredPerformance, renderWithPageUrlFocused, withinRegion
 } from './PerformanceView-fixtures';
 import {
-  lastExcelExport, stubExcelExport
-} from '../../../test/tableExcelExport';
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 import {
   getSettingsLinkElement, suggestionsOf
 } from '../LocalSeo/settingsDefaults-fixtures';
 
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoPerformance');
-vi.mock('../../../exporters/tableExcel', { spy: true });
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
 vi.mock('../../../hooks/useSeoSettings');
 
 beforeEach(() => {
   mockPerformanceAnswers();
-  stubExcelExport();
 });
 
 describe('PerformanceView setup', () => {
@@ -85,31 +86,31 @@ describe('Lighthouse tab', () => {
   });
 });
 
-describe('Lighthouse Excel exports', () => {
-  it('exports the top opportunities of the result named after its page and device', async () => {
-    const user = await measurePage();
-    await user.click(screen.getByTitle('The failed audits of this result'));
+describe('Lighthouse export', () => {
+  it('exports the stored result of the page and device from the server', async () => {
+    await measurePage();
 
-    const {
-      rows, file 
-    } = lastExcelExport();
-    expect(rows).toStrictEqual(buildCompletedResult().failed_audits);
-    expect(file).toStrictEqual(['Top opportunities', 'lighthouse-opportunities', `${PAGE} mobile`]);
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'seo-lighthouse',
+      params: {
+        device: 'mobile',
+        run_id: buildRun().run_id,
+        url: PAGE,
+      },
+      format: 'xlsx',
+    });
   });
 
-  it('exports the six page speed metrics of the result', async () => {
-    await (await measurePage()).click(screen.getByTitle('The six page speed metrics of this result'));
-
-    expect(lastExcelExport().file).toStrictEqual(['Page speed metrics', 'lighthouse-metrics', `${PAGE} mobile`]);
-  });
-
-  it('disables the opportunities export when no audit failed', async () => {
-    const run = buildRun({ results: [buildCompletedResult({ failed_audits: [] })] });
+  it('offers no export before the page is measured', async () => {
+    const run = buildRun({ results: [null] });
     vi.mocked(startLighthouse).mockResolvedValue(buildStartRunResponse(run));
     vi.mocked(fetchLighthouseRun).mockResolvedValue(run);
     await measurePage();
+    await screen.findByText('Waiting to be measured…');
 
-    expect(await screen.findByTitle('The failed audits of this result')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Export all' })).not.toBeInTheDocument();
   });
 });
 
@@ -160,7 +161,10 @@ describe('Lighthouse URL suggestions', () => {
   it('suggests the audit sample pages before the URL field is focused', async () => {
     await renderLoadedPerformance();
 
-    expect(suggestionsOf('Page URL')).toStrictEqual([PAGE, 'https://www.example.com/blog/first-great-post']);
+    // The sample's pages arrive after the region renders: wait for them rather than read the list at once.
+    await waitFor(() => {
+      expect(suggestionsOf('Page URL')).toStrictEqual([PAGE, 'https://www.example.com/blog/first-great-post']);
+    });
   });
 
   it('reads no crawled pages until the URL field is focused', async () => {

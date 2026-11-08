@@ -45,6 +45,7 @@ import {
   processBulkKeyword,
 } from './keywordEntry';
 import type { BulkKeywordResult } from './keywordEntry';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 interface KeywordsManagerProps {
   keywords: Keyword[];
@@ -389,6 +390,7 @@ export const KeywordsManager = ({
         }}
       />
 
+      <div className="flex justify-end px-6 pt-4"><ConfigListExport list="keywords" /></div>
       <KeywordList
         keywords={visibleKeywords}
         editingId={editingId}

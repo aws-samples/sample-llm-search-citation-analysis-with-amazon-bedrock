@@ -58,6 +58,7 @@ function ConfiguredExplorer({ onKeywordsAdded }: KeywordExplorerProps) {
   const research = useKeywordExplorer();
   const serp = useSerpSnapshot();
   const [serpKeyword, setSerpKeyword] = useState<string | null>(null);
+  const [researched, setResearched] = useState<KeywordResearchRequest | null>(null);
   const {
     reset: resetResearch, run: runResearch 
   } = research;
@@ -75,10 +76,12 @@ function ConfiguredExplorer({ onKeywordsAdded }: KeywordExplorerProps) {
   const search = (request: Omit<KeywordResearchRequest, 'market_id'>) => {
     resetSerp();
     setSerpKeyword(null);
-    void runResearch({
+    const sent: KeywordResearchRequest = {
       ...request,
       ...marketRequestField(selectedMarketId),
-    });
+    };
+    setResearched(sent);
+    void runResearch(sent);
   };
 
   const openSerp = useCallback((keyword: string, depth: 20 | 50 = 20) => {
@@ -103,8 +106,9 @@ function ConfiguredExplorer({ onKeywordsAdded }: KeywordExplorerProps) {
       )}
       {state.status === 'loading' && <ResearchSkeleton />}
       {state.status === 'error' && <ErrorAlert message={state.message} />}
-      {state.status === 'success' && (
+      {state.status === 'success' && researched !== null && (
         <KeywordExplorerResults
+          request={researched}
           response={state.response}
           serpKeyword={serpKeyword}
           serpState={serp.state}

@@ -6,7 +6,7 @@ import {
   buildHttpError, useGroupKpiHistory
 } from './useGroupKpiHistory';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   FAILED_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -29,10 +29,11 @@ describe('useGroupKpiHistory', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useGroupKpiHistory());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchGroupKpiHistory'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchGroupKpiHistory'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'group KPI history',
     useHook: useGroupKpiHistory,
     fetchName: 'fetchGroupKpiHistory',

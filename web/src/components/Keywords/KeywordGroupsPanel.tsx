@@ -10,6 +10,7 @@ import {
 import {
   Skeleton, SkeletonRegion
 } from '../ui/Skeleton';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 /** Placeholder filter buttons while the groups load, so the row does not reflow. */
 const GROUP_PILL_IDS = ['group-pill-a', 'group-pill-b', 'group-pill-c'] as const;
@@ -99,6 +100,7 @@ export const KeywordGroupsPanel = ({
             {'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'}
           </p>
         </div>
+        <ConfigListExport list="keyword_groups" />
       </div>
 
       <div className="flex gap-3">

@@ -5,7 +5,13 @@ import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
   GROUP_REPORT_DEFINITIONS, VISIBILITY_DEFINITIONS
 } from '../../../../constants/kpiDefinitions';
-import type { GroupKpiHistoryResponse } from '../../../../types/domain/groupKpiHistory';
+import {
+  isKeywordRunSummary, type GroupKpiHistoryResponse
+} from '../../../../types/domain/groupKpiHistory';
+import { useScopedList } from '../../../../hooks/useScopedList';
+import { GROUP_KPI_KEYWORDS_PAGING } from '../../../../api/scopedListPagings';
+import { ScopedListFooter } from '../../../ui/ScopedListFooter';
+import { SectionExport } from '../../scopeReport/ScopeLists';
 import {
   KpiDefinitionsSection, type ReportSlice
 } from '../../layout';
@@ -76,12 +82,15 @@ function GroupHeadlineBlock({ group }: GroupBlockProps) {
   return (
     <GroupKpiGate group={group} title="Headline">
       {(history) => (
-        <GroupKpiHeadlineSection
-          runs={history.runs}
-          selected={resolveRun(history.runs, group.runTimestamp)}
-          onSelect={group.selectRun}
-          citationsConfigured={history.citations_configured}
-        />
+        <>
+          <SectionExport view="group-kpis" request={group.request} />
+          <GroupKpiHeadlineSection
+            runs={history.runs}
+            selected={resolveRun(history.runs, group.runTimestamp)}
+            onSelect={group.selectRun}
+            citationsConfigured={history.citations_configured}
+          />
+        </>
       )}
     </GroupKpiGate>
   );
@@ -110,21 +119,31 @@ function GroupDriversBlock({ group }: GroupBlockProps) {
   );
 }
 
+/** The keyword picker over every keyword of the group (2.45.0 wave 5: past the first page), then the runs of the one picked. */
+function GroupKeywordsBody({
+  group, history
+}: GroupBlockProps & { readonly history: GroupKpiHistoryResponse }) {
+  const keywordList = useScopedList(history, group.request ?? null, GROUP_KPI_KEYWORDS_PAGING, isKeywordRunSummary);
+  const keywords = keywordList.items.length === 0 ? history.keywords : [...keywordList.items];
+  const selected = resolveKeyword(keywords, group.keyword);
+  return selected && (
+    <>
+      <KeywordRunsSection
+        scope={group.scope}
+        days={history.days}
+        keywords={keywords}
+        selected={selected}
+        onSelect={group.selectKeyword}
+      />
+      <ScopedListFooter list={keywordList} noun="keywords" />
+    </>
+  );
+}
+
 function GroupKeywordsBlock({ group }: GroupBlockProps) {
   return (
     <GroupKpiGate group={group} title="Keyword detail">
-      {(history) => {
-        const selected = resolveKeyword(history.keywords, group.keyword);
-        return selected && (
-          <KeywordRunsSection
-            scope={group.scope}
-            days={history.days}
-            keywords={history.keywords}
-            selected={selected}
-            onSelect={group.selectKeyword}
-          />
-        );
-      }}
+      {(history) => <GroupKeywordsBody group={group} history={history} />}
     </GroupKpiGate>
   );
 }

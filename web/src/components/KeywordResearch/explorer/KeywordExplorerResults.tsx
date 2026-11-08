@@ -4,16 +4,16 @@ import {
 import { useKeywordExplorerTracking } from '../../../hooks/useKeywordExplorerTracking';
 import type { SeoRequestState } from '../../../hooks/useKeywordExplorerRequest';
 import type { Keyword } from '../../../types';
+import type { ViewParams } from '../../../api/exports';
 import type {
-  KeywordResearchResponse, SerpResponse
+  KeywordResearchRequest, KeywordResearchResponse, SerpResponse
 } from '../../../types/api/seo';
 import { Button } from '../../ui/Button';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import {
-  DEFAULT_SORT, EMPTY_FILTERS, activeFilterCount, filterKeywordRows, nextSort, sortKeywordRows, type KeywordFilters,
-  type KeywordSort, type SortField
+  DEFAULT_SORT, EMPTY_FILTERS, activeFilterCount, explorerExportParams, filterKeywordRows, nextSort, sortKeywordRows,
+  type KeywordFilters, type KeywordSort, type SortField
 } from './keywordExplorerFilters';
-import { exportKeywordRowsExcel } from './keywordExplorerExcel';
 import { KeywordFilterPanel } from './KeywordFilterPanel';
 import { KeywordExplorerTable } from './KeywordExplorerTable';
 import { KeywordTrackBar } from './KeywordTrackBar';
@@ -23,6 +23,8 @@ export const GOOGLE_ADS_NOTE = 'Difficulty and intent are not available for this
 export const CACHED_NOTE = 'From cache (refreshes daily)';
 
 interface KeywordExplorerResultsProps {
+  /** The research request the response answers (what the export asks the cache for). */
+  readonly request: KeywordResearchRequest;
   readonly response: KeywordResearchResponse;
   readonly serpKeyword: string | null;
   readonly serpState: SeoRequestState<SerpResponse>;
@@ -46,14 +48,14 @@ function ResearchNotes({ response }: { readonly response: KeywordResearchRespons
 }
 
 function ResultsToolbar({
-  shown, total, filterCount, filtersOpen, onToggleFilters, onExport
+  shown, total, filterCount, filtersOpen, onToggleFilters, exportParams
 }: {
   readonly shown: number;
   readonly total: number;
   readonly filterCount: number;
   readonly filtersOpen: boolean;
   readonly onToggleFilters: () => void;
-  readonly onExport: () => Promise<void>;
+  readonly exportParams: ViewParams;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -63,19 +65,14 @@ function ResultsToolbar({
       <p className="flex-1 text-sm text-gray-600">
         {shown === total ? `Showing ${total} keywords` : `Showing ${shown} of ${total} keywords`}
       </p>
-      <ExportExcelButton
-        onExport={onExport}
-        failureLabel="[seo] Keyword Explorer Excel export failed:"
-        disabled={shown === 0}
-        title="The keywords shown, filtered and sorted"
-      />
+      <ExportAllButton view="seo-keyword-explorer" params={shown === 0 ? null : exportParams} />
     </div>
   );
 }
 
 /** The rows of one research: notes, filters, sortable table, tracking and the SERP panel. */
 export function KeywordExplorerResults({
-  response, serpKeyword, serpState, onOpenSerp, onKeywordsAdded
+  request, response, serpKeyword, serpState, onOpenSerp, onKeywordsAdded
 }: KeywordExplorerResultsProps) {
   const [filters, setFilters] = useState<KeywordFilters>(EMPTY_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -103,7 +100,7 @@ export function KeywordExplorerResults({
         filterCount={activeFilterCount(filters)}
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen((open) => !open)}
-        onExport={() => exportKeywordRowsExcel(visible, response.keyword)}
+        exportParams={explorerExportParams(request, filters, sort)}
       />
       {filtersOpen && <KeywordFilterPanel filters={filters} onChange={setFilters} />}
       <KeywordTrackBar tracking={tracking} />

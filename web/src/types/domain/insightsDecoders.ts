@@ -12,7 +12,7 @@ import { isInsightsNarrative } from './insightsNarrativeDecoders';
 import { isRecord } from './keywordDecoders';
 import { isTruncationMark } from './truncationDecoders';
 import {
-  isCitationOwnershipFacts, isCompetitorCaveatRow, isNullableNumber, isOwnedPagesFacts, isPromptEngineFacts
+  isCaveatReasonsFacts, isCitationOwnershipFacts, isCompetitorCaveatRow, isNullableNumber, isOwnedPagesFacts, isPromptEngineFacts
 } from './insightFactDecoders';
 
 const ENGINE_PLAYS: ReadonlySet<unknown> = new Set<EnginePlay>(['get_cited', 'get_ranked_first', 'get_mentioned_and_cited', 'defend']);
@@ -59,6 +59,13 @@ function isKeywordStabilityRow(value: unknown): value is KeywordStabilityRow {
     && typeof value.unstable === 'boolean';
 }
 
+/** The competitor caveats, and every caveat reason when the build has them (2.45.0 wave 5). */
+function hasCompetitorFacts(value: Record<string, unknown>): boolean {
+  return Array.isArray(value.competitor_caveats)
+    && value.competitor_caveats.every(isCompetitorCaveatRow)
+    && (value.caveat_reasons === undefined || isCaveatReasonsFacts(value.caveat_reasons));
+}
+
 function isInsightFacts(value: unknown): value is InsightFacts {
   return isRecord(value)
     && Array.isArray(value.engines)
@@ -66,8 +73,7 @@ function isInsightFacts(value: unknown): value is InsightFacts {
     && isPromptEngineFacts(value.prompt_engine)
     && isCitationOwnershipFacts(value.citation_ownership)
     && isOwnedPagesFacts(value.owned_pages)
-    && Array.isArray(value.competitor_caveats)
-    && value.competitor_caveats.every(isCompetitorCaveatRow)
+    && hasCompetitorFacts(value)
     && Array.isArray(value.portfolio)
     && value.portfolio.every(isPortfolioBrandRow)
     && Array.isArray(value.stability)

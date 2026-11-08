@@ -66,9 +66,8 @@ MAX_KEYWORD_IDS = 100
 MARKET_PARAM = 'market_id'
 """The optional market filter: one market id, or ``global`` for the keywords without one."""
 
-#: The most keywords one scoped report covers, and how many of their
-#: partitions it reads at a time: keeps a group report inside the 29s API budget.
-SCOPE_KEYWORDS_CAP = 100
+#: How many of a scope's keyword partitions a live report reads at a time
+#: (a scope's size routes it live or to its snapshot: ``shared.scope_source``).
 SCOPE_MAX_WORKERS = 10
 
 
@@ -212,26 +211,6 @@ def scope_from_request(
     if required and scope is None:
         return None, validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
     return scope, None
-
-
-def scope_keywords_from_request(
-    event: dict[str, Any], params: dict[str, Any] | None, keywords_table: Any
-) -> tuple[list[str] | None, dict[str, Any] | None]:
-    """``scope_from_request`` for handlers that only need the keyword texts.
-
-    ``(None, None)`` without a scope (the handler applies its default),
-    ``(keywords, None)`` for a scope with active keywords, and ``(None, 400)``
-    for a malformed scope or one that resolves to no active keyword (an unknown
-    group, or one whose members are all paused), refused on the ``scope`` field
-    the way ``trigger-keyword-analysis`` refuses a run of that scope, rather
-    than handed on as an empty list that a loader would read as "all keywords".
-    """
-    report_scope, rejected = scope_from_request(event, params, keywords_table)
-    if rejected or report_scope is None:
-        return None, rejected
-    if not report_scope.keywords:
-        return None, validation_error(f'No active keywords match the selected scope ({report_scope.label}).', event, 'scope')
-    return list(report_scope.keywords), None
 
 
 def scoped_dynamodb_resource() -> Any:

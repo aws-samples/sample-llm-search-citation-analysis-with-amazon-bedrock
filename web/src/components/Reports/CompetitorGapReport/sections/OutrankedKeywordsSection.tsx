@@ -9,6 +9,11 @@ import {
 import {
   gateRollup, type RollupSectionProps
 } from './rollupSection';
+import { useScopedList } from '../../../../hooks/useScopedList';
+import {
+  isOutrankedKeyword, OUTRANKED_KEYWORDS_PAGING
+} from '../../../../api/scopedListPagings';
+import { ScopedListFooter } from '../../../ui/ScopedListFooter';
 
 const TITLE = 'Outranked keywords';
 
@@ -44,10 +49,12 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<CompetitorOutrankedKeyword>> = [
  * would invest first.
  */
 export function OutrankedKeywordsSection(props: RollupSectionProps) {
+  // An older answer carries no `response`: the rollup's own list is the whole list.
+  const outrankedList = useScopedList(props.response ?? null, props.request ?? null, OUTRANKED_KEYWORDS_PAGING, isOutrankedKeyword);
   const gate = gateRollup(TITLE, props);
   if (!gate.ready) return gate.placeholder;
 
-  const outranked = gate.value.outranked_keywords;
+  const outranked = props.response === undefined || props.response === null ? gate.value.outranked_keywords : outrankedList.items;
   if (outranked.length === 0) {
     return (
       <ReportSectionNote title={TITLE} subtitle="No keywords where this competitor beats us right now.">
@@ -66,6 +73,7 @@ export function OutrankedKeywordsSection(props: RollupSectionProps) {
         rows={outranked}
         rowKey={(row) => row.keyword}
       />
+      <ScopedListFooter list={outrankedList} noun="keywords" />
     </ReportSection>
   );
 }

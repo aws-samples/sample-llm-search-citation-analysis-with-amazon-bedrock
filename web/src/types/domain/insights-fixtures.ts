@@ -287,6 +287,17 @@ export const REJECTED_REPORT_INSIGHTS_BODIES: ReadonlyArray<[description: string
       engines: undefined,
     },
   }],
+  ['a caveat reason without its competitor', {
+    ...VALID,
+    facts: {
+      ...VALID.facts,
+      caveat_reasons: { reasons: [{ reason: 'Frequent delays' }] },
+    },
+  }],
+  ['a caveat row whose reasons total is a string', withFact('competitor_caveats', {
+    ...buildCaveatRow(),
+    reasons_total: '4',
+  })],
   ['an engine with an unknown play', withFact('engines', {
     ...buildEnginePlayRow('openai', 'defend'),
     play: 'attack',

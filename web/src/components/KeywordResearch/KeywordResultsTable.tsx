@@ -4,8 +4,7 @@ import {
   keywordSelectionKey, uniqueResearchKeywords
 } from '../../hooks/keywordIdentity';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
-import { exportResearchKeywords } from './researchExport';
-import { useExportAction } from '../ui/useExportAction';
+import { ExportAllButton } from '../ui/ExportAllButton';
 import {
   CopyKeywordCell, KeywordSignalCells
 } from './KeywordSignalCells';
@@ -13,6 +12,8 @@ import type { KeywordSelectionProps } from './researchRunView';
 
 interface KeywordResultsTableProps extends KeywordSelectionProps {
   keywords: ResearchKeyword[];
+  /** The research job the keywords come from: Export all writes its rows (`keyword-research`, `id`). */
+  jobId: string;
   title: string;
   subtitle?: string;
   compact?: boolean;
@@ -48,7 +49,7 @@ const KeywordResultRow = ({
 };
 
 export const KeywordResultsTable = ({
-  keywords, title, subtitle, compact = false, selectable = false, selected, onToggle
+  keywords, jobId, title, subtitle, compact = false, selectable = false, selected, onToggle
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
@@ -70,12 +71,6 @@ export const KeywordResultsTable = ({
     const rightCompetition = right.competition?.toLowerCase() ?? '';
     return (competitionOrder[leftCompetition] ?? 2) - (competitionOrder[rightCompetition] ?? 2);
   });
-  const {
-    exporting, handleExport 
-  } = useExportAction(
-    () => exportResearchKeywords(sortedKeywords, title),
-    '[research] Excel export failed:',
-  );
 
   if (uniqueKeywords.length === 0) return null;
 
@@ -111,14 +106,10 @@ export const KeywordResultsTable = ({
             <option value="relevance">Sort by Relevance</option>
             <option value="competition">Sort by Competition</option>
           </select>
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={exporting}
-            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50"
-          >
-            {exporting ? 'Exporting…' : 'Export to Excel'}
-          </button>
+          <ExportAllButton view="keyword-research" params={{
+            id: jobId,
+            intent: filterIntent === 'all' ? null : filterIntent,
+          }} />
         </div>
       </div>
 

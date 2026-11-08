@@ -1,64 +1,75 @@
 """
-Recommendations API
+Recommendations API — GET /api/recommendations (the Action Center)
 
-Generates actionable recommendations to improve AI visibility based on
-analysis of current data. Uses rule-based logic and optionally LLM for
-more sophisticated recommendations.
+Actionable recommendations to improve AI visibility: the rules of
+``shared.recommendation_rules`` over every keyword's **latest run**
+(visibility gaps, low rankings, provider gaps, competitor dominance, and a
+best practice when the rules find little to say), most urgent first, and
+optionally a few written by an LLM.
 
-Recommendation Types:
-- Citation gaps to fill
-- Content optimization suggestions
-- Prompt targeting opportunities
-- Competitor insights
+For any report scope (every active keyword without one), complete since
+2.45.0 and paged: ``limit`` a page, ``next_token`` for the next, ``total``
+(and ``total_count``) and ``by_priority`` over the whole list; the
+action-tracking status is joined per page. Live or from the
+``recommendations`` artifact, per ``shared.action_scope_serve``.
 
-Scope: the request takes the report scope every KPI endpoint accepts
-(``keyword`` | ``group_id`` | ``keyword_ids`` | ``scope=all``, see
-``shared.scope_params``); without one the first 20 active keywords are analysed.
+``use_llm=true`` (first page only) asks a fast-tier model for 3-5 more, from
+the page's top five and the ``LLM_PROMPT_KEYWORDS`` keywords a
+recommendation would move most (the brand missing, the most competitor
+mentions, the worst rank), bounded by the request's deadline.
 """
 
 import json
 import logging
 import sys
-from collections import defaultdict
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any, Literal
-
-import boto3
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared.action_scope_serve import (
+    LiveLatests,
+    action_list_endpoint,
+    action_request,
+    limit_param,
+    read_live_latests,
+    serve_action_list,
+)
+from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response
-from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
-from shared.constants import priority_rank
-from shared.decorators import api_handler, validate
-from shared.dynamo_decimal import to_int
+from shared.artifact_recommendations import LLM_PROMPT_KEYWORDS
+from shared.brand_visibility import tracked_brand_names
+from shared.decorators import api_handler
 from shared.llm_json import parse_llm_json
 from shared.models import BedrockDeadlineError, ModelRole, invoke_bedrock
+from shared.partial_contract import PartialConfig
+from shared.recommendation_rules import CONFIGURATION_RECOMMENDATION, by_priority, rule_recommendations
 from shared.request_deadline import current_deadline
 from shared.scope_params import (
-    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    all_active_scope,
     keywords_table_name,
     load_sibling_function,
+    scoped_dynamodb_resource,
 )
-from shared.scoped_reports import optional_scope_keywords
-from shared.search_results import latest_run, search_results_table_name
+from shared.search_results import search_results_table_name
+from shared.snapshot_artifacts import coverage, live_envelope, with_scope_contract
 from shared.utils import get_brand_config, get_timestamp, recommendation_id
+
+SEARCH_RESULTS_TABLE = search_results_table_name()
+KEYWORDS_TABLE = keywords_table_name()
+dynamodb = scoped_dynamodb_resource()
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-dynamodb = boto3.resource('dynamodb')
+#: Recommendations per page by default, and at most (``limit``).
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 200
 
-# Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = search_results_table_name()
-
-# What the recommendation rules read of a SearchResults row (A-8: whole rows carried the answer text).
-RULE_ROWS_PROJECTION = 'keyword, #ts, provider, brands'
-
-# The most scope keywords the LLM prompt names.
-LLM_PROMPT_KEYWORDS_CAP = 50
+# ``get-reports-overview.py`` loads ``generate_rule_based_recommendations`` by name (a hyphenated sibling).
+__all__ = ['generate_rule_based_recommendations', 'handler']
 
 # The LLM pass's role: a fast tier (Haiku by default), so the call fits the request.
 LLM_RECOMMENDATIONS_ROLE = ModelRole.GENERATION
@@ -67,272 +78,43 @@ LLM_RECOMMENDATIONS_ROLE = ModelRole.GENERATION
 LlmOutcome = Literal['ok', 'timed_out', 'failed']
 
 
-@dataclass(frozen=True)
-class _KeywordSnapshot:
-    """What the latest analysis run of one keyword says about the tracked brands."""
-
-    providers: set[str]
-    """Every provider that answered in the run."""
-    first_party_providers: set[str]
-    """Providers whose answer mentioned a first-party brand."""
-    first_party_best_rank: int
-    """Best (lowest) rank of a first-party mention; 999 when there is none."""
-    competitor_mentions: int
-    """Competitor mentions across all of the run's answers."""
-
-    @property
-    def first_party_found(self) -> bool:
-        """True when any answer in the run mentioned a first-party brand."""
-        return bool(self.first_party_providers)
-
-
-@dataclass(frozen=True)
-class _KeywordFindings:
-    """The per-keyword observations the recommendation rules are written against."""
-
-    without_first_party: list[dict[str, Any]]
-    """Keywords whose latest run never mentions the brand: ``{keyword, competitor_mentions}``."""
-    low_rank: list[dict[str, Any]]
-    """Keywords where the brand's best rank is below position 3: ``{keyword, rank, providers}``."""
-    competitor_dominated: list[dict[str, Any]]
-    """Keywords where competitors out-mention the brand: ``{keyword, competitor_mentions, fp_rank}``."""
-    provider_gaps: dict[str, list[str]]
-    """Provider -> keywords whose answer from that provider omits the brand."""
-
-
-def _latest_run_snapshot(results: list[dict[str, Any]], first_party: list[str], competitors: list[str]) -> _KeywordSnapshot:
-    """Reduce one keyword's SearchResults rows to what its latest run says about the tracked brands."""
-    _latest_ts, latest = latest_run(results)
-
-    providers: set[str] = set()
-    fp_providers: set[str] = set()
-    fp_best_rank = 999
-    comp_mentions = 0
-
-    for result in latest:
-        provider = result.get('provider', '')
-        providers.add(provider)
-
-        for brand in result.get('brands', []):
-            rank = to_int(brand.get('rank'), 999)
-
-            # Prefer the LLM-assigned classification. Fall back to exact
-            # brand-name match (never substring — see audit item 9, 22).
-            classification = classify_brand(brand, first_party, competitors)
-
-            if classification == 'first_party':
-                fp_best_rank = min(fp_best_rank, rank)
-                fp_providers.add(provider)
-            elif classification == 'competitor':
-                comp_mentions += 1
-
-    return _KeywordSnapshot(providers, fp_providers, fp_best_rank, comp_mentions)
-
-
-def _collect_keyword_findings(
-    keyword_data: dict[str, list[dict[str, Any]]], first_party: list[str], competitors: list[str]
-) -> _KeywordFindings:
-    """Bucket each keyword's latest run into the observations the rules act on."""
-    without_first_party: list[dict[str, Any]] = []
-    low_rank: list[dict[str, Any]] = []
-    competitor_dominated: list[dict[str, Any]] = []
-    provider_gaps: dict[str, list[str]] = defaultdict(list)
-
-    for keyword, results in keyword_data.items():
-        run = _latest_run_snapshot(results, first_party, competitors)
-
-        # Track provider gaps
-        for provider in run.providers:
-            if provider not in run.first_party_providers:
-                provider_gaps[provider].append(keyword)
-
-        if not run.first_party_found:
-            without_first_party.append({
-                'keyword': keyword,
-                'competitor_mentions': run.competitor_mentions
-            })
-        elif run.first_party_best_rank > 3:
-            low_rank.append({
-                'keyword': keyword,
-                'rank': run.first_party_best_rank,
-                'providers': list(run.first_party_providers)
-            })
-
-        if run.competitor_mentions > 0 and (not run.first_party_found or run.first_party_best_rank > run.competitor_mentions):
-            competitor_dominated.append({
-                'keyword': keyword,
-                'competitor_mentions': run.competitor_mentions,
-                'fp_rank': run.first_party_best_rank if run.first_party_found else None
-            })
-
-    return _KeywordFindings(without_first_party, low_rank, competitor_dominated, provider_gaps)
-
-
-def _visibility_gap_rule(findings: _KeywordFindings) -> list[dict[str, Any]]:
-    """Keywords where the first-party brand does not appear at all (high priority)."""
-    missing = findings.without_first_party
-    if not missing:
-        return []
-    top_gaps = sorted(missing, key=lambda x: -x['competitor_mentions'])[:5]
-    return [{
-        'type': 'visibility_gap',
-        'priority': 'high',
-        'title': f'Missing from {len(missing)} Keywords',
-        'description': f'Your brand doesn\'t appear in AI responses for {len(missing)} tracked keywords where competitors are mentioned.',
-        'action': 'Create content targeting these keywords and ensure your brand is mentioned on authoritative sources.',
-        'keywords': [k['keyword'] for k in top_gaps],
-        'impact': f'Potential to capture {sum(k["competitor_mentions"] for k in missing)} competitor mentions'
-    }]
-
-
-def _low_rank_rule(findings: _KeywordFindings) -> list[dict[str, Any]]:
-    """Keywords where the brand appears but ranks below position 3 (medium priority)."""
-    low_rank = findings.low_rank
-    if not low_rank:
-        return []
-    return [{
-        'type': 'ranking',
-        'priority': 'medium',
-        'title': f'Low Rankings on {len(low_rank)} Keywords',
-        'description': 'Your brand appears but ranks below position 3 on these keywords.',
-        'action': 'Improve content quality and get more citations from authoritative sources for these topics.',
-        'keywords': [f"{k['keyword']} (rank {k['rank']})" for k in low_rank[:5]],
-        'impact': 'Moving to top 3 can significantly increase visibility'
-    }]
-
-
-def _provider_gap_rule(findings: _KeywordFindings) -> list[dict[str, Any]]:
-    """One recommendation per provider that omits the brand on at least 3 keywords (medium priority)."""
-    return [
-        {
-            'type': 'provider_gap',
-            'priority': 'medium',
-            'title': f'Not Appearing on {provider.title()}',
-            'description': f'Your brand doesn\'t appear in {provider.title()} responses for {len(keywords)} keywords.',
-            'action': f'Research what sources {provider.title()} prefers and ensure your brand is mentioned there.',
-            'keywords': keywords[:5],
-            'impact': f'Expand visibility to {provider.title()} users'
-        }
-        for provider, keywords in findings.provider_gaps.items()
-        if len(keywords) >= 3
-    ]
-
-
-def _competitive_rule(findings: _KeywordFindings) -> list[dict[str, Any]]:
-    """Keywords where competitors are mentioned more often than the brand ranks (high priority)."""
-    dominated = findings.competitor_dominated
-    if not dominated:
-        return []
-    top_dominated = sorted(dominated, key=lambda x: -x['competitor_mentions'])[:3]
-    return [{
-        'type': 'competitive',
-        'priority': 'high',
-        'title': 'Competitors Dominating Key Terms',
-        'description': 'Competitors are mentioned more frequently than your brand on important keywords.',
-        'action': 'Analyze competitor content strategy and citation sources. Create superior content.',
-        'keywords': [k['keyword'] for k in top_dominated],
-        'impact': 'Reclaim market share in AI search results'
-    }]
-
-
-# Applied in this order. The priority sort in `generate_rule_based_recommendations`
-# is stable, so this order is kept within each priority level.
-_RULES: tuple[Callable[[_KeywordFindings], list[dict[str, Any]]], ...] = (
-    _visibility_gap_rule,
-    _low_rank_rule,
-    _provider_gap_rule,
-    _competitive_rule,
-)
+def _live_read(keywords: Sequence[str], config: dict[str, Any]) -> LiveLatests:
+    """Every keyword's latest run, turned into its ``actions`` partial (the findings the rules read)."""
+    return read_live_latests(keywords, dynamodb.Table(SEARCH_RESULTS_TABLE), PartialConfig(brand_config=config), ('actions',), query_latest_run_rows)
 
 
 def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[str] | None = None) -> list[dict[str, Any]]:
+    """The rules over ``keywords``' latest runs (every active keyword by default), read for this request.
+
+    The executive summary (``get-reports-overview.py``) takes its top
+    recommendations from here; the keywords the time budget leaves unread
+    are left out.
     """
-    Generate recommendations based on rule-based analysis.
-
-    ``keywords`` restricts the analysis to those keyword texts (a keyword
-    group, for the group-scoped executive summary and the scoped Action
-    Center); by default the active keywords are discovered from the Keywords
-    table. ``load_recent_search_results`` reads an empty list as "discover"
-    too, so ``handler`` refuses an empty scope before getting here.
-    """
-    first_party, competitors = tracked_brand_names(config)
-
-    if not first_party:
-        return [{
-            'type': 'configuration',
-            'priority': 'high',
-            'title': 'Configure First-Party Brands',
-            'description': 'Add your brand names to the configuration to enable visibility tracking and recommendations.',
-            'action': 'Go to Settings > Brand Configuration and add your brands under "First Party"',
-            'impact': 'Required for all other recommendations'
-        }]
-
-    # Limit to 20 keywords for performance; only the attributes the rules read (no answer text)
-    items = load_recent_search_results(
-        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=20, keywords=keywords, projection=RULE_ROWS_PROJECTION,
-    )
-
-    if not items:
-        return [{
-            'type': 'data',
-            'priority': 'high',
-            'title': 'Run Your First Analysis',
-            'description': 'No search data found. Run an analysis to start tracking your AI visibility.',
-            'action': 'Go to Run Analysis and trigger a new analysis',
-            'impact': 'Required to generate insights'
-        }]
-
-    # Group by keyword
-    keyword_data = defaultdict(list)
-    for item in items:
-        keyword_data[item.get('keyword', '')].append(item)
-
-    findings = _collect_keyword_findings(keyword_data, first_party, competitors)
-    recommendations = [rec for rule in _RULES for rec in rule(findings)]
-
-    # General best practices, when the data-driven rules found little to say
-    if len(recommendations) < 3:
-        recommendations.append({
-            'type': 'best_practice',
-            'priority': 'low',
-            'title': 'Maintain Citation Freshness',
-            'description': 'Regularly update your content and ensure citations remain current.',
-            'action': 'Review and refresh content quarterly. Monitor for broken links.',
-            'impact': 'Sustained visibility over time'
-        })
-
-    # Sort by priority
-    recommendations.sort(key=lambda x: priority_rank(x.get('priority')))
-
-    return recommendations
+    if not tracked_brand_names(config)[0]:
+        return [dict(CONFIGURATION_RECOMMENDATION)]
+    scope_keywords = keywords if keywords is not None else list(all_active_scope(dynamodb.Table(KEYWORDS_TABLE)).keywords)
+    return rule_recommendations(_findings(_live_read(scope_keywords, config)))
 
 
-def generate_llm_recommendations(
-    config: dict[str, Any], context: str, keywords: Sequence[str] | None = None
-) -> tuple[list[dict[str, Any]], LlmOutcome]:
-    """
-    Generate recommendations using LLM for more sophisticated analysis.
+def _findings(read: LiveLatests) -> list[dict[str, Any]]:
+    """The recommendation-rule finding of every keyword read with a latest run."""
+    findings = []
+    for latest in read.latests:
+        run = latest['latest']
+        part = run['parts'].get('actions') if run is not None else None
+        if part is not None and part.get('findings') is not None:
+            findings.append(part['findings'])
+    return findings
 
-    ``keywords`` are the texts a scoped request covers; the first
-    ``LLM_PROMPT_KEYWORDS_CAP`` are named in the prompt so the model
-    recommends for that scope only (the Action Center defaults to every
-    keyword, 5,000 lines at 10x). Without a scope the prompt is the unscoped one.
 
-    The call runs on a fast-tier role without thinking, bounded by the
-    request's deadline (A-1: the balanced tier with medium thinking took
-    15-45 s inside a 29 s request). Returns the recommendations and how the
-    pass went: ``ok``, ``timed_out`` (the model did not answer in time) or
-    ``failed``; the handler keeps the rule-based list either way.
-    """
-    try:
-        scope_section = ''
-        if keywords:
-            listed = '\n'.join(f'- {keyword}' for keyword in keywords[:LLM_PROMPT_KEYWORDS_CAP])
-            more = len(keywords) - LLM_PROMPT_KEYWORDS_CAP
-            listed += f'\n- … and {more} more keywords' if more > 0 else ''
-            scope_section = f'Keywords In Scope (recommend for these only):\n{listed}\n\n'
-
-        prompt = f"""Analyze this AI visibility data and provide 3-5 specific, actionable recommendations.
+def _llm_prompt(config: dict[str, Any], context: str, keywords: Sequence[str], keywords_total: int) -> str:
+    scope_section = ''
+    if keywords:
+        listed = '\n'.join(f'- {keyword}' for keyword in keywords)
+        more = keywords_total - len(keywords)
+        listed += f'\n- … and {more} more keywords' if more > 0 else ''
+        scope_section = f'Keywords In Scope (recommend for these only):\n{listed}\n\n'
+    return f"""Analyze this AI visibility data and provide 3-5 specific, actionable recommendations.
 
 Context:
 {context}
@@ -360,10 +142,28 @@ Focus on:
 3. Content and citation opportunities
 4. Provider-specific optimizations"""
 
+
+def generate_llm_recommendations(
+    config: dict[str, Any], context: str, keywords: Sequence[str] = (), keywords_total: int = 0,
+) -> tuple[list[dict[str, Any]], LlmOutcome]:
+    """
+    Generate recommendations using LLM for more sophisticated analysis.
+
+    ``keywords`` are the scope's highest-impact keywords (at most
+    ``LLM_PROMPT_KEYWORDS``, from the stored or live list), named in the prompt
+    so the model recommends for that scope only; ``keywords_total`` is the
+    scope's size, the rest counted as "… and N more".
+
+    The call runs on a fast-tier role without thinking, bounded by the
+    request's deadline. Returns the recommendations and how the pass went:
+    ``ok``, ``timed_out`` (the model did not answer in time) or ``failed``;
+    the handler keeps the rule-based list either way.
+    """
+    try:
+        prompt = _llm_prompt(config, context, keywords, keywords_total)
         content = invoke_bedrock(
             prompt, LLM_RECOMMENDATIONS_ROLE, max_tokens=2000, thinking=False, deadline=current_deadline(),
         )
-
         # Parse JSON array via shared helper; with expect="array" it yields a list or None.
         parsed = parse_llm_json(content, expect="array")
         if isinstance(parsed, list):
@@ -416,53 +216,39 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
                     rec[key] = row[key]
 
 
+def _configuration_body(keywords_total: int) -> dict[str, Any]:
+    """The one-recommendation page answered while no first-party brand is configured (it holds for every keyword)."""
+    recommendations = [dict(CONFIGURATION_RECOMMENDATION)]
+    body = {'recommendations': recommendations, 'total': 1, 'total_count': 1, 'next_token': None, 'by_priority': by_priority(recommendations)}
+    return with_scope_contract({**body, 'keywords_truncated': False}, coverage(keywords_total, keywords_total), live_envelope())
+
+
 @api_handler
-@validate({
-    'use_llm': {'type': bool, 'default': False},
-    **SCOPE_QUERY_PARAMS,
-})
-@optional_scope_keywords(lambda: dynamodb.Table(keywords_table_name()))
-def handler(event: dict[str, Any], context: Any, keywords: list[str] | None, use_llm: bool = False) -> dict[str, Any]:
-    """
-    API handler for recommendations.
-
-    Query params:
-        - use_llm: Whether to use LLM for enhanced recommendations (default: false)
-        - keyword | group_id | keyword_ids | scope=all: the keywords to recommend
-          for (optional; one keyword, a keyword group, a set of keyword ids or
-          every active keyword). Without one the first 20 active keywords are analysed.
-    """
+@action_list_endpoint({'limit': limit_param(DEFAULT_LIMIT, MAX_LIMIT), 'use_llm': {'type': bool, 'default': False}}, lambda: dynamodb, paged=True)
+def handler(event, context, report_scope: ReportScope, use_llm: bool = False, limit: int = DEFAULT_LIMIT, next_token: str | None = None) -> dict[str, Any]:
+    """GET /api/recommendations (see the module docstring)."""
     config = get_brand_config()
-
-    # Generate rule-based recommendations
-    recommendations = generate_rule_based_recommendations(config, keywords)
-
-    # Annotate each recommendation with a deterministic id and the
-    # persisted action-tracking state.
-    # Done here rather than inside `generate_rule_based_recommendations`
-    # so the rule generator stays a pure data shaper. The id is computed
-    # from `type + title + sorted keywords` so it survives list
-    # regeneration as long as those fields don't change.
-    _annotate_with_status(recommendations)
-
-    # Optionally enhance with LLM
+    if tracked_brand_names(config)[0]:
+        request = action_request('recommendations', 'recommendations', {'limit': limit}, report_scope, config, event, next_token)
+        listed = serve_action_list(request, dynamodb, dynamodb.Table(SEARCH_RESULTS_TABLE), config)
+        if listed.body is None:
+            return listed.response or {}
+        body = listed.body
+    else:
+        body = _configuration_body(len(report_scope.keywords))
+    page = body['recommendations']
+    # The status join reads only this page's ids.
+    _annotate_with_status(page)
+    llm_keywords = body.pop('llm_keywords', [])
     llm_recommendations: list[dict[str, Any]] = []
     llm_outcome: LlmOutcome | None = None
-    if use_llm and recommendations:
-        context_str = json.dumps(recommendations[:5], indent=2)
-        llm_recommendations, llm_outcome = generate_llm_recommendations(config, context_str, keywords)
-
-    result = {
+    if use_llm and page and next_token is None:
+        context_str = json.dumps(page[:5], indent=2)
+        llm_recommendations, llm_outcome = generate_llm_recommendations(config, context_str, llm_keywords[:LLM_PROMPT_KEYWORDS], len(report_scope.keywords))
+    return success_response({
         'generated_at': get_timestamp(),
-        'recommendations': recommendations,
+        'scope': report_scope.describe(),
+        **body,
         'llm_enhanced': llm_recommendations or None,
         'llm': llm_outcome,
-        'total_count': len(recommendations),
-        'by_priority': {
-            'high': len([r for r in recommendations if r.get('priority') == 'high']),
-            'medium': len([r for r in recommendations if r.get('priority') == 'medium']),
-            'low': len([r for r in recommendations if r.get('priority') == 'low'])
-        }
-    }
-
-    return success_response(result, event)
+    }, event)

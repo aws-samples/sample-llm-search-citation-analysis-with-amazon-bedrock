@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import {
+  useEffect, useMemo 
+} from 'react';
 import { useCitationGaps } from '../../hooks/useCitationGaps';
 import type {
-  CitationGap, CitationGapsResponse, Keyword
+  CitationGapsResponse, Keyword
 } from '../../types';
 import {
   Skeleton, SkeletonRegion, SkeletonTable
@@ -13,6 +15,17 @@ import { GapCard } from './GapCard';
 import { InsightsScopeSelector } from './InsightsScopeSelector';
 import { useScopeSelection } from './useScopeSelection';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { ComputingState } from '../ui/ComputingState';
+import { ScopeCoverageNote } from '../ui/ScopeCoverageNote';
+import { ScopedListFooter } from '../ui/ScopedListFooter';
+import { ExportAllButton } from '../ui/ExportAllButton';
+import { useScopedList } from '../../hooks/useScopedList';
+import {
+  GAP_SUMMARIES_PAGING, GAPS_PAGING, isCitationGap, isGapSummary
+} from '../../api/scopedListPagings';
+import type { ListRequest } from '../../api/scopedListPages';
+import { requestParams } from '../../api/exports';
+import type { ComputingResponse } from '../../types/domain/scopeCoverage';
 
 interface Props { readonly keywords: Array<Keyword>; }
 
@@ -31,6 +44,9 @@ function StatCard({
   );
 }
 
+/** Where the domain summary's "See all gaps" points. */
+const GAP_LIST_ANCHOR = 'citation-gaps-list';
+
 function DomainSummary({ domains }: {
   readonly domains: Array<{
     domain: string;
@@ -40,7 +56,10 @@ function DomainSummary({ domains }: {
 }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow-sm">
-      <h3 className="text-lg font-medium mb-3">Top Domains with Gaps</h3>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-lg font-medium">Top Domains with Gaps</h3>
+        <a href={`#${GAP_LIST_ANCHOR}`} className="print-hidden text-sm font-medium text-gray-700 underline hover:text-gray-900">See all gaps</a>
+      </div>
       <div className="space-y-2">
         {domains.slice(0, 10).map(domain => (
           <div key={domain.domain} className="flex justify-between items-center py-2 border-b border-gray-100">
@@ -80,27 +99,85 @@ function GapStats({
   );
 }
 
-/** The gaps a response carries: `gaps` for one keyword, `top_gaps` across keywords. */
-function gapsOf(data: CitationGapsResponse): CitationGap[] {
-  return data.gaps ?? data.top_gaps ?? [];
+/**
+ * The gap cards a response opens with, as the `gaps` list `GAPS_PAGING` pages: `gaps` for one
+ * keyword, `top_gaps` across keywords; the scope's gap count when the answer has no `gaps_total`.
+ */
+function gapListBody(data: CitationGapsResponse): CitationGapsResponse {
+  return {
+    ...data,
+    gaps: data.gaps ?? data.top_gaps ?? [],
+    gaps_total: data.gaps_total ?? data.total_gaps ?? data.summary?.gap_count,
+  };
 }
 
-function GapList({ gaps }: { readonly gaps: CitationGap[] }) {
+function GapList({
+  data, request
+}: {
+  readonly data: CitationGapsResponse;
+  readonly request: ListRequest | null;
+}) {
+  const body = useMemo(() => gapListBody(data), [data]);
+  const list = useScopedList(body, request, GAPS_PAGING, isCitationGap);
   return (
     <>
-      <div>
-        <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
+      <div id={GAP_LIST_ANCHOR}>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-base sm:text-lg font-medium">Citation Gaps to Fill</h3>
+          <ExportAllButton view="citation-gaps" params={requestParams(request)} />
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {gaps.map(gap => (
+          {list.items.map(gap => (
             <GapCard key={`${gap.keyword ?? 'single'}:${gap.url}`} gap={gap} />
           ))}
         </div>
+        <ScopedListFooter list={list} noun="gaps" />
       </div>
 
-      {gaps.length === 0 && (
+      {list.items.length === 0 && (
         <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>
       )}
     </>
+  );
+}
+
+/** The gaps of each keyword of a scope, a page at a time (2.45.0); nothing for one keyword's answer. */
+function KeywordGapSummaries({
+  data, request
+}: {
+  readonly data: CitationGapsResponse;
+  readonly request: ListRequest | null;
+}) {
+  const list = useScopedList(data, request, GAP_SUMMARIES_PAGING, isGapSummary);
+  if (list.items.length === 0) return null;
+  return (
+    <div className="bg-white p-4 rounded-lg shadow-sm">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h3 className="text-lg font-medium">Gaps per keyword</h3>
+        <ExportAllButton view="gap-keyword-summaries" params={requestParams(request)} />
+      </div>
+      <table aria-label="Gaps per keyword" className="min-w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <th className="py-2 pr-3 font-medium">Keyword</th>
+            <th className="py-2 pr-3 font-medium">Gaps</th>
+            <th className="py-2 pr-3 font-medium">High priority</th>
+            <th className="py-2 font-medium">Coverage</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {list.items.map((row) => (
+            <tr key={row.keyword}>
+              <td className="py-2 pr-3 font-medium text-gray-700">{row.keyword}</td>
+              <td className="py-2 pr-3 text-red-600">{row.gap_count}</td>
+              <td className="py-2 pr-3">{row.high_priority_gaps}</td>
+              <td className="py-2">{`${row.coverage_rate.toFixed(1)}%`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <ScopedListFooter list={list} noun="keywords" />
+    </div>
   );
 }
 
@@ -122,28 +199,32 @@ function CitationGapsSkeleton() {
 }
 
 function CitationGapResults({
-  data, loading, error
+  data, request, loading, computing, error
 }: {
   readonly data: CitationGapsResponse | null;
+  readonly request: ListRequest | null;
   readonly loading: boolean;
+  readonly computing: ComputingResponse | null;
   readonly error: string | null;
 }) {
+  if (loading && computing !== null) return <ComputingState subject="citation gaps" />;
   if (loading) return <CitationGapsSkeleton />;
   if (error) {
     return <div className="text-center py-8 text-red-500">{error}</div>;
   }
   if (!data) return null;
 
-  const gaps = gapsOf(data);
   return (
     <>
+      <ScopeCoverageNote response={data} />
       <GapStats
         summary={data.summary}
         totalGaps={data.total_gaps}
         totalHighPriority={data.total_high_priority}
       />
       {(data.domain_summary?.length ?? 0) > 0 && <DomainSummary domains={data.domain_summary} />}
-      <GapList gaps={gaps} />
+      <KeywordGapSummaries data={data} request={request} />
+      <GapList data={data} request={request} />
     </>
   );
 }
@@ -151,7 +232,7 @@ function CitationGapResults({
 export function CitationGaps({ keywords }: Props) {
   const selection = useScopeSelection();
   const {
-    data, loading, error, fetchCitationGaps
+    data, loading, error, computing, request, fetchCitationGaps
   } = useCitationGaps();
 
   useEffect(
@@ -167,7 +248,9 @@ export function CitationGaps({ keywords }: Props) {
 
       <CitationGapResults
         data={data}
+        request={request}
         loading={loading || selection.scopePending}
+        computing={computing}
         error={error}
       />
     </div>

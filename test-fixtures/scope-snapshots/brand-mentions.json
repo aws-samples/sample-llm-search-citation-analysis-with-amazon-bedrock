@@ -1,0 +1,909 @@
+{
+  "route": "GET /api/brand-mentions",
+  "paging": {
+    "list": "aggregated.brands",
+    "view": "brands",
+    "cursor": "snapshot",
+    "token": "aggregated.brands_next_token",
+    "total": "aggregated.brands_total"
+  },
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "truncated": false,
+        "keyword": null,
+        "timestamp": "2026-10-12T06:00:00.000000Z",
+        "available_runs": [
+          "2026-10-12T06:00:00.000000Z",
+          "2026-10-05T06:00:00.000000Z"
+        ],
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "config": {
+          "config_id": "default",
+          "industry": "hospitality",
+          "extract_brands": true,
+          "include_sentiment": true,
+          "include_ranking_context": true,
+          "max_brands": 10,
+          "tracked_brands": {
+            "first_party": [
+              "Hotel Coruña Mar"
+            ],
+            "competitors": [
+              "Meliá Galicia"
+            ]
+          },
+          "first_party_domains": [
+            "hotelcorunamar.com"
+          ],
+          "competitor_domains": {
+            "Meliá Galicia": [
+              "melia.com"
+            ]
+          },
+          "custom_entity_types": [],
+          "custom_prompt_additions": "",
+          "industry_prompts": {},
+          "created_at": "2026-09-18T09:00:00Z",
+          "updated_at": "2026-10-01T10:30:00Z"
+        },
+        "by_provider": [],
+        "aggregated": {
+          "brands": [
+            {
+              "name": "Hotel Coruña Mar",
+              "parent_company": null,
+              "classification": "first_party",
+              "providers": [
+                "claude",
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 4,
+              "provider_ranks": {
+                "claude": 1,
+                "gemini": 1,
+                "openai": 2,
+                "perplexity": 1
+              },
+              "total_mentions": 8,
+              "best_rank": 1,
+              "aggregate_score": 57,
+              "overall_rank": 1,
+              "keyword_count": 2,
+              "appearance_count": 6,
+              "sentiment_counts": {
+                "positive": 4,
+                "neutral": 1,
+                "mixed": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "claude",
+                  "model": "claude-sonnet-5-5",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 3,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Praised for location and views.",
+                  "sentiment_quote": "Destaca por sus vistas a la bahía.",
+                  "ranking_context": "Listed first among seafront hotels."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "perplexity",
+                  "model": "perplexity/sonar",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 1,
+                  "first_position": 1,
+                  "sentiment": "mixed",
+                  "sentiment_reason": "Great views, dated rooms.",
+                  "sentiment_quote": "Vistas magníficas, aunque las habitaciones necesitan reforma.",
+                  "ranking_context": "Top pick for sea views."
+                }
+              ]
+            },
+            {
+              "name": "Meliá Galicia",
+              "parent_company": "Meliá Hotels International",
+              "classification": "competitor",
+              "providers": [
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 3,
+              "provider_ranks": {
+                "gemini": 2,
+                "openai": 1,
+                "perplexity": 2
+              },
+              "total_mentions": 6,
+              "best_rank": 1,
+              "aggregate_score": 45,
+              "overall_rank": 2,
+              "keyword_count": 2,
+              "appearance_count": 5,
+              "sentiment_counts": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "openai",
+                  "model": "gpt-5-mini",
+                  "query_prompt_id": "qp-family",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 1,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Recommended for families.",
+                  "sentiment_quote": "Ideal para familias, con piscina cubierta.",
+                  "ranking_context": "First family recommendation."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "gemini",
+                  "model": "gemini-3.6-flash",
+                  "query_prompt_id": "default",
+                  "rank": 2,
+                  "mention_count": 1,
+                  "first_position": 2,
+                  "sentiment": "neutral",
+                  "sentiment_reason": "Mentioned without judgement.",
+                  "sentiment_quote": "Meliá Galicia también ofrece habitaciones con vistas.",
+                  "ranking_context": "Second option listed."
+                }
+              ]
+            }
+          ],
+          "total_unique_brands": 3,
+          "matching_brands": 140,
+          "brands_truncated": true,
+          "brands_total": 140,
+          "brands_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0",
+          "summary": {
+            "first_party_count": 1,
+            "competitor_count": 1,
+            "other_count": 1
+          }
+        },
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "keywords_truncated": false,
+        "truncated": false,
+        "keyword": null,
+        "timestamp": "2026-10-12T06:00:00.000000Z",
+        "available_runs": [
+          "2026-10-12T06:00:00.000000Z",
+          "2026-10-05T06:00:00.000000Z"
+        ],
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "config": {
+          "config_id": "default",
+          "industry": "hospitality",
+          "extract_brands": true,
+          "include_sentiment": true,
+          "include_ranking_context": true,
+          "max_brands": 10,
+          "tracked_brands": {
+            "first_party": [
+              "Hotel Coruña Mar"
+            ],
+            "competitors": [
+              "Meliá Galicia"
+            ]
+          },
+          "first_party_domains": [
+            "hotelcorunamar.com"
+          ],
+          "competitor_domains": {
+            "Meliá Galicia": [
+              "melia.com"
+            ]
+          },
+          "custom_entity_types": [],
+          "custom_prompt_additions": "",
+          "industry_prompts": {},
+          "created_at": "2026-09-18T09:00:00Z",
+          "updated_at": "2026-10-01T10:30:00Z"
+        },
+        "by_provider": [],
+        "aggregated": {
+          "brands": [
+            {
+              "name": "Hotel Coruña Mar",
+              "parent_company": null,
+              "classification": "first_party",
+              "providers": [
+                "claude",
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 4,
+              "provider_ranks": {
+                "claude": 1,
+                "gemini": 1,
+                "openai": 2,
+                "perplexity": 1
+              },
+              "total_mentions": 8,
+              "best_rank": 1,
+              "aggregate_score": 57,
+              "overall_rank": 1,
+              "keyword_count": 2,
+              "appearance_count": 6,
+              "sentiment_counts": {
+                "positive": 4,
+                "neutral": 1,
+                "mixed": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "claude",
+                  "model": "claude-sonnet-5-5",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 3,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Praised for location and views.",
+                  "sentiment_quote": "Destaca por sus vistas a la bahía.",
+                  "ranking_context": "Listed first among seafront hotels."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "perplexity",
+                  "model": "perplexity/sonar",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 1,
+                  "first_position": 1,
+                  "sentiment": "mixed",
+                  "sentiment_reason": "Great views, dated rooms.",
+                  "sentiment_quote": "Vistas magníficas, aunque las habitaciones necesitan reforma.",
+                  "ranking_context": "Top pick for sea views."
+                }
+              ]
+            },
+            {
+              "name": "Meliá Galicia",
+              "parent_company": "Meliá Hotels International",
+              "classification": "competitor",
+              "providers": [
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 3,
+              "provider_ranks": {
+                "gemini": 2,
+                "openai": 1,
+                "perplexity": 2
+              },
+              "total_mentions": 6,
+              "best_rank": 1,
+              "aggregate_score": 45,
+              "overall_rank": 2,
+              "keyword_count": 2,
+              "appearance_count": 5,
+              "sentiment_counts": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "openai",
+                  "model": "gpt-5-mini",
+                  "query_prompt_id": "qp-family",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 1,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Recommended for families.",
+                  "sentiment_quote": "Ideal para familias, con piscina cubierta.",
+                  "ranking_context": "First family recommendation."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "gemini",
+                  "model": "gemini-3.6-flash",
+                  "query_prompt_id": "default",
+                  "rank": 2,
+                  "mention_count": 1,
+                  "first_position": 2,
+                  "sentiment": "neutral",
+                  "sentiment_reason": "Mentioned without judgement.",
+                  "sentiment_quote": "Meliá Galicia también ofrece habitaciones con vistas.",
+                  "ranking_context": "Second option listed."
+                }
+              ]
+            }
+          ],
+          "total_unique_brands": 3,
+          "matching_brands": 3,
+          "brands_truncated": false,
+          "brands_total": 3,
+          "brands_next_token": null,
+          "summary": {
+            "first_party_count": 1,
+            "competitor_count": 1,
+            "other_count": 1
+          }
+        },
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "truncated": false,
+        "keyword": null,
+        "timestamp": "2026-10-12T06:00:00.000000Z",
+        "available_runs": [
+          "2026-10-12T06:00:00.000000Z",
+          "2026-10-05T06:00:00.000000Z"
+        ],
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "config": {
+          "config_id": "default",
+          "industry": "hospitality",
+          "extract_brands": true,
+          "include_sentiment": true,
+          "include_ranking_context": true,
+          "max_brands": 10,
+          "tracked_brands": {
+            "first_party": [
+              "Hotel Coruña Mar"
+            ],
+            "competitors": [
+              "Meliá Galicia"
+            ]
+          },
+          "first_party_domains": [
+            "hotelcorunamar.com"
+          ],
+          "competitor_domains": {
+            "Meliá Galicia": [
+              "melia.com"
+            ]
+          },
+          "custom_entity_types": [],
+          "custom_prompt_additions": "",
+          "industry_prompts": {},
+          "created_at": "2026-09-18T09:00:00Z",
+          "updated_at": "2026-10-01T10:30:00Z"
+        },
+        "by_provider": [],
+        "aggregated": {
+          "brands": [
+            {
+              "name": "Hotel Coruña Mar",
+              "parent_company": null,
+              "classification": "first_party",
+              "providers": [
+                "claude",
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 4,
+              "provider_ranks": {
+                "claude": 1,
+                "gemini": 1,
+                "openai": 2,
+                "perplexity": 1
+              },
+              "total_mentions": 8,
+              "best_rank": 1,
+              "aggregate_score": 57,
+              "overall_rank": 1,
+              "keyword_count": 2,
+              "appearance_count": 6,
+              "sentiment_counts": {
+                "positive": 4,
+                "neutral": 1,
+                "mixed": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "claude",
+                  "model": "claude-sonnet-5-5",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 3,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Praised for location and views.",
+                  "sentiment_quote": "Destaca por sus vistas a la bahía.",
+                  "ranking_context": "Listed first among seafront hotels."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "perplexity",
+                  "model": "perplexity/sonar",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 1,
+                  "first_position": 1,
+                  "sentiment": "mixed",
+                  "sentiment_reason": "Great views, dated rooms.",
+                  "sentiment_quote": "Vistas magníficas, aunque las habitaciones necesitan reforma.",
+                  "ranking_context": "Top pick for sea views."
+                }
+              ]
+            },
+            {
+              "name": "Meliá Galicia",
+              "parent_company": "Meliá Hotels International",
+              "classification": "competitor",
+              "providers": [
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 3,
+              "provider_ranks": {
+                "gemini": 2,
+                "openai": 1,
+                "perplexity": 2
+              },
+              "total_mentions": 6,
+              "best_rank": 1,
+              "aggregate_score": 45,
+              "overall_rank": 2,
+              "keyword_count": 2,
+              "appearance_count": 5,
+              "sentiment_counts": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "openai",
+                  "model": "gpt-5-mini",
+                  "query_prompt_id": "qp-family",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 1,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Recommended for families.",
+                  "sentiment_quote": "Ideal para familias, con piscina cubierta.",
+                  "ranking_context": "First family recommendation."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "gemini",
+                  "model": "gemini-3.6-flash",
+                  "query_prompt_id": "default",
+                  "rank": 2,
+                  "mention_count": 1,
+                  "first_position": 2,
+                  "sentiment": "neutral",
+                  "sentiment_reason": "Mentioned without judgement.",
+                  "sentiment_quote": "Meliá Galicia también ofrece habitaciones con vistas.",
+                  "ranking_context": "Second option listed."
+                }
+              ]
+            }
+          ],
+          "total_unique_brands": 3,
+          "matching_brands": 3,
+          "brands_truncated": false,
+          "brands_total": 3,
+          "brands_next_token": null,
+          "summary": {
+            "first_party_count": 1,
+            "competitor_count": 1,
+            "other_count": 1
+          }
+        },
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-brand-mentions-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "keywords_truncated": true,
+        "truncated": false,
+        "keyword": null,
+        "timestamp": "2026-10-12T06:00:00.000000Z",
+        "available_runs": [
+          "2026-10-12T06:00:00.000000Z",
+          "2026-10-05T06:00:00.000000Z"
+        ],
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "config": {
+          "config_id": "default",
+          "industry": "hospitality",
+          "extract_brands": true,
+          "include_sentiment": true,
+          "include_ranking_context": true,
+          "max_brands": 10,
+          "tracked_brands": {
+            "first_party": [
+              "Hotel Coruña Mar"
+            ],
+            "competitors": [
+              "Meliá Galicia"
+            ]
+          },
+          "first_party_domains": [
+            "hotelcorunamar.com"
+          ],
+          "competitor_domains": {
+            "Meliá Galicia": [
+              "melia.com"
+            ]
+          },
+          "custom_entity_types": [],
+          "custom_prompt_additions": "",
+          "industry_prompts": {},
+          "created_at": "2026-09-18T09:00:00Z",
+          "updated_at": "2026-10-01T10:30:00Z"
+        },
+        "by_provider": [],
+        "aggregated": {
+          "brands": [
+            {
+              "name": "Hotel Coruña Mar",
+              "parent_company": null,
+              "classification": "first_party",
+              "providers": [
+                "claude",
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 4,
+              "provider_ranks": {
+                "claude": 1,
+                "gemini": 1,
+                "openai": 2,
+                "perplexity": 1
+              },
+              "total_mentions": 8,
+              "best_rank": 1,
+              "aggregate_score": 57,
+              "overall_rank": 1,
+              "keyword_count": 2,
+              "appearance_count": 6,
+              "sentiment_counts": {
+                "positive": 4,
+                "neutral": 1,
+                "mixed": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "claude",
+                  "model": "claude-sonnet-5-5",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 3,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Praised for location and views.",
+                  "sentiment_quote": "Destaca por sus vistas a la bahía.",
+                  "ranking_context": "Listed first among seafront hotels."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "perplexity",
+                  "model": "perplexity/sonar",
+                  "query_prompt_id": "default",
+                  "rank": 1,
+                  "mention_count": 1,
+                  "first_position": 1,
+                  "sentiment": "mixed",
+                  "sentiment_reason": "Great views, dated rooms.",
+                  "sentiment_quote": "Vistas magníficas, aunque las habitaciones necesitan reforma.",
+                  "ranking_context": "Top pick for sea views."
+                }
+              ]
+            },
+            {
+              "name": "Meliá Galicia",
+              "parent_company": "Meliá Hotels International",
+              "classification": "competitor",
+              "providers": [
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 3,
+              "provider_ranks": {
+                "gemini": 2,
+                "openai": 1,
+                "perplexity": 2
+              },
+              "total_mentions": 6,
+              "best_rank": 1,
+              "aggregate_score": 45,
+              "overall_rank": 2,
+              "keyword_count": 2,
+              "appearance_count": 5,
+              "sentiment_counts": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "openai",
+                  "model": "gpt-5-mini",
+                  "query_prompt_id": "qp-family",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 1,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Recommended for families.",
+                  "sentiment_quote": "Ideal para familias, con piscina cubierta.",
+                  "ranking_context": "First family recommendation."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "gemini",
+                  "model": "gemini-3.6-flash",
+                  "query_prompt_id": "default",
+                  "rank": 2,
+                  "mention_count": 1,
+                  "first_position": 2,
+                  "sentiment": "neutral",
+                  "sentiment_reason": "Mentioned without judgement.",
+                  "sentiment_quote": "Meliá Galicia también ofrece habitaciones con vistas.",
+                  "ranking_context": "Second option listed."
+                }
+              ]
+            }
+          ],
+          "total_unique_brands": 3,
+          "matching_brands": 3,
+          "brands_truncated": false,
+          "brands_total": 3,
+          "brands_next_token": null,
+          "summary": {
+            "first_party_count": 1,
+            "competitor_count": 1,
+            "other_count": 1
+          }
+        },
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "page": {
+      "description": "A view=brands page after the summary: brands 101-140 of the ranked list (one shown), the last page so next_token is null.",
+      "query": {
+        "scope": "all",
+        "view": "brands",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "truncated": false,
+        "keyword": null,
+        "timestamp": "2026-10-12T06:00:00.000000Z",
+        "aggregated": {
+          "brands": [
+            {
+              "name": "Meliá Galicia",
+              "parent_company": "Meliá Hotels International",
+              "classification": "competitor",
+              "providers": [
+                "gemini",
+                "openai",
+                "perplexity"
+              ],
+              "provider_count": 3,
+              "provider_ranks": {
+                "gemini": 2,
+                "openai": 1,
+                "perplexity": 2
+              },
+              "total_mentions": 6,
+              "best_rank": 1,
+              "aggregate_score": 45,
+              "overall_rank": 2,
+              "keyword_count": 2,
+              "appearance_count": 5,
+              "sentiment_counts": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 1
+              },
+              "appearances": [
+                {
+                  "keyword": "hotel en a coruña",
+                  "provider": "openai",
+                  "model": "gpt-5-mini",
+                  "query_prompt_id": "qp-family",
+                  "rank": 1,
+                  "mention_count": 2,
+                  "first_position": 1,
+                  "sentiment": "positive",
+                  "sentiment_reason": "Recommended for families.",
+                  "sentiment_quote": "Ideal para familias, con piscina cubierta.",
+                  "ranking_context": "First family recommendation."
+                },
+                {
+                  "keyword": "hotel con vistas al mar a coruña",
+                  "provider": "gemini",
+                  "model": "gemini-3.6-flash",
+                  "query_prompt_id": "default",
+                  "rank": 2,
+                  "mention_count": 1,
+                  "first_position": 2,
+                  "sentiment": "neutral",
+                  "sentiment_reason": "Mentioned without judgement.",
+                  "sentiment_quote": "Meliá Galicia también ofrece habitaciones con vistas.",
+                  "ranking_context": "Second option listed."
+                }
+              ]
+            }
+          ],
+          "brands_total": 140,
+          "next_token": null
+        },
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "cursor_expired": {
+      "description": "A brand token of a build that was replaced (or a live token on a scope now served from its snapshot).",
+      "query": {
+        "scope": "all",
+        "view": "brands",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 400,
+      "body": {
+        "error": "The list changed since this page was read; start again from the first page",
+        "code": "cursor_expired",
+        "field": "next_token"
+      }
+    }
+  }
+}

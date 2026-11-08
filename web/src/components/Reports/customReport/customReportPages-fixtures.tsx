@@ -45,8 +45,11 @@ export function buildCompetitorSource(overrides: Partial<CompetitorSource> = {})
     gap: {
       rollup: null,
       keywordsAnalyzed: 0,
+      response: null,
+      request: null,
       loading: false,
       error: null,
+      computing: null,
       ready: true,
     },
     ready: true,

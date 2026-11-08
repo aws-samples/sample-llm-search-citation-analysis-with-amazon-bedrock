@@ -190,26 +190,28 @@ export function bedrockTierEnvironments(template: Template): Record<string, unkn
 
 /** Map function names to timeouts for every Lambda reachable from API Gateway (methods in `apiTemplate`, functions in `mainTemplate`). */
 export function extractApiBackedFunctionTimeouts(mainTemplate: Template, apiTemplate: Template): Record<string, number> {
-  const byLogicalId = new Map<string, { name: string; timeout: number }>();
-  for (const [logicalId, resource] of Object.entries(
-    mainTemplate.findResources('AWS::Lambda::Function')
-  )) {
+  const timeoutsByName = new Map<string, number>();
+  for (const resource of Object.values(mainTemplate.findResources('AWS::Lambda::Function'))) {
     const name = resolvePath(resource, ['Properties', 'FunctionName']);
     const timeout = resolvePath(resource, ['Properties', 'Timeout']);
     if (typeof name === 'string' && typeof timeout === 'number') {
-      byLogicalId.set(logicalId, { name, timeout });
+      timeoutsByName.set(name, timeout);
     }
   }
 
   const timeouts: Record<string, number> = {};
   for (const method of Object.values(apiTemplate.findResources('AWS::ApiGateway::Method'))) {
-    const uri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
-    for (const logicalId of importedLogicalIds(mainTemplate, uri)) {
-      const fn = byLogicalId.get(logicalId);
-      if (fn) timeouts[fn.name] = fn.timeout;
+    for (const name of namedFunctions(resolvePath(method, ['Properties', 'Integration', 'Uri']))) {
+      const timeout = timeoutsByName.get(name);
+      if (timeout !== undefined) timeouts[name] = timeout;
     }
   }
   return timeouts;
+}
+
+/** The Lambda function names the ARNs in `node` spell out (`...:function:<name>`), in order. */
+export function namedFunctions(node: unknown): string[] {
+  return [...(JSON.stringify(node) ?? '').matchAll(/:function:([\w-]+)/g)].map((match) => match[1]);
 }
 
 /** Every `Fn::ImportValue` export name in `node`, in order of appearance. */
@@ -224,26 +226,6 @@ export function importedExportNames(node: unknown, found: string[] = []): string
     for (const value of Object.values(node)) importedExportNames(value, found);
   }
   return found;
-}
-
-/** The value `template` exports as `exportName`; `undefined` when it exports no such name. */
-function exportedValue(template: Template, exportName: string): unknown {
-  const output = Object.values(template.findOutputs('*')).find(
-    (candidate) => resolvePath(candidate, ['Export', 'Name']) === exportName,
-  );
-  return resolvePath(output, ['Value']);
-}
-
-/**
- * The main-stack logical ids `node` reaches through imports: each
- * `Fn::ImportValue` resolved to the `Ref` or `Fn::GetAtt` target of the
- * main template's export of that name.
- */
-export function importedLogicalIds(mainTemplate: Template, node: unknown): string[] {
-  return importedExportNames(node).flatMap((name) => {
-    const value = exportedValue(mainTemplate, name);
-    return [...collectGetAttTargets(value), ...collectRefTargets(value)];
-  });
 }
 
 export function extractReservedConcurrency(
@@ -357,6 +339,7 @@ function statementTargets(statement: unknown, resourceLogicalId: string): boolea
   return [...collectGetAttTargets(resource), ...collectRefTargets(resource)].includes(resourceLogicalId);
 }
 
+/** `values` once each, in locale order. */
 export function sortedUnique(values: string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
@@ -572,16 +555,18 @@ function methodIntegrationUri(method: unknown): string {
 
 /**
  * The verbs among `methods` that are not behind the Cognito user pool
- * authorizer, and those whose integration is not the Lambda function with
- * logical id `functionLogicalId`. Both lists are empty for a fully guarded route set.
+ * authorizer, and those whose integration URI does not name `functionReference`:
+ * the function name for a dashboard API route (the API stack builds each
+ * function's ARN from its name), the logical id for a function of the same
+ * stack (MCP). Both lists are empty for a fully guarded route set.
  */
-export function unguardedVerbs(methods: ApiGatewayMethodSnapshot[], functionLogicalId: string) {
+export function unguardedVerbs(methods: ApiGatewayMethodSnapshot[], functionReference: string) {
   return {
     withoutCognitoAuthorizer: methods
       .filter((method) => method.authorizationType !== COGNITO_AUTH)
       .map((method) => method.httpMethod),
     notIntegratedWithFunction: methods
-      .filter((method) => !method.integrationUri.includes(functionLogicalId))
+      .filter((method) => !method.integrationUri.includes(functionReference))
       .map((method) => method.httpMethod),
   };
 }
@@ -904,7 +889,9 @@ export interface ContentStudioInfrastructureSnapshot {
   workerEnvironment: Record<string, unknown>;
   templateTableActions: string[];
   routes: ContentStudioRouteSnapshot[];
-  functionLogicalId: string;
+  /** Name of the API function, which the API stack's integrations name in their URIs. */
+  functionName: string;
+  workerFunctionName: string;
   workerFunctionLogicalId: string;
   apiTimeout: number;
   workerTimeout: number;
@@ -1117,7 +1104,8 @@ export function extractContentStudioInfrastructureSnapshot(
       templateTableId
     ),
     routes,
-    functionLogicalId,
+    functionName,
+    workerFunctionName,
     workerFunctionLogicalId,
     apiTimeout: extractFunctionTimeout(template, functionName),
     workerTimeout: extractFunctionTimeout(template, workerFunctionName),
@@ -1407,6 +1395,40 @@ function parseStateMachineDefinition(template: Template, stateMachineName: strin
   return parsed;
 }
 
+/** The top-level `States` of a state machine's parsed definition (`{}` when absent). */
+export function extractStateMachineStates(template: Template, stateMachineName: string): Record<string, unknown> {
+  const states = resolvePath(parseStateMachineDefinition(template, stateMachineName), ['States']);
+  return isRecord(states) ? states : {};
+}
+
+function collectDistributedMaps(node: unknown, found: string[]): string[] {
+  if (Array.isArray(node)) {
+    for (const item of node) collectDistributedMaps(item, found);
+    return found;
+  }
+  if (!isRecord(node)) return found;
+  const states = isRecord(node.States) ? node.States : {};
+  for (const [name, state] of Object.entries(states)) {
+    if (resolvePath(state, ['ItemProcessor', 'ProcessorConfig', 'Mode']) === 'DISTRIBUTED') found.push(name);
+  }
+  for (const value of Object.values(node)) collectDistributedMaps(value, found);
+  return found;
+}
+
+/** Names of every Distributed Map in a state machine (Parallel branches and Map processors included), sorted. */
+export function extractDistributedMapNames(template: Template, stateMachineName: string): string[] {
+  return sortedUnique(collectDistributedMaps(parseStateMachineDefinition(template, stateMachineName), []));
+}
+
+/** The statements of a Lambda's role that grant any `states:` action, as sorted-action snapshots. */
+export function extractFunctionStatesStatements(template: Template, functionName: string): IamPolicyStatementSnapshot[] {
+  return roleStatementsMatching(
+    template,
+    findFunctionRoleLogicalId(template, functionName),
+    (actions) => actions.some((action) => action.startsWith('states:'))
+  );
+}
+
 function serializedResources(statements: IamPolicyStatementSnapshot[]): string {
   return JSON.stringify(statements.flatMap((statement) => statement.resources));
 }
@@ -1538,7 +1560,7 @@ export interface CustomReportsSnapshot {
     encryption: unknown;
     deletionPolicy: string;
   };
-  configMgmtFunctionLogicalId: string;
+  configMgmtFunctionName: string;
   configMgmtTableEnv: unknown;
   configMgmtTableActions: string[];
   collectionMethods: ApiGatewayMethodSnapshot[];
@@ -1554,7 +1576,7 @@ export const EMPTY_CUSTOM_REPORTS_SNAPSHOT: CustomReportsSnapshot = {
     encryption: undefined,
     deletionPolicy: '',
   },
-  configMgmtFunctionLogicalId: '',
+  configMgmtFunctionName: '',
   configMgmtTableEnv: undefined,
   configMgmtTableActions: [],
   collectionMethods: [],
@@ -1579,7 +1601,7 @@ export function extractCustomReportsSnapshot(template: Template, apiTemplate: Te
       encryption: resolvePath(table, ['Properties', 'SSESpecification']),
       deletionPolicy: resolveString(table, ['DeletionPolicy']),
     },
-    configMgmtFunctionLogicalId: findLambdaLogicalId(template, configMgmt),
+    configMgmtFunctionName: configMgmt,
     configMgmtTableEnv: extractLambdaEnvVars(template, configMgmt).DYNAMODB_TABLE_CUSTOM_REPORTS,
     configMgmtTableActions: extractFunctionRoleActionsOn(template, configMgmt, tableLogicalId),
     collectionMethods: extractApiMethods(apiTemplate, collectionId),
@@ -1634,7 +1656,7 @@ export interface ReportInsightsSnapshot {
   statsInsightsReportInsightsActions: string[];
   statsInsightsWorkerActions: string[];
   regenerateMethods: ApiGatewayMethodSnapshot[];
-  statsInsightsFunctionLogicalId: string;
+  statsInsightsFunctionName: string;
 }
 
 export function extractReportInsightsSnapshot(template: Template, apiTemplate: Template): ReportInsightsSnapshot {
@@ -1661,7 +1683,7 @@ export function extractReportInsightsSnapshot(template: Template, apiTemplate: T
     statsInsightsReportInsightsActions: extractFunctionRoleActionsOn(template, statsInsights, tableLogicalId),
     statsInsightsWorkerActions: extractFunctionRoleActionsOn(template, statsInsights, findLambdaLogicalId(template, worker)),
     regenerateMethods: extractApiMethods(apiTemplate, findApiResourceId(apiTemplate, 'regenerate', insightsResourceId)),
-    statsInsightsFunctionLogicalId: findLambdaLogicalId(template, statsInsights),
+    statsInsightsFunctionName: statsInsights,
   };
 }
 

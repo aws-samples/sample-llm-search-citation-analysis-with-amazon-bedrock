@@ -7,11 +7,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from shared.group_kpi_history import build_group_kpi_history
-from shared.insights_citations import citation_ownership_facts, owned_pages_facts
 from shared.insights_engine import (
     BLOCK_BY_KIND,
     CAVEAT_HIGH_SHARE,
@@ -29,17 +28,44 @@ from shared.insights_engine import (
     SUBBRAND_POSITION_GAP,
     SUBBRAND_SENTIMENT_GAP,
     UNSTABLE_POSITION_RANGE,
-    competitor_caveat_facts,
+    compute_facts,
     compute_insights,
     derive_insights,
-    engine_facts,
-    portfolio_facts,
-    prompt_engine_facts,
     stability_facts,
 )
 from shared.kpi_engine import KPI_IDS, Answer, answers_from_rows, brand_kpis, brand_table, engine_breakdown
 from testing.search_results_fixtures import search_result_row
 from testing.sentiment_examples_fixtures import stored_brand
+
+
+def _answer_facts(answers: Iterable[Answer], owned: Iterable[str] = (), competitor_domains: Mapping[str, list[str]] | None = None) -> dict[str, Any]:
+    """The facts ``compute_insights`` derives from ``answers`` (merged per keyword, as a scope snapshot does)."""
+    return compute_insights(answers, owned, None, competitor_domains)['facts']
+
+
+def engine_facts(answers: Iterable[Answer], owned: Iterable[str] = ()) -> list[dict[str, Any]]:
+    return _answer_facts(answers, owned)['engines']
+
+
+def portfolio_facts(answers: Iterable[Answer]) -> list[dict[str, Any]]:
+    return _answer_facts(answers)['portfolio']
+
+
+def prompt_engine_facts(answers: Iterable[Answer]) -> dict[str, Any]:
+    return _answer_facts(answers)['prompt_engine']
+
+
+def competitor_caveat_facts(answers: Iterable[Answer]) -> list[dict[str, Any]]:
+    return _answer_facts(answers)['competitor_caveats']
+
+
+def citation_ownership_facts(answers: Iterable[Answer], owned: Iterable[str] = ()) -> dict[str, Any]:
+    return _answer_facts(answers, owned)['citation_ownership']
+
+
+def owned_pages_facts(answers: Iterable[Answer], owned: Iterable[str] = ()) -> dict[str, Any]:
+    return _answer_facts(answers, owned)['owned_pages']
+
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
 RUN_2 = '2026-09-08T06:00:00.000000Z'
@@ -169,10 +195,13 @@ def _facts(
     """Facts holding the given rows; ``phase_2`` replaces the prompt, citation and caveat facts, empty by default."""
     return {
         'engines': list(engines),
-        'prompt_engine': {'engines': [], 'keywords': [], 'omitted': 0},
+        'prompt_engine': {'engines': [], 'keywords': [], 'omitted': 0, 'keywords_total': 0},
         'citation_ownership': {'owned_configured': True, 'competitors_configured': True, 'engines': []},
-        'owned_pages': {'pages': [], 'pages_omitted': 0, 'sections': [], 'engines': [], 'document_citations': 0, 'page_citations': 0},
+        'owned_pages': {
+            'pages': [], 'pages_omitted': 0, 'pages_total': 0, 'sections': [], 'engines': [], 'document_citations': 0, 'page_citations': 0,
+        },
         'competitor_caveats': [],
+        'caveat_reasons': {'reasons': [], 'reasons_omitted': 0, 'reasons_total': 0},
         'portfolio': list(portfolio),
         'stability': list(stability),
         **phase_2,
@@ -472,6 +501,7 @@ class TestPromptEngineFacts:
             'engines': ['gemini', 'openai'],
             'keywords': [{'keyword': 'k1', 'visibility_score': 54.3, 'positions': {'gemini': None, 'openai': 2}, 'lost_engines': ['gemini']}],
             'omitted': 0,
+            'keywords_total': 1,
         }
 
     @pytest.mark.parametrize(('rank', 'lost'), [(3, []), (4, ['openai']), (None, ['openai'])])
@@ -493,7 +523,7 @@ class TestPromptEngineFacts:
         assert (len(facts['keywords']), facts['omitted'], {row['keyword'] for row in facts['keywords']} & {'k00', 'k01'}) == (50, 2, set())
 
     def test_is_empty_without_answers(self):
-        assert prompt_engine_facts([]) == {'engines': [], 'keywords': [], 'omitted': 0}
+        assert prompt_engine_facts([]) == {'engines': [], 'keywords': [], 'omitted': 0, 'keywords_total': 0}
 
 
 class TestCompetitorCaveatFacts:
@@ -506,18 +536,39 @@ class TestCompetitorCaveatFacts:
         )
 
         assert competitor_caveat_facts(answers) == [
-            {'name': RIVAL, 'mentions': 4, 'mixed': 2, 'negative': 1, 'caveat_share': 75.0, 'reasons': ['Fees add up', 'Late check-in']},
+            {'name': RIVAL, 'mentions': 4, 'mixed': 2, 'negative': 1, 'caveat_share': 75.0, 'reasons': ['Fees add up', 'Late check-in'], 'reasons_total': 2},
         ]
 
-    def test_lists_at_most_three_reasons_in_answer_order(self):
+    def test_a_row_lists_its_first_three_reasons_in_answer_order(self):
         answers = _answers(*(_answer(f'k{index}', 'openai', _rival(sentiment='negative', reason=f'reason {index}')) for index in range(5)))
 
         assert competitor_caveat_facts(answers)[0]['reasons'] == ['reason 0', 'reason 1', 'reason 2']
 
+    def test_a_row_counts_every_distinct_reason_as_reasons_total(self):
+        answers = _answers(*(_answer(f'k{index}', 'openai', _rival(sentiment='negative', reason=f'reason {index % 4}')) for index in range(9)))
+
+        assert competitor_caveat_facts(answers)[0]['reasons_total'] == 4
+
+    def test_the_caveat_reasons_fact_holds_every_distinct_reason_in_answer_order(self):
+        answers = _answers(*(_answer(f'k{index}', 'openai', _rival(sentiment='mixed', reason=f'reason {index}')) for index in range(5)))
+
+        assert compute_facts(answers)['caveat_reasons'] == {'reasons': [{'competitor': RIVAL, 'reason': f'reason {index}'} for index in range(5)]}
+
+    def test_the_caveat_reasons_follow_the_competitors_order(self):
+        other = stored_brand('Casa Luna', 'negative', classification='competitor', sentiment_reason='Noisy')
+        answers = _answers(_answer('k1', 'openai', _rival(sentiment='mixed', reason='Fees')), _answer('k2', 'openai', other), _answer('k3', 'openai', other))
+
+        assert [entry['competitor'] for entry in compute_facts(answers)['caveat_reasons']['reasons']] == ['Casa Luna', RIVAL]
+
+    def test_an_answer_lists_no_caveat_reason_and_counts_them(self):
+        answers = _answers(*(_answer(f'k{index}', 'openai', _rival(sentiment='mixed', reason=f'reason {index}')) for index in range(5)))
+
+        assert _answer_facts(answers)['caveat_reasons'] == {'reasons': [], 'reasons_omitted': 5, 'reasons_total': 5}
+
     def test_leaves_the_reasons_empty_when_none_is_stored(self):
         [row] = competitor_caveat_facts(_answers(_answer('k1', 'openai', _rival(sentiment='mixed'))))
 
-        assert (row['caveat_share'], row['reasons']) == (100.0, [])
+        assert (row['caveat_share'], row['reasons'], row['reasons_total']) == (100.0, [], 0)
 
     def test_ignores_first_party_brands_and_lists_the_most_mentioned_competitor_first(self):
         other = stored_brand('Casa Luna', 'negative', classification='competitor')
@@ -677,6 +728,7 @@ class TestComputeInsights:
             'citation_ownership': citation_ownership_facts(answers, OWNED),
             'owned_pages': owned_pages_facts(answers, OWNED),
             'competitor_caveats': competitor_caveat_facts(answers),
+            'caveat_reasons': _answer_facts(answers)['caveat_reasons'],
             'portfolio': portfolio_facts(answers),
             'stability': stability_facts(history),
         }
@@ -862,7 +914,10 @@ def _contract_rank(insight: dict[str, Any]) -> tuple[int, float]:
 
 
 class TestEvidenceProperties:
+    """Each example builds a whole scope; no per-example deadline (the first one is slow after a long suite warms the heap)."""
+
     @pytest.mark.parametrize('kind', list(CONTRACT_ANSWER_EVIDENCE))
+    @settings(deadline=None)
     @given(rows=_ROWS)
     def test_evidence_recomputes_from_the_answers_of_the_scope(self, kind, rows):
         answers, _history_keywords, result = _scope(rows)
@@ -870,6 +925,7 @@ class TestEvidenceProperties:
         for insight in _of_kind(result, kind):
             assert insight['evidence'] == CONTRACT_ANSWER_EVIDENCE[kind](answers, insight['subject'])
 
+    @settings(deadline=None)
     @given(_ROWS)
     def test_unstable_keyword_evidence_repeats_the_keyword_history(self, rows):
         _answers_of_rows, history, result = _scope(rows)
@@ -877,6 +933,7 @@ class TestEvidenceProperties:
         for insight in _of_kind(result, 'unstable_keyword'):
             assert insight['evidence'] == _contract_keyword_evidence(history, insight['subject'])
 
+    @settings(deadline=None)
     @given(_ROWS)
     def test_raises_one_insight_per_flagged_fact_row(self, rows):
         result = _scope(rows)[2]
@@ -899,18 +956,21 @@ class TestEvidenceProperties:
             ),
         }
 
+    @settings(deadline=None)
     @given(_ROWS)
     def test_ranks_insights_by_severity_then_size(self, rows):
         ranks = [_contract_rank(insight) for insight in _scope(rows)[2]['insights']]
 
         assert ranks == sorted(ranks)
 
+    @settings(deadline=None)
     @given(_ROWS)
     def test_gives_the_same_result_for_the_same_input(self, rows):
         answers, history, result = _scope(rows)
 
         assert result == compute_insights(answers, OWNED, history, RIVAL_DOMAINS)
 
+    @settings(deadline=None)
     @given(_ROWS)
     def test_is_plain_json_without_nan(self, rows):
         result = _scope(rows)[2]

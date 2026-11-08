@@ -5,7 +5,6 @@ import type {
   DomainPagesResponse,
   TopPageRow,
 } from '../../../types/api/seoDomains';
-import { fetchDomainPages } from '../../../api/seoDomains';
 import { Button } from '../../ui/Button';
 import {
   DomainPagedPanel, etvColumn, type DomainListProps, type ListColumn, type PagedListSpec
@@ -14,7 +13,6 @@ import {
   PAGE_BOUNDS, pageConditionCount, pageFilters
 } from './domainFilters';
 import { firstQuery } from './domainPagedQuery';
-import { PAGE_EXCEL_COLUMNS } from './domainExcel';
 import {
   CompactNumber, pageColumn
 } from '../../ui/tableCells';
@@ -45,12 +43,9 @@ export function DomainPagesPanel(props: DomainListProps<DomainPagesRequest, Doma
   return (
     <DomainPagedPanel {...props} spec={SPEC} initialQuery={firstQuery<DomainPageSort>('traffic')} columns={COLUMNS}
       rowKey={(row) => row.url}
-      excel={{
-        columns: PAGE_EXCEL_COLUMNS,
-        sheetName: 'Top pages',
-        filePrefix: 'domain-pages',
+      exported={{
+        table: 'pages',
         tableName: 'top pages',
-        fetchRows: fetchDomainPages,
       }}
       start={(load) => (
         <div className="flex flex-col items-start gap-2 py-6 sm:items-center">

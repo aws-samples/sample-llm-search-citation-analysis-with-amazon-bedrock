@@ -2,11 +2,9 @@ import {
   describe, it, expect 
 } from 'vitest';
 import {
-  CITATION_EXPORT_COLUMNS, citationExportRows, isVideoCitation, parseApiResponse
+  isVideoCitation, parseApiResponse
 } from './citationParser';
-import {
-  MIXED_TYPE_CITATIONS, buildCitation
-} from './citationParser-fixtures';
+import { MIXED_TYPE_CITATIONS } from './citationParser-fixtures';
 
 // Sorting and filtering the citation list moved to the API (GET /citations
 // sorts, filters and pages server-side): lambda/api/test_get_citations_pages.py.
@@ -67,40 +65,5 @@ describe('parseApiResponse', () => {
 describe('isVideoCitation', () => {
   it('is true only for a citation the API tagged as video', () => {
     expect(MIXED_TYPE_CITATIONS.map(isVideoCitation)).toStrictEqual([true, false, false]);
-  });
-});
-
-describe('citationExportRows', () => {
-  it('writes the Type column after the domain, as Video or Page', () => {
-    const rows = citationExportRows(MIXED_TYPE_CITATIONS);
-
-    expect(rows.map((row) => [row.Domain, row.Type])).toStrictEqual([
-      ['www.youtube.com', 'Video'],
-      ['example.com', 'Page'],
-      ['example.com', 'Page'],
-    ]);
-  });
-
-  it('writes rank, URL, counts and the keyword list of each citation', () => {
-    const [row] = citationExportRows([buildCitation({
-      keyword_count: 2,
-      keywords: ['hotels', 'family hotels'],
-    })]);
-
-    expect(row).toStrictEqual({
-      Rank: 1,
-      URL: 'https://example.com/article',
-      Domain: 'example.com',
-      Type: 'Page',
-      Keywords: 2,
-      'Citation Count': 5,
-      'Keyword List': 'hotels, family hotels',
-    });
-  });
-
-  it('declares one column width per exported column', () => {
-    const [row] = citationExportRows([buildCitation()]);
-
-    expect(CITATION_EXPORT_COLUMNS).toHaveLength(Object.keys(row).length);
   });
 });

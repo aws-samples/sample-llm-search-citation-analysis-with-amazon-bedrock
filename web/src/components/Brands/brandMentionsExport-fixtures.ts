@@ -2,7 +2,7 @@ import {
   fireEvent, screen
 } from '@testing-library/react';
 import type {
-  BrandAppearanceRow, BrandMentionsResponse, Keyword, ReportScope
+  BrandMentionsResponse, Keyword, ReportScope
 } from '../../types';
 import { ONE_BRAND_ONE_COMPETITOR } from '../../hooks/useBrandMentions-fixtures';
 
@@ -119,13 +119,3 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
     ...ONE_BRAND_ONE_COMPETITOR,
   },
 };
-
-/** The `view=appearances` rows of `brandMentionsExportResponse`, tagged with their brand. */
-export const brandMentionsExportRows: BrandAppearanceRow[] = brandMentionsExportResponse.aggregated.brands.flatMap(
-  (brand) => brand.appearances.map((appearance) => ({
-    ...appearance,
-    brand: brand.name,
-    classification: brand.classification,
-    overall_rank: brand.overall_rank,
-  }))
-);

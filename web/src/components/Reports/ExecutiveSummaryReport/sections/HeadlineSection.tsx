@@ -4,6 +4,7 @@ import {
   gateSection,
   type ReportSlice,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 /**
  * Top-of-deck answer to "are we winning, level or losing right now": every
@@ -25,5 +26,10 @@ export function HeadlineSection({
   if (!gate.ready) return gate.placeholder;
 
   const overview = gate.value;
-  return <TrendHeadlineSection kpis={overview.kpis} standing={overview} counts={overview.summary} />;
+  return (
+    <>
+      <TrendHeadlineSection kpis={overview.kpis} standing={overview} counts={overview.summary} />
+      <p className="-mt-6 mb-8 text-right"><SeeAllLink to="/reports/visibility">See every keyword in Brand Visibility</SeeAllLink></p>
+    </>
+  );
 }

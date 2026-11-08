@@ -10,9 +10,15 @@ type ReportData = ReturnType<typeof useBrandVisibilityReport>;
 function settledReport(overrides: Partial<ReportData>): ReportData {
   return {
     ...SETTLED_VISIBILITY_AND_TRENDS,
+    visibilityComputing: null,
+    trendsComputing: null,
+    visibilityRequest: null,
+    trendsRequest: null,
     groupHistory: null,
     groupHistoryLoading: false,
     groupHistoryError: null,
+    groupHistoryComputing: null,
+    groupHistoryRequest: null,
     ready: true,
     ...overrides,
   };

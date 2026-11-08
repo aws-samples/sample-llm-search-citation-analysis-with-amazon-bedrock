@@ -10,7 +10,14 @@ from shared import dataforseo_business as business
 from shared import dataforseo_local_serp as local_serp
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
-from testing.local_seo_fixtures import CAFE_CID, GRID_REQUEST, install_memory_cache, projected_business, stored_job
+from testing.local_seo_fixtures import (
+    CAFE_CID,
+    GRID_REQUEST,
+    MemoryCache,
+    install_memory_cache,
+    projected_business,
+    stored_job,
+)
 from testing.seo_fixtures import SEO_DIR, SEO_ENV, seo_event
 
 LOCAL_ENV = {**SEO_ENV, 'SEO_LOCAL_JOB_STATE_MACHINE_ARN': 'arn:aws:states:eu-west-1:123456789012:stateMachine:local'}
@@ -200,3 +207,91 @@ class TestJobStatus:
 
     def test_answers_404_for_a_malformed_job_id(self, call, memory):
         assert call('GET', '/jobs/not-an-id')[0] == 404
+
+
+@pytest.fixture
+def seo_cache(seo_boundary):
+    """The SEO answer cache as a dict, so a GET twin reads what its POST stored."""
+    cache = MemoryCache()
+    seo_boundary.get_cached.side_effect = cache.get
+    seo_boundary.put_cached.side_effect = cache.put
+    return cache
+
+
+LISTINGS = [
+    {**projected_business('Low'), 'rating': 3.9, 'reviews_count': 5},
+    {**projected_business('Unrated'), 'rating': None, 'reviews_count': 40},
+    {**projected_business('High'), 'rating': 4.8, 'reviews_count': 2},
+    {**projected_business('Also high'), 'rating': 4.8, 'reviews_count': 9},
+]
+LISTINGS_SEARCH = {'query': 'cafe', **NEAR, 'categories': ['coffee_shop'], 'sort_by': 'rating', 'limit': 50}
+LISTINGS_QUERY = {'query': 'cafe', 'latitude': '40.0', 'longitude': '-74.0', 'categories': 'coffee_shop',
+                  'sort_by': 'rating', 'count': '50'}
+
+
+class TestListingsOrder:
+    def test_rating_sort_lists_the_highest_rating_first_and_unrated_listings_last(self, call, monkeypatch):
+        monkeypatch.setattr(business, 'search_listings', MagicMock(return_value=(LISTINGS, 0.0192)))
+
+        body = call('POST', '/businesses', body={**NEAR, 'sort_by': 'rating'})[1]
+
+        assert [row['title'] for row in body['businesses']] == ['High', 'Also high', 'Low', 'Unrated']
+
+    def test_relevance_keeps_the_order_dataforseo_answered(self, call, monkeypatch):
+        monkeypatch.setattr(business, 'search_listings', MagicMock(return_value=(LISTINGS, 0.0192)))
+
+        body = call('POST', '/businesses', body=NEAR)[1]
+
+        assert [row['title'] for row in body['businesses']] == ['Low', 'Unrated', 'High', 'Also high']
+
+
+class TestCachedListings:
+    def test_answers_the_listings_a_post_cached_for_the_same_search(self, call, seo_cache, monkeypatch):
+        monkeypatch.setattr(business, 'search_listings', MagicMock(return_value=(LISTINGS, 0.0192)))
+        posted = call('POST', '/businesses', body=LISTINGS_SEARCH)[1]
+
+        status, body = call('GET', '/businesses', query=LISTINGS_QUERY)
+
+        assert (status, body['businesses'], body['cached'], body['estimated_cost_usd']) == (
+            200, posted['businesses'], True, 0.0,
+        )
+
+    def test_reads_the_cached_answer_of_a_post_with_an_integer_radius_and_coordinates(self, call, seo_cache, monkeypatch):
+        monkeypatch.setattr(business, 'search_listings', MagicMock(return_value=(LISTINGS, 0.0192)))
+        call('POST', '/businesses', body={**LISTINGS_SEARCH, 'latitude': 40, 'radius_km': 10})
+
+        status, body = call('GET', '/businesses', query={**LISTINGS_QUERY, 'latitude': '40', 'radius_km': '10'})
+
+        assert (status, body['cached']) == (200, True)
+
+    def test_answers_404_not_cached_without_a_paid_call_when_the_search_is_not_cached(self, call, seo_cache, monkeypatch):
+        search = MagicMock()
+        monkeypatch.setattr(business, 'search_listings', search)
+
+        status, body = call('GET', '/businesses', query=LISTINGS_QUERY)
+
+        assert (status, body['code'], search.call_count) == (404, 'NOT_CACHED', 0)
+
+    def test_another_result_count_is_another_search_and_not_cached(self, call, seo_cache, monkeypatch):
+        monkeypatch.setattr(business, 'search_listings', MagicMock(return_value=(LISTINGS, 0.0192)))
+        call('POST', '/businesses', body=LISTINGS_SEARCH)
+
+        assert call('GET', '/businesses', query={**LISTINGS_QUERY, 'count': '20'})[0] == 404
+
+
+class TestCachedLocalSerp:
+    def test_answers_the_results_and_match_a_post_cached(self, call, seo_cache, monkeypatch):
+        monkeypatch.setattr(local_serp, 'local_serp', MagicMock(return_value=(TestLocalSerp.ITEMS, None, 0.002)))
+        posted = call('POST', '/serp', body={'keyword': 'coffee', **NEAR, 'cid': '9'})[1]
+
+        body = call('GET', '/serp', query={'keyword': 'coffee', 'latitude': '40.0', 'longitude': '-74.0', 'cid': '9'})[1]
+
+        assert (body['items'], body['match'], body['cached']) == (posted['items'], posted['match'], True)
+
+    def test_answers_404_not_cached_without_a_paid_call_when_the_results_are_not_cached(self, call, seo_cache, monkeypatch):
+        crawl = MagicMock()
+        monkeypatch.setattr(local_serp, 'local_serp', crawl)
+
+        status, body = call('GET', '/serp', query={'keyword': 'coffee', 'latitude': '40.0', 'longitude': '-74.0'})
+
+        assert (status, body['code'], crawl.call_count) == (404, 'NOT_CACHED', 0)

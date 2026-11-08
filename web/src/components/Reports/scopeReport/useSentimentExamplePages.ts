@@ -6,6 +6,7 @@ import type {
   SentimentExample, SentimentExamplesResponse, SentimentLabel
 } from '../../../types/domain/sentimentExamples';
 import { useSentimentExamples } from '../../../hooks/useSentimentExamples';
+import type { ListRequest } from '../../../api/scopedListPages';
 import {
   decodeReportScope, encodeReportScope
 } from '../../ui/reportScope';
@@ -22,6 +23,8 @@ export interface SentimentExamplePages {
   readonly error: string | null;
   /** Fetches the page `data.next_token` points at and appends it. */
   readonly loadMore: () => void;
+  /** The latest request (scope, market, sentiment, engine): Export all exports every answer it selects. */
+  readonly request: ListRequest | null;
 }
 
 /**
@@ -31,7 +34,7 @@ export interface SentimentExamplePages {
  */
 export function useSentimentExamplePages(scope: ReportScope, sentiment: SentimentLabel, provider: string | null): SentimentExamplePages {
   const {
-    data, loading, error, fetchSentimentExamples
+    data, loading, error, request, fetchSentimentExamples
   } = useSentimentExamples();
   const [examples, setExamples] = useState<readonly SentimentExample[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -62,5 +65,6 @@ export function useSentimentExamplePages(scope: ReportScope, sentiment: Sentimen
     loadingMore: loading && loadingMore,
     error,
     loadMore,
+    request,
   };
 }

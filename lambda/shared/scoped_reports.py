@@ -2,11 +2,11 @@
 Wiring shared by the report handlers whose scope is required.
 
 ``/visibility``, ``/visibility/sentiment-examples``, ``/brand-mentions`` and
-``/reports/group-kpis`` answer 400 without exactly one scope parameter, then
-read at most ``SCOPE_KEYWORDS_CAP`` of the scope's keywords and echo the scope
-next to whether the cap cut it short. ``required_report_scope`` and
-``capped_scope`` are those two steps; scope parsing itself lives in
-``shared.scope_params``. ``TREND_WINDOW_PARAMS`` are the ``period`` / ``days``
+``/reports/group-kpis`` answer 400 without exactly one scope parameter
+(``required_report_scope``); the action lists resolve an optional one through
+``scope_decorator``. Scope parsing itself lives in ``shared.scope_params``;
+whether a scope is read live or served from its snapshot is
+``shared.scope_source.route_scope`` (no keyword cap since 2.45.0). ``TREND_WINDOW_PARAMS`` are the ``period`` / ``days``
 rules ``/trends`` and ``/reports/overview`` share. ``load_window_runs`` is
 the bounded windowed read (per-run KPI rollups first, raw rows for runs
 without one) behind ``/trends``, ``/reports/overview``,
@@ -14,7 +14,7 @@ without one) behind ``/trends``, ``/reports/overview``,
 
 Every read here honours the request's time budget (``shared.request_deadline``):
 a keyword the budget leaves unread is left out of the answer and named in
-``skipped``, and ``scope_read_fields`` turns that into ``keywords_truncated``.
+``skipped`` (the routes report it as ``keywords_truncated``).
 """
 
 from __future__ import annotations
@@ -27,18 +27,16 @@ from typing import Any, NamedTuple
 
 from shared.answer_queries import query_keyword_rows_capped, query_keyword_run_rows
 from shared.group_kpi_history import keyword_run_histories
-from shared.keyword_run_kpis import BRANDS_PER_RUN, StoredRuns, query_stored_runs
+from shared.keyword_run_brands import query_run_brands, with_all_brands
+from shared.keyword_run_kpis import StoredRuns, query_stored_runs
 from shared.kpi_engine import answers_from_rows
 from shared.kpi_tally import RunTally, owned_fingerprint, run_tallies, run_tally
 from shared.request_deadline import Deadline, current_deadline
 from shared.scope_params import (
     MARKET_PARAM,
-    SCOPE_KEYWORDS_CAP,
     SCOPE_PARAMS,
-    ReportScope,
     map_scope_keywords,
     scope_from_request,
-    scope_keywords_from_request,
 )
 from shared.visibility_views import PERIODS
 
@@ -53,7 +51,7 @@ Decorator = Callable[[Callable[..., dict[str, Any]]], Callable[..., dict[str, An
 """A scope decorator: wraps ``handler(event, context, <scope>, **params)`` into ``(event, context, **params)``."""
 
 
-def _scope_decorator(
+def scope_decorator(
     keywords_table: Callable[[], Any],
     resolve: Callable[[dict[str, Any], dict[str, Any], Any], tuple[Any, dict[str, Any] | None]],
 ) -> Decorator:
@@ -90,21 +88,7 @@ def required_report_scope(keywords_table: Callable[[], Any]) -> Decorator:
         # A required scope resolves to exactly one of (scope, None) / (None, rejection).
         return scope_from_request(event, scope_params, table, required=True)
 
-    return _scope_decorator(keywords_table, resolve)
-
-
-def optional_scope_keywords(keywords_table: Callable[[], Any]) -> Decorator:
-    """Resolve an *optional* scope into the keyword texts a handler analyses.
-
-    The counterpart of ``required_report_scope`` for Action Center and Prompt
-    Insights, which have a default when no scope is given. Place it under
-    ``@validate({**SCOPE_QUERY_PARAMS, ...})``; the handler receives
-    ``(event, context, keywords, **other_params)`` where ``keywords`` is ``None``
-    without a scope and the scope's active keyword texts with one. A malformed
-    scope, or one resolving to no active keyword, is answered with the 400 of
-    ``scope_keywords_from_request`` without calling the handler.
-    """
-    return _scope_decorator(keywords_table, scope_keywords_from_request)
+    return scope_decorator(keywords_table, resolve)
 
 
 # ---------------------------------------------------------------------------
@@ -143,11 +127,6 @@ def read_scope_keywords[ValueT](
     )
 
 
-def scope_read_fields(scope_fields: dict[str, Any], skipped: Sequence[str]) -> dict[str, Any]:
-    """``capped_scope``'s fields with ``keywords_truncated`` also set when the time budget left keywords unread."""
-    return {**scope_fields, 'keywords_truncated': bool(scope_fields.get('keywords_truncated')) or bool(skipped)}
-
-
 # ---------------------------------------------------------------------------
 # Windowed reads
 # ---------------------------------------------------------------------------
@@ -162,8 +141,11 @@ ROW_HEAP_KIB = 17
 BASELINE_MEMORY_MB = 160
 
 #: The share of the memory left after ``BASELINE_MEMORY_MB`` that window rows may hold;
-#: the page being parsed and the view built from the rows need the rest.
-WINDOW_MEMORY_SHARE = 0.75
+#: the page being parsed and the view built from the rows need the rest. At 0.5 a
+#: full cap peaks near 55% of the function's memory (710 MB of the windowed
+#: readers' 1,280), under the 60% a function may use; the cap scales with
+#: memory, so raising memory never helps.
+WINDOW_MEMORY_SHARE = 0.5
 
 #: The memory, in MB, assumed outside Lambda (tests, scripts): the smallest API function size.
 DEFAULT_MEMORY_MB = 512
@@ -177,7 +159,7 @@ def window_rows_cap(memory_mb: int) -> int:
     """The SearchResults rows one windowed report reads at most in a container of ``memory_mb`` MB.
 
     The cap bounds memory (``ROW_HEAP_KIB`` per row, worst shape): about
-    15,902 rows at 512 MB, 72,688 at 1,769 MB. Time is bounded separately,
+    10,601 rows at 512 MB, 33,731 at 1,280 MB (the windowed readers' size). Time is bounded separately,
     by ``window_read_deadline``.
     """
     free_kib = max(0, memory_mb - BASELINE_MEMORY_MB) * 1024 * WINDOW_MEMORY_SHARE
@@ -244,12 +226,8 @@ class _WindowRead:
     brands: bool
     several: bool
     budget: Deadline
-    tracked_brands: tuple[str, ...] = ()
-
-    @property
-    def tally_options(self) -> dict[str, Any]:
-        """A raw or re-tallied run keeps its brands as a stored row does, so a window counts every run the same way."""
-        return {'brand_cap': BRANDS_PER_RUN, 'tracked_brands': self.tracked_brands} if self.brands else {}
+    brand_rows: Any | None = None
+    """KeywordRunBrands: the complete brands of the runs whose rollup kept only ``BRANDS_PER_RUN``."""
 
     @property
     def fingerprint(self) -> str:
@@ -270,8 +248,16 @@ def _rebuilt_runs(request: _WindowRead, keyword: str, timestamps: list[str]) -> 
         if request.budget.stop_reading('a stale keyword rollup'):
             return rebuilt, timestamp
         rows = query_keyword_run_rows(request.table, keyword, timestamp)
-        rebuilt.append(run_tally(keyword, timestamp, answers_from_rows(rows), request.owned_domains, **request.tally_options))
+        rebuilt.append(run_tally(keyword, timestamp, answers_from_rows(rows), request.owned_domains))
     return rebuilt, None
+
+
+def _with_complete_brands(request: _WindowRead, keyword: str, runs: list[RunTally]) -> list[RunTally]:
+    """``runs`` (rollups) with every brand where their row kept only ``BRANDS_PER_RUN`` (read from KeywordRunBrands)."""
+    if not request.brands or request.brand_rows is None or not any(run.brands_total > len(run.brands) for run in runs):
+        return runs
+    complete = query_run_brands(request.brand_rows, keyword, request.since, request.until)
+    return [with_all_brands(run, complete) for run in runs]
 
 
 def _read_keyword_window(request: _WindowRead, keyword: str) -> _KeywordWindow | None:
@@ -287,7 +273,7 @@ def _read_keyword_window(request: _WindowRead, keyword: str) -> _KeywordWindow |
     if stored.cut is not None and request.several:
         return None
     fingerprint = request.fingerprint
-    current = [run for run in stored.runs if run.matches_owned(fingerprint)]
+    current = _with_complete_brands(request, keyword, [run for run in stored.runs if run.matches_owned(fingerprint)])
     rebuilt, rebuilt_cut = _rebuilt_runs(request, keyword, [run.timestamp for run in stored.runs if run.answers and not run.matches_owned(fingerprint)])
     raw: list[RunTally] = []
     raw_cut = None
@@ -298,8 +284,7 @@ def _read_keyword_window(request: _WindowRead, keyword: str) -> _KeywordWindow |
         )
         if capped.stopped and request.several:
             return None
-        raw = run_tallies(keyword, answers_from_rows(capped.rows), request.owned_domains, **request.tally_options)
-        raw_cut = capped.cut
+        raw, raw_cut = run_tallies(keyword, answers_from_rows(capped.rows), request.owned_domains), capped.cut
     cut = _latest_cut(stored.cut, rebuilt_cut, raw_cut)
     runs = sorted((run for run in (*raw, *current, *rebuilt) if run.answers and (cut is None or run.timestamp > cut)), key=lambda run: run.timestamp)
     return _KeywordWindow(runs, cut)
@@ -315,7 +300,7 @@ def load_window_runs(
     until: str | None = None,
     max_rows: int | None = None,
     brands: bool = True,
-    tracked_brands: Iterable[str] = (),
+    brand_rows: Any | None = None,
 ) -> WindowRuns:
     """Each keyword's run tallies from ``since`` on (through the run ``until``), read in parallel and bounded.
 
@@ -325,9 +310,10 @@ def load_window_runs(
     written or backfilled) are read from its SearchResults rows in ``table``.
     A rollup counted against other owned domains than ``owned_domains`` is
     re-tallied from that run's rows. ``brands`` False leaves the brand counts
-    unread; with brands, raw and re-tallied runs keep ``BRANDS_PER_RUN`` brands
-    (``tracked_brands`` always) like a stored row, so one window never mixes
-    capped and uncapped runs. Without ``rollups`` every run is read raw (2.42.0).
+    unread. Without ``rollups`` every run is read raw (2.42.0). With
+    ``brand_rows`` (KeywordRunBrands) a rollup that kept only
+    ``BRANDS_PER_RUN`` brands gets every brand of its run (2.45.0: complete
+    brand leaderboards).
 
     The raw part reads at most ``max_rows`` rows a keyword (default
     ``rows_per_keyword``), newest first. When a keyword's read is cut, every
@@ -350,7 +336,7 @@ def load_window_runs(
         brands=brands,
         several=len(keywords) > 1,
         budget=window_read_deadline(),
-        tracked_brands=tuple(tracked_brands),
+        brand_rows=brand_rows,
     )
 
     def unread_or_empty(_keyword: str) -> _KeywordWindow | None:
@@ -390,13 +376,3 @@ def load_window_histories(
     """
     histories, window = window_histories(table, keywords, since, owned_domains, rollups=rollups)
     return histories, window.truncated_before
-
-
-def capped_scope(scope: ReportScope, cap: int = SCOPE_KEYWORDS_CAP) -> tuple[list[str], dict[str, Any]]:
-    """The first ``cap`` keywords of ``scope`` and the response fields that describe them.
-
-    The fields are ``scope`` (``ReportScope.describe()``) and
-    ``keywords_truncated`` (whether ``scope`` has more keywords than were kept).
-    """
-    keywords = list(scope.keywords)[:cap]
-    return keywords, {'scope': scope.describe(), 'keywords_truncated': len(scope.keywords) > len(keywords)}

@@ -4,12 +4,17 @@ import {
 import {
   API_BASE_URL,
   ApiRequestError,
-  authenticatedFetch,
   getErrorMessage,
   isAbortError,
 } from '../infrastructure';
 import { isRecord } from '../types/domain/keywordDecoders';
+import type { ComputingResponse } from '../types/domain/scopeCoverage';
+import { fetchUntilReady } from '../api/viewJobs';
+import { hasScopedResponseFields } from '../types/domain/scopeCoverageDecoders';
 import { useLatestRequest } from './useLatestRequest';
+import {
+  isStaleScopedBody, STALE_REFETCH_LIMIT, useStaleRefetch
+} from './useStaleRefetch';
 
 /**
  * Error payload the analysis API returns with HTTP 200 for domain
@@ -107,28 +112,29 @@ export function brandFilterParams(
 }
 
 /**
- * Performs one analysis request and returns its validated body. Throws the
- * contract's own errors on a non-OK status, a 200 `{error}` body (unless the
- * contract opts out) and a body its type guard rejects; the caller owns the
- * abort, staleness and state-write decisions.
+ * Performs one analysis request and returns its validated body. A `202` computing answer is
+ * repeated until the view job's result is stored (`awaitViewJob`), each one reported to
+ * `onComputing`. Throws the contract's own errors on a non-OK status, a 200 `{error}` body
+ * (unless the contract opts out) and a body its type guard rejects or whose 2.45.0 `coverage`,
+ * `source`, `as_of`, `stale` or `refreshing` is malformed; the caller owns the abort,
+ * staleness and state-write decisions.
  */
 async function fetchAnalysisResponse<TResult>(
   request: AnalysisRequest,
   contract: AnalysisResponseContract<TResult>,
   signal: AbortSignal,
+  onComputing: (computing: ComputingResponse) => void,
 ): Promise<TResult> {
   const query = request.params ? `?${request.params.toString()}` : '';
-  const response = await authenticatedFetch(`${API_BASE_URL}${request.path}${query}`, {
-    ...request.init,
+  const json = await fetchUntilReady(`${API_BASE_URL}${request.path}${query}`, request.init ?? {}, contract.createHttpError, {
     signal,
+    onComputing,
   });
-  if (!response.ok) throw contract.createHttpError(response.status);
-
-  const json: unknown = await response.json();
   if ((contract.rejectBackendErrorBody ?? true) && isBackendErrorResponse(json)) {
     throw contract.createResponseError(json.error);
   }
-  if (!contract.isValidResponse(json)) {
+  // A 2.45.0 body's coverage and source fields are checked here, once for every scoped hook; older bodies lack them.
+  if (!contract.isValidResponse(json) || (isRecord(json) && !hasScopedResponseFields(json))) {
     throw contract.createResponseError('Invalid response format');
   }
   return json;
@@ -147,12 +153,17 @@ async function fetchAnalysisResponse<TResult>(
  *   the abort can never overwrite newer results;
  * - unmount aborts the active request and blocks further state writes;
  * - an aborted fetch resolves null without touching the error state;
- * - `loading` only clears when the current request settles.
+ * - `loading` only clears when the current request settles;
+ * - `computing` holds the view job of a `202` answer while the request
+ *   waits for it (`awaitViewJob`), and clears when the request settles;
+ * - a `stale: true` snapshot answer is kept and the same request is sent
+ *   again every 10 s (at most 18 times) without touching `loading` or
+ *   `error`, until an answer is current (`useStaleRefetch`).
  *
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
  *
- * @returns `data`, `loading`, `error`, the configured `fetchData` and `reset`.
+ * @returns `data`, `loading`, `error`, `computing`, the `request` `data` answered, the configured `fetchData` and `reset`.
  */
 export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>(config: AnalysisEndpointConfig<TArgs, TResponse>) {
   const [data, setData] = useState<TResponse | null>(null);
@@ -161,60 +172,93 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   const {
     beginRequest, isMounted, cancelRequest
   } = useLatestRequest();
+  const [computing, setComputing] = useState<ComputingResponse | null>(null);
+  const [request, setRequest] = useState<AnalysisRequest | null>(null);
+  const {
+    schedule: scheduleStaleRefetch, cancel: cancelStaleRefetch
+  } = useStaleRefetch();
   const { errorContext } = config;
 
   // Stryker disable ArrayDeclaration: React dependency list, not behaviour
+  /** `background`: a stale-answer refetch, which leaves `loading` and `error` alone. */
   const runRequest = useCallback(async <TResult>(
     request: AnalysisRequest,
     contract: AnalysisResponseContract<TResult>,
     applyResult: (result: TResult) => void,
+    background: boolean,
   ): Promise<TResult | null> => {
     if (!isMounted()) return null;
 
     const latestRequest = beginRequest();
-    setLoading(true);
-    setError(null);
+    const foreground = !background;
+    if (foreground) {
+      setLoading(true);
+      setError(null);
+    }
+    setComputing(null);
+    const onComputing = (job: ComputingResponse) => {
+      if (latestRequest.isCurrent()) setComputing(job);
+    };
 
     try {
-      const json = await fetchAnalysisResponse(request, contract, latestRequest.signal);
+      const json = await fetchAnalysisResponse(request, contract, latestRequest.signal, onComputing);
       if (!latestRequest.isCurrent()) return null;
       applyResult(json);
       return json;
     } catch (err) {
       if (isAbortError(err)) return null;
       console.error(contract.logMessage, err);
-      if (latestRequest.isCurrent()) {
+      if (foreground && latestRequest.isCurrent()) {
         setError(getErrorMessage(err, errorContext));
       }
       return null;
     } finally {
-      if (latestRequest.isCurrent()) setLoading(false);
+      if (latestRequest.isCurrent()) {
+        if (foreground) setLoading(false);
+        setComputing(null);
+      }
       latestRequest.finish();
     }
   }, [beginRequest, errorContext, isMounted]);
   // Stryker restore ArrayDeclaration
 
   const fetchData = useCallback(
-    (...args: TArgs) => runRequest(config.buildRequest(...args), config, result => {
-      setData(result);
-    }),
+    (...args: TArgs) => {
+      cancelStaleRefetch();
+      const built = config.buildRequest(...args);
+      const run = (round: number): Promise<TResponse | null> => runRequest(built, config, result => {
+        setData(result);
+        setRequest(built);
+        if (round < STALE_REFETCH_LIMIT && isStaleScopedBody(result)) {
+          scheduleStaleRefetch(() => { void run(round + 1); });
+        }
+      }, round > 0);
+      return run(0);
+    },
     // Stryker disable next-line ArrayDeclaration: React dependency list, not behaviour
-    [config, runRequest],
+    [config, runRequest, cancelStaleRefetch, scheduleStaleRefetch],
   );
 
   // Stryker disable next-line ArrayDeclaration: React dependency list, not behaviour
   const reset = useCallback((): void => {
     // The dropped request's own settle no longer clears loading (it is not current), so clear it here.
+    cancelStaleRefetch();
     cancelRequest();
     setData(null);
     setLoading(false);
     setError(null);
-  }, [cancelRequest]);
+    setComputing(null);
+    setRequest(null);
+  }, [cancelRequest, cancelStaleRefetch]);
 
   return {
     data,
     loading,
     error,
+    /** The view job of a `202` answer the current request is waiting for; `null` otherwise. */
+    computing,
+    /** The request `data` answered, so a paged list can ask for its next pages (`useScopedList`). */
+    request,
     fetchData,
     /** Back to the idle state: the request in flight is dropped, `data` and `error` cleared. */
     reset,

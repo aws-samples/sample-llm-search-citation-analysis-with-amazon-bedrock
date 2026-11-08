@@ -1,9 +1,7 @@
 import type { BrandLeaderboardRow } from '../../../../types';
+import type { ReportTableColumn } from '../../layout/ReportTable';
 import {
-  ReportTable, type ReportTableColumn
-} from '../../layout/ReportTable';
-import {
-  BRAND_COLUMN, brandKpiColumn, brandRowKey, firstPartyRowClass, LatestRunSection, noBrandNamed, type ScopeSectionProps
+  BRAND_COLUMN, brandKpiColumn, firstPartyRowClass, LatestRunSection, noBrandNamed, ScopeBrandTable, type ScopeSectionProps
 } from '../../scopeReport';
 
 /**
@@ -28,13 +26,8 @@ export function BrandSentimentSection({ report }: ScopeSectionProps) {
       subtitle="Each brand's net sentiment over the latest runs, measured like yours, brands by visibility score. Your brand is highlighted."
       emptyMessage={noBrandNamed}
     >
-      {({ brands }) => (
-        <ReportTable
-          rows={brands}
-          columns={sentimentColumns()}
-          rowClassName={firstPartyRowClass}
-          rowKey={brandRowKey}
-        />
+      {(visibility) => (
+        <ScopeBrandTable report={report} visibility={visibility} columns={sentimentColumns()} rowClassName={firstPartyRowClass} />
       )}
     </LatestRunSection>
   );

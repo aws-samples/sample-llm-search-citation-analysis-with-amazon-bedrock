@@ -11,12 +11,11 @@ from __future__ import annotations
 import pytest
 
 from shared.search_results import (
-    DEFAULT_KEYWORD_SCAN_LIMIT,
+    LATEST_RUN_ITEM_LIMIT,
     latest_run,
-    scan_keyword_texts,
+    query_latest_run,
     search_results_table_name,
 )
-from testing.dynamodb_stubs import fake_table
 from testing.env import cleared_env
 
 _LATEST = '2026-09-18T10:00:00Z'
@@ -41,27 +40,6 @@ class TestSearchResultsTableName:
             search_results_table_name()
 
 
-class TestScanKeywordTexts:
-    def test_returns_the_keyword_of_every_row_that_has_one(self):
-        table = fake_table(scan={'Items': [{'keyword': 'shoes'}, {'keyword': ''}, {}, {'keyword': 'boots'}]})
-
-        assert scan_keyword_texts(table) == ['shoes', 'boots']
-
-    def test_scans_one_projected_page_capped_at_the_default_limit(self):
-        table = fake_table(scan={'Items': []})
-
-        scan_keyword_texts(table)
-
-        table.scan.assert_called_once_with(ProjectionExpression='keyword', Limit=DEFAULT_KEYWORD_SCAN_LIMIT)
-
-    def test_passes_an_explicit_limit_to_the_scan(self):
-        table = fake_table(scan={'Items': []})
-
-        scan_keyword_texts(table, limit=25)
-
-        assert table.scan.call_args.kwargs['Limit'] == 25
-
-
 class TestLatestRun:
     def test_keeps_only_the_rows_stamped_with_the_newest_timestamp(self):
         rows = [_row(_OLDER, 'openai'), _row(_LATEST, 'openai'), _row(_LATEST, 'gemini'), _row(_OLDER, 'gemini')]
@@ -80,3 +58,43 @@ class TestLatestRun:
 
     def test_returns_an_empty_run_for_no_rows(self):
         assert latest_run([]) == ('', [])
+
+
+class _PagedPartition:
+    """A SearchResults partition answered newest first in pages of ``Limit`` rows (``LastEvaluatedKey`` = the next index)."""
+
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self.rows = rows
+        self.calls = 0
+
+    def query(self, **kwargs: object) -> dict[str, object]:
+        self.calls += 1
+        start_key = kwargs.get('ExclusiveStartKey')
+        start = int(start_key['at']) if isinstance(start_key, dict) else 0
+        limit = kwargs['Limit']
+        end = start + (limit if isinstance(limit, int) else 0)
+        page: dict[str, object] = {'Items': self.rows[start:end]}
+        return {**page, 'LastEvaluatedKey': {'at': end}} if end < len(self.rows) else page
+
+
+class TestQueryLatestRun:
+    def test_reads_every_row_of_a_run_longer_than_a_page(self):
+        run = [_row(_LATEST, f'provider-{index:03}') for index in range(LATEST_RUN_ITEM_LIMIT * 2 + 7)]
+        table = _PagedPartition([*run, _row(_OLDER, 'openai')])
+
+        assert query_latest_run(table, 'spa') == (_LATEST, run)
+
+    def test_stops_at_the_page_that_reaches_an_older_run(self):
+        run = [_row(_LATEST, f'provider-{index:03}') for index in range(LATEST_RUN_ITEM_LIMIT + 3)]
+        table = _PagedPartition([*run, *(_row(_OLDER, f'old-{index:03}') for index in range(LATEST_RUN_ITEM_LIMIT * 3))])
+
+        query_latest_run(table, 'spa')
+
+        assert table.calls == 2
+
+    def test_reads_one_page_when_the_run_fits_in_it(self):
+        table = _PagedPartition([_row(_LATEST, 'openai'), _row(_OLDER, 'openai')])
+
+        query_latest_run(table, 'spa')
+
+        assert table.calls == 1

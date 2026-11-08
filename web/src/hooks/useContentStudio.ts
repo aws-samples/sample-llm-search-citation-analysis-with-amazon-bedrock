@@ -23,9 +23,13 @@ import type {
   GenerateContentResponse,
 } from '../types';
 import { useContentStudioBatchTracking } from './useContentStudioBatchTracking';
+import type {
+  ComputingResponse, ScopedResponseFields
+} from '../types/domain/scopeCoverage';
 import {
   CONTENT_HISTORY_PAGE_SIZE, useContentHistoryPaging
 } from './useContentHistoryPaging';
+import { useContentIdeasPaging } from './useContentIdeasPaging';
 
 const GENERATING_POLL_INTERVAL = 10000;
 const MAX_CONSECUTIVE_STATUS_FAILURES = 3;
@@ -58,6 +62,9 @@ function isStructuredBatchRejection(requestError: unknown): boolean {
 
 export function useContentStudio() {
   const [ideas, setIdeas] = useState<ContentIdea[]>([]);
+  /** The coverage and source fields of the ideas answer (2.45.0). */
+  const [ideasScope, setIdeasScope] = useState<ScopedResponseFields | null>(null);
+  const [ideasComputing, setIdeasComputing] = useState<ComputingResponse | null>(null);
   const [history, setHistory] = useState<ContentStudioHistory[]>([]);
   const [unviewedCount, setUnviewedCount] = useState(0);
   const [unviewedCountCapped, setUnviewedCountCapped] = useState(false);
@@ -113,11 +120,13 @@ export function useContentStudio() {
 
   const reportHistoryPageError = useCallback((requestError: unknown) => {
     if (mountedRef.current) setError(getErrorMessage(requestError, 'content'));
-    console.error('[content] Error loading more history:', requestError);
+    console.error('[content] Error loading more content:', requestError);
   }, []);
   const {
     applyFirstPage, loadMoreHistory, historyHasMore, historyLoadingMore
   } = useContentHistoryPaging(setHistory, reportHistoryPageError);
+  const ideasPaging = useContentIdeasPaging(setIdeas, reportHistoryPageError);
+  const { applyFirstPage: applyFirstIdeasPage } = ideasPaging;
 
   const fetchHistory = useCallback(async (
     limit = CONTENT_HISTORY_PAGE_SIZE
@@ -258,13 +267,24 @@ export function useContentStudio() {
     return stopItemPolling;
   }, [history, startItemPolling, stopItemPolling]);
 
-  const fetchIdeas = useCallback(async (): Promise<ContentIdea[]> => {
+  /** The first page of ideas of `params` (scope and market; every keyword when empty). */
+  const fetchIdeas = useCallback(async (params: Readonly<Record<string, string>> = {}): Promise<ContentIdea[]> => {
     const operation = beginLoading();
     latestIdeasReadRef.current = operation;
     setError(null);
     try {
-      const response = await requestContentIdeas();
-      if (!mountedRef.current || latestIdeasReadRef.current !== operation) return [];
+      const isCurrent = () => mountedRef.current && latestIdeasReadRef.current === operation;
+      const response = await requestContentIdeas(undefined, (scope) => {
+        if (isCurrent()) setIdeasScope(scope);
+      }, (job) => {
+        if (isCurrent()) setIdeasComputing(job);
+      }, {
+        params,
+        onPage: (page) => {
+          if (isCurrent()) applyFirstIdeasPage(params, page);
+        },
+      });
+      if (!isCurrent()) return [];
       setIdeas(response);
       return response;
     } catch (requestError) {
@@ -273,9 +293,10 @@ export function useContentStudio() {
       console.error('[content] Error fetching ideas:', requestError);
       return [];
     } finally {
+      if (mountedRef.current && latestIdeasReadRef.current === operation) setIdeasComputing(null);
       finishLoading(operation);
     }
-  }, [beginLoading, finishLoading]);
+  }, [applyFirstIdeasPage, beginLoading, finishLoading]);
 
   // Stryker disable ArrayDeclaration: This callback closes only over stable refs and React state setters.
   const beginGeneration = useCallback((): symbol => {
@@ -400,6 +421,12 @@ export function useContentStudio() {
 
   return {
     ideas,
+    ideasScope,
+    ideasComputing,
+    ideasTotal: ideasPaging.ideasTotal,
+    ideasHasMore: ideasPaging.ideasHasMore,
+    ideasLoadingMore: ideasPaging.ideasLoadingMore,
+    loadMoreIdeas: ideasPaging.loadMoreIdeas,
     history,
     unviewedCount,
     unviewedCountCapped,

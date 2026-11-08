@@ -20,7 +20,7 @@ vi.mock('../../hooks/useVisibilityMetrics', () => ({ useVisibilityMetrics: vi.fn
 vi.mock('../../hooks/useHistoricalTrends', () => ({ useHistoricalTrends: vi.fn() }));
 vi.mock('../../hooks/usePersonaRankings', () => ({ usePersonaRankings: vi.fn() }));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
-vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 vi.mock('../Personas/PersonaSelector', () => ({ PersonaSelector: () => <div>Persona selector</div> }));
 vi.mock('./InsightsSummary', () => ({
   InsightsSummary: (props: InsightsSummaryProps) => {
@@ -38,14 +38,15 @@ import {
 } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
-import { exportVisibilityOverview } from './visibilityOverviewExport';
 import {
   SINGLE_PERSONA_RANKINGS, TOO_FEW_PERSONAS, buildPersonaRankingsHookResult, buildTrendsHookResult, buildVisibilityHookResult
 } from './VisibilityDashboard-fixtures';
 import {
   buildTrendsResponse, buildVisibility
 } from './visibilityOverview-fixtures';
-import { clickExportToExcel } from './overviewRender-fixtures';
+import {
+  computingLabel, COMPUTING_JOB
+} from '../../test/scopedTestKit';
 import {
   clickRangeButton, historyPanel, scopeLine
 } from './visibilityTables-fixtures';
@@ -56,7 +57,6 @@ import type {
 type HookStateOverrides = Parameters<typeof buildVisibilityHookResult>[1];
 
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
-const mockExportVisibilityOverview = vi.mocked(exportVisibilityOverview);
 
 const visibility = buildVisibility();
 const trends = buildTrendsResponse();
@@ -161,7 +161,7 @@ describe('VisibilityDashboard', () => {
     it('shows no overview until visibility is loaded', () => {
       renderDashboard();
 
-      expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Export all' })).not.toBeInTheDocument();
     });
   });
 
@@ -179,7 +179,7 @@ describe('VisibilityDashboard', () => {
 
       renderDashboard();
 
-      expect(screen.getByRole('button', { name: 'Export to Excel' }).closest('[aria-busy]')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getAllByRole('button', { name: 'Export all' })[0].closest('[aria-busy]')).toHaveAttribute('aria-busy', 'true');
       expect(screen.queryByText('Loading visibility data')).not.toBeInTheDocument();
     });
 
@@ -190,6 +190,17 @@ describe('VisibilityDashboard', () => {
       renderDashboard();
 
       expect(screen.getByText('Loading history')).toBeInTheDocument();
+    });
+
+    it('says the complete figures are being computed while a view job runs', () => {
+      stubVisibility(null, {
+        loading: true,
+        computing: COMPUTING_JOB,
+      });
+
+      renderDashboard();
+
+      expect(computingLabel('visibility figures')).toBeInTheDocument();
     });
 
     it('hides the loading placeholders once both requests are done', () => {
@@ -236,16 +247,6 @@ describe('VisibilityDashboard', () => {
       renderDashboard();
 
       expect(scopeLine()).toHaveTextContent(/^All keywords · 1 of 2 keywords have analysis data/);
-    });
-
-    it('exports the rendered overview under the scope label', async () => {
-      stubTrends(trends);
-      mockExportVisibilityOverview.mockResolvedValue();
-
-      renderDashboard();
-      await clickExportToExcel();
-
-      expect(mockExportVisibilityOverview).toHaveBeenCalledWith(visibility, trends, 'All keywords');
     });
 
     it('leaves the persona comparison out of a scope wider than one keyword', () => {

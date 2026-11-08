@@ -4,6 +4,7 @@ import type {
 } from '../../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../../types';
 import { useKeywordRuns } from '../../../../hooks/useGroupKpiDetail';
+import { AppendedPagesFooter } from './AppendedPagesFooter';
 import { formatDate } from '../../../../formatting/dateFormatter';
 import {
   formatKpi, formatKpiDelta
@@ -78,7 +79,7 @@ function RunsTable({
   scope, days, keyword
 }: RunsTableProps) {
   const {
-    history, loading, error
+    history, loading, error, more
   } = useKeywordRuns(scope, days, keyword);
   if (error !== null) {
     return <p role="alert" className="text-sm text-red-700">{`Could not load this keyword's runs: ${error}`}</p>;
@@ -91,8 +92,9 @@ function RunsTable({
     <>
       {/* Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical */}
       <ReportTable columns={runColumns()} rows={runs} rowKey={(run) => run.timestamp} />
-      {history.runs_truncated === true && (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Older runs are left out; export to Excel for the newest runs of every keyword.</p>
+      <AppendedPagesFooter more={more} label="Load older runs" />
+      {history.runs_truncated === true && more.loadMore === undefined && more.items.length === 0 && (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Older runs are left out; Export all writes every run of every keyword.</p>
       )}
     </>
   );

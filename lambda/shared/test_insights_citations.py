@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -10,9 +11,13 @@ from shared.insights_citations import (
     DOCUMENT_SEGMENTS,
     DOCUMENT_SUFFIXES,
     OWNED_PAGES_LIMIT,
-    citation_ownership_facts,
+    citation_ownership_from,
     competitor_domains_from,
-    owned_pages_facts,
+    merge_owned_pages,
+    merge_ownership,
+    owned_pages_from,
+    owned_pages_partial,
+    ownership_partial,
     page_of,
 )
 from shared.kpi_engine import Answer, answers_from_rows
@@ -26,6 +31,29 @@ REPORT = 'https://investors.aurora-airways.com/files/annual-report.pdf'
 RIVAL_DEALS = 'https://borealis-air.com/deals'
 RIVAL_APP = 'https://app.borealis-air.com/'
 GUIDE = 'https://travel-guide.org/south-america'
+
+
+def _by_keyword(answers: Iterable[Answer]) -> dict[str, list[Answer]]:
+    grouped: dict[str, list[Answer]] = {}
+    for answer in answers:
+        grouped.setdefault(answer.keyword, []).append(answer)
+    return grouped
+
+
+def citation_ownership_facts(answers: Iterable[Answer], owned: Sequence[str] = (), competitors: Mapping[str, list[str]] | None = None) -> dict[str, Any]:
+    """The ownership fact of ``answers``: counted per keyword, merged, shaped."""
+    merged: dict[str, dict[str, Any]] = {}
+    for keyword_answers in _by_keyword(answers).values():
+        merge_ownership(merged, ownership_partial(keyword_answers, list(owned), dict(competitors or {})))
+    return citation_ownership_from(merged, bool(owned), competitors)
+
+
+def owned_pages_facts(answers: Iterable[Answer], owned: Sequence[str] = ()) -> dict[str, Any]:
+    """The owned-pages fact of ``answers``: counted per keyword, merged, shaped."""
+    merged: dict[str, Any] = {'pages': {}, 'engines': {}}
+    for keyword_answers in _by_keyword(answers).values():
+        merge_owned_pages(merged, owned_pages_partial(keyword_answers, list(owned)))
+    return owned_pages_from(merged)
 
 
 def _cited(provider: str, *urls: str, keyword: str = 'cheap flights to Lima') -> list[Answer]:
@@ -136,13 +164,13 @@ class TestOwnedPages:
 
         assert (facts['pages'][0]['citations'], facts['page_citations']) == (1, 1)
 
-    def test_keeps_the_twenty_five_most_cited_pages_and_counts_the_rest(self):
+    def test_keeps_every_page_past_the_twenty_five_an_answer_lists_first(self):
         answers = [answer for index in range(OWNED_PAGES_LIMIT + 2) for answer in _cited('openai', f'https://aurora-airways.com/p{index:02}')]
         facts = _pages(answers)
 
-        assert (len(facts['pages']), facts['pages_omitted'], len(facts['sections'])) == (25, 2, 27)
+        assert (len(facts['pages']), len(facts['sections'])) == (27, 27)
 
     def test_is_empty_without_owned_domains(self):
         assert owned_pages_facts(_cited('openai', FARES, REPORT)) == {
-            'pages': [], 'pages_omitted': 0, 'sections': [], 'engines': [], 'document_citations': 0, 'page_citations': 0,
+            'pages': [], 'sections': [], 'engines': [], 'document_citations': 0, 'page_citations': 0,
         }

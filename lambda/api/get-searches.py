@@ -12,6 +12,11 @@ Three reads, each paginated with ``next_token`` (``shared.partition_pages``):
 - neither: every configured provider's ``ProviderIndex`` partition, merged
   newest first; the token keeps one start key per provider.
 
+Filters applied after the read (2.45.0 wave 5): ``provider``,
+``query_prompt_id``, ``keyword_contains`` (a case-insensitive part of the
+keyword text, the Recent Searches box) and ``market_id`` (the row's market;
+``global`` for the keywords without one).
+
 List rows leave out the answer text and the bulky extraction fields
 (``response``, ``brands``, ``search_results``, ``metadata``): a row with them
 is 10-15 KB, and the Recent Searches view and the MCP tool only list runs.
@@ -21,6 +26,7 @@ answers); pages are cut to ``PAGE_BUDGET_BYTES`` either way.
 
 import logging
 import sys
+from dataclasses import dataclass, replace
 from typing import Any
 
 import boto3
@@ -32,6 +38,7 @@ from shared.api_response import success_response, validation_error
 from shared.config import PROVIDERS
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
 from shared.decorators import api_handler, optional_limit, validate
+from shared.markets import GLOBAL_MARKET_ID
 from shared.partition_pages import (
     PartitionRead,
     RowFilter,
@@ -66,18 +73,31 @@ LIST_ATTRIBUTES = (
 )
 
 
-def _keep(provider: str | None, query_prompt_id: str | None) -> RowFilter | None:
-    """The after-read filter for the provider (case-insensitive) and persona (missing = ``default``)."""
-    if provider is None and query_prompt_id is None:
-        return None
-    wanted_provider = provider.lower() if provider else None
+@dataclass(frozen=True)
+class SearchFilters:
+    """The after-read filters of a request (``None``: not filtered on)."""
 
-    def keep(row: dict[str, Any]) -> bool:
-        if wanted_provider is not None and str(row.get('provider', '')).lower() != wanted_provider:
-            return False
-        return query_prompt_id is None or row.get('query_prompt_id', 'default') == query_prompt_id
+    provider: str | None = None
+    query_prompt_id: str | None = None
+    keyword_contains: str | None = None
+    market_id: str | None = None
 
-    return keep
+    def keep(self) -> RowFilter | None:
+        """The row filter: provider case-insensitive, persona (missing = ``default``), keyword part, market (missing = ``global``)."""
+        if not any((self.provider, self.query_prompt_id, self.keyword_contains, self.market_id)):
+            return None
+        wanted_provider = self.provider.lower() if self.provider else None
+        wanted_text = self.keyword_contains.casefold() if self.keyword_contains else None
+
+        def keep(row: dict[str, Any]) -> bool:
+            return (
+                (wanted_provider is None or str(row.get('provider', '')).lower() == wanted_provider)
+                and (self.query_prompt_id is None or row.get('query_prompt_id', 'default') == self.query_prompt_id)
+                and (wanted_text is None or wanted_text in str(row.get('keyword', '')).casefold())
+                and (self.market_id is None or str(row.get('market_id') or GLOBAL_MARKET_ID) == self.market_id)
+            )
+
+        return keep
 
 
 def _page_body(rows: list[dict[str, Any]], next_token: str | None) -> dict[str, Any]:
@@ -115,18 +135,20 @@ def _every_provider(event, limit: int, projection, next_token, keep):
 @api_handler
 @validate({
     'keyword': {'type': str, 'max_length': 500},
+    'keyword_contains': {'type': str, 'max_length': 500},
     'provider': {'type': str, 'max_length': 50},
     'query_prompt_id': {'type': str, 'max_length': 100},
+    'market_id': {'type': str, 'max_length': 32},
     'limit': optional_limit(default=DEFAULT_LIMIT, max_val=MAX_LIMIT),
     'include_response': {'type': bool, 'default': False},
     **CURSOR_QUERY_PARAM,
 })
 def handler(
     event, context, keyword=None, provider=None, query_prompt_id=None, limit=DEFAULT_LIMIT,
-    include_response=False, next_token=None,
+    include_response=False, next_token=None, keyword_contains=None, market_id=None,
 ):
     """
-    GET /api/searches?keyword=&provider=&query_prompt_id=&limit=&include_response=&next_token=
+    GET /api/searches?keyword=&keyword_contains=&provider=&query_prompt_id=&market_id=&limit=&include_response=&next_token=
 
     Returns ``{"searches": [...], "count": n, "next_token": str | null}``:
     at most ``limit`` rows (default 50, max 500), newest first, cut to the page
@@ -134,10 +156,11 @@ def handler(
     or empty while ``next_token`` is still set.
     """
     projection = None if include_response else LIST_ATTRIBUTES
+    filters = SearchFilters(provider or None, query_prompt_id or None, (keyword_contains or '').strip() or None, market_id or None)
     if keyword:
         read = PartitionRead('keyword', keyword, limit, projection=projection)
-        return _single_partition(event, read, _TABLE_KEY, next_token, _keep(provider, query_prompt_id))
+        return _single_partition(event, read, _TABLE_KEY, next_token, filters.keep())
     if provider:
         read = PartitionRead('provider', provider.lower(), limit, index_name=_PROVIDER_INDEX, projection=projection)
-        return _single_partition(event, read, _PROVIDER_INDEX_KEY, next_token, _keep(None, query_prompt_id))
-    return _every_provider(event, limit, projection, next_token, _keep(None, query_prompt_id))
+        return _single_partition(event, read, _PROVIDER_INDEX_KEY, next_token, replace(filters, provider=None).keep())
+    return _every_provider(event, limit, projection, next_token, filters.keep())

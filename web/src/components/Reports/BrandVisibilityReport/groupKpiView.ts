@@ -3,10 +3,7 @@
  * report: which runs to show and what changed between them. Values are
  * written by `formatting/kpiFormatter`.
  */
-import type {
-  GroupRun, KpiTrend
-} from '../../../types/domain/groupKpiHistory';
-import type { KpiId } from '../../../constants/kpiDefinitions';
+import type { GroupRun } from '../../../types/domain/groupKpiHistory';
 
 /** The runs covering at least half of the group's keywords — the ones compared with each other. */
 export function groupRuns(runs: readonly GroupRun[]): GroupRun[] {
@@ -48,10 +45,4 @@ export function modelChanges(runs: readonly GroupRun[]): ModelChange[] {
         to: models,
       }));
   });
-}
-
-/** The trend of a KPI in a group run's change; `undefined` for counts, or without a change. */
-export function runTrend(run: GroupRun, id: KpiId): KpiTrend | undefined {
-  const trends: Partial<Record<KpiId, KpiTrend>> | undefined = run.change?.trends;
-  return trends?.[id];
 }

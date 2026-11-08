@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type {
   BrandClassification, BrandLeaderboardRow
 } from '../../types';
@@ -58,20 +59,34 @@ function firstPartyHighlight(brand: BrandLeaderboardRow): string {
   return brand.classification === 'first_party' ? 'bg-green-50' : '';
 }
 
+/** Where the Share of voice panel's "See all brands" points. */
+export const BRAND_LEADERBOARD_ANCHOR = 'brand-leaderboard';
+
+interface BrandLeaderboardProps {
+  readonly brands: readonly BrandLeaderboardRow[];
+  /** Below the table: "Showing N of M brands" and Load more (`ScopedListFooter`). */
+  readonly footer?: ReactNode;
+  /** At the heading's right: the leaderboard's Export all. */
+  readonly actions?: ReactNode;
+}
+
 /**
  * Every brand the scope's answers name, with the tracked-brand formulas
  * applied to each alone, best visibility score first. First-party rows are
  * highlighted.
  */
-export function BrandLeaderboard({ brands }: { readonly brands: readonly BrandLeaderboardRow[] }) {
+export function BrandLeaderboard({
+  brands, footer, actions
+}: BrandLeaderboardProps) {
   return (
-    <OverviewPanel title="Brand leaderboard">
+    <OverviewPanel title="Brand leaderboard" id={BRAND_LEADERBOARD_ANCHOR} actions={actions}>
       {brands.length === 0 ? (
         <p className="py-6 text-center text-sm text-gray-500">No brand data available.</p>
       ) : (
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         <ReportTable columns={leaderboardColumns()} rows={brands} rowKey={(brand) => brand.name} rowClassName={firstPartyHighlight} />
       )}
+      {footer}
     </OverviewPanel>
   );
 }

@@ -58,7 +58,7 @@ On the Backlinks tab, "One per domain" shows each linking domain's strongest lin
 
 The filter panel shows how many conditions you have used. If the filters go over the limit, no request is sent, and the server would refuse one anyway. Nothing is silently dropped.
 
-**Export CSV** saves the page of results that is on screen. A cell that starts with `=`, `+`, `-` or `@` gets a leading `'` so that a spreadsheet does not run it as a formula.
+**Export** opens a dialog that exports the table as it is sorted and filtered now, as Excel or CSV, on the server: the file appears on the Exports page. Pick how many rows to export (up to 10,000) and the dialog shows the DataForSEO price; the server refuses an export whose row count or price was not confirmed, and pays for each 1,000-row window at most once. "Export the N rows on screen (free)" exports the page you see from the cache instead. In a CSV file, a cell that starts with `=`, `+`, `-` or `@` gets a leading `'` so that a spreadsheet does not run it as a formula.
 
 ## Authority over time
 

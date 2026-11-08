@@ -143,7 +143,7 @@ class TestLookupStarts:
         })
 
         assert spend('run_seo_keywords', SERP)['structuredContent'] == {
-            'status': 502, 'error': 'DataForSEO is unavailable, try again later',
+            'status': 502, 'error': 'DataForSEO is unavailable, try again later', 'code': 'UPSTREAM_UNAVAILABLE',
         }
 
 

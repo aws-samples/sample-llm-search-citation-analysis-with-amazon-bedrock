@@ -26,6 +26,8 @@ import { TopSourcesSection } from '../../SourcesReport/sections/TopSourcesSectio
 import { BrandSentimentSection } from '../../SentimentReport/sections/BrandSentimentSection';
 import { NetSentimentTrendSection } from '../../SentimentReport/sections/NetSentimentTrendSection';
 import { SentimentHeadlineSection } from '../../SentimentReport/sections/SentimentHeadlineSection';
+import { ScopeCoverageNote } from '../../../ui/ScopeCoverageNote';
+import type { ScopedResponseFields } from '../../../../types/domain/scopeCoverage';
 import {
   EVERY_SCOPE, type DataBlockDefinition, type ScopeKind
 } from './catalogTypes';
@@ -36,11 +38,13 @@ import {
  * Sources and Sentiment reports.
  */
 
+/** The `/trends` slice with its request, so a paged block (the per-keyword leaderboard) loads past its first page. */
 function trendSlice(report: ScopeReportData): TrendSectionProps {
   return {
     trends: report.trends.data,
     loading: report.trends.loading,
     error: report.trends.error,
+    request: report.trendsRequest ?? null,
   };
 }
 
@@ -67,13 +71,35 @@ function VisibilityHeadlineBlock({ report }: ScopeSectionProps) {
 /** One keyword ranks the brands of its latest run; a wider scope pools each keyword's latest period. */
 function BrandRankingsBlock({ report }: ScopeSectionProps) {
   if (report.scope.kind === 'keyword') {
-    return <LatestRunRankingsSection visibility={report.visibility.data} loading={report.visibility.loading} error={report.visibility.error} />;
+    return (
+      <LatestRunRankingsSection
+        visibility={report.visibility.data}
+        loading={report.visibility.loading}
+        error={report.visibility.error}
+        request={report.visibilityRequest ?? null}
+      />
+    );
   }
   return <PooledRankingsSection {...trendSlice(report)} />;
 }
 
 function ExploredEngineSentimentBlock({ report }: ScopeSectionProps) {
   return <EngineSentimentSection report={report} explore />;
+}
+
+/** A response cut short (not every keyword) or served from a snapshot older than the scope. */
+function needsNote(response: ScopedResponseFields | null): boolean {
+  return response?.stale === true || response?.coverage?.complete === false;
+}
+
+/**
+ * What the block was computed over (tenet 2): the `/visibility` or `/trends` answer that was cut short or is
+ * stale, otherwise the complete line of the one that loaded.
+ */
+function ScopeBlockCoverage({ report }: ScopeSectionProps) {
+  const responses: readonly (ScopedResponseFields | null)[] = [report.visibility.data, report.trends.data];
+  const response = responses.find(needsNote) ?? responses.find((candidate) => candidate !== null) ?? null;
+  return <ScopeCoverageNote response={response} className="mb-4" />;
 }
 
 const KEYWORD_SETS: readonly ScopeKind[] = ['all', 'group'];
@@ -113,6 +139,11 @@ export const SCOPE_BLOCKS: readonly DataBlockDefinition[] = SCOPE_BLOCK_ROWS.map
     description,
     sources: ['scope'],
     scopes,
-    render: (sources) => sources.scope && <Section report={sources.scope} />,
+    render: (sources) => sources.scope && (
+      <>
+        <ScopeBlockCoverage report={sources.scope} />
+        <Section report={sources.scope} />
+      </>
+    ),
   };
 });

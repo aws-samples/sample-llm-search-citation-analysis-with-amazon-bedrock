@@ -99,28 +99,29 @@ class TestAlertsOnMatchedCells:
         assert run.result['alerts_created'] == 0
 
 
-class TestPreviousRunWithinTheBudget:
+class TestPreviousRunLikeForLike:
     GROUP_KEYWORDS = ['hotel spa', 'hotel pool']
 
-    def group(self, worker_module):
-        return worker_module._GroupRun(
-            pair=None, name='Group One', keywords=self.GROUP_KEYWORDS, rows=[], tracked_competitors=[],
+    def comparison(self, worker_module, previous_rows, seconds_left=60):
+        """``_Evaluation._comparison`` with this run's rows read and the previous run's reads answering ``previous_rows``."""
+        evaluation = worker_module._Evaluation(
+            run_timestamp=_RUN, execution_id='run-1', execution_input={}, report={}, settings={}, brand_config={},
+            markets={}, groups_by_id={}, deadline=Deadline(seconds_left),
+            rows={'hotel spa': _CURRENT_MENTION, 'hotel pool': []},
         )
+        group = worker_module._GroupRun(pair=None, name='Group One', keywords=self.GROUP_KEYWORDS, tracked_competitors=[])
+        with patch.object(worker_module, '_load_run_rows', MagicMock(return_value=previous_rows)):
+            return evaluation._comparison(group, _PREVIOUS_SNAPSHOT)
 
-    @pytest.mark.parametrize(('seconds_left', 'expected'), [
-        (0, None),  # the deadline ran out before every keyword was read: no comparison with part of the past
-        (60, None),  # a read that failed with time left: no comparison with part of the past either
+    @pytest.mark.parametrize('seconds_left', [
+        0,  # the deadline ran out before every keyword was read: no comparison with part of the past
+        60,  # a read that failed with time left: no comparison with part of the past either
     ])
-    def test_reads_the_previous_run_like_for_like(self, worker_module, seconds_left, expected):
-        partly = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': None})
-        with patch.object(worker_module, '_load_run_rows', partly):
-            rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(seconds_left))
+    def test_compares_nothing_when_a_previous_read_failed(self, worker_module, seconds_left):
+        assert self.comparison(worker_module, {'hotel spa': _PREVIOUS_MENTION, 'hotel pool': None}, seconds_left) is None
 
-        assert rows == expected
+    def test_compares_every_keyword_of_the_previous_run_when_all_were_read(self, worker_module):
+        comparison = self.comparison(worker_module, {'hotel spa': _PREVIOUS_MENTION, 'hotel pool': []})
 
-    def test_compares_with_every_keyword_of_the_previous_run_when_all_were_read(self, worker_module):
-        whole = MagicMock(return_value={'hotel spa': _PREVIOUS_MENTION, 'hotel pool': []})
-        with patch.object(worker_module, '_load_run_rows', whole):
-            rows = worker_module._previous_run_rows(self.group(worker_module), _PREVIOUS_SNAPSHOT, Deadline(60))
-
-        assert rows == _PREVIOUS_MENTION
+        assert comparison is not None
+        assert comparison.state == 'comparable'

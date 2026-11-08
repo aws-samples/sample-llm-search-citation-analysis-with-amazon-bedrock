@@ -1,7 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
-import { SeoFeatureConstruct, stringKey } from './seo-feature';
+import { SeoFeatureConstruct } from './seo-feature';
+import { stringKey } from './tables';
 
 export const BACKLINK_SNAPSHOTS_TABLE_NAME = 'CitationAnalysis-SeoBacklinkSnapshots';
 export const BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME = 'CitationAnalysis-SeoBacklinkSnapshots';

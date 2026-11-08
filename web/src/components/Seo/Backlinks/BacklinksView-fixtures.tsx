@@ -45,7 +45,7 @@ export async function renderSearched() {
 export async function renderExportReady() {
   const user = await renderSearched();
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled();
   });
   return user;
 }
@@ -53,18 +53,18 @@ export async function renderExportReady() {
 /** Searches `example.com`, waits for its first table page and opens its export dialog. */
 export async function openBacklinksExport() {
   const user = await renderExportReady();
-  await user.click(screen.getByRole('button', { name: 'Export to Excel' }));
+  await user.click(screen.getByRole('button', { name: 'Export' }));
   return user;
 }
 
-/** Opens the export dialog of the table on screen and presses its Download. */
-export async function clickExportDownload(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Export to Excel' }));
-  await user.click(screen.getByRole('button', { name: 'Download' }));
+/** Opens the export dialog of the table on screen and presses its Start export. */
+export async function clickExportStart(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Export' }));
+  await user.click(screen.getByRole('button', { name: 'Start export' }));
 }
 
 /** Opens the export dialog of the first backlinks page and presses `button` in it. */
-export async function downloadBacklinksExport(button: string) {
+export async function pressInBacklinksExport(button: string) {
   const user = await openBacklinksExport();
   await user.click(screen.getByRole('button', { name: button }));
 }

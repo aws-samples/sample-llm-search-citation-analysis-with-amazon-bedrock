@@ -9,6 +9,270 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.45.0] - 2026-11-08
+
+2.44.0 made KPI history complete, but a scoped view still read at most 100 keywords (`capped_scope`), and several
+views read fewer without saying so: Citation Gaps 10 keywords by default, Prompt Insights and the Competitor Gap
+report 50, the Action Center 20, content ideas 30. Most exports were built in the browser from the same capped
+answers. This release makes every scoped view complete at any scope size, from a precomputed scope snapshot when a
+live read would be too large, and moves every Excel and CSV export to a server export service that runs until the
+file is written. It includes the fixes from the code review (F1–F13) and the performance review (PERF-1 to PERF-8) of
+that work, and the Lambda sizes the owner decided on 2026-11-07.
+
+### Upgrade notes
+
+- **Deploy with one `npm run deploy` (or `cdk deploy --all`).** `CitationAnalysisStack` is updated first. It adds the
+  tables `CitationAnalysis-KeywordRunBrands` and `CitationAnalysis-Exports`, the state machines
+  `CitationAnalysis-Export` and `CitationAnalysis-ScopeSnapshotBuild`, the functions `CitationAnalysis-ExportWorker`,
+  `CitationAnalysis-ScopeSnapshotWorker`, `CitationAnalysis-API-Exports` and `CitationAnalysis-KpiWriteFailureRelay`,
+  and the SSM parameters the API stack now reads. `CitationAnalysisApiStack` is updated next and adds the
+  `/api/exports` routes. The API URL does not change.
+- **`retainLegacyApiStackExports` keeps the old API-stack exports for one release.** In 2.44.0 the API stack imports
+  16 CloudFormation exports of the main stack; from 2.45.0 it imports none. The main stack keeps those exports under
+  the same names so that this deploy can pass, and the release after 2.45.0 removes them. Deploy 2.45.0 before that
+  release. If you deploy the stacks one at a time, deploy `CitationAnalysisStack` first. Details: README, "Upgrading
+  from 2.44.0".
+- **Run the `latest` backfill once after deploying.** It writes every keyword's `KeywordLatest` object, the input of
+  the scope snapshots, then starts a snapshot build. With `chain` it invokes itself again until it is done:
+
+  ```bash
+  aws lambda invoke --function-name CitationAnalysis-Deduplication --invocation-type Event \
+    --cli-binary-format raw-in-base64-out \
+    --payload '{"action":"backfill_keyword_run_kpis","latest":true,"chain":true}' out.json
+  ```
+
+  Without it, the first build finds keywords whose newest run has no object, serves their scopes `stale` with
+  `coverage.complete: false`, and asks for their backfill itself.
+- **SEO exports need the SEO stack.** The export worker invokes `CitationAnalysis-SeoRouter` by name, because the SEO
+  stack deploys after the main stack and a reference would be a cycle. Without the SEO stack an SEO export fails with
+  a clear error; every other export works.
+- **Exports notify in the dashboard only.** Email notification is not built: it would need a verified SES sender.
+- **API clients:** a scoped GET can now answer `202 {status: "computing", job, retry_after_ms}`; repeat the same GET
+  until it answers 200. A list cursor can answer `400 cursor_expired`; restart the list without `next_token`. The
+  group KPI drill-down's `next_token` changed format, so a 2.44.0 offset token answers 400. `/api/brand-mentions` no
+  longer takes `export=`; use `POST /api/exports`. Without `brand`, brand appearances come in keyword order (keyword,
+  then brand, then row). The MCP tools handle all of this (see Changed).
+- **GenerateSummary drops from 3,008 MB to 1,769 MB,** and several API functions change size (see Changed).
+
+### Added
+
+- **Scope snapshots** (`shared/scope_snapshot*.py`, under `scope-snapshots/` in the keywords bucket). One rule in
+  `shared/scope_source.py` decides where a scoped view is computed: estimated rows = keywords × (max(1, enabled
+  personas) × engines + plain engines) × runs needed. At most `LIVE_ROWS_BUDGET` (8,000 rows) the view is read live,
+  exact and complete at request time; one keyword or a `keyword_ids` scope (at most 100) is always live. A larger
+  scope is served from the snapshot. The new workflow state `BuildScopeSnapshots` (GenerateSummary action
+  `build_scope_snapshots`) builds `all`, every market, and every group or group × market over the live budget after
+  each run. Keyword, group, market and promotion writes ask for a rebuild, and a reader that finds the build stale
+  does too, at most once per 5 minutes. The build writes `current.json` last and keeps the previous build.
+- **KeywordLatest objects:** one per keyword (`scope-snapshots/keywords/<hash>.json.gz`), written by
+  DeduplicateCitations next to the KPI row with a conditional PUT. It holds what the keyword adds to any scope: the
+  latest and previous runs' counts with every brand, per persona, cited domains, mentions, the sentiment index,
+  citation gaps, the prompt classification, recommendation findings, competitor evidence, insight facts, the last 62
+  days of runs and row counts. Brand configuration and persona writes start the `latest` backfill, chained, and its
+  last pass starts a build.
+- **`CitationAnalysis-KeywordRunBrands`** (PK `keyword`, SK `run_timestamp`): the full brand list of a keyword run,
+  written only when the run names more brands than the 25 a KeywordRunKpis row keeps. The scope series and the window
+  view jobs read it, so brand leaderboards over a period stay exact.
+- **Scope series:** one row per run for each built scope, up to 365 runs, updated with each new run and rebuilt in
+  full every 7th build as a self-check. Trends and group KPIs over 7, 30, 90, 180 and 365 days come from it.
+- **View jobs.** When the snapshot does not hold a view (another number of days, an older run on a large Brand
+  Mentions scope, no build yet), the GET answers 202 and GenerateSummary (`view_job`) computes that one view. The same
+  GET answers 200 once it is stored; job results under `scope-snapshots/jobs/` expire after 7 days. The dashboard
+  polls from 2 s up to 10 s for at most 3 minutes and shows a placeholder with "Computing…". MCP tools return a
+  non-error result that says to call again.
+- **Cursors over snapshots.** A list page's `next_token` is tied to the snapshot build it came from, or to the scope's
+  keyword list for live pages. When that build is gone or the scope changed, the API answers `400 cursor_expired` and
+  the dashboard restarts the list.
+- **Coverage on every scoped answer:** `coverage` (`keywords_total`, `keywords_analyzed`, `complete`), `source`
+  (`live` or `snapshot`), `as_of`, `stale`, `refreshing` and `scope`. `ScopeCoverageNote` shows it on every scoped
+  view ("Covers X of Y keywords", a time-budget cut, "figures as of …"). A stale snapshot shows its figures with an
+  "Updating…" note and is fetched again every 10 s until it is fresh.
+- **Distributed snapshot build,** `CitationAnalysis-ScopeSnapshotBuild` (Standard, 6-hour timeout, every step on
+  `CitationAnalysis-ScopeSnapshotWorker`): PlanSnapshotBuild → in parallel FoldUnits → SeriesBatches (each batch
+  loops 480 s turns until done) and RollupShards → RollupMerges → PublishSnapshotBuild. The Distributed Maps run 10
+  items at a time and every step is idempotent. GenerateSummary starts it when the build needs more than one 450 MB
+  unit or Citations holds more than 100,000 rows; one build runs at a time. Smaller tenants still build in process.
+  Tests compare the distributed artifacts, `current.json`, series and citation rollup with the in-process build.
+- **Server export service.** Routes on the new `CitationAnalysis-API-Exports` Lambda: `POST /api/exports {view,
+  params, format}` (202 with the export), `GET /api/exports`, `GET` and `DELETE /api/exports/{id}`, `POST
+  /api/exports/{id}/seen`. The Standard state machine `CitationAnalysis-Export` (7-day timeout) runs PrepareExport,
+  then ExportChunk until every row is written, then FinalizeExport; any failure goes to MarkExportFailed. Each chunk
+  (one ExportWorker invocation) writes rows until 60 s before its 900 s timeout, uploads S3 multipart parts and saves
+  a cursor, so an export of any size finishes. Formats: XLSX (streamed ZIP, a new sheet every 1,048,575 rows) or CSV
+  (UTF-8 BOM, one file with a `sheet` column when the view has several). Rows come from 36 row sources
+  (`EXPORT_VIEWS` in `shared/export_contract.py`) that replay the dashboard's own routes with the view's filters and
+  follow every page, so a file holds the whole view.
+- **Export storage:** jobs in `CitationAnalysis-Exports` (PK `export_id`, GSI `OwnerCreatedIndex`, TTL `expires_at`)
+  and files under `exports/<owner>/<id>/` in the keywords bucket, both kept 7 days. A user has at most 5 exports
+  queued or running (one more answers 429) and sees only their own, Admin included.
+- **Exports center** (`/exports`, in the sidebar's Data section, with a header badge). Each row shows the view,
+  format, status, rows and creation time, with Download (a new link on each click), Cancel or Delete. The list
+  survives reloads and is refreshed every 5 s. The badge counts finished exports not seen yet. A toast says when an
+  export starts and when it is ready, and an opt-in browser notification does the same while the dashboard is open.
+- **"Export all" on every data view** (`ui/ExportAllButton.tsx`, Excel or CSV): the view's full data with its current
+  filters, sort, scope and market, every page. Summary widgets that keep a top N link to the full view ("See all").
+  Settings lists (keywords, groups, markets, personas, schedules and, for admins, users) export through
+  `config-lists`. Views without it: the Raw Responses browser, the Run Analysis monitor, single-record dialogs and
+  configuration forms.
+- **KPI write-failure alarm** `CitationAnalysis-KeywordRunKpisWriteFailure` (first failure in 5 minutes). The relay
+  Lambda `CitationAnalysis-KpiWriteFailureRelay` publishes it to `CitationAnalysis-KpiAlerts`, because CloudWatch
+  alarms cannot publish to a topic encrypted with the AWS-managed SNS key.
+
+### Changed
+
+- **The paid export dialog** names the table's own cache window (Backlinks 6 hours, Domain Overview 12): the SEO
+  API sends it as `cache_hours` in each answer's `export` pricing. `xlsx-js-style` is no longer a dashboard dependency.
+- **Scoped views read every keyword.** `SCOPE_KEYWORDS_CAP` and `capped_scope` are removed; the live path keeps the
+  2.42.0 time budget only as a safety net, and a cut sets `keywords_truncated` and `coverage.complete: false`.
+  - `/visibility`: keyword rows, brands (`view=brands`) and sources (`view=sources`) are paged.
+  - `/visibility/sentiment-examples`: `total` is exact.
+  - `/brand-mentions`: the summary keeps 100 brands and pages the rest (`aggregated.brands_total`, `view=brands`);
+    appearances have an exact `total_appearances`.
+  - `/trends` and `/reports/overview`: `keyword_trends` and `latest_brands` are paged.
+  - `/reports/group-kpis`: the summary and drivers are read live or from the snapshot; the keyword drill-down reads
+    one page at any group size; `view=runs` lists every run.
+  - `/reports/insights`: no keyword cap; every competitor caveat reason is paged (`view=caveat_reasons`).
+  - `/reports/competitor`: honours the scope, rolls up every configured competitor and pages outranked keywords and
+    outreach targets (`keyword_limit` still works).
+  - `/citation-gaps`: `limit` is the page size of `keyword_summaries`; totals count every keyword.
+  - `/prompt-insights`: classifies every active keyword from its latest run, with counts per list.
+  - `/recommendations`: paged (`limit` 50, at most 200, `total`). The Bedrock prompt names at most 50 keywords,
+    chosen by impact, on the first page only.
+  - `/content-studio/ideas`: every active keyword, a scope and market, paged (`ideas_next_token`, `ideas_total`).
+  - `/alerts`: paged with `next_token` and `total`. `/stats?market_id` reads a large market from the snapshot.
+- **GenerateInsights** has no per-group cap (it was 100, silently). A large group reads the snapshot's facts, KPIs
+  and 90-day stability.
+- **Workflow order:** … → KpiAlerts → BuildScopeSnapshots → GenerateInsights → BuildCitationRollup. A failed snapshot
+  build is caught (`BuildScopeSnapshotsFailed`) and the run keeps its report. A tenant with more than 100,000
+  Citations rows gets its citation rollup from the distributed build.
+- **KpiAlerts** pools each (group, market) snapshot from the run's KeywordRunKpis rows, one BatchGet per 100 keywords.
+  A keyword is read from its raw answers only when its row is missing, counted against other owned domains, or may
+  have dropped a competitor the pair tracks.
+- **Every Excel and CSV export runs on the server,** including every SEO table. The browser Excel generator is gone:
+  `exporters/excelGenerator.ts`, `exporters/tableExcel.ts`, `ui/ExportExcelButton.tsx`, the per-view `*Excel.ts`
+  builders and the client chunk fetcher of the paid SEO exports. Only Content Studio's DOCX is still built in the
+  browser. The per-view `?export=` path of `/brand-mentions` is removed.
+- **SEO exports** (row sources S28–S36). Stored data exports for free: SEO vs GEO, rank tracking, site audit,
+  Lighthouse, Domain Overview traffic snapshots. The Local SEO, Keyword Explorer and SERP competitors exports read
+  cache-only forms of their routes (`GET /api/seo/local/businesses`, `GET /api/seo/local/serp`, `GET
+  /api/seo/keywords/research`, SERP competitors with `cached_only`), and fail with a "no longer cached" error instead
+  of paying. The new GET forms have no API Gateway method; only the export worker reaches them.
+- **Paid SEO exports** (Domain Overview keywords and pages, the three Backlinks tables) keep the row picker and price,
+  and add a file format. The server refuses an export without the confirmed row count (1 to 10,000) or with a price
+  that differs from its own calculation. It reads 1,000-row windows and cuts the last one to the confirmed count. A
+  chunk that resumes inside a window asks it again with `cached_only: true`, and the route answers from the cache or
+  409 `NOT_CACHED`, so no window is billed twice. "Export the N rows on screen (free)" exports the cached page.
+- **SEO tables share one order with their export.** Rank tracking results and local listings are sorted on the
+  route. Keyword Explorer filters run in the browser and on the route, and both pass the same 8 cases
+  (`lambda/testing/keyword_explorer_filter_cases.json`). The site audit export puts every issue type's pages in one
+  sheet and is offered only for a finished or cancelled audit; `GET /audits/{id}/issues` answers `audit_running`.
+- **Lambda sizes (owner decision, 2026-11-07).** 1,769 MB (one vCPU): API-StatsInsights, API-CitationsContent,
+  API-GetBrandMentions, ReportInsights, KpiAlerts, ExportWorker (900 s), GenerateSummary (was 3,008 MB) and
+  ScopeSnapshotWorker (900 s). 1,024 MB: API-ConfigMgmt, API-ExecutionMgmt, API-ManageBrandConfig (was 256 MB) and
+  API-GetPersonaRankings (was 256 MB). 512 MB: API-Health, API-ManageUsers and API-SelfReflection (each was 256 MB),
+  API-ContentStudio, Mcp and API-Exports. KpiWriteFailureRelay: 256 MB. Unchanged: API-KeywordMgmt, ParseKeywords,
+  Deduplication and Crawler at 1,024 MB.
+- **The API stack imports nothing from the main stack.** It builds the function ARNs from their fixed names and reads
+  the user pool id, distribution id and dashboard origin from the SSM parameters `/citation-analysis/user-pool-id`,
+  `/citation-analysis/web-distribution-id` and `/citation-analysis/cors-origin`, so later main-stack changes cannot be
+  blocked by an export in use.
+- **MCP:** a 202 becomes a "computing, call again in N s" result, a failed view job an error result, and
+  `cursor_expired` tells the model to restart without `next_token`.
+- **Replayed onto the SEO release (2.43.0).** These decisions were made while merging:
+  - KpiAlerts pools the snapshots from KeywordRunKpis, but reads both runs' raw rows for the like-for-like comparison
+    when the pair has a previous snapshot. At very large scale such a pair may therefore be listed under
+    `time_budget_scopes`.
+  - The Visibility Queries filter (neutral, branded, all) is carried in the scope snapshots, so it works on large
+    scopes too.
+  - The live-read budget counts Google AI Overviews once per keyword (`PLAIN_ENGINES`), whatever the personas, so at
+    10 personas the largest live scope is 97 keywords.
+  - A snapshot's `total_crawled` may lag by up to `CRAWLED_RECOUNT_DAYS` (7 days).
+
+### Fixed
+
+- **Replayed onto the final 2.43.0 and 2.44.0.** A filtered (`neutral` / `branded`) visibility view again leaves out a
+  run stored before the branded flag (2.43.0): such a run's pool has no filtered slices, since its old rows would
+  read as neutral and a delta would compare a filtered run with an unfiltered one. KPI alerts leave a group/market
+  pair unevaluated when any of its previous run's reads failed, not only when the deadline ran out (2.44.0 review).
+  The backlinks on/off snapshot setting stays removed (2.43.0 moved recurring snapshots to Schedules).
+- **Silent caps:** Citation Gaps (10 keywords by default), Prompt Insights (the first 50 keywords, 20 newest rows
+  each), the Action Center (the first 20 keywords), the Competitor Gap report (the first 50 keywords, scope ignored),
+  content ideas (30 keywords) and GenerateInsights (100 keywords per group) now cover every keyword. The group KPI
+  report no longer says "only the first N" when the time budget cut the read.
+- **F1:** an export whose row source stopped for time near the deadline was finalised short. A source now says
+  whether it finished, and the file is closed only when it did.
+- **F2:** a filter that left pages empty could not save progress, so a large export failed as stalled. Empty pages
+  now save a cursor.
+- **F3:** a snapshot claimed complete coverage for keywords it had not folded (a failed KeywordLatest write). Such
+  keywords are now counted as behind, their scopes are served `stale` with `coverage.complete: false`, and the build
+  asks for their backfill. The new alarm reports the failed writes.
+- **F4:** a missing list key in a route answer was read as an empty list. It now fails the export, unless the list is
+  marked optional.
+- **F5:** newest-first lists duplicated or skipped rows when rows arrived during an export. The cursor keeps the last
+  row's identity and resumes after it.
+- **F6:** the 5-running-exports limit was check-then-act. A per-owner slots item is now written in the same
+  transaction as the export.
+- **F7:** a router timeout plus retries could outrun the chunk's 60 s reserve. A route read starts only while enough
+  time remains, and the worker's Lambda client makes one attempt.
+- **F8:** a multi-sheet export could mix two snapshot builds. The cursor pins the first build and the export fails
+  with "rebuilt while the export ran" if it changes.
+- **F9:** cancelling during a chunk left that chunk's checkpoint behind. It is deleted now.
+- **F10:** XLSX cut cells over Excel's 32,767 characters without saying so. They now end with a marker, and the
+  Exports page shows how many cells were cut; the CSV keeps the full text.
+- **F11:** the API stack's imports of main-stack exports could block later main-stack deploys (see Changed).
+- **F12:** an export ran with the permissions checked when it was queued. PrepareExport checks the view again and,
+  for an Admin-only list, reads the owner's groups from Cognito; a refusal fails the export.
+- **F13:** MarkFailed could leave an export `running` if aborting the upload failed. It saves `failed` first.
+- **Dashboard:** top movers come from the server's `top_movers`; group drivers and keyword runs follow `next_token`;
+  the brand drill-down loads one page per "Load more"; the Content Action Plan joins follow every page.
+
+### Performance
+
+- **PERF-1, PERF-2:** the snapshot build no longer holds every scope at once. Scopes are folded in passes and their
+  memory is released once written, and the series is built resumably in turns. Measured at 10x per invocation (5,000
+  keywords, 365 runs, 10 personas, tracemalloc): 78 fold units, at most 118 CPU s and 592 MB; series turns at most
+  482 CPU s and 606 MB; rollup shards at most 89 CPU s and 108 MB; merges at most 405 MB. The citation rollup in one
+  invocation would have needed about 1,400 CPU s and 1.6 GB.
+- **PERF-3:** the live window row cap takes half of the memory above the baseline (`WINDOW_MEMORY_SHARE` 0.5, was
+  0.75).
+- **PERF-4:** window view jobs read only the runs inside their window, not the whole history.
+- **PERF-5:** decoded snapshot objects are cached per container (`shared/snapshot_cache.py`, up to 64 MB of JSON), so
+  an export paging a large artifact decodes it once.
+- **PERF-6:** a KeywordLatest object keeps 62 days of per-run counts and folds older runs into a base count; the
+  CrawledContent count is read again at most every 7 days.
+- **PERF-7:** DeduplicateCitations writes citations through `shared.bounded_writes.map_writes`, several at a time.
+- **PERF-8:** the snapshot artifact registry is imported only when a snapshot is read, which shortens cold starts.
+
+### Security
+
+- Export files are private. A download is a 15-minute presigned URL minted by the Cognito-gated API on each click,
+  only for keys under the owner's `exports/<owner>/` prefix; the key is never returned. Another user's export id
+  answers 404, Admin included.
+- A CSV text cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'`, so a
+  spreadsheet does not run it as a formula.
+- The cache-only SEO routes are reachable only by the export worker's direct invoke, never from the network.
+- An export's paid SEO reads count against its owner's daily limit (`SEO_PAID_REQUESTS_PER_DAY`), not one shared
+  `export-service` counter: the worker's route reads carry the owner in the claim `custom:export_owner`, which the SEO
+  router honours only for the export service (`shared/seo_spend_limit.py`).
+- No Lambda waits for a view job. A chunk that meets `202 computing` ends and answers `wait_seconds`; the export
+  state machine's `WaitForViewJob` state waits that long before the next chunk, and a wait does not count as a stall.
+- Custom-report scope blocks show the coverage note (the `/visibility` or `/trends` answer that was cut short or is
+  stale, otherwise the complete line).
+
+### Known limits
+
+- **No email notification** for finished exports (in-app only).
+- **The first full series build at 10x is long:** about 67 turns of 480 s over 34 batches, with the `all` batch the
+  longest (about 11 turns). It repeats on every 7th build. Summing the market series into `all` would not be exact
+  for brands (a market row keeps 500 brands, a 10x market run names about 14,700), so it is not done.
+- **KpiAlerts at very large scale** may list pairs with a previous snapshot under `time_budget_scopes` (see Changed).
+- **Snapshot `total_crawled`** may lag by up to 7 days.
+- **An older run on a large Brand Mentions scope** starts one view job per appearances page; use the export instead.
+- **Sentiment examples** assume no two keywords differ only in letter case.
+- **Runs from before this release** keep at most 3 competitor caveat reasons per keyword.
+- **The write-failure alarm** emails the KPI alert subscribers even when alerts are disabled in Settings.
+- **`CitationAnalysisMcpStack`** still imports main-stack function ARNs and the user pool.
+
 ## [2.44.0] - 2026-11-08
 
 2.42.0 put a time budget on every API request but left three gaps: long KPI windows could come back partial, the main

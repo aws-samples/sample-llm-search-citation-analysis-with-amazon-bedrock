@@ -99,7 +99,8 @@ manual check, and at most $0.90 per scheduled check (about $3.60 a month weekly)
 
 - **Latest results**: each keyword's newest position per device, compared with a check from yesterday, last week,
   last month or 90 days ago (the newest finished check from before then, else the oldest one). An arrow shows a rise
-  or fall; Export CSV downloads the table (change = previous − current, `new`, or `lost`).
+  or fall; Export all queues an Excel or CSV export of the table on the server, in the table's order (change =
+  previous − current, `new`, or `lost`), and the file appears on the Exports page.
 - **Keyword history**: click a keyword to see its position per device over the last year; a miss is drawn at the
   bottom of the chart.
 - **Position distribution**: per finished check, the number of keywords in the top 3, 4–10, 11–20, not in the top

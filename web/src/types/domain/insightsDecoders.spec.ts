@@ -5,6 +5,7 @@ import {
   isEnginePlay, isReportInsightsResponse
 } from './insightsDecoders';
 import { buildNarrative } from './insightsNarrative-fixtures';
+import { fixtureBody } from './scopeCoverage-fixtures';
 import {
   buildEnginePlayRow, buildPortfolioBrand, buildReportInsights, emptyReportInsights, REJECTED_REPORT_INSIGHTS_BODIES
 } from './insights-fixtures';
@@ -89,6 +90,27 @@ describe('isReportInsightsResponse', () => {
         competitor_caveats: [buildCaveatRow({ caveat_share: null })],
       },
     }))).toBe(true);
+  });
+
+  it('accepts every caveat reason of a build that lists them', () => {
+    expect(isReportInsightsResponse(buildReportInsights({
+      facts: {
+        ...buildReportInsights().facts,
+        competitor_caveats: [buildCaveatRow({ reasons_total: 1 })],
+        caveat_reasons: {
+          reasons: [{
+            competitor: 'Borealis Air',
+            reason: 'Frequent delays',
+          }],
+          reasons_total: 1,
+          reasons_next_token: null,
+        },
+      },
+    }))).toBe(true);
+  });
+
+  it.each(['complete', 'live', 'stale', 'partial'])('accepts the %s body of the scope-snapshot fixture, caveat reasons included', (caseName) => {
+    expect(isReportInsightsResponse(fixtureBody('reports-insights', caseName))).toBe(true);
   });
 
   it.each(REJECTED_REPORT_INSIGHTS_BODIES)('rejects %s', (_description, body) => {

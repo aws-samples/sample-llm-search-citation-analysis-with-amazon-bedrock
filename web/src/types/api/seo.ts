@@ -19,6 +19,8 @@ export interface SeoExportPricing {
   readonly rows_per_request: number;
   readonly request_usd: number;
   readonly row_usd: number;
+  /** How long the SEO API keeps a window cached: exporting the same rows again within it is free. */
+  readonly cache_hours: number;
 }
 
 /** The fields every answer of a DataForSEO-paged table adds: the window an export chunk asked (`null` on a page) and the export pricing. */

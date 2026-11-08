@@ -5,6 +5,8 @@ import type { Keyword } from '../../../types';
 import { AgentBriefForm } from './AgentBriefForm';
 import { AgentRunList } from './AgentRunList';
 import { AgentRunModal } from './AgentRunModal';
+import { ExportAllButton } from '../../ui/ExportAllButton';
+import { LoadMoreButton } from '../../ui/LoadMoreButton';
 
 interface ResearchAgentProps {readonly onKeywordsAdded?: (created: Keyword[]) => void;}
 
@@ -42,9 +44,12 @@ export function ResearchAgent({ onKeywordsAdded }: ResearchAgentProps) {
       )}
 
       <section aria-label="Research runs" className="space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium text-gray-900">Runs</h3>
-          <button type="button" onClick={() => void agent.refresh()} className="text-xs text-gray-500 hover:text-gray-900 underline">Refresh</button>
+          <div className="flex items-center gap-3">
+            <ExportAllButton view="keyword-research" params={{ type: 'agent' }} />
+            <button type="button" onClick={() => void agent.refresh()} className="text-xs text-gray-500 hover:text-gray-900 underline">Refresh</button>
+          </div>
         </div>
         <AgentRunList
           jobs={agent.jobs}
@@ -53,6 +58,7 @@ export function ResearchAgent({ onKeywordsAdded }: ResearchAgentProps) {
           onRetry={(job) => void agent.retry(job)}
           onDelete={(id) => void agent.remove(id)}
         />
+        <LoadMoreButton onLoadMore={agent.loadMore} loading={agent.loadingMore} label="Load older runs" />
       </section>
 
       <AgentRunModal

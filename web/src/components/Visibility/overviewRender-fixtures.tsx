@@ -1,9 +1,6 @@
 import type { ComponentProps } from 'react';
 import { vi } from 'vitest';
-import {
-  render, screen
-} from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render } from '@testing-library/react';
 import { VisibilityOverview } from './VisibilityOverview';
 import {
   buildTrendsResponse, buildVisibility
@@ -26,9 +23,4 @@ export function renderOverview(overrides: Partial<OverviewProps> = {}) {
     props,
     ...render(<VisibilityOverview {...props} />),
   };
-}
-
-/** Clicks the overview's "Export to Excel" button. */
-export async function clickExportToExcel(): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
 }

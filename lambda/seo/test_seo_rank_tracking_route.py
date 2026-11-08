@@ -248,6 +248,29 @@ def test_reads_latest_results_for_the_period(api):
         '30d', 3, 'not_checked')
 
 
+def test_results_list_the_best_desktop_position_first_and_unranked_keywords_last(api):
+    stored_tracker(api.table)
+    api.call('POST', f'{TRACKER}/keywords', body={'keywords': ['zeta fares', 'cheap flights', 'alpha deals']})
+    save_items(api.table, [
+        {'pk': 'TRACKER#rt-example', 'sk': f'STATE#{keyword_id_for(keyword)}', 'keyword_id': keyword_id_for(keyword),
+         'desktop': {'status': 'found', 'position': position, 'checked_at': NOW_TEXT}}
+        for keyword, position in (('cheap flights', 7), ('zeta fares', 2))
+    ])
+
+    body = api.call('GET', f'{TRACKER}/results', query={'period': '7d'}, groups='Users')[1]
+
+    assert [row['keyword'] for row in body['rows']] == ['zeta fares', 'cheap flights', 'alpha deals']
+
+
+def test_ranked_rows_order_equal_positions_by_keyword(rank_module):
+    body = {'devices': ['mobile'], 'rows': [
+        {'keyword': 'b', 'mobile': {'position': 4}}, {'keyword': 'A', 'mobile': {'position': 4}},
+        {'keyword': 'c', 'mobile': {'position': None}}, {'keyword': 'd', 'mobile': {'position': 1}},
+    ]}
+
+    assert [row['keyword'] for row in rank_module.ranked_rows(body)['rows']] == ['d', 'A', 'b', 'c']
+
+
 def test_refuses_an_unknown_results_period(api):
     stored_tracker(api.table)
 

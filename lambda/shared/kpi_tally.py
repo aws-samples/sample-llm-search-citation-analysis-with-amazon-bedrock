@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
-from shared.brand_names import FIRST_PARTY
+from shared.brand_names import FIRST_PARTY, normalize_brand_key
 from shared.kpi_engine import (
     SPLIT_LABELS,
     Answer,
@@ -203,8 +203,11 @@ class _BrandSum:
         self.engines.update(other.engines)
         self.keywords.update(other.keywords)
 
-    def row(self, answers: int, total_mentions: int) -> dict[str, Any]:
-        """The brand's ``brand_table`` row among ``answers`` answers naming ``total_mentions`` brands."""
+    def row(self, answers: int, total_mentions: int, keywords: int | None = None) -> dict[str, Any]:
+        """The brand's ``brand_table`` row among ``answers`` answers naming ``total_mentions`` brands.
+
+        ``keywords`` overrides the count of keywords naming it (a pool that kept counts, not names).
+        """
         return {
             'name': self.name,
             'classification': self.classification,
@@ -215,7 +218,7 @@ class _BrandSum:
             'best_position': self.best_rank,
             'visibility_score': visibility_percent(self.points, answers),
             'engines': sorted(self.engines),
-            'keywords': len(self.keywords),
+            'keywords': len(self.keywords) if keywords is None else keywords,
             **sentiment_fields(dict(zip(SPLIT_LABELS, self.split, strict=True))),
         }
 
@@ -234,7 +237,7 @@ def _kept_brands(brands: list[_BrandSum], cap: int | None, tracked: frozenset[st
     """``brands`` (first named first) without the least visible beyond ``cap``; first-party and tracked brands always stay."""
     if cap is None or len(brands) <= cap:
         return brands
-    always = [brand for brand in brands if brand.classification == FIRST_PARTY or brand.name.lower() in tracked]
+    always = [brand for brand in brands if brand.classification == FIRST_PARTY or brand.key in tracked]
     others = sorted((brand for brand in brands if brand not in always), key=_BrandSum.leaderboard_key)
     kept = {id(brand) for brand in [*always, *others[:max(0, cap - len(always))]]}
     return [brand for brand in brands if id(brand) in kept]
@@ -261,7 +264,7 @@ def run_tally(
         for sighting in answer.sightings:
             brand = brands.get(sighting.key) or brands.setdefault(sighting.key, _BrandSum(sighting.key, sighting.name, sighting.classification))
             brand.add_sighting(sighting, answer.provider)
-    kept = _kept_brands(list(brands.values()), brand_cap, frozenset(name.lower() for name in tracked_brands))
+    kept = _kept_brands(list(brands.values()), brand_cap, frozenset(map(normalize_brand_key, tracked_brands)))
     return RunTally(
         keyword=keyword,
         timestamp=timestamp,
@@ -328,11 +331,29 @@ def _citation_fields(pool: _Pool, configured: bool) -> dict[str, Any]:
     }
 
 
-def tally_kpis(tallies: Iterable[RunTally], owned_domains: Iterable[str] = ()) -> dict[str, Any]:
-    """``brand_kpis`` of every answer the ``tallies`` count (each built against ``owned_domains``)."""
-    pool = _Pool()
-    for tally in tallies:
-        pool.add(tally)
+@dataclass(frozen=True)
+class PooledCounts:
+    """Answer counts already summed over some keywords' runs, with how many engines and keywords they span.
+
+    What ``pooled_kpis`` reads; a mergeable scope accumulator (``shared.partial_kpi``)
+    keeps these numbers instead of the tallies themselves.
+    """
+
+    counts: Sequence[int]
+    """The summed ``COUNT_FIELDS``."""
+    engines: int
+    """Engines with at least one answer."""
+    engines_naming: int
+    """Engines with at least one answer naming a first-party brand."""
+    keywords: int
+    """Keywords with at least one answer."""
+    keywords_naming: int
+    """Keywords with at least one answer naming a first-party brand."""
+
+
+def pooled_kpis(pooled: PooledCounts, citations_configured: bool) -> dict[str, Any]:
+    """``brand_kpis`` of the answers ``pooled`` counts (``citations_configured``: owned domains are set)."""
+    pool = _Pool(counts=list(pooled.counts))
     answers = pool.count('answers')
     rank_count = pool.count('rank_count')
     return {
@@ -344,13 +365,45 @@ def tally_kpis(tallies: Iterable[RunTally], owned_domains: Iterable[str] = ()) -
         'top_1_share': percent(pool.count('top_1'), answers),
         'top_3_share': percent(pool.count('top_3'), answers),
         'visibility_score': visibility_percent(pool.count('points'), answers),
-        **_citation_fields(pool, any(normalize_domain(domain) for domain in owned_domains)),
+        **_citation_fields(pool, citations_configured),
         **sentiment_fields({label: pool.counts[index] for label, index in zip(SPLIT_LABELS, _SPLIT, strict=True)}),
-        'engine_coverage': percent(len(pool.engines_naming), len(pool.engines)),
-        'keyword_coverage': percent(len(pool.keywords_naming), len(pool.keywords)),
-        'engines': len(pool.engines),
-        'keywords': len(pool.keywords),
+        'engine_coverage': percent(pooled.engines_naming, pooled.engines),
+        'keyword_coverage': percent(pooled.keywords_naming, pooled.keywords),
+        'engines': pooled.engines,
+        'keywords': pooled.keywords,
     }
+
+
+def tally_kpis(tallies: Iterable[RunTally], owned_domains: Iterable[str] = ()) -> dict[str, Any]:
+    """``brand_kpis`` of every answer the ``tallies`` count (each built against ``owned_domains``)."""
+    pool = _Pool()
+    for tally in tallies:
+        pool.add(tally)
+    pooled = PooledCounts(
+        counts=pool.counts, engines=len(pool.engines), engines_naming=len(pool.engines_naming),
+        keywords=len(pool.keywords), keywords_naming=len(pool.keywords_naming),
+    )
+    return pooled_kpis(pooled, any(normalize_domain(domain) for domain in owned_domains))
+
+
+def brand_row(brand: BrandTally, *, keywords: int, answers: int, total_mentions: int) -> dict[str, Any]:
+    """``brand_table``'s row of the summed ``brand`` named in ``keywords`` keywords, among ``answers`` answers naming ``total_mentions`` brands."""
+    summed = _BrandSum(brand.key, brand.name, brand.classification)
+    summed.add_tally(brand, '')
+    return summed.row(answers, total_mentions, keywords)
+
+
+def merged_brand(first: BrandTally, other: BrandTally) -> BrandTally:
+    """The counts of ``first`` and ``other`` (one brand) added up, with ``first``'s name and classification."""
+    summed = _BrandSum(first.key, first.name, first.classification)
+    summed.add_tally(first, '')
+    summed.add_tally(other, '')
+    return summed.tally()
+
+
+def count_index(name: str) -> int:
+    """The position of ``name`` in ``COUNT_FIELDS``."""
+    return _INDEX[name]
 
 
 @dataclass
@@ -418,9 +471,14 @@ __all__ = [
     'COUNT_FIELDS',
     'BrandPool',
     'BrandTally',
+    'PooledCounts',
     'RunTally',
+    'brand_row',
     'brands_truncated',
+    'count_index',
+    'merged_brand',
     'owned_fingerprint',
+    'pooled_kpis',
     'run_tallies',
     'run_tally',
     'tally_brand_table',

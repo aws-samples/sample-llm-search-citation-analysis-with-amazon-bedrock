@@ -9,16 +9,14 @@ import { useLocalSeoJob } from '../../../hooks/useLocalSeoJob';
 import type {
   GridJobRequest, GridPoint, GridResult, GridSize
 } from '../../../types/api/seoLocal';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import { ConfirmModal } from '../../ui/Modal';
 import {
   IdentityFields, PointFields, SelectField, TextField
 } from './LocalSeoFields';
 import {
-  LocalCard, LocalExcelButton, LocalForm
+  LocalCard, LocalForm
 } from './LocalSeoLayout';
-import {
-  localScopeLabel, rankGridExport
-} from './localSeoExcel';
 import {
   EMPTY_POINT, hasSearchPoint, pointFields, rankBand, targetFields, type IdentityInput
 } from './localSeoRequest';
@@ -116,7 +114,6 @@ export function RankGridTab({
   const [size, setSize] = useState('3');
   const [spacing, setSpacing] = useState('2');
   const [confirming, setConfirming] = useState(false);
-  const [searched, setSearched] = useState('');
   const gridSize = Number(size) as GridSize;
   const spacingKm = Math.min(10, Math.max(0.25, Number(spacing) || 2));
   const busy = job.state.status === 'starting' || job.state.status === 'running';
@@ -132,7 +129,6 @@ export function RankGridTab({
       ...pointFields(point),
       ...targetFields(target),
     };
-    setSearched(localScopeLabel([request.keyword], point, market.city));
     void job.start(request);
   };
 
@@ -158,7 +154,10 @@ export function RankGridTab({
       {result !== null && (
         <LocalCard
           title={`Ranks for “${keyword.trim()}”`}
-          actions={<LocalExcelButton table={rankGridExport(result.points, searched)} />}
+          actions={<ExportAllButton view="seo-local" params={state.status === 'done' ? {
+            table: 'Rank grid',
+            job_id: state.job.job_id,
+          } : null} />}
         >
           <GridSummaryLine result={result} />
           <GridMap result={result} />

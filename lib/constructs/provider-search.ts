@@ -91,8 +91,8 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
  * Google AI Overviews through DataForSEO's SERP API (an answer engine: the
  * overview is the answer, its references the citations). Its function
  * `CitationAnalysis-Search-google_ai_overview` lives in the SEO stack
- * (`lib/seo-stack.ts`) because the main stack sits at CloudFormation's
- * 500-resource limit; the main workflow calls it by name (see
+ * (`lib/seo-stack.ts`) with the rest of the SEO features (the main stack was
+ * then at CloudFormation's 500-resource limit); the main workflow calls it by name (see
  * `readExternalSearchProviders`). Not benchmarked; DataForSEO allows 2,000
  * requests a minute per account, so 5 in flight is about the other paid
  * providers' level rather than a DataForSEO limit.
@@ -228,7 +228,8 @@ function readProviderSettings(
  *
  * Reserved concurrency comes out of the account's Lambda concurrency limit,
  * and Lambda refuses a deploy that leaves fewer than 100 unreserved. The
- * defaults reserve 58 (plus 20 for the Content Studio workers) of the usual
+ * defaults reserve 65 in the main stack and 5 for Google AI Overviews in the
+ * SEO stack (plus 20 for the Content Studio workers) of the usual
  * 1,000. A new account with a low limit must lower these caps, or set them to
  * 0, and raise the limit through Service Quotas before running at scale.
  */

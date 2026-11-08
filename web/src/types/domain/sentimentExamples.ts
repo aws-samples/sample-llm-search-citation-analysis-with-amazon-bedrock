@@ -4,6 +4,7 @@
  * run in the scope, one sighting per brand per answer at its best rank).
  */
 import type { ReportScopeInfo } from './baseTypes';
+import type { ScopedResponseFields } from './scopeCoverage';
 import type { SentimentSplit } from './groupKpiHistory';
 import {
   isNullableString, isRecord
@@ -36,7 +37,7 @@ export interface SentimentExample {
   answer_truncated: boolean;
 }
 
-export interface SentimentExamplesResponse {
+export interface SentimentExamplesResponse extends ScopedResponseFields {
   scope: ReportScopeInfo;
   keywords_truncated: boolean;
   sentiment: SentimentLabel;

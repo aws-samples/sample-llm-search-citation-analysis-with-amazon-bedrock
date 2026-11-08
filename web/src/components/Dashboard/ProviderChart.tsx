@@ -63,6 +63,10 @@ export const ProviderChart = ({ data }: ProviderChartProps) => {
       canvasRef={canvasRef}
       hasData={hasData}
       emptyHint="Run an analysis to see provider stats"
+      seeAll={{
+        to: '/citations',
+        label: 'See all citations',
+      }}
       emptyIconPaths={CHART_BAR_PATHS}
     />
   );

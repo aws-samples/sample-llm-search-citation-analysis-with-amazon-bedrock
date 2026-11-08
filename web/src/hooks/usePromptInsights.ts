@@ -46,7 +46,7 @@ const promptInsightsEndpoint = {
  */
 export function usePromptInsights(scope: ReportScope) {
   const {
-    data, loading, error, fetchData,
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(promptInsightsEndpoint);
   // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
   const scopeKey = encodeReportScope(scope);
@@ -58,6 +58,8 @@ export function usePromptInsights(scope: ReportScope) {
   );
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

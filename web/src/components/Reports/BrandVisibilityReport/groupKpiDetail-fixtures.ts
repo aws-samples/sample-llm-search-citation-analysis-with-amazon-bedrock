@@ -8,7 +8,7 @@ import type {
   GroupRun, GroupRunDriver, KeywordRunHistory
 } from '../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../types';
-import type { GroupKpiDetail } from './groupKpiDetail';
+import type { GroupKpiDetail } from './groupKpiHistory-fixtures';
 import {
   buildChange, buildRun
 } from './groupKpiHistory-fixtures';
@@ -19,6 +19,14 @@ interface DetailState {
   loading: boolean;
   error: string | null;
 }
+
+/** No page after the first: what the stubbed reads answer for `more`. */
+const NO_MORE_PAGES = {
+  items: [],
+  loadMore: undefined,
+  loadingMore: false,
+  error: null,
+} as const;
 
 const DETAIL_STATE: DetailState = {
   keywords: [],
@@ -44,6 +52,7 @@ export function useKeywordRuns(_scope: ReportScope, _days: number, keyword: stri
     history: DETAIL_STATE.keywords.find((entry) => entry.keyword === keyword) ?? null,
     loading: DETAIL_STATE.loading,
     error: DETAIL_STATE.error,
+    more: NO_MORE_PAGES,
   };
 }
 
@@ -54,6 +63,7 @@ export function useRunDrivers(_scope: ReportScope, run: string) {
     drivers,
     loading: DETAIL_STATE.loading,
     error: DETAIL_STATE.error,
+    more: NO_MORE_PAGES,
   };
 }
 

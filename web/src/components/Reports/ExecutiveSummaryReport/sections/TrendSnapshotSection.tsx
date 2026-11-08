@@ -2,6 +2,7 @@ import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
   ReportSection, gateSection, type ReportSlice
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 import {
   KpiTrendPanel, ShareOfVoicePanel
 } from '../../BrandVisibilityReport/sections/ReportChartPanels';
@@ -33,6 +34,7 @@ export function TrendSnapshotSection({
         <KpiTrendPanel points={gate.value.trend_data} />
         <ShareOfVoicePanel brands={gate.value.latest_brands} />
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to="/reports/benchmark">See all brands</SeeAllLink></p>
     </ReportSection>
   );
 }

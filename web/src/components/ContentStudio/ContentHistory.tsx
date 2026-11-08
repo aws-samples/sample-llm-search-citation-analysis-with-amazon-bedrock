@@ -8,6 +8,7 @@ import { CollectionIcon } from '../ui';
 import { ContentDetailModal } from './ContentDetailModal';
 import { HistoryListItem } from './HistoryListItem';
 import { LoadMoreButton } from '../ui/LoadMoreButton';
+import { ExportAllButton } from '../ui/ExportAllButton';
 
 interface ContentHistoryProps {
   history: ContentStudioHistory[];
@@ -76,6 +77,9 @@ export const ContentHistory = ({
 
   return (
     <>
+      <div className="mb-3 flex justify-end">
+        <ExportAllButton view="content-history" params={{}} />
+      </div>
       <div className="space-y-3">
         {history.map(item => (
           <HistoryListItem

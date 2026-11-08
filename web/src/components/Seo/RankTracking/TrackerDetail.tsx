@@ -7,6 +7,7 @@ import { useState } from 'react';
 import {
   estimateRankTracker, removeRankKeywords
 } from '../../../api/seoRankTracking';
+import type { ViewParams } from '../../../api/exports';
 import { seoErrorMessage } from '../../../api/seo';
 import {
   useRankKeywordHistory, useRankTrackerData
@@ -19,7 +20,7 @@ import type {
 } from '../../../types/api/seoRankTracking';
 import { Button } from '../../ui/Button';
 import { ErrorAlert } from '../../ui/ErrorAlert';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import {
   ConfirmModal, Modal
 } from '../../ui/Modal';
@@ -34,7 +35,6 @@ import { CheckSummary } from './TrackerFormModal';
 import {
   SCHEDULE_LABELS, keywordCapNote
 } from './rankTrackingFormat';
-import { exportRankResultsExcel } from './rankTrackingExcel';
 
 const PERIODS: readonly {
   value: RankPeriod;
@@ -109,9 +109,9 @@ interface HeaderProps {
   readonly isAdmin: boolean;
   readonly period: RankPeriod;
   readonly runBusy: boolean;
-  readonly canExport: boolean;
+  /** The `seo-rank-tracking` export of the shown results; `null` while there is none. */
+  readonly exportParams: ViewParams | null;
   readonly onPeriod: (period: RankPeriod) => void;
-  readonly onExport: () => Promise<void>;
   readonly onEdit: () => void;
   readonly onArchive: () => void;
   readonly onRun: () => void;
@@ -136,8 +136,7 @@ function DetailHeader(props: HeaderProps) {
           onChange={(event) => props.onPeriod(PERIODS.find((option) => option.value === event.target.value)?.value ?? '7d')}>
           {PERIODS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
-        <ExportExcelButton onExport={props.onExport} failureLabel="[seo] Rank tracking Excel export failed:"
-          disabled={!props.canExport} title="The keywords of this tracker with their latest positions" />
+        <ExportAllButton view="seo-rank-tracking" params={props.exportParams} />
         {props.isAdmin && (
           <>
             <Button variant="secondary" size="sm" onClick={props.onEdit}>Edit</Button>
@@ -248,7 +247,11 @@ export function TrackerDetail({
     <div className="space-y-4">
       <DetailHeader
         tracker={tracker} isAdmin={isAdmin} period={period} runBusy={control.starting || isRunActive(control.run)}
-        canExport={rows.length > 0} onPeriod={setPeriod} onExport={() => exportRankResultsExcel(rows, devices, tracker.domain)}
+        exportParams={rows.length > 0 ? {
+          tracker_id: tracker.tracker_id,
+          period,
+        } : null}
+        onPeriod={setPeriod}
         onEdit={onEdit} onArchive={onArchive} onRun={askToRun}
       />
       {status !== null && <output className="block text-sm text-gray-600 dark:text-gray-300">{status}</output>}

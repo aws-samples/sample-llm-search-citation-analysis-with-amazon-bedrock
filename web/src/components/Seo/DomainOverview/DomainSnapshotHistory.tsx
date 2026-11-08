@@ -7,7 +7,6 @@ import {
 } from '../../ui/DataTable';
 import { DomainTableStatus } from './DomainTableStatus';
 import { DomainExportButton } from './DomainExportButton';
-import { SNAPSHOT_EXCEL_COLUMNS } from './domainExcel';
 import {
   integerText, usdText
 } from './domainFormat';
@@ -64,9 +63,10 @@ export function DomainSnapshotHistory({
           ? <p className="text-sm text-gray-600">{`No snapshot of ${response.domain} in this market yet.`}</p>
           : (
             <div className="space-y-1">
-              <DomainExportButton columns={SNAPSHOT_EXCEL_COLUMNS} rows={response.snapshots} sheetName="Traffic snapshots"
-                filePrefix="domain-snapshots" scopeLabel={response.domain}
-                title={`The ${response.snapshots.length} stored snapshots of ${response.domain}`} />
+              <DomainExportButton table="Traffic snapshots" params={{
+                domain: response.domain,
+                market_id: response.market_id,
+              }} />
               <DataTable rows={response.snapshots} columns={COLUMNS} rowKey={(snapshot) => snapshot.snapshot_at}
                 caption="Stored traffic snapshots" />
               <p className="text-xs text-gray-500">Estimated by DataForSEO, not measured clicks.</p>

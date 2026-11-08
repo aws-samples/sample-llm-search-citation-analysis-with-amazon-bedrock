@@ -59,6 +59,7 @@ from shared.keyword_groups import (
     serialize_keyword_item,
     validate_id_list,
 )
+from shared.snapshot_triggers import rebuilds_snapshot
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -368,6 +369,7 @@ def update_memberships(event: dict[str, Any], context: Any, body: dict, id: str,
     }, event)
 
 
+@rebuilds_snapshot('keyword groups changed')
 @api_handler
 @route_handler({
     ('PUT', '/keywords'): update_memberships,

@@ -44,6 +44,7 @@ export const LABS_EXPORT: SeoExportPricing = {
   rows_per_request: 1000,
   request_usd: 0.012,
   row_usd: 0.00012,
+  cache_hours: 12,
 };
 
 /** A page answer of a Labs list: no export window, and its export pricing. */

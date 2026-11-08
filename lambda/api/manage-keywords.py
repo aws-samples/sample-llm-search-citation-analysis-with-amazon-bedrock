@@ -40,6 +40,7 @@ from shared.keyword_store import (
     validate_keyword_text,
 )
 from shared.requested_group_ids import validate_requested_group_ids
+from shared.snapshot_triggers import rebuilds_snapshot
 from shared.utils import get_timestamp, keyword_id, load_keyword_identities, normalize_keyword
 
 dynamodb = boto3.resource('dynamodb')
@@ -300,6 +301,7 @@ def delete_keyword(event, context, id=None):
     return success_response({'message': 'Keyword deleted successfully'}, event)
 
 
+@rebuilds_snapshot('keywords changed')
 @api_handler
 @route_handler({
     'POST': create_keyword,

@@ -15,6 +15,8 @@ from shared.dataforseo_locations import UnsupportedMarketError
 from shared.utils import keyword_id
 from testing.events import parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.keyword_explorer_fixtures import explorer_query, filter_cases, filter_rows
+from testing.local_seo_fixtures import MemoryCache
 from testing.seo_fixtures import ADS_CODES, GLOBAL_CODES, SEO_DIR, SEO_ENV, FakeMetricsTable, labs_price, seo_event
 
 keywords_module = handler_fixture(SEO_DIR, 'seo-keywords.py', 'seo_keywords_under_test', env=SEO_ENV)
@@ -224,3 +226,70 @@ class TestRefusals:
         call = research({'keyword': 'x'}, result=DataForSeoError('NOT_CONFIGURED', 'no key'))
 
         assert (call.status, call.body['code']) == (503, 'NOT_CONFIGURED')
+
+
+@pytest.fixture
+def cached_read(keywords_module, seo_boundary):
+    """``cached_read(query)``: one ``GET /research`` (cache only) with the provider stubbed to spot any paid call."""
+    provider = MagicMock(side_effect=AssertionError('the cache-only read called DataForSEO'))
+
+    def read(query: dict[str, str]) -> tuple[int, dict]:
+        with patch.multiple(keywords_module, research_keywords=provider, labs_usd=labs_price):
+            event = seo_event('GET', '/api/seo/keywords/research', query=query)
+            return parse_response(keywords_module.handler(event, {}))
+
+    return read
+
+
+@pytest.fixture
+def filtered_read(cached_read, seo_boundary):
+    """``filtered_read(query)``: the body of a cache-only read of "cheap flights" over the shared filter rows."""
+    seo_boundary.get_cached.return_value = {**CACHED, 'rows': filter_rows()}
+    return lambda query: cached_read({'keyword': 'cheap flights', **query})[1]
+
+
+@pytest.fixture
+def seo_cache(seo_boundary):
+    """The SEO answer cache as a dict, so the cache-only read sees what a research stored."""
+    cache = MemoryCache()
+    seo_boundary.get_cached.side_effect = cache.get
+    seo_boundary.put_cached.side_effect = cache.put
+    return cache
+
+
+class TestCacheOnlyResearchRead:
+    def test_answers_the_rows_a_research_cached_with_the_same_options(self, research, cached_read, seo_cache):
+        research({'keyword': 'Cheap Flights', 'mode': 'ideas', 'limit': 300, 'clickstream': True})
+
+        status, body = cached_read({'keyword': 'cheap flights', 'mode': 'ideas', 'count': '300', 'clickstream': 'true'})
+
+        assert (status, body['rows'], body['cached'], body['estimated_cost_usd']) == (200, [ROW_JSON], True, 0.0)
+
+    def test_answers_404_not_cached_when_the_research_is_no_longer_cached(self, cached_read, seo_cache):
+        status, body = cached_read({'keyword': 'cheap flights'})
+
+        assert (status, body['code']) == (404, 'NOT_CACHED')
+
+    def test_another_limit_is_another_research_and_not_cached(self, research, cached_read, seo_cache):
+        research({'keyword': 'cheap flights', 'limit': 300})
+
+        assert cached_read({'keyword': 'cheap flights', 'count': '500'})[0] == 404
+
+    def test_counts_every_cached_row_as_the_total_whatever_the_filters_keep(self, filtered_read):
+        body = filtered_read({'include': 'zebra'})
+
+        assert (body['total'], [row['keyword'] for row in body['rows']]) == (5, ['Zebra tours'])
+
+    def test_refuses_a_sort_field_the_table_does_not_have(self, cached_read, seo_boundary):
+        seo_boundary.get_cached.return_value = CACHED
+
+        status, body = cached_read({'keyword': 'cheap flights', 'sort': 'trend'})
+
+        assert (status, body['field']) == (400, 'sort')
+
+
+@pytest.mark.parametrize('case', filter_cases(), ids=[case['name'] for case in filter_cases()])
+def test_the_cache_only_read_lists_the_rows_the_explorer_table_shows(case, filtered_read):
+    body = filtered_read(explorer_query(case))
+
+    assert [row['keyword'] for row in body['rows']] == case['keywords']

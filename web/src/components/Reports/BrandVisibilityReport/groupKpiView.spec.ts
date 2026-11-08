@@ -2,10 +2,10 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  groupRuns, latestGroupRun, modelChanges, runTrend
+  groupRuns, latestGroupRun, modelChanges
 } from './groupKpiView';
 import {
-  buildChange, buildRun, buildRunSeries, buildTrends, RUN_1, RUN_2, RUN_3
+  buildRun, buildRunSeries, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 
 const PARTIAL = buildRun({
@@ -72,32 +72,5 @@ describe('modelChanges', () => {
     const runs = buildRunSeries({ models: { openai: before } }, { models: { openai: after } });
 
     expect(modelChanges(runs)).toHaveLength(1);
-  });
-});
-
-describe('runTrend', () => {
-  const compared = buildRun({
-    change: buildChange({
-      trends: buildTrends({
-        mention_rate: 'declining',
-        average_position: 'improving',
-      }),
-    }),
-  });
-
-  it.each([
-    ['mention_rate', 'declining'],
-    ['average_position', 'improving'],
-    ['visibility_score', 'stable'],
-  ] as const)('returns the %s trend of the run change: %s', (id, trend) => {
-    expect(runTrend(compared, id)).toBe(trend);
-  });
-
-  it('returns no trend for a run without a change', () => {
-    expect(runTrend(buildRun({ change: null }), 'mention_rate')).toBeUndefined();
-  });
-
-  it('returns no trend for a count KPI, which is never trended', () => {
-    expect(runTrend(compared, 'mentions')).toBeUndefined();
   });
 });

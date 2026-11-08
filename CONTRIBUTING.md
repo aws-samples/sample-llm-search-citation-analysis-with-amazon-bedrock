@@ -89,7 +89,7 @@ GitHub releases). `quality-gates.yml` pins the versions CI uses.
 ### Test conventions
 
 - Tests live beside the code they test.
-  - CDK and dashboard: `*.spec.ts` / `*.spec.tsx` next to the module, run by Vitest (`vitest.config.ts` at the root
+  - CDK and dashboard: `*.spec.ts` / `*.spec.tsx` next to the module, run by Vitest (`vitest.config.mts` at the root
     covers `lib/**/*.spec.ts`; `web/vite.config.ts` runs the dashboard specs in jsdom).
   - Lambda: `test_*.py` next to the Python module, run by pytest from the repo root (`testpaths = ["lambda"]` in
     `pyproject.toml`).

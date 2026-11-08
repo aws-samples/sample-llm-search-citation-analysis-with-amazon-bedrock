@@ -1,15 +1,19 @@
 import type {
   AggregatedBrand, BrandAppearance
 } from '../../types';
-import type { BrandAppearancesRequest } from '../../api/brandMentions';
+import {
+  brandMentionsExportParams, type BrandAppearancesRequest
+} from '../../api/brandMentions';
 import {
   classificationLabel, sentimentTextColor
 } from './brandPresentation';
 import { useAllBrandAppearances } from './useAllBrandAppearances';
+import { ScopedListFooter } from '../ui/ScopedListFooter';
+import { ExportAllButton } from '../ui/ExportAllButton';
 
 interface BrandOverviewTabProps {
   brand: AggregatedBrand;
-  /** The summary's scope and filters; `null` hides "Show all appearances". */
+  /** The summary's scope and filters; `null` hides "Show more appearances". */
   appearancesRequest?: BrandAppearancesRequest | null;
 }
 
@@ -63,14 +67,22 @@ const ProviderBreakdown = ({
   appearancesRequest: BrandAppearancesRequest | null;
 }) => {
   const {
-    appearances, loading, error, loaded, loadAll
+    appearances, list, showMore, loading, error
   } = useAllBrandAppearances(brand.appearances, brand.name, appearancesRequest);
-  const more = !loaded && appearancesRequest !== null && brand.appearance_count > appearances.length;
+  const more = showMore !== undefined && brand.appearance_count > appearances.length;
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6">
-      <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Provider Breakdown</h3>
-      {brand.appearance_count > appearances.length && (
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <h3 className="text-base sm:text-lg font-bold text-gray-900">Provider Breakdown</h3>
+        {appearancesRequest !== null && (
+          <ExportAllButton view="brand-appearances" params={brandMentionsExportParams({
+            ...appearancesRequest,
+            brand: brand.name,
+          })} />
+        )}
+      </div>
+      {list === null && brand.appearance_count > appearances.length && (
         <p className="text-xs text-gray-500 mb-3">Best {appearances.length} of {brand.appearance_count} appearances.</p>
       )}
       <div className="space-y-3">
@@ -85,13 +97,14 @@ const ProviderBreakdown = ({
       {more && (
         <button
           type="button"
-          onClick={() => void loadAll()}
+          onClick={() => void showMore()}
           disabled={loading}
           className="mt-3 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 disabled:opacity-50"
         >
-          {loading ? 'Loading…' : `Show all ${brand.appearance_count} appearances`}
+          {loading ? 'Loading…' : 'Show more appearances'}
         </button>
       )}
+      {list !== null && <ScopedListFooter list={list} noun="appearances" />}
       {error && <p role="alert" className="mt-2 text-xs text-red-700">{error}</p>}
     </div>
   );

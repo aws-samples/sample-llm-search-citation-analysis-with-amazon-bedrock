@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import { StrokeIcon } from '../ui/StrokeIcon';
+import { SeeAllLink } from '../ui/SeeAllLink';
 
 interface DashboardChartCardProps {
   readonly title: string;
@@ -9,6 +10,11 @@ interface DashboardChartCardProps {
   readonly emptyHint: string;
   /** Heroicons-style outline `d` attributes drawn in the empty state. */
   readonly emptyIconPaths: readonly string[];
+  /** The full view behind the chart ("See all"), e.g. `/citations`. */
+  readonly seeAll?: {
+    readonly to: string;
+    readonly label: string;
+  };
 }
 
 /**
@@ -21,10 +27,12 @@ export const DashboardChartCard = ({
   hasData,
   emptyHint,
   emptyIconPaths,
+  seeAll,
 }: DashboardChartCardProps) => (
   <div className="bg-white rounded-lg border border-gray-200 p-6">
-    <div className="mb-4">
+    <div className="mb-4 flex items-center justify-between gap-2">
       <h3 className="text-sm font-medium text-gray-900">{title}</h3>
+      {seeAll && <SeeAllLink to={seeAll.to}>{seeAll.label}</SeeAllLink>}
     </div>
     <div style={{
       height: '280px',

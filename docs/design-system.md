@@ -416,7 +416,12 @@ its own file.
 | `PageHeaderCard.tsx` | White card at the top of a view: title, description, and the view's controls (scope picker, persona filter, buttons) stacked under it. |
 | `ErrorAlert.tsx` | Announced (`role="alert"`) red error box; renders nothing while the message is `null`. |
 | `RefreshTextButton.tsx` | Grey "Refresh" text button of a panel header. |
-| `useExportAction.ts` | Busy flag and click handler for an "Export to Excel" button; a failure is logged or handed to a callback. |
+| `useExportAction.ts` | Busy flag and click handler for a file built in the browser (only Content Studio's DOCX); a failure is logged or handed to a callback. |
+| `ExportAllButton.tsx` | The one "Export all" of every data view: Excel or CSV of the view's full data with its current filters, queued on the server export service; the file appears on the Exports page. Pass the view's export id (`ExportView`) and its query parameters (`null` while nothing is loaded). Never build an export in the browser. |
+| `ConfigListExport.tsx` | "Export all" of one Settings list (`config-lists`). |
+| `ScopeCoverageNote.tsx` | Coverage and freshness of a scoped view, from the answer's `coverage`, `as_of`, `stale` and `refreshing`: "Covers X of Y keywords", a time-budget cut, "figures as of …" for snapshot data, or the "Updating…" note of a stale build. Every scoped view shows it. |
+| `ComputingState.tsx` | The skeleton of the content plus "computing the complete figures" while a `202` view job runs; the data hook keeps polling (`api/viewJobs.ts`). |
+| `PaidExportButton.tsx`, `PaidExportModal.tsx` | "Export" above a table paged from DataForSEO: pick the rows, see the price and the file format, then queue the server export; "Export the N rows on screen (free)" exports the cached page. |
 | `ThemeToggle.tsx` | Light / dark / system switcher. |
 | `InfoTooltip.tsx` | "i" button with an explanation; used next to headings and KPI columns. The only tooltip component: it renders into `document.body` with fixed positioning (`tooltipPosition.ts`), so no table or scroll container can clip it or stop its text wrapping. Don't hand-roll another. |
 | `Disclosure.tsx` | A heading that expands the content under it; collapsed on screen, always open in print (§1.4). |
@@ -469,9 +474,9 @@ and `domainColumns` hold the shared brand and domain columns),
 `KpiHeadline`, `RunKpiHeadline`, `VisibilityHeadlineSection`,
 `TrendHeadlineSection`, `TrendPeriodTable`, `MoverColumn`,
 `KpiDefinitionsSection` (the definitions every report ends with),
-`PriorityBadge` and `ReportKeywordSelector`; `kpiSheets` holds the shared
-Excel sheets of the report exports. Use them instead of building report
-layout from scratch.
+`PriorityBadge` and `ReportKeywordSelector`. Use them instead of building report
+layout from scratch. A report section's export is an `ExportAllButton` with the
+section's export view and query; the server builds the file.
 
 ### 7.5 Charts
 

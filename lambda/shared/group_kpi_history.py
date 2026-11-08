@@ -19,7 +19,7 @@ compared with each other; every run still appears in the keyword drill-down.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 from shared.kpi_engine import (
@@ -149,17 +149,13 @@ def keyword_run_histories(keywords: list[str], runs_by_keyword: Mapping[str, Ite
     return [keyword_history(keyword, _kpis_by_run(_runs_by_timestamp(runs_by_keyword.get(keyword, ())), domains)) for keyword in keywords]
 
 
-def group_kpi_history_from_runs(
-    keywords: list[str],
-    runs_by_keyword: Mapping[str, Iterable[RunTally]],
-    owned_domains: Iterable[str] = (),
-) -> dict[str, Any]:
-    """``build_group_kpi_history`` over run tallies already read (``shared.kpi_tally``), counted against ``owned_domains``."""
-    domains = list(owned_domains)
-    tallies = {keyword: _runs_by_timestamp(runs_by_keyword.get(keyword, ())) for keyword in keywords}
-    kpis = {keyword: _kpis_by_run(runs, domains) for keyword, runs in tallies.items()}
+def _group_runs(
+    keywords: list[str], tallies: Mapping[str, Mapping[str, RunTally]], domains: list[str], keyword_kpis: Callable[[str, str], dict[str, Any]],
+) -> Iterator[dict[str, Any]]:
+    """Every run of the group, oldest first, each with its ``keyword_kpis`` and its ``change`` against the previous group run.
 
-    runs: list[dict[str, Any]] = []
+    Only the previous group run is held for the comparison: a caller that drops ``keyword_kpis`` holds one run's.
+    """
     previous_group_run = None
     for timestamp in sorted({timestamp for runs in tallies.values() for timestamp in runs}):
         answered = [keyword for keyword in keywords if timestamp in tallies[keyword]]
@@ -175,18 +171,64 @@ def group_kpi_history_from_runs(
             'kpis': tally_kpis(run_tallies_of, domains),
             'models': tally_models(run_tallies_of),
             'change': None,
-            'keyword_kpis': {keyword: kpis[keyword][timestamp] for keyword in answered},
+            'keyword_kpis': {keyword: keyword_kpis(keyword, timestamp) for keyword in answered},
         }
         if run['is_group_run']:
             if previous_group_run is not None:
                 run['change'] = compare_group_runs(previous_group_run, run)
             previous_group_run = run
-        runs.append(run)
+        yield run
 
+
+def _tallies_of(
+    keywords: list[str], runs_by_keyword: Mapping[str, Iterable[RunTally]], owned_domains: Iterable[str],
+) -> tuple[list[str], dict[str, dict[str, RunTally]]]:
+    """The owned domains as a list and each keyword's answered runs by timestamp."""
+    return list(owned_domains), {keyword: _runs_by_timestamp(runs_by_keyword.get(keyword, ())) for keyword in keywords}
+
+
+def _without_keyword_kpis(run: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in run.items() if key != 'keyword_kpis'}
+
+
+def group_kpi_history_from_runs(
+    keywords: list[str],
+    runs_by_keyword: Mapping[str, Iterable[RunTally]],
+    owned_domains: Iterable[str] = (),
+) -> dict[str, Any]:
+    """``build_group_kpi_history`` over run tallies already read (``shared.kpi_tally``), counted against ``owned_domains``."""
+    domains, tallies = _tallies_of(keywords, runs_by_keyword, owned_domains)
+    kpis = {keyword: _kpis_by_run(runs, domains) for keyword, runs in tallies.items()}
+    runs = list(_group_runs(keywords, tallies, domains, lambda keyword, timestamp: kpis[keyword][timestamp]))
     return {
-        'runs': [{key: value for key, value in run.items() if key != 'keyword_kpis'} for run in runs],
+        'runs': [_without_keyword_kpis(run) for run in runs],
         'keywords': [keyword_history(keyword, kpis[keyword]) for keyword in keywords],
     }
+
+
+def group_kpi_summary_from_runs(
+    keywords: list[str], runs_by_keyword: Mapping[str, Iterable[RunTally]], owned_domains: Iterable[str] = (),
+) -> dict[str, Any]:
+    """``group_kpi_history_from_runs`` as the snapshot and window views keep it: every run (``summary_run``), each
+    keyword's ``keyword_summary`` and every run's drivers (``run_drivers``).
+
+    Equal to summarizing the whole history, without holding every keyword's KPIs of every run at once: one
+    group run's keyword KPIs (and the previous group run's) and, per keyword, only its last two runs (whose
+    latest entry's change needs only the run before): ~400 MB fewer for 5,000 keywords x 31 runs.
+    """
+    domains, tallies = _tallies_of(keywords, runs_by_keyword, owned_domains)
+    runs: list[dict[str, Any]] = []
+    drivers: list[dict[str, Any]] = []
+    for run in _group_runs(keywords, tallies, domains, lambda keyword, timestamp: tally_kpis([tallies[keyword][timestamp]], domains)):
+        bare = _without_keyword_kpis(run)
+        drivers.extend(run_drivers([bare]))
+        runs.append(summary_run(bare))
+    summaries = []
+    for keyword in keywords:
+        last_two = {timestamp: tallies[keyword][timestamp] for timestamp in sorted(tallies[keyword])[-2:]}
+        entry = keyword_history(keyword, _kpis_by_run(last_two, domains))
+        summaries.append({**keyword_summary(entry), 'runs_count': len(tallies[keyword])})
+    return {'runs': runs, 'keywords': summaries, 'drivers': drivers}
 
 
 def summary_run(run: Mapping[str, Any]) -> dict[str, Any]:
@@ -221,6 +263,7 @@ __all__ = [
     'build_group_kpi_history',
     'compare_group_runs',
     'group_kpi_history_from_runs',
+    'group_kpi_summary_from_runs',
     'keyword_history',
     'keyword_run_histories',
     'keyword_summary',

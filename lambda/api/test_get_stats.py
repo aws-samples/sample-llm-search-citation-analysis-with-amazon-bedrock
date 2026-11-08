@@ -24,6 +24,7 @@ import pytest
 
 from shared.bounded_counts import Count
 from shared.config import PROVIDERS
+from testing import kpi_route_fixtures
 from testing.client_errors import throttled
 from testing.deadlines import capped_reads_deadline, spent_deadline
 from testing.dynamodb_stubs import described, fake_table
@@ -265,6 +266,10 @@ _LATEST_RUNS = {
 }
 
 
+#: The projected Keywords scan behind a market's totals: the keyword, its market and its status (the snapshot covers the active ones).
+_MARKET_KEYWORD_SCAN = {'ProjectionExpression': '#kw, market_id, #st', 'ExpressionAttributeNames': {'#kw': 'keyword', '#st': 'status'}}
+
+
 def _market_tables(keyword_rows: list[dict[str, Any]] | None = None) -> dict[str, MagicMock]:
     """Every table with the market fixtures: Keywords answers ``keyword_rows`` to its scan, the rest count per keyword."""
     return {
@@ -306,6 +311,7 @@ class TestMarketTotals:
             'timestamp': _STAMP,
             'market_id': _CHILE_ID,
             'last_execution_approximate': False,
+            **kpi_route_fixtures.live_scope_fields(2),
         })
 
     def test_global_counts_the_keywords_without_a_market_or_with_an_empty_one(self, stats_module):
@@ -345,9 +351,7 @@ class TestMarketTotals:
 
         _get_market_stats(stats_module, tables, _CHILE_ID)
 
-        tables['keywords_table'].scan.assert_called_once_with(
-            ProjectionExpression='#kw, market_id', ExpressionAttributeNames={'#kw': 'keyword'},
-        )
+        tables['keywords_table'].scan.assert_called_once_with(**_MARKET_KEYWORD_SCAN)
 
     def test_sums_every_page_of_a_partition_count(self, stats_module):
         citations = fake_table()
@@ -438,9 +442,7 @@ class TestMarketCountCache:
         responses = _get_market_stats(stats_module, tables, _CHILE_ID, _CHILE_ID)
 
         assert [body['total_searches'] for _, body in responses] == [6, 6]
-        tables['keywords_table'].scan.assert_called_once_with(
-            ProjectionExpression='#kw, market_id', ExpressionAttributeNames={'#kw': 'keyword'},
-        )
+        tables['keywords_table'].scan.assert_called_once_with(**_MARKET_KEYWORD_SCAN)
 
     def test_keeps_each_markets_counts_apart(self, stats_module):
         responses = _get_market_stats(stats_module, _market_tables(), _CHILE_ID, _BRAZIL_ID, 'global')

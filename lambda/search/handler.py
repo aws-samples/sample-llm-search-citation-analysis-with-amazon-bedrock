@@ -46,7 +46,7 @@ from shared.ai_clients import (
     PERPLEXITY_TIMEOUT_SECONDS,
     perplexity_agent_text,
 )
-from shared.config import Provider
+from shared.config import PLAIN_KEYWORD_PROVIDERS, Provider
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_locations import UnsupportedMarketError, market_codes
@@ -623,10 +623,9 @@ AIO_ORGANIC_LIMIT = 10
 #: ``error_category`` of a market DataForSEO cannot localise: nothing was sent, nothing billed.
 UNSUPPORTED_MARKET = 'unsupported_market'
 
-#: Engines asked the plain keyword once per keyword and run: Google takes no persona
-#: wording, and a long persona prompt rarely triggers an overview. Their single row carries the
+#: ``PLAIN_KEYWORD_PROVIDERS`` (``shared.config``) are asked the plain keyword once per keyword and run:
+#: a long persona prompt rarely triggers an overview. Their single row carries the
 #: unpersonalised prompt (``DEFAULT_QUERY_PROMPT``) even when the run has personas.
-PLAIN_KEYWORD_PROVIDERS = frozenset({Provider.GOOGLE_AI_OVERVIEW})
 
 #: The prompt of an unpersonalised query (also the run's only prompt when it has no personas).
 DEFAULT_QUERY_PROMPT: dict[str, Any] = {"id": "default", "name": "Default", "template": None}

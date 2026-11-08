@@ -8,7 +8,7 @@ The server sits behind its own CloudFront distribution (`https://<dist>.cloudfro
 
 ## What you need
 
-The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys both stacks before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
+The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys every stack before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
 
 From the `CitationAnalysisMcpStack` outputs (`aws cloudformation describe-stacks --stack-name CitationAnalysisMcpStack`):
 
@@ -101,6 +101,8 @@ Not verified yet. If it offers the same OAuth form as Quick web, use the same va
 Catalogue reads include providers, personas, engine answers, persona rankings, prompt insights, report insights (`get_report_insights`), recent searches, crawled pages, sentiment examples, custom reports (list and one by id), schedules, KPI alerts, run status (`get_run_status`), research jobs and templates, and Content Studio items.
 
 Large lists come in pages: keywords, the citation list, recent searches, crawled pages, brand appearances (`get_brand_mentions` `view=appearances`), group KPI keywords and drivers (`get_report` `kind=group_kpis`), sentiment examples, schedules, research jobs and Content Studio items return `next_token`; pass it back with the same arguments for the next page (`null` on the last page). A result over 50,000 characters is cut to a first page and marked `truncated`; when it also has a `next_token`, ask again with a smaller `limit` first, because the cursor continues after the whole page. An API answer over 5 MB is read by the server from its temporary S3 copy, so tools see the same data as the dashboard.
+
+Scoped reads (a keyword group, a market or all keywords) cover every keyword (2.45.0). A large scope is served from the precomputed scope snapshot; when the snapshot does not hold the view yet, the tool returns a non-error result saying the complete figures are being computed and to call again in a few seconds (the API's `202 {status: "computing"}`); a failed computation is an error result. A cursor whose snapshot build is gone, or whose scope changed, comes back as `cursor_expired` with a note to call again without `next_token`. Exports are not exposed as tools; use the dashboard's Export all.
 
 SEO reads (SEO stack, router `seo`; they need `CitationAnalysisSeoStack` deployed). They are free: none calls DataForSEO, and each description starts with "Free".
 

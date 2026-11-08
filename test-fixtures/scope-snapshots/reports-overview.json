@@ -1,0 +1,992 @@
+{
+  "route": "GET /api/reports/overview",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all",
+        "days": "30"
+      },
+      "status": 200,
+      "body": {
+        "generated_at": "2026-10-01T08:15:02.481233Z",
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "period_type": "day",
+        "days_analyzed": 30,
+        "truncated_before": null,
+        "truncated": false,
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "kpis": {
+          "answers": 8,
+          "mentions": 5,
+          "mention_rate": 62.5,
+          "share_of_voice": 41.7,
+          "average_position": 2.2,
+          "top_1_share": 25.0,
+          "top_3_share": 50.0,
+          "visibility_score": 48.3,
+          "citations": 3,
+          "citation_rate": 37.5,
+          "citation_share": 12.5,
+          "net_sentiment": 60.0,
+          "sentiment_split": {
+            "positive": 3,
+            "neutral": 2,
+            "negative": 0,
+            "mixed": 0
+          },
+          "engine_coverage": 75.0,
+          "keyword_coverage": 100.0,
+          "engines": 4,
+          "keywords": 2
+        },
+        "change": {
+          "keywords_compared": 2,
+          "deltas": {
+            "answers": 0,
+            "mentions": 1,
+            "mention_rate": 12.5,
+            "share_of_voice": 5.3,
+            "average_position": -0.3,
+            "top_1_share": 12.5,
+            "top_3_share": 12.5,
+            "visibility_score": 8.2,
+            "citations": 1,
+            "citation_rate": 12.5,
+            "citation_share": 3.4,
+            "net_sentiment": 10.0,
+            "engine_coverage": 0.0,
+            "keyword_coverage": 0.0
+          },
+          "trends": {
+            "mention_rate": "improving",
+            "share_of_voice": "improving",
+            "average_position": "stable",
+            "top_1_share": "improving",
+            "top_3_share": "improving",
+            "visibility_score": "improving",
+            "citation_rate": "improving",
+            "citation_share": "improving",
+            "net_sentiment": "improving",
+            "engine_coverage": "stable",
+            "keyword_coverage": "stable"
+          }
+        },
+        "trend_data": [
+          {
+            "period": "2026-09-29",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          },
+          {
+            "period": "2026-09-30",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          }
+        ],
+        "latest_brands": [
+          {
+            "name": "Meliá Galicia",
+            "classification": "competitor",
+            "mentions": 6,
+            "mention_rate": 75.0,
+            "share_of_voice": 50.0,
+            "average_position": 1.67,
+            "best_position": 1,
+            "visibility_score": 62.4,
+            "engines": [
+              "claude",
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 50.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 3,
+              "negative": 0,
+              "mixed": 0
+            }
+          },
+          {
+            "name": "Hotel Coruña Mar",
+            "classification": "first_party",
+            "mentions": 5,
+            "mention_rate": 62.5,
+            "share_of_voice": 41.7,
+            "average_position": 2.2,
+            "best_position": 1,
+            "visibility_score": 48.3,
+            "engines": [
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 60.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 2,
+              "negative": 0,
+              "mixed": 0
+            }
+          }
+        ],
+        "summary": {
+          "improving_count": 1,
+          "declining_count": 0,
+          "stable_count": 1
+        },
+        "top_improving": [
+          {
+            "keyword": "hotel en a coruña",
+            "visibility_score": 62.1,
+            "change": 15.4
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "visibility_score": 34.6,
+            "change": 1.0
+          }
+        ],
+        "top_declining": [],
+        "top_recommendations": [
+          {
+            "type": "competitive",
+            "priority": "high",
+            "title": "Competitors Dominating Key Terms",
+            "description": "Competitors are mentioned more frequently than your brand on important keywords.",
+            "action": "Analyze competitor content strategy and citation sources. Create superior content.",
+            "keywords": [
+              "hotel cerca de riazor"
+            ],
+            "impact": "Reclaim market share in AI search results"
+          },
+          {
+            "type": "best_practice",
+            "priority": "low",
+            "title": "Maintain Citation Freshness",
+            "description": "Regularly update your content and ensure citations remain current.",
+            "action": "Review and refresh content quarterly. Monitor for broken links.",
+            "impact": "Sustained visibility over time"
+          }
+        ],
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna",
+        "days": "30"
+      },
+      "status": 200,
+      "body": {
+        "generated_at": "2026-10-01T08:15:02.481233Z",
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "keywords_truncated": false,
+        "period_type": "day",
+        "days_analyzed": 30,
+        "truncated_before": null,
+        "truncated": false,
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "kpis": {
+          "answers": 8,
+          "mentions": 5,
+          "mention_rate": 62.5,
+          "share_of_voice": 41.7,
+          "average_position": 2.2,
+          "top_1_share": 25.0,
+          "top_3_share": 50.0,
+          "visibility_score": 48.3,
+          "citations": 3,
+          "citation_rate": 37.5,
+          "citation_share": 12.5,
+          "net_sentiment": 60.0,
+          "sentiment_split": {
+            "positive": 3,
+            "neutral": 2,
+            "negative": 0,
+            "mixed": 0
+          },
+          "engine_coverage": 75.0,
+          "keyword_coverage": 100.0,
+          "engines": 4,
+          "keywords": 2
+        },
+        "change": {
+          "keywords_compared": 2,
+          "deltas": {
+            "answers": 0,
+            "mentions": 1,
+            "mention_rate": 12.5,
+            "share_of_voice": 5.3,
+            "average_position": -0.3,
+            "top_1_share": 12.5,
+            "top_3_share": 12.5,
+            "visibility_score": 8.2,
+            "citations": 1,
+            "citation_rate": 12.5,
+            "citation_share": 3.4,
+            "net_sentiment": 10.0,
+            "engine_coverage": 0.0,
+            "keyword_coverage": 0.0
+          },
+          "trends": {
+            "mention_rate": "improving",
+            "share_of_voice": "improving",
+            "average_position": "stable",
+            "top_1_share": "improving",
+            "top_3_share": "improving",
+            "visibility_score": "improving",
+            "citation_rate": "improving",
+            "citation_share": "improving",
+            "net_sentiment": "improving",
+            "engine_coverage": "stable",
+            "keyword_coverage": "stable"
+          }
+        },
+        "trend_data": [
+          {
+            "period": "2026-09-29",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          },
+          {
+            "period": "2026-09-30",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          }
+        ],
+        "latest_brands": [
+          {
+            "name": "Meliá Galicia",
+            "classification": "competitor",
+            "mentions": 6,
+            "mention_rate": 75.0,
+            "share_of_voice": 50.0,
+            "average_position": 1.67,
+            "best_position": 1,
+            "visibility_score": 62.4,
+            "engines": [
+              "claude",
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 50.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 3,
+              "negative": 0,
+              "mixed": 0
+            }
+          },
+          {
+            "name": "Hotel Coruña Mar",
+            "classification": "first_party",
+            "mentions": 5,
+            "mention_rate": 62.5,
+            "share_of_voice": 41.7,
+            "average_position": 2.2,
+            "best_position": 1,
+            "visibility_score": 48.3,
+            "engines": [
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 60.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 2,
+              "negative": 0,
+              "mixed": 0
+            }
+          }
+        ],
+        "summary": {
+          "improving_count": 1,
+          "declining_count": 0,
+          "stable_count": 1
+        },
+        "top_improving": [
+          {
+            "keyword": "hotel en a coruña",
+            "visibility_score": 62.1,
+            "change": 15.4
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "visibility_score": 34.6,
+            "change": 1.0
+          }
+        ],
+        "top_declining": [],
+        "top_recommendations": [
+          {
+            "type": "competitive",
+            "priority": "high",
+            "title": "Competitors Dominating Key Terms",
+            "description": "Competitors are mentioned more frequently than your brand on important keywords.",
+            "action": "Analyze competitor content strategy and citation sources. Create superior content.",
+            "keywords": [
+              "hotel cerca de riazor"
+            ],
+            "impact": "Reclaim market share in AI search results"
+          },
+          {
+            "type": "best_practice",
+            "priority": "low",
+            "title": "Maintain Citation Freshness",
+            "description": "Regularly update your content and ensure citations remain current.",
+            "action": "Review and refresh content quarterly. Monitor for broken links.",
+            "impact": "Sustained visibility over time"
+          }
+        ],
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all",
+        "days": "30"
+      },
+      "status": 200,
+      "body": {
+        "generated_at": "2026-10-01T08:15:02.481233Z",
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "period_type": "day",
+        "days_analyzed": 30,
+        "truncated_before": null,
+        "truncated": false,
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "kpis": {
+          "answers": 8,
+          "mentions": 5,
+          "mention_rate": 62.5,
+          "share_of_voice": 41.7,
+          "average_position": 2.2,
+          "top_1_share": 25.0,
+          "top_3_share": 50.0,
+          "visibility_score": 48.3,
+          "citations": 3,
+          "citation_rate": 37.5,
+          "citation_share": 12.5,
+          "net_sentiment": 60.0,
+          "sentiment_split": {
+            "positive": 3,
+            "neutral": 2,
+            "negative": 0,
+            "mixed": 0
+          },
+          "engine_coverage": 75.0,
+          "keyword_coverage": 100.0,
+          "engines": 4,
+          "keywords": 2
+        },
+        "change": {
+          "keywords_compared": 2,
+          "deltas": {
+            "answers": 0,
+            "mentions": 1,
+            "mention_rate": 12.5,
+            "share_of_voice": 5.3,
+            "average_position": -0.3,
+            "top_1_share": 12.5,
+            "top_3_share": 12.5,
+            "visibility_score": 8.2,
+            "citations": 1,
+            "citation_rate": 12.5,
+            "citation_share": 3.4,
+            "net_sentiment": 10.0,
+            "engine_coverage": 0.0,
+            "keyword_coverage": 0.0
+          },
+          "trends": {
+            "mention_rate": "improving",
+            "share_of_voice": "improving",
+            "average_position": "stable",
+            "top_1_share": "improving",
+            "top_3_share": "improving",
+            "visibility_score": "improving",
+            "citation_rate": "improving",
+            "citation_share": "improving",
+            "net_sentiment": "improving",
+            "engine_coverage": "stable",
+            "keyword_coverage": "stable"
+          }
+        },
+        "trend_data": [
+          {
+            "period": "2026-09-29",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          },
+          {
+            "period": "2026-09-30",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          }
+        ],
+        "latest_brands": [
+          {
+            "name": "Meliá Galicia",
+            "classification": "competitor",
+            "mentions": 6,
+            "mention_rate": 75.0,
+            "share_of_voice": 50.0,
+            "average_position": 1.67,
+            "best_position": 1,
+            "visibility_score": 62.4,
+            "engines": [
+              "claude",
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 50.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 3,
+              "negative": 0,
+              "mixed": 0
+            }
+          },
+          {
+            "name": "Hotel Coruña Mar",
+            "classification": "first_party",
+            "mentions": 5,
+            "mention_rate": 62.5,
+            "share_of_voice": 41.7,
+            "average_position": 2.2,
+            "best_position": 1,
+            "visibility_score": 48.3,
+            "engines": [
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 60.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 2,
+              "negative": 0,
+              "mixed": 0
+            }
+          }
+        ],
+        "summary": {
+          "improving_count": 1,
+          "declining_count": 0,
+          "stable_count": 1
+        },
+        "top_improving": [
+          {
+            "keyword": "hotel en a coruña",
+            "visibility_score": 62.1,
+            "change": 15.4
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "visibility_score": 34.6,
+            "change": 1.0
+          }
+        ],
+        "top_declining": [],
+        "top_recommendations": [
+          {
+            "type": "competitive",
+            "priority": "high",
+            "title": "Competitors Dominating Key Terms",
+            "description": "Competitors are mentioned more frequently than your brand on important keywords.",
+            "action": "Analyze competitor content strategy and citation sources. Create superior content.",
+            "keywords": [
+              "hotel cerca de riazor"
+            ],
+            "impact": "Reclaim market share in AI search results"
+          },
+          {
+            "type": "best_practice",
+            "priority": "low",
+            "title": "Maintain Citation Freshness",
+            "description": "Regularly update your content and ensure citations remain current.",
+            "action": "Review and refresh content quarterly. Monitor for broken links.",
+            "impact": "Sustained visibility over time"
+          }
+        ],
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all",
+        "days": "45"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-reports-overview-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all",
+        "days": "30"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia",
+        "days": "30"
+      },
+      "status": 200,
+      "body": {
+        "generated_at": "2026-10-01T08:15:02.481233Z",
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "keywords_truncated": true,
+        "period_type": "day",
+        "days_analyzed": 30,
+        "truncated_before": null,
+        "truncated": false,
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "kpis": {
+          "answers": 8,
+          "mentions": 5,
+          "mention_rate": 62.5,
+          "share_of_voice": 41.7,
+          "average_position": 2.2,
+          "top_1_share": 25.0,
+          "top_3_share": 50.0,
+          "visibility_score": 48.3,
+          "citations": 3,
+          "citation_rate": 37.5,
+          "citation_share": 12.5,
+          "net_sentiment": 60.0,
+          "sentiment_split": {
+            "positive": 3,
+            "neutral": 2,
+            "negative": 0,
+            "mixed": 0
+          },
+          "engine_coverage": 75.0,
+          "keyword_coverage": 100.0,
+          "engines": 4,
+          "keywords": 2
+        },
+        "change": {
+          "keywords_compared": 2,
+          "deltas": {
+            "answers": 0,
+            "mentions": 1,
+            "mention_rate": 12.5,
+            "share_of_voice": 5.3,
+            "average_position": -0.3,
+            "top_1_share": 12.5,
+            "top_3_share": 12.5,
+            "visibility_score": 8.2,
+            "citations": 1,
+            "citation_rate": 12.5,
+            "citation_share": 3.4,
+            "net_sentiment": 10.0,
+            "engine_coverage": 0.0,
+            "keyword_coverage": 0.0
+          },
+          "trends": {
+            "mention_rate": "improving",
+            "share_of_voice": "improving",
+            "average_position": "stable",
+            "top_1_share": "improving",
+            "top_3_share": "improving",
+            "visibility_score": "improving",
+            "citation_rate": "improving",
+            "citation_share": "improving",
+            "net_sentiment": "improving",
+            "engine_coverage": "stable",
+            "keyword_coverage": "stable"
+          }
+        },
+        "trend_data": [
+          {
+            "period": "2026-09-29",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          },
+          {
+            "period": "2026-09-30",
+            "runs": 1,
+            "keywords_with_data": 2,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            }
+          }
+        ],
+        "latest_brands": [
+          {
+            "name": "Meliá Galicia",
+            "classification": "competitor",
+            "mentions": 6,
+            "mention_rate": 75.0,
+            "share_of_voice": 50.0,
+            "average_position": 1.67,
+            "best_position": 1,
+            "visibility_score": 62.4,
+            "engines": [
+              "claude",
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 50.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 3,
+              "negative": 0,
+              "mixed": 0
+            }
+          },
+          {
+            "name": "Hotel Coruña Mar",
+            "classification": "first_party",
+            "mentions": 5,
+            "mention_rate": 62.5,
+            "share_of_voice": 41.7,
+            "average_position": 2.2,
+            "best_position": 1,
+            "visibility_score": 48.3,
+            "engines": [
+              "gemini",
+              "openai",
+              "perplexity"
+            ],
+            "keywords": 2,
+            "net_sentiment": 60.0,
+            "sentiment_split": {
+              "positive": 3,
+              "neutral": 2,
+              "negative": 0,
+              "mixed": 0
+            }
+          }
+        ],
+        "summary": {
+          "improving_count": 1,
+          "declining_count": 0,
+          "stable_count": 1
+        },
+        "top_improving": [
+          {
+            "keyword": "hotel en a coruña",
+            "visibility_score": 62.1,
+            "change": 15.4
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "visibility_score": 34.6,
+            "change": 1.0
+          }
+        ],
+        "top_declining": [],
+        "top_recommendations": [
+          {
+            "type": "competitive",
+            "priority": "high",
+            "title": "Competitors Dominating Key Terms",
+            "description": "Competitors are mentioned more frequently than your brand on important keywords.",
+            "action": "Analyze competitor content strategy and citation sources. Create superior content.",
+            "keywords": [
+              "hotel cerca de riazor"
+            ],
+            "impact": "Reclaim market share in AI search results"
+          },
+          {
+            "type": "best_practice",
+            "priority": "low",
+            "title": "Maintain Citation Freshness",
+            "description": "Regularly update your content and ensure citations remain current.",
+            "action": "Review and refresh content quarterly. Monitor for broken links.",
+            "impact": "Sustained visibility over time"
+          }
+        ],
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    }
+  }
+}

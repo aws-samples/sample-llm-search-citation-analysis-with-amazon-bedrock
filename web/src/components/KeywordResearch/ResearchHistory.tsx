@@ -11,6 +11,7 @@ import { JobFailureMessage } from './ResearchProgress';
 import type { ResearchRunViewProps } from './researchRunView';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
+import { ExportAllButton } from '../ui/ExportAllButton';
 import { formatDate } from '../../formatting/dateFormatter';
 import {
   getResearchStatusClass,
@@ -91,7 +92,10 @@ export const ResearchHistory = ({
         <p className="text-sm text-gray-600">
           View your past keyword research and competitor analyses.
         </p>
-        <RefreshTextButton onRefresh={onRefresh} loading={loading} showIcon />
+        <div className="flex items-center gap-3">
+          <ExportAllButton view="keyword-research" params={{}} />
+          <RefreshTextButton onRefresh={onRefresh} loading={loading} showIcon />
+        </div>
       </div>
 
       {loading && history.length === 0 && <ResearchListSkeleton label="Loading history" detailsGapClassName="mt-2" />}
@@ -195,6 +199,7 @@ const HistoryItem = ({
           <KeywordPromotionControls promotion={promotion} />
           <KeywordResultsTable
             keywords={keywords}
+            jobId={item.id}
             title={`${keywords.length} keywords for "${itemTitle}"`}
             subtitle={`Industry: ${item.industry ?? 'general'}`}
             compact

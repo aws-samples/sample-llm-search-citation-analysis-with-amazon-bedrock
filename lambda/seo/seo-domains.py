@@ -19,6 +19,7 @@ Google-Ads-only market: such a market is refused before any call.
 Keywords and pages also serve the paid Excel export (``seo_export``): with ``limit`` (1..1000) and ``offset``
 (0..9999, ``offset + limit`` <= 10,000) the call asks for those rows instead of the page, cached under its own key
 and priced ``labs_usd(limit)``. Both answers echo ``offset``/``limit`` (``null`` on a page) and carry ``export``.
+With ``cached_only: true`` (a resumed server export) a cache miss is 409 ``NOT_CACHED`` instead of a paid call.
 
 A snapshot runs as a job (two Labs calls of up to a minute each); the route starts the
 ``CitationAnalysis-SeoDomainSnapshots`` state machine with one target. Its execution name holds the domain,
@@ -63,7 +64,7 @@ from seo_domain_requests import (
     target_json,
     top_page_json,
 )
-from seo_export import EXPORT_SCHEMA, RowWindow, export_pricing, row_window
+from seo_export import EXPORT_SCHEMA, NotCachedError, RowWindow, export_pricing, not_cached_response, row_window
 from seo_geo_data import SCOPE_QUERY_SCHEMA, load_seo_geo
 from seo_http import MARKET_ID_FIELD, CachePolicy, dynamodb_table, keyword_list, seo_error, seo_route
 
@@ -103,11 +104,14 @@ PAGED_SCHEMA: dict[str, dict[str, Any]] = {
     **DOMAIN_SCHEMA, 'page': PAGE_FIELD, 'page_size': PAGE_SIZE_FIELD, 'order': ORDER_FIELD, 'search': SEARCH_FIELD,
     'filters': FILTERS_FIELD, **EXPORT_SCHEMA,
 }
-PAGED_FIELDS = ('target', 'scope', 'market_id', 'sort', 'order', 'search', 'filters')
-LABS_EXPORT = export_pricing(LABS_TASK_USD, LABS_ROW_USD)
+PAGED_FIELDS = ('target', 'scope', 'market_id', 'sort', 'order', 'search', 'filters', 'cached_only')
+LABS_EXPORT = export_pricing(LABS_TASK_USD, LABS_ROW_USD, KEYWORDS_CACHE.ttl_seconds)
 KEYWORDS_SCHEMA = {**PAGED_SCHEMA, 'sort': {'type': str, 'choices': ['rank', 'traffic', 'volume', 'score', 'cpc'], 'default': 'traffic'}}
 PAGES_SCHEMA = {**PAGED_SCHEMA, 'sort': {'type': str, 'choices': ['traffic', 'keywords'], 'default': 'traffic'}}
-COMPETITORS_SCHEMA: dict[str, dict[str, Any]] = {'market_id': MARKET_ID_FIELD, 'include_subdomains': {'type': bool, 'default': True}}
+COMPETITORS_SCHEMA: dict[str, dict[str, Any]] = {
+    'market_id': MARKET_ID_FIELD, 'include_subdomains': {'type': bool, 'default': True},
+    'cached_only': {'type': bool, 'default': False},
+}
 SNAPSHOT_SCHEMA: dict[str, dict[str, Any]] = {'domain': TARGET_FIELD, 'market_id': MARKET_ID_FIELD}
 SNAPSHOT_QUERY_SCHEMA = {key: {**rules, 'source': 'query'} for key, rules in SNAPSHOT_SCHEMA.items()}
 
@@ -169,8 +173,13 @@ PAGES_LOOKUP = PagedLookup(PAGES_CACHE, page_filters, relevant_pages, top_page_j
 
 def paged_answer(lookup: PagedLookup, window: RowWindow, *, target: str, scope: str | None,
                  market_id: str | None, sort: str, order: str, search: str | None,
-                 filters: object) -> dict[str, Any]:
-    """The rows of ``window`` (a page or an export chunk): cached, else one paid call (filters checked first)."""
+                 filters: object, cached_only: bool) -> dict[str, Any]:
+    """
+    The rows of ``window`` (a page or an export chunk): cached, else one paid call (filters checked first).
+
+    Raises:
+        NotCachedError: ``cached_only`` and the rows are not cached (nothing was paid).
+    """
     request = domain_request(target, scope, market_id)
     parsed = lookup.parse_filters(filters)
     params = cache_params(request, **window.cache_key, sort=sort, order=order, filters=filters_json(parsed),
@@ -178,6 +187,8 @@ def paged_answer(lookup: PagedLookup, window: RowWindow, *, target: str, scope: 
     cached = lookup.policy.get(params)
     if isinstance(cached, dict) and isinstance(cached.get('items'), list):
         return {**target_json(request), **_cached_answer(cached, cached=True, cost_usd=0.0)}
+    if cached_only:
+        raise NotCachedError
     rows = lookup.fetch(request.target, request.codes, limit=window.limit, offset=window.offset, sort=sort,
                         order=order, filters=parsed, search=search)
     payload = {'total_count': rows.total_count, 'has_more': rows.has_more, 'fetched_at': get_timestamp(),
@@ -191,7 +202,10 @@ def paged_response(event: dict[str, Any], lookup: PagedLookup, request: dict[str
     page, page_size = request['page'], request['page_size']
     window = row_window(request['body'], page=page, page_size=page_size, offset=request['offset'],
                         limit=request['limit'])
-    answer = paged_answer(lookup, window, **{key: request[key] for key in PAGED_FIELDS})
+    try:
+        answer = paged_answer(lookup, window, **{key: request[key] for key in PAGED_FIELDS})
+    except NotCachedError:
+        return not_cached_response(event)
     return success_response({
         **answer, 'page': page, 'page_size': page_size, **window.echo(), 'export': LABS_EXPORT,
     }, event)
@@ -216,8 +230,11 @@ def handle_pages(event: dict[str, Any], _context: Any, **request: Any) -> dict[s
 @json_object_body
 @validate(COMPETITORS_SCHEMA)
 def handle_competitors(event: dict[str, Any], _context: Any, *, body: dict[str, Any], market_id: str | None,
-                       include_subdomains: bool, **_request: Any) -> dict[str, Any]:
-    """POST /api/seo/domains/competitors - the domains ranking on up to 200 keywords."""
+                       include_subdomains: bool, cached_only: bool, **_request: Any) -> dict[str, Any]:
+    """POST /api/seo/domains/competitors - the domains ranking on up to 200 keywords.
+
+    With ``cached_only`` (a server export of the table on screen) a cache miss is 409 ``NOT_CACHED``, never a paid call.
+    """
     keywords, error = keyword_list(body.get('keywords'), 'keywords', MAX_COMPETITOR_KEYWORDS)
     if keywords is None:
         return seo_error(400, 'VALIDATION_ERROR', error or 'keywords is invalid', event, 'keywords')
@@ -226,6 +243,8 @@ def handle_competitors(event: dict[str, Any], _context: Any, *, body: dict[str, 
               'include_subdomains': include_subdomains}
     cached = COMPETITORS_CACHE.get(params)
     hit = isinstance(cached, dict) and isinstance(cached.get('items'), list)
+    if cached_only and not hit:
+        return not_cached_response(event)
     payload: dict[str, Any] = cached if isinstance(cached, dict) and hit else _fresh_competitors(
         keywords, codes, include_subdomains, params,
     )

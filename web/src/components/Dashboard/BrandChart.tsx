@@ -74,6 +74,10 @@ export const BrandChart = ({ data }: BrandChartProps) => {
       canvasRef={canvasRef}
       hasData={hasData}
       emptyHint="Run an analysis to see brand stats"
+      seeAll={{
+        to: '/brands',
+        label: 'See all brands',
+      }}
       emptyIconPaths={BRAND_MENTIONS_EMPTY_ICON_PATHS}
     />
   );

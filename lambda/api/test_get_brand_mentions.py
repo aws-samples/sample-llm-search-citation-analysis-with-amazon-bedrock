@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 
-from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords
 from testing.events import parse_response
 from testing.report_scope_fixtures import OLD_TS, RUN_TS, load_scoped_handler, scoped_report
@@ -84,13 +83,13 @@ class TestBoundedReads:
 
 
 class TestAppearancesView:
-    def test_lists_every_appearance_of_the_selected_runs(self, coruna):
+    def test_lists_every_appearance_keyword_major_by_overall_rank(self, coruna):
         body = coruna.body({'group_id': 'coruna', 'view': 'appearances'})
 
         assert [(row['brand'], row['keyword'], row['provider']) for row in body['appearances']] == [
+            ('Rival Inn', 'best hotels galicia', 'openai'),
             ('Hotel Coruna', 'hotel coruna spa', 'openai'),
             ('Hotel Coruna', 'hotel coruna spa', 'gemini'),
-            ('Rival Inn', 'best hotels galicia', 'openai'),
             ('Rival Inn', 'hotel coruna spa', 'openai'),
         ]
 
@@ -145,6 +144,11 @@ class TestTimeBudget:
 
         assert (status, body['keywords_analyzed'], body['keywords_truncated'], body['truncated']) == (200, 0, True, True)
 
+    def test_group_summary_coverage_says_the_unread_keywords_are_missing(self, spent):
+        body = parse_response(spent.call({'group_id': 'coruna'}))[1]
+
+        assert (body['coverage']['keywords_analyzed'], body['coverage']['complete'], body['source']) == (0, False, 'live')
+
     def test_group_appearances_answer_200_flagged_partial(self, spent):
         status, body = parse_response(spent.call({'group_id': 'coruna', 'view': 'appearances'}))
 
@@ -160,11 +164,11 @@ class TestTimeBudget:
 
         assert (body['keywords_truncated'], body['truncated']) == (False, False)
 
-    def test_group_appearances_read_at_most_the_scope_keyword_cap(self, brand_mentions):
-        # The summary's cap is pinned by test_get_brand_mentions_volume.py.
-        keywords = volume_keywords(SCOPE_KEYWORDS_CAP + 1)
+    def test_group_appearances_read_every_keyword_of_a_live_scope_past_the_former_cap(self, brand_mentions):
+        # 101 keywords: one more than the 2.44.0 scope cap; within the live budget, so every keyword is read.
+        keywords = volume_keywords(101)
         with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows={}, active=keywords) as report:
-            report.call({'group_id': VOLUME_GROUP_ID, 'view': 'appearances'})
+            body = report.body({'group_id': VOLUME_GROUP_ID, 'view': 'appearances'})
             partitions = {key_parts(call.kwargs['KeyConditionExpression'])[0] for call in report.tables['search'].query.call_args_list}
 
-        assert len(partitions) == SCOPE_KEYWORDS_CAP
+        assert (len(partitions), body['keywords_truncated'], body['coverage']['complete']) == (101, False, True)

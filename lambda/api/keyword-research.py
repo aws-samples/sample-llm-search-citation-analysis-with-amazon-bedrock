@@ -56,6 +56,7 @@ from shared.decorators import (
     route_handler,
     validate,
 )
+from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
 from shared.env_vars import resolve_table_env
 from shared.merged_pages import MergeSpec, PartitionReader, decode_positions, merged_page, query_reader
@@ -542,9 +543,9 @@ def _template_view(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _list_templates(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /api/keyword-research/templates — the built-in industry templates first, then saved ones by name."""
-    response = templates_table.scan(Limit=MAX_TEMPLATES)
-    saved = sorted((_template_view(item) for item in response.get('Items', []) if item.get('id')), key=lambda item: item['name'].casefold())
+    """GET /api/keyword-research/templates — the built-in industry templates first, then every saved one by name (the scan follows every page)."""
+    saved_items = collect_all_items(templates_table.scan)
+    saved = sorted((_template_view(item) for item in saved_items if item.get('id')), key=lambda item: item['name'].casefold())
     items = [*builtin_templates(), *saved]
     return success_response({'items': items, 'count': len(items)}, event)
 

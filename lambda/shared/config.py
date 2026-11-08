@@ -51,6 +51,10 @@ LLM_PROVIDERS: list[str] = [
     Provider.GOOGLE_AI_OVERVIEW,
 ]
 
+#: Answer engines a run asks the plain keyword once per keyword, whatever the personas
+#: (``search/handler.py``): Google takes no persona wording.
+PLAIN_KEYWORD_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW})
+
 # List of search providers (for iteration)
 SEARCH_PROVIDERS: list[str] = [
     Provider.BRAVE,

@@ -1,7 +1,11 @@
 import { useEffect } from 'react';
 import {
-  useNavigate, useParams 
+  useNavigate, useParams, useSearchParams
 } from 'react-router-dom';
+import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
+import { GroupScopeSelector } from '../layout/GroupScopeSelector';
+import { scopeFromSearch } from '../scopeReport/scopeReportRoute';
+import type { ReportScope } from '../../../types';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 import {
@@ -12,6 +16,8 @@ import { HeadlineSection } from './sections/HeadlineSection';
 import { OutrankedKeywordsSection } from './sections/OutrankedKeywordsSection';
 import { OutreachTargetsSection } from './sections/OutreachTargetsSection';
 import { rollupSlice } from './sections/rollupSection';
+import { ExportAllButton } from '../../ui/ExportAllButton';
+import { requestParams } from '../../../api/exports';
 
 /**
  * Competitor Gap report. Per-competitor printable layout aimed at a
@@ -41,6 +47,10 @@ export function CompetitorGapReport() {
   const navigate = useNavigate();
   const { config } = useBrandConfig();
 
+  const [searchParams] = useSearchParams();
+  // `?group=<id>` narrows the rollup to one keyword group (2.45.0: the API honours the scope).
+  const scope = scopeFromSearch(searchParams, null);
+  const { groups } = useKeywordGroups();
   const configuredCompetitors = config?.tracked_brands?.competitors ?? [];
   const selected = params.competitor
     ? decodeURIComponent(params.competitor)
@@ -71,7 +81,7 @@ export function CompetitorGapReport() {
     }
   }, [selected, configuredCompetitors, navigate]);
 
-  const data = useCompetitorGap(configuredSelection(selected, configuredCompetitors));
+  const data = useCompetitorGap(configuredSelection(selected, configuredCompetitors), scope);
 
   usePrintMode({ ready: Boolean(selected) && data.ready });
 
@@ -105,13 +115,17 @@ export function CompetitorGapReport() {
       title={`Competitor Gap — ${selected}`}
       subtitle="Where this competitor outranks us, who cites them but not us, and the outreach targets ordered by visibility lift."
       actions={(
-        <CompetitorSwitcher
-          selected={selected}
-          competitors={configuredCompetitors}
-          onChange={(next) => {
-            navigate(`/reports/competitor/${encodeURIComponent(next)}`);
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <GroupScopeSelector groups={groups} value={scope} onChange={(next) => navigate(competitorPath(selected, next))} />
+          <CompetitorSwitcher
+            selected={selected}
+            competitors={configuredCompetitors}
+            onChange={(next) => {
+              navigate(competitorPath(next, scope));
+            }}
+          />
+          <ExportAllButton view="competitor-gap" params={requestParams(data.request)} />
+        </div>
       )}
     >
       <HeadlineSection
@@ -123,6 +137,12 @@ export function CompetitorGapReport() {
       <OutreachTargetsSection {...rollupSlice(data)} />
     </ReportLayout>
   );
+}
+
+/** The report of `competitor` over `scope`: `?group=` for a keyword group, nothing for every keyword. */
+function competitorPath(competitor: string, scope: ReportScope): string {
+  const path = `/reports/competitor/${encodeURIComponent(competitor)}`;
+  return scope.kind === 'group' ? `${path}?group=${encodeURIComponent(scope.groupId)}` : path;
 }
 
 /** The competitor picker of the Competitor Gap report, and of custom reports with its blocks. */

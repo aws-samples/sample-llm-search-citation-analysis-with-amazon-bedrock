@@ -4,6 +4,7 @@ import type {
   ContentStudioHistory,
 } from '../../../../types';
 import type { SectionFetchState } from '../../layout';
+import type { ListRequest } from '../../../../api/scopedListPages';
 import type { useContentActionPlan } from '../useContentActionPlan';
 
 /**
@@ -14,6 +15,8 @@ export interface ContentPlanSectionProps extends SectionFetchState {
   readonly gaps: CitationGapsResponse | null;
   readonly ideas: ReadonlyArray<ContentIdea>;
   readonly history: ReadonlyArray<ContentStudioHistory>;
+  /** The citation-gaps request: Export all of the coverage map exports its keyword summaries. */
+  readonly gapsRequest?: ListRequest | null;
 }
 
 /**
@@ -25,6 +28,7 @@ export function joinedContentPlan(plan: ReturnType<typeof useContentActionPlan>)
     gaps: plan.gaps,
     ideas: plan.ideas,
     history: plan.history,
+    gapsRequest: plan.gapsRequest,
     loading: plan.gapsLoading || plan.studioLoading,
     error: plan.gapsError ?? plan.studioError,
   };

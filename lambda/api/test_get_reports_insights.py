@@ -21,6 +21,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from shared.artifact_insights import InsightsBuilder
+from testing.action_handler_fixtures import snapshot_route
 from testing.events import parse_response
 from testing.report_scope_fixtures import (
     OLD_TS,
@@ -33,6 +35,7 @@ from testing.report_scope_fixtures import (
     scoped_report,
 )
 from testing.search_results_fixtures import sort_condition
+from testing.snapshot_fakes import FakeSnapshotArtifacts
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -125,12 +128,26 @@ class TestScope:
 
         assert (body['timestamp'], body['keywords_analyzed'], body['keywords_with_data']) == coverage
 
-    def test_caps_a_group_at_one_hundred_keywords(self, insights: ModuleType, history_since: MagicMock):
+    def test_analyses_every_keyword_of_a_group_beyond_the_old_cap(self, insights: ModuleType, history_since: MagicMock):
         crowd = [{'id': f'faro-{i}', 'keyword': f'faro keyword {i:03}', 'status': 'active', 'group_ids': {'faro'}} for i in range(101)]
         with _wired(insights, active=crowd) as wired:
             body = wired.body(FARO)
 
-        assert (body['keywords_analyzed'], body['keywords_truncated'], body['scope']['keyword_count']) == (100, True, 101)
+        assert (body['keywords_analyzed'], body['keywords_truncated'], body['coverage']['complete']) == (101, False, True)
+
+    def test_a_large_group_is_served_from_its_snapshot(self, insights: ModuleType, history_since: MagicMock):
+        stored = FakeSnapshotArtifacts({'insights': InsightsBuilder().finalize(None)['insights']}, keywords_total=2)
+        with _wired(insights) as wired, snapshot_route(stored):
+            body = wired.body({'scope': 'all'})
+
+        assert (body['source'], body['keywords_analyzed'], body['insights']) == ('snapshot', 0, [])
+
+    def test_a_group_window_that_is_not_stored_answers_202(self, insights: ModuleType, history_since: MagicMock):
+        stored = FakeSnapshotArtifacts({'insights': {**InsightsBuilder().finalize(None)['insights'], 'group': True}}, keywords_total=2)
+        with _wired(insights) as wired, snapshot_route(stored) as calls:
+            response = wired.call({**FARO, 'days': '45'})
+
+        assert (response['statusCode'], calls.jobs[0][0]) == (202, 'reports-insights')
 
 
 class TestWindow:
@@ -161,7 +178,7 @@ class TestWindow:
 class TestFacts:
     def test_groups_the_facts_by_kind(self, report: ScopedReport):
         assert list(report.body(FARO)['facts']) == [
-            'engines', 'prompt_engine', 'citation_ownership', 'owned_pages', 'competitor_caveats', 'portfolio', 'stability',
+            'engines', 'prompt_engine', 'citation_ownership', 'owned_pages', 'competitor_caveats', 'caveat_reasons', 'portfolio', 'stability',
         ]
 
     def test_places_the_brand_per_keyword_and_engine_of_the_latest_runs(self, report: ScopedReport):

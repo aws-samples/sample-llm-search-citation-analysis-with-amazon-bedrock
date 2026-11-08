@@ -127,6 +127,28 @@ def test_issues_of_one_type_list_the_affected_pages(finished: Api):
     )
 
 
+def test_issue_types_of_a_finished_audit_say_the_audit_is_not_running(finished: Api):
+    _status, body = finished.call('GET', f'{BASE}/{AUDIT_ID}/issues')
+
+    assert body['audit_running'] is False
+
+
+def test_issue_types_of_a_running_audit_say_the_audit_is_running(api: Api):
+    api.store.create_audit(new_audit_item())
+
+    _status, body = api.call('GET', f'{BASE}/{AUDIT_ID}/issues')
+
+    assert (body['issue_types'], body['audit_running']) == ([], True)
+
+
+def test_affected_pages_of_a_running_audit_say_the_audit_is_running(api: Api):
+    api.store.create_audit(new_audit_item())
+
+    _status, body = api.call('GET', f'{BASE}/{AUDIT_ID}/issues', query={'issue_type': 'missing-title'})
+
+    assert body['audit_running'] is True
+
+
 def test_an_unknown_issue_type_is_refused(finished: Api):
     status, body = finished.call('GET', f'{BASE}/{AUDIT_ID}/issues', query={'issue_type': 'nope'})
 

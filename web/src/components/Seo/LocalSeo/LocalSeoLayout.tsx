@@ -2,11 +2,7 @@
 import type {
   SubmitEvent, ReactNode
 } from 'react';
-import {
-  exportTableToExcel, type TableExport
-} from '../../../exporters/tableExcel';
 import { Button } from '../../ui/Button';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
 import {
   SeoRequestStatus, type SeoRequestStatusProps
 } from '../SeoRequestStatus';
@@ -17,7 +13,7 @@ interface LocalCardProps {
   readonly note?: ReactNode;
   /** Whether the answer in the card came from the cache: "From cache" shows on the right of the title. */
   readonly cached?: boolean;
-  /** Buttons on the far right of the title row, e.g. the table's Excel export. */
+  /** Buttons on the far right of the title row, e.g. the table's export. */
   readonly actions?: ReactNode;
   readonly children: ReactNode;
 }
@@ -37,18 +33,6 @@ export function LocalCard({
       </div>
       {children}
     </section>
-  );
-}
-
-/** "Export to Excel" for the rows a local table shows (no new paid call). */
-export function LocalExcelButton<TRow>({ table }: { readonly table: TableExport<TRow> }) {
-  return (
-    <ExportExcelButton
-      onExport={() => exportTableToExcel(table)}
-      failureLabel={`[seo] ${table.sheetName} Excel export failed:`}
-      disabled={table.rows.length === 0}
-      title="The rows of this table"
-    />
   );
 }
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Link, useLocation
 } from 'react-router-dom';
+import { useExports } from '../../hooks/useExports';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import type { TabType } from '../../types';
 import { useMarketSelection } from '../Markets/marketSelectionContext';
@@ -139,6 +140,7 @@ export const Sidebar = ({
   const { isAdmin } = useIsAdmin();
   const { catalog } = useMarketSelection();
   const attention = useSettingsAttention();
+  const exportsUnseen = useExports()?.unseenCount ?? 0;
   const {
     openGroup, setOpenGroup
   } = useOpenGroup(activeTab);
@@ -160,6 +162,7 @@ export const Sidebar = ({
 
   const navSections = buildNavSections({
     schedulesCount,
+    exportsUnseen,
     settings: {
       isAdmin,
       keywordsCount,

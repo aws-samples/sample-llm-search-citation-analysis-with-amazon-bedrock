@@ -14,17 +14,15 @@ import type {
   BusinessListing, BusinessSearchRequest, ListingsSort
 } from '../../../types/api/seoLocal';
 import { Button } from '../../ui/Button';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import {
   PointFields, SelectField, TextField
 } from './LocalSeoFields';
 import {
-  LocalCard, LocalExcelButton, LocalForm, LocalTable, RequestOutcome
+  LocalCard, LocalForm, LocalTable, RequestOutcome
 } from './LocalSeoLayout';
 import {
-  listingsExport, localScopeLabel 
-} from './localSeoExcel';
-import {
-  EMPTY_POINT, hasSearchPoint, pointFields, sortedByDescending, type PointInput
+  EMPTY_POINT, hasSearchPoint, localExportParams, pointFields, type PointInput
 } from './localSeoRequest';
 import {
   BrandNameHint, MarketPointHint, marketHasPoint, type LocalSeoSettings
@@ -52,12 +50,6 @@ const LIMITS = ['20', '50'].map((limit) => ({
   label: `${limit} businesses` 
 }));
 const LISTING_HEADERS = ['Business', 'Rating', 'Reviews', 'Category', 'Claimed', 'Phone', 'Website', 'Profile'];
-
-function shownRows(rows: readonly BusinessListing[], sort: ListingsSort): BusinessListing[] {
-  if (sort === 'rating') return sortedByDescending(rows, (row) => row.rating);
-  if (sort === 'reviews') return sortedByDescending(rows, (row) => row.reviews_count);
-  return [...rows];
-}
 
 function claimedLabel(claimed: boolean | null): string {
   if (claimed === null) return '–';
@@ -157,7 +149,7 @@ export function BusinessSearchTab({
   const [radius, setRadius] = useState('10');
   const [sort, setSort] = useState<ListingsSort>('relevance');
   const [limit, setLimit] = useState('20');
-  const [searched, setSearched] = useState('');
+  const [searched, setSearched] = useState<BusinessSearchRequest | null>(null);
   const named = query.trim() !== '' || category.trim() !== '';
   const canSearch = named && hasSearchPoint(point, marketHasPoint(market)) && request.state.status !== 'loading';
   const footer = (
@@ -175,8 +167,7 @@ export function BusinessSearchTab({
         submitLabel="Search"
         canSubmit={canSearch}
         onSubmit={() => {
-          setSearched(localScopeLabel([query, category], point, market.city));
-          void request.run({
+          const body: BusinessSearchRequest = {
             ...market.marketField,
             ...searchBody({
               query,
@@ -184,9 +175,11 @@ export function BusinessSearchTab({
               point,
               radius,
               sort,
-              limit 
-            }) 
-          });
+              limit
+            })
+          };
+          setSearched(body);
+          void request.run(body);
         }}
         footer={footer}
       >
@@ -201,12 +194,13 @@ export function BusinessSearchTab({
       </LocalForm>
       <RequestOutcome state={request.state} loadingLabel="Loading businesses" columns={8}>
         {(response) => {
-          const rows = shownRows(response.businesses, sort);
+          // The API lists the businesses in the searched sort, as the export does.
+          const rows = response.businesses;
           return (
             <LocalCard
               title={`${integerText(rows.length)} ${rows.length === 1 ? 'business' : 'businesses'}`}
               cached={response.cached}
-              actions={<LocalExcelButton table={listingsExport(rows, searched)} />}
+              actions={<ExportAllButton view="seo-local" params={rows.length > 0 && searched !== null ? localExportParams('Businesses', searched) : null} />}
             >
               <ListingsTable rows={rows} onOpen={onOpenBusiness} />
             </LocalCard>

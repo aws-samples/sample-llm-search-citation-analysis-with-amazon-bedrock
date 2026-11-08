@@ -27,11 +27,12 @@ export function noTrendMessage(days: number): string {
  */
 export function gateLatestRuns(report: ScopeReportData, title: string): SectionGate<VisibilityResponse> {
   const {
-    data, loading, error
+    data, loading, error, computing
   } = report.visibility;
   return gateSection({
     title,
     loading,
+    computing,
     loadingMessage: LATEST_RUNS_LOADING,
     error,
     value: data !== null && data.keywords_with_data > 0 ? data : null,
@@ -42,11 +43,12 @@ export function gateLatestRuns(report: ScopeReportData, title: string): SectionG
 /** Gates a section on the trend (`/trends`): loading, then error, then empty while the period has no run. */
 export function gateTrend(report: ScopeReportData, title: string): SectionGate<HistoricalTrendsResponse> {
   const {
-    data, loading, error
+    data, loading, error, computing
   } = report.trends;
   return gateSection({
     title,
     loading,
+    computing,
     loadingMessage: TREND_LOADING,
     error,
     value: data !== null && data.trend_data.length > 0 ? data : null,

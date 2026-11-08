@@ -10,6 +10,7 @@ import {
 import { useReportReady } from '../layout/useReportReady';
 import type { ReportSlice } from '../layout/sectionGate';
 import { trendPeriodFor } from './scopeReportRoute';
+import type { ListRequest } from '../../../api/scopedListPages';
 
 /** What every scope report renders from. */
 export interface ScopeReportData {
@@ -23,15 +24,21 @@ export interface ScopeReportData {
   readonly period: PeriodType;
   /** Both fetches settled: the page may print. */
   readonly ready: boolean;
+  /** The `/visibility` request: its brand and source lists page with it, and Export all exports it (2.45.0 wave 5). */
+  readonly visibilityRequest?: ListRequest | null;
+  /** The `/trends` request: Export all of the trend sections. */
+  readonly trendsRequest?: ListRequest | null;
 }
 
 function sliceOf<T>({
-  data, loading, error
+  data, loading, error, computing = null
 }: ReportSlice<T>): ReportSlice<T> {
   return {
     data,
     loading,
     error,
+    // Only while a view job runs, so a settled slice keeps its three fields.
+    ...(computing === null ? {} : { computing }),
   };
 }
 
@@ -66,5 +73,7 @@ export function useScopeReportData(scope: ReportScope, days: number): ScopeRepor
     days,
     period,
     ready,
+    visibilityRequest: visibility.request,
+    trendsRequest: trends.request,
   };
 }

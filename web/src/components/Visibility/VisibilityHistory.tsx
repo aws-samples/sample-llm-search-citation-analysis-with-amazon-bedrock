@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { HistoricalTrendsResponse } from '../../types';
 import { formatDateOnly } from '../../formatting/dateFormatter';
 import {
@@ -18,6 +19,8 @@ interface Props {
   readonly onRangeChange: (days: HistoryRangeDays) => void;
   /** The trends request is in flight; with no trends yet, a chart-sized placeholder holds the panel's height. */
   readonly loading?: boolean;
+  /** The KPI history's Export all, next to the range buttons. */
+  readonly exportButton?: ReactNode;
 }
 
 function RangeButton({
@@ -79,13 +82,18 @@ function HistoryBody({
 
 /** The headline KPIs per period over the chosen range as lines, with how they are drawn in a tooltip. */
 export function VisibilityHistory({
-  trends, error, rangeDays, onRangeChange, loading
+  trends, error, rangeDays, onRangeChange, loading, exportButton
 }: Props) {
   return (
     <OverviewPanel
       title={HISTORY_TITLE}
       info={KPI_TREND_INFO}
-      actions={<RangeButtons rangeDays={rangeDays} onRangeChange={onRangeChange} />}
+      actions={(
+        <div className="flex flex-wrap items-center gap-2">
+          <RangeButtons rangeDays={rangeDays} onRangeChange={onRangeChange} />
+          {exportButton}
+        </div>
+      )}
     >
       <HistoryBody trends={trends} error={error} loading={loading} />
     </OverviewPanel>

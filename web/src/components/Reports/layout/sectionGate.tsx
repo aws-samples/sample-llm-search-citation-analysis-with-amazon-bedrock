@@ -1,11 +1,17 @@
 import type { ReactElement } from 'react';
 import { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
+import type { ComputingResponse } from '../../../types/domain/scopeCoverage';
 
 /** Whether the fetch a report section renders from is still in flight, or failed. */
 export interface SectionFetchState {
   readonly loading: boolean;
   readonly error: string | null;
+  /** The fetch waits for a `202` view job (2.45.0): the loading placeholder says the complete figures are being computed. */
+  readonly computing?: ComputingResponse | null;
 }
+
+/** The loading text of a section whose figures a view job is computing. */
+export const COMPUTING_SECTION_MESSAGE = 'Computing the complete figures for every keyword of this scope… This can take a few minutes; the report updates by itself.';
 
 /** A report section's payload (`null` until it is loaded) and the state of its fetch. */
 export interface ReportSlice<T> extends SectionFetchState {readonly data: T | null;}
@@ -31,6 +37,7 @@ export function pendingSectionPlaceholder({
   loadingMessage,
   loadingSubtitle,
   error,
+  computing = null,
 }: PendingSectionOptions): ReactElement | null {
   if (loading) {
     return (
@@ -38,7 +45,7 @@ export function pendingSectionPlaceholder({
         title={title}
         subtitle={loadingSubtitle}
         variant="loading"
-        message={loadingMessage}
+        message={computing === null ? loadingMessage : COMPUTING_SECTION_MESSAGE}
       />
     );
   }

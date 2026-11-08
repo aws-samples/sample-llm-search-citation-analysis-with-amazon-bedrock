@@ -2,34 +2,40 @@ import {
   describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  waitFor, screen
+  screen, waitFor
 } from '@testing-library/react';
+import { mockStartExport } from '../../test/exportsApiMock';
+import { exportPlan } from '../../exporters/paidExport';
+import type { ExportsCenter } from '../../hooks/useExports';
+import { ApiRequestError } from '../../infrastructure';
 import {
-  askedWindows, fakeFailingFetch, fakeStalledFetch, listRows, WINDOWS_OF_2500
-} from '../../exporters/paidExport-fixtures';
-import {
-  clickCancel, getDownloadElement, getPriceLineElement, getRowsInputElement, renderDownloadClicked, renderPaidExportModal,
-  settle, silenceExportFailures, typeRows
+  KEYWORD_LIST, getPriceLineElement, getRowsInputElement, getScreenExportElement, getStartElement, renderPaidExportModal,
+  renderStartClicked, silenceExportFailures, typeRows
 } from './PaidExportModal-fixtures';
 import { BACKLINKS_EXPORT } from '../../api/seoBacklinks-fixtures';
 import { LABS_EXPORT } from '../../api/seoDomains-fixtures';
-import type { FetchChunk } from '../../exporters/paidExport';
 
-vi.mock('../../api/seo', () => import('../../test/seoApiMock'));
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
-const UNAVAILABLE = 'DataForSEO is unavailable';
+const PRICE_CHANGED = 'The price of this export is not the one confirmed. Open the export again to see its price.';
 
-describe('PaidExportModal before Download', () => {
+describe('PaidExportModal before the export starts', () => {
   it('names the table in its title', () => {
     renderPaidExportModal();
 
-    expect(screen.getByRole('dialog', { name: 'Export ranked keywords to Excel' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Export ranked keywords' })).toBeInTheDocument();
   });
 
-  it('says the rows are a new, paid DataForSEO request', () => {
+  it('says the rows are new, paid DataForSEO requests', () => {
     renderPaidExportModal();
 
-    expect(screen.getByRole('dialog')).toHaveTextContent('the export is a new request, and DataForSEO charges for the rows it returns');
+    expect(screen.getByRole('dialog')).toHaveTextContent('the export makes new requests, and DataForSEO charges for the rows it returns');
+  });
+
+  it('says the file arrives on the Exports page', () => {
+    renderPaidExportModal();
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('runs in the background: the file appears on the Exports page');
   });
 
   it('asks for 1000 rows by default', () => {
@@ -57,17 +63,17 @@ describe('PaidExportModal before Download', () => {
     expect(getPriceLineElement()).toHaveTextContent(price);
   });
 
-  it('says a repeat export within 6 hours is free', () => {
+  it('says a repeat export within the answer\'s 12-hour cache window is free', () => {
     renderPaidExportModal();
 
-    expect(screen.getByText('Exporting the same rows again within 6 hours is free.')).toBeInTheDocument();
+    expect(screen.getByText('Exporting the same rows again within 12 hours is free.')).toBeInTheDocument();
   });
 
-  it('makes no request while the rows are picked', async () => {
-    const rendered = renderPaidExportModal();
-    await typeRows(rendered.user, '3000');
+  it('queues nothing while the rows are picked', async () => {
+    const { user } = renderPaidExportModal();
+    await typeRows(user, '3000');
 
-    expect(rendered.fetchChunk.mock.calls).toStrictEqual([]);
+    expect(mockStartExport.mock.calls).toStrictEqual([]);
   });
 });
 
@@ -97,109 +103,124 @@ describe('PaidExportModal row count', () => {
     expect(screen.getByText(hint)).toBeInTheDocument();
   });
 
-  it.each(['', '0'])('disables Download for the row count "%s"', async (typed) => {
+  it.each(['', '0'])('disables Start export for the row count "%s"', async (typed) => {
     const { user } = renderPaidExportModal();
     await typeRows(user, typed);
 
-    expect(getDownloadElement()).toBeDisabled();
+    expect(getStartElement()).toBeDisabled();
   });
 });
 
-describe('PaidExportModal Download', () => {
-  it('asks the chunks one after the other, the last one the remainder', async () => {
-    const rendered = await renderDownloadClicked('2500');
-    await waitFor(() => {
-      expect(rendered.onDownload.mock.calls).toHaveLength(1);
-    });
-
-    expect(askedWindows(rendered.fetchChunk)).toStrictEqual(WINDOWS_OF_2500);
-  });
-
-  it('downloads every fetched row in order', async () => {
-    const { onDownload } = await renderDownloadClicked('2500');
+describe('PaidExportModal Start export', () => {
+  it('queues the list with the confirmed rows and their price, as Excel by default', async () => {
+    await renderStartClicked('2500');
 
     await waitFor(() => {
-      expect(onDownload).toHaveBeenCalledWith(listRows(2500, 0, 2500));
+      expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'seo-domain',
+        params: {
+          ...KEYWORD_LIST,
+          rows: '2500',
+          price_usd: String(exportPlan(2500, LABS_EXPORT).priceUsd),
+        },
+        format: 'xlsx',
+      });
     });
   });
 
-  it('closes once the file is written', async () => {
-    const { onClose } = await renderDownloadClicked(null);
+  it('queues a CSV file when CSV is chosen', async () => {
+    const { user } = renderPaidExportModal();
+    await user.selectOptions(screen.getByLabelText('File format'), 'csv');
+    await user.click(getStartElement());
+
+    await waitFor(() => {
+      expect(mockStartExport.mock.lastCall?.[0].format).toBe('csv');
+    });
+  });
+
+  it('says the export started when no Exports center is mounted', async () => {
+    await renderStartClicked(null);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Export started — find it on the Exports page.');
+  });
+
+  it('disables Start export once the export is queued', async () => {
+    await renderStartClicked(null);
+    await screen.findByRole('status');
+
+    expect(getStartElement()).toBeDisabled();
+  });
+});
+
+describe('PaidExportModal with the Exports center', () => {
+  it('queues through the center and closes', async () => {
+    const start = vi.fn<ExportsCenter['start']>(mockStartExport);
+    const {
+      user, onClose 
+    } = renderPaidExportModal({}, start);
+    await user.click(getStartElement());
 
     await waitFor(() => {
       expect(onClose).toHaveBeenCalledWith();
     });
   });
 
-  it('shows which rows are being fetched', async () => {
-    await renderDownloadClicked('2500', { fetchChunk: fakeStalledFetch() });
+  it('leaves the started toast to the center', async () => {
+    const start = vi.fn<ExportsCenter['start']>(mockStartExport);
+    const { user } = renderPaidExportModal({}, start);
+    await user.click(getStartElement());
+    await waitFor(() => {
+      expect(start.mock.calls).toHaveLength(1);
+    });
 
-    expect(await screen.findByText('Fetching rows 1–1,000 of 2,500…')).toBeInTheDocument();
-  });
-
-  it('disables Download while the rows are fetched', async () => {
-    await renderDownloadClicked(null, { fetchChunk: fakeStalledFetch() });
-
-    expect(getDownloadElement()).toBeDisabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
 
-describe('PaidExportModal cancel and errors', () => {
+describe('PaidExportModal errors', () => {
   beforeEach(silenceExportFailures);
 
-  it('asks no further chunk once Cancel is pressed mid-export', async () => {
-    const answers: Array<(rows: number[]) => void> = [];
-    const fetchChunk = vi.fn<FetchChunk<number>>(() => new Promise((resolve) => {
-      answers.push(resolve);
+  it('shows why the export could not start and stays open', async () => {
+    mockStartExport.mockRejectedValueOnce(new ApiRequestError(PRICE_CHANGED, {
+      statusCode: 400,
+      responseMessage: PRICE_CHANGED,
     }));
-    const rendered = await renderDownloadClicked('2500', { fetchChunk });
-    await clickCancel(rendered.user);
-    answers[0](listRows(2500, 0, 1000));
-    await settle();
+    const { onClose } = await renderStartClicked(null);
 
-    expect(rendered.onClose).toHaveBeenCalledWith();
-    expect([fetchChunk.mock.calls.length, rendered.onDownload.mock.calls.length]).toStrictEqual([1, 0]);
-  });
-
-  it('aborts the request in flight on Cancel', async () => {
-    const fetchChunk = fakeStalledFetch();
-    const { user } = await renderDownloadClicked(null, { fetchChunk });
-    await clickCancel(user);
-
-    expect(fetchChunk.mock.calls[0][2].aborted).toBe(true);
-  });
-
-  it('shows the error of a failed request and exports nothing', async () => {
-    const rendered = await renderDownloadClicked(null, { fetchChunk: fakeFailingFetch(UNAVAILABLE) });
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(UNAVAILABLE);
-    expect([rendered.onDownload.mock.calls.length, rendered.onClose.mock.calls.length]).toStrictEqual([0, 0]);
+    expect(await screen.findByRole('alert')).toHaveTextContent(PRICE_CHANGED);
+    expect(onClose.mock.calls).toStrictEqual([]);
   });
 
   it('lets the user retry after an error', async () => {
-    await renderDownloadClicked(null, { fetchChunk: fakeFailingFetch(UNAVAILABLE) });
+    mockStartExport.mockRejectedValueOnce(new ApiRequestError(PRICE_CHANGED, { statusCode: 400 }));
+    await renderStartClicked(null);
     await screen.findByRole('alert');
 
-    expect(getDownloadElement()).toBeEnabled();
+    expect(getStartElement()).toBeEnabled();
   });
 });
 
 describe('PaidExportModal rows on screen', () => {
-  const SCREEN_DOWNLOAD = {
-    role: 'button',
-    name: 'Download the 50 rows on screen (free)',
-  } as const;
-
   it('offers the rows on screen for free', () => {
     renderPaidExportModal();
 
-    expect(screen.getByRole(SCREEN_DOWNLOAD.role, { name: SCREEN_DOWNLOAD.name })).toBeEnabled();
+    expect(getScreenExportElement()).toBeEnabled();
   });
 
-  it('downloads the rows on screen without any request', async () => {
-    const rendered = renderPaidExportModal();
-    await rendered.user.click(screen.getByRole(SCREEN_DOWNLOAD.role, { name: SCREEN_DOWNLOAD.name }));
+  it('queues the page on screen without a row count or price', async () => {
+    const { user } = renderPaidExportModal();
+    await user.click(getScreenExportElement());
 
-    expect([rendered.onDownloadScreen.mock.calls.length, rendered.fetchChunk.mock.calls.length]).toStrictEqual([1, 0]);
+    await waitFor(() => {
+      expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'seo-domain',
+        params: {
+          ...KEYWORD_LIST,
+          page: '2',
+          page_size: '50',
+        },
+        format: 'xlsx',
+      });
+    });
   });
 });

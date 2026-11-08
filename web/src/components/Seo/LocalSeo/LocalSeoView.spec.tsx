@@ -9,7 +9,7 @@ import {
   fetchBusinessProfile, fetchLocalSerp, isSeoApiConfigured, paidCallCounts, searchBusinesses
 } from './localSeoApi-fixtures';
 import {
-  firstColumnTexts, openFirstBusiness, renderLocalSeo, searchBusinessesFor, searchLocalResults, setupLocalSeoPage
+  openFirstBusiness, renderLocalSeo, searchBusinessesFor, searchLocalResults, setupLocalSeoPage
 } from './LocalSeoView-fixtures';
 import { NOT_SET_UP_TITLE } from '../../KeywordResearch/explorer/KeywordExplorer';
 
@@ -54,25 +54,6 @@ describe('Business search tab', () => {
     await searchBusinessesFor('acme');
 
     expect(await screen.findByRole('cell', { name: 'Acme Cafe' })).toBeInTheDocument();
-  });
-
-  it('sorts businesses without a rating last when sorting by rating', async () => {
-    searchBusinesses.mockResolvedValue(buildSearchResponse([
-      buildListing({
-        title: 'Unrated',
-        cid: '1',
-        rating: null 
-      }), buildListing({
-        title: 'Rated',
-        cid: '2',
-        rating: 3 
-      }),
-    ]));
-
-    await searchBusinessesFor('bakery', 'rating');
-    await screen.findByRole('cell', { name: 'Unrated' });
-
-    expect(firstColumnTexts()).toStrictEqual(['Rated', 'Unrated']);
   });
 
   it('counts a single business in the singular', async () => {

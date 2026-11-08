@@ -1,7 +1,9 @@
 import {
   describe, expect, it, vi
 } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook
+} from '@testing-library/react';
 import {
   useKeywordRuns, useRunDrivers
 } from './useGroupKpiDetail';
@@ -66,11 +68,7 @@ describe('useKeywordRuns', () => {
   it('reads nothing without a keyword', () => {
     const { result } = renderHook(() => useKeywordRuns(SOL, 90, null));
 
-    expect([result.current, mockAuthenticatedFetch.mock.calls]).toStrictEqual([{
-      history: null,
-      loading: false,
-      error: null 
-    }, []]);
+    expect([result.current.history, result.current.loading, result.current.error, mockAuthenticatedFetch.mock.calls]).toStrictEqual([null, false, null, []]);
   });
 
   it('reports a page that is not a keyword page', async () => {
@@ -99,6 +97,39 @@ describe('useRunDrivers', () => {
     const { result } = await renderRun2Drivers();
 
     expect(result.current.drivers).toStrictEqual([buildDriver()]);
+  });
+
+  it('appends the drivers of the next page', async () => {
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({
+      changes: [buildRunDrivers()],
+      next_token: 'drivers-2',
+    }));
+    const { result } = await renderRun2Drivers();
+    const nextDriver = {
+      ...buildDriver(),
+      keyword: 'hotel sol playa',
+    };
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({
+      changes: [buildRunDrivers({ drivers: [nextDriver] })],
+      next_token: null,
+    }));
+
+    await act(() => result.current.more.loadMore?.() ?? Promise.resolve());
+
+    expect(result.current.drivers?.map((driver) => driver.keyword)).toStrictEqual([buildDriver().keyword, 'hotel sol playa']);
+  });
+
+  it('asks for the next drivers page with the cursor', async () => {
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({
+      changes: [buildRunDrivers()],
+      next_token: 'drivers-2',
+    }));
+    const { result } = await renderRun2Drivers();
+    mockDriversPage(buildRunDrivers());
+
+    await act(() => result.current.more.loadMore?.() ?? Promise.resolve());
+
+    expect(new URL(String(mockAuthenticatedFetch.mock.calls[1][0])).searchParams.get('next_token')).toBe('drivers-2');
   });
 
   it('answers no drivers when the page holds another run', async () => {

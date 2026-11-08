@@ -28,15 +28,15 @@ import {
   openRunConfirmation, renderEmptyMarket, renderRankTracking, renderWithResults, reviewAndConfirm, reviewNewTracker
 } from './RankTracking-fixtures';
 import {
-  lastExcelExport, stubExcelExport
-} from '../../../test/tableExcelExport';
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 vi.mock('../../../api/keywordGroups', () => ({ fetchKeywordGroups: vi.fn() }));
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
 vi.mock('../../../api/seoRankTracking');
-vi.mock('../../../exporters/tableExcel', { spy: true });
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 
 const NO_TRACKERS = buildTrackerList({ trackers: [] });
 
@@ -44,7 +44,6 @@ beforeEach(() => {
   mockAdminRole(true);
   vi.mocked(isSeoApiConfigured).mockReturnValue(true);
   mockRankTrackingApi();
-  stubExcelExport();
 });
 
 describe('RankTrackingView setup', () => {
@@ -454,22 +453,22 @@ describe('RankTrackingView one-click start', () => {
   });
 });
 
-describe('RankTrackingView Excel export', () => {
-  it('exports the shown result rows of the tracker domain', async () => {
-    await clickAfterResults('Export to Excel');
+describe('RankTrackingView export', () => {
+  it('exports the tracker results of the chosen period from the server', async () => {
+    const user = await renderWithResults();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Compare with' }), '30d');
+    await screen.findByRole('table');
 
-    const exported = lastExcelExport();
-    expect(exported.rows).toStrictEqual(buildRankResults().rows);
-    expect(exported.file).toStrictEqual(['Rank tracking', 'rank-tracking', 'example.com']);
-  });
+    await chooseExportFormat('xlsx');
 
-  it('writes the columns of both tracked devices', async () => {
-    await clickAfterResults('Export to Excel');
-
-    expect(lastExcelExport().headers?.slice(1)).toStrictEqual([
-      'Desktop position', 'Desktop change', 'Desktop URL', 'Desktop SERP features',
-      'Mobile position', 'Mobile change', 'Mobile URL', 'Mobile SERP features',
-    ]);
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'seo-rank-tracking',
+      params: {
+        period: '30d',
+        tracker_id: 'rt-example',
+      },
+      format: 'xlsx',
+    });
   });
 
   it('disables the export while the tracker has no results', async () => {
@@ -477,6 +476,6 @@ describe('RankTrackingView Excel export', () => {
 
     await renderWithResults();
 
-    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeDisabled();
   });
 });

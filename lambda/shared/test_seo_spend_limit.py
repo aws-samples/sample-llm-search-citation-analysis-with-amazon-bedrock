@@ -42,3 +42,27 @@ def test_falls_back_to_the_default_for_an_unusable_limit(monkeypatch, value):
     monkeypatch.setenv('SEO_PAID_REQUESTS_PER_DAY', value)
 
     assert seo_spend_limit.limit() == seo_spend_limit.DEFAULT_LIMIT
+
+
+def _event(claims):
+    return {'requestContext': {'authorizer': {'claims': claims}}}
+
+
+def test_counts_a_signed_in_caller_against_themselves_even_with_an_owner_claim():
+    assert seo_spend_limit.spender(_event({'cognito:username': 'mallory', 'custom:export_owner': 'alice'})) == 'mallory'
+
+
+def test_counts_an_export_read_against_the_exports_owner():
+    assert seo_spend_limit.spender(_event({'cognito:username': 'export-service', 'custom:export_owner': 'alice'})) == 'alice'
+
+
+def test_stops_an_export_read_at_the_owners_limit(monkeypatch):
+    seen = []
+    monkeypatch.setattr(seo_spend_limit, 'take', lambda who: seen.append(who) or False)
+    dispatch = MagicMock()
+    event = {**_event({'cognito:username': 'export-service', 'custom:export_owner': 'alice'}),
+             'httpMethod': 'POST', 'path': '/api/seo/domains/overview'}
+
+    answer = seo_spend_limit.limited(dispatch)(event, None)
+
+    assert (answer['statusCode'], seen, dispatch.call_count) == (429, ['alice'], 0)

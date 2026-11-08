@@ -39,6 +39,8 @@ interface FetchAlertsOptions {
   status: AlertStatusFilter;
   limit: number;
   signal?: AbortSignal;
+  /** The page after the one that answered this cursor (2.45.0 wave 5). */
+  nextToken?: string | null;
 }
 
 interface FetchContentChangesOptions {
@@ -63,13 +65,14 @@ function decodeResponse<TResponse>(
 }
 
 export async function fetchAlerts({
-  status, limit, signal
+  status, limit, signal, nextToken = null
 }: FetchAlertsOptions): Promise<AlertsResponse> {
   requirePositiveLimit(limit);
   const payload = await apiGet<unknown>('/alerts', {
     params: {
       status,
       limit: String(limit),
+      ...(nextToken === null ? {} : { next_token: nextToken }),
     },
     signal,
   });

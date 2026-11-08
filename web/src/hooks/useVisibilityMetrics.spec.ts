@@ -8,7 +8,7 @@ import {
 } from './useVisibilityMetrics-fixtures';
 import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -24,10 +24,11 @@ describe('useVisibilityMetrics', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useVisibilityMetrics());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchVisibilityMetrics'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchVisibilityMetrics'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'visibility',
     useHook: useVisibilityMetrics,
     fetchName: 'fetchVisibilityMetrics',

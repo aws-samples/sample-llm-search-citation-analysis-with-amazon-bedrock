@@ -55,7 +55,10 @@ def five_citation_event() -> dict[str, Any]:
 
 
 def _stored_urls(dedup) -> list[str]:
-    return [call.kwargs['Key']['normalized_url'] for call in dedup.citations_table.update_item.call_args_list]
+    """The URLs stored, in rank order (the writes run in parallel, so call order is not rank order)."""
+    calls = dedup.citations_table.update_item.call_args_list
+    ranked = sorted(calls, key=lambda call: call.kwargs['ExpressionAttributeValues'][':priority'])
+    return [call.kwargs['Key']['normalized_url'] for call in ranked]
 
 
 def _stored_values(dedup, url: str) -> dict[str, Any]:
@@ -130,9 +133,32 @@ def test_tags_each_crawl_item_with_its_content_type(dedup, five_citation_event):
 def test_numbers_every_stored_citation_by_rank(dedup, five_citation_event):
     dedup.handler(five_citation_event, None)
 
-    priorities = [call.kwargs['ExpressionAttributeValues'][':priority']
-                  for call in dedup.citations_table.update_item.call_args_list]
+    priorities = sorted(call.kwargs['ExpressionAttributeValues'][':priority']
+                        for call in dedup.citations_table.update_item.call_args_list)
     assert priorities == [1, 2, 3, 4, 5]
+
+
+def test_writes_every_citation_of_a_large_keyword_once(dedup):
+    citations = [
+        {'normalized_url': f'https://site-{index}.example/', 'original_urls': [f'https://site-{index}.example/'], 'citation_count': 1,
+         'citing_providers': ['openai'], 'priority': index + 1, 'content_type': 'page'}
+        for index in range(500)
+    ]
+    dedup.store_citations('family hotels', citations)
+
+    assert sorted(_stored_urls(dedup)) == sorted(citation['normalized_url'] for citation in citations)
+
+
+def test_writes_citations_in_parallel(dedup):
+    citations = [
+        {'normalized_url': f'https://site-{index}.example/', 'original_urls': [], 'citation_count': 1,
+         'citing_providers': ['openai'], 'priority': index + 1, 'content_type': 'page'}
+        for index in range(40)
+    ]
+    with patch.object(dedup, 'map_writes', wraps=dedup.map_writes) as writes:
+        dedup.store_citations('family hotels', citations)
+
+    assert (writes.call_count, dedup.citations_table.update_item.call_count) == (1, 40)
 
 
 def test_uses_the_shared_default_crawl_cap_when_no_override_is_set():

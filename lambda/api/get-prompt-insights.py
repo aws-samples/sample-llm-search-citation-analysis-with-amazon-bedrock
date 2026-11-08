@@ -1,283 +1,65 @@
 """
-Prompt Insights API
+Prompt Insights API — GET /api/prompt-insights
 
-Analyzes which prompts/keywords lead to brand mentions and provides
-insights on winning vs losing prompts.
+Which prompts (keywords) lead to brand mentions: the winning prompts (the
+first party in the top 3), the losing ones (absent or below 5th) and the
+opportunities (competitors named, the first party not), each classified from
+every answer of the keyword's **latest run** (``shared.prompt_classification``).
 
-Features:
-- Prompt-to-brand correlation
-- Winning prompts (high brand visibility)
-- Losing prompts (low/no brand visibility)
-- Prompt opportunities (keywords where competitors appear but you don't)
-
-Scope: the request takes the report scope every KPI endpoint accepts
-(``keyword`` | ``group_id`` | ``keyword_ids`` | ``scope=all``, see
-``shared.scope_params``); without one the tracked keywords (at most 50) are
-analysed, as before.
+Each list holds the ``limit`` best prompts of its whole ranking, with
+``<list>_total`` and ``<list>_next_token``; the same GET with ``type=<the
+list's type>`` and that ``next_token`` answers its next page (2.45.0 wave 5).
+``summary`` counts every prompt of the scope (any report scope; every active
+keyword without one). Where the
+lists come from, live or the ``prompts`` snapshot artifact, and the 202 of a
+scope not built yet: ``shared.action_scope_serve``. ``truncated`` mirrors
+``keywords_truncated``.
 """
 
-import logging
-import os
 import sys
-from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass, field
 from typing import Any
-
-import boto3
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared import action_scope_serve as action_lists
 from shared.api_response import success_response, validation_error
-from shared.brand_visibility import load_recent_search_results, tracked_brand_names
-from shared.decorators import api_handler, validate
-from shared.dynamo_decimal import to_int
-from shared.kpi_engine import percent
-from shared.request_deadline import current_deadline
-from shared.scope_params import SCOPE_QUERY_PARAMS
-from shared.scoped_reports import optional_scope_keywords
-from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
+from shared.artifact_prompts import STORED_PER_LIST
+from shared.brand_visibility import tracked_brand_names
+from shared.decorators import api_handler
+from shared.scope_params import ReportScope, scoped_dynamodb_resource
+from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-dynamodb = boto3.resource('dynamodb')
+dynamodb = scoped_dynamodb_resource()
 
 SEARCH_RESULTS_TABLE = search_results_table_name()
-KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 
-# Rank sentinel for a brand side that was never mentioned; reported as `best_rank: None`.
-_UNRANKED = 999
-# Keywords whose recent results the insights read (one partition query each).
-_MAX_KEYWORDS = 50
-# Prompts per list by default, and at most (``limit``); every list is cut to it before shaping.
+#: Prompts per list (page) by default, and at most (``limit``).
 DEFAULT_LIMIT = 20
-MAX_LIMIT = 100
-# What the insights read of each SearchResults row: never the answer text.
-_RESULT_PROJECTION = '#ts, keyword, provider, brands'
-# The one list a `type` keeps.
-_TYPE_LISTS = {'winning': 'winning_prompts', 'losing': 'losing_prompts', 'opportunities': 'opportunity_prompts'}
-
-
-def get_all_keywords() -> list[str]:
-    """Get all tracked keywords from Keywords table (small table, scan is acceptable).
-
-    Any failure of the scan is logged with its traceback and reported as "no
-    keywords", which the handler turns into a 400.
-    """
-    try:
-        # Keywords table is small (typically <100 items); the projected scan
-        # is capped so it cannot run away.
-        return scan_keyword_texts(dynamodb.Table(KEYWORDS_TABLE))
-    except Exception:
-        logger.exception("Error getting keywords")
-        return []
-
-
-def _group_by_keyword(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Bucket rows by keyword, keeping the order in which keywords were first seen."""
-    keyword_results: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in items:
-        keyword_results[item.get('keyword', '')].append(item)
-
-    logger.info('Found %s unique keywords', len(keyword_results))
-    return keyword_results
-
-
-@dataclass
-class _BrandPresence:
-    """Running tally of one brand side (first-party or competitors) across a keyword's latest run."""
-
-    mentions: int = 0
-    best_rank: int = _UNRANKED
-    providers: set[str] = field(default_factory=set)
-
-    def record(self, provider: str, brand: dict[str, Any]) -> None:
-        """Count one brand entry from `provider`'s response."""
-        self.mentions += to_int(brand.get('mention_count'), 1)
-        self.best_rank = min(self.best_rank, to_int(brand.get('rank'), _UNRANKED))
-        self.providers.add(provider)
-
-    def coverage(self, total_providers: int) -> float:
-        """Share of the run's providers that mentioned this side (0 for an empty run)."""
-        return len(self.providers) / total_providers if total_providers > 0 else 0
-
-    def as_dict(self, total_providers: int) -> dict[str, Any]:
-        """The per-side block of a prompt record."""
-        return {
-            'mentions': self.mentions,
-            'best_rank': self.best_rank if self.best_rank < _UNRANKED else None,
-            'provider_coverage': round(self.coverage(total_providers) * 100, 1),
-            'providers': list(self.providers),
-        }
-
-
-def _tally_brand_presence(latest_results: list[dict[str, Any]]) -> tuple[_BrandPresence, _BrandPresence]:
-    """Tally first-party and competitor mentions across one run, using the LLM-assigned classification."""
-    first_party = _BrandPresence()
-    competitors = _BrandPresence()
-    for result in latest_results:
-        provider = result.get('provider', '')
-        for brand in result.get('brands', []):
-            classification = brand.get('classification', 'other')
-            if classification == 'first_party':
-                first_party.record(provider, brand)
-            elif classification == 'competitor':
-                competitors.record(provider, brand)
-    return first_party, competitors
-
-
-def _classify_prompt(first_party: _BrandPresence, competitors: _BrandPresence, total_providers: int) -> dict[str, Any]:
-    """The prompt's `status` plus the score field that status carries.
-
-    Winning: first-party in the top 3 (`score`). Opportunity: competitors appear
-    but first-party does not (`opportunity_score`). Losing: first-party absent or
-    ranked below 5 (`improvement_potential`). Neutral: first-party at rank 4-5,
-    unscored; it is listed among the winning prompts.
-    """
-    fp_provider_coverage = first_party.coverage(total_providers)
-
-    if first_party.mentions > 0 and first_party.best_rank <= 3:
-        score = (
-            (fp_provider_coverage * 50) +
-            ((4 - first_party.best_rank) / 3 * 30) +
-            (min(first_party.mentions, 10) / 10 * 20)
-        )
-        return {'status': 'winning', 'score': round(score, 1)}
-
-    if first_party.mentions == 0 and competitors.mentions > 0:
-        opportunity_score = (
-            (competitors.coverage(total_providers) * 50) +
-            (min(competitors.mentions, 10) / 10 * 50)
-        )
-        return {'status': 'opportunity', 'opportunity_score': round(opportunity_score, 1)}
-
-    if first_party.mentions == 0 or first_party.best_rank > 5:
-        improvement_potential = (
-            100 - (fp_provider_coverage * 50) -
-            ((10 - min(first_party.best_rank, 10)) / 10 * 50)
-        )
-        return {'status': 'losing', 'improvement_potential': round(improvement_potential, 1)}
-
-    return {'status': 'neutral'}
-
-
-def _analyze_keyword(keyword: str, results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build one prompt record from the latest run of a keyword's search results."""
-    latest_ts, latest_results = latest_run(results)
-    total_providers = len(latest_results)
-    first_party, competitors = _tally_brand_presence(latest_results)
-    return {
-        'keyword': keyword,
-        'timestamp': latest_ts,
-        'first_party': first_party.as_dict(total_providers),
-        'competitors': competitors.as_dict(total_providers),
-        'total_providers': total_providers,
-        **_classify_prompt(first_party, competitors, total_providers),
-    }
-
-
-def _rank_prompts(prompts: list[dict[str, Any]], limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
-    """Bucket prompts by status, rank each bucket by its score, and shape the insights payload.
-
-    Neutral prompts sit in the winning bucket (unscored, so after every scored
-    win) and count toward the win rate. Each bucket is cut to its top ``limit``
-    while the summary counts every prompt.
-    """
-    winning_prompts = [p for p in prompts if p['status'] in ('winning', 'neutral')]
-    losing_prompts = [p for p in prompts if p['status'] == 'losing']
-    opportunity_prompts = [p for p in prompts if p['status'] == 'opportunity']
-
-    winning_prompts.sort(key=lambda x: x.get('score', 0), reverse=True)
-    losing_prompts.sort(key=lambda x: x.get('improvement_potential', 0), reverse=True)
-    opportunity_prompts.sort(key=lambda x: x.get('opportunity_score', 0), reverse=True)
-
-    return {
-        'total_prompts_analyzed': len(prompts),
-        'winning_prompts': winning_prompts[:limit],
-        'losing_prompts': losing_prompts[:limit],
-        'opportunity_prompts': opportunity_prompts[:limit],
-        'summary': {
-            'winning_count': len(winning_prompts),
-            'losing_count': len(losing_prompts),
-            'opportunity_count': len(opportunity_prompts),
-            'win_rate': percent(len(winning_prompts), len(prompts)) if prompts else 0
-        }
-    }
-
-
-def analyze_prompt_brand_correlation(
-    config: dict[str, Any], keywords: Sequence[str] | None = None, limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
-    """
-    Analyze correlation between prompts and brand mentions.
-
-    ``keywords`` restricts the analysis to those keyword texts (a report
-    scope); by default the tracked keywords are read from the Keywords table.
-    Either way at most ``_MAX_KEYWORDS`` of them are queried, without their
-    answer text. Each list holds at most ``limit`` prompts.
-
-    Returns insights on:
-    - Which prompts trigger first-party brand mentions
-    - Which prompts favor competitors
-    - Opportunities where competitors appear but first-party doesn't
-    """
-    # Only the first-party list gates execution: classification is taken from
-    # brand.get('classification') per-mention in _tally_brand_presence.
-    first_party, _competitors = tracked_brand_names(config)
-    if not first_party:
-        return {"error": "No first-party brands configured"}
-
-    # Get keywords from Keywords table (small, efficient) then query SearchResults by keyword
-    keywords = list(keywords) if keywords is not None else get_all_keywords()
-
-    if not keywords:
-        return {"error": "No keywords configured"}
-
-    # The 20 most recent rows of each of the first 50 keywords, one partition query each.
-    items = load_recent_search_results(
-        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=_MAX_KEYWORDS, keywords=keywords, projection=_RESULT_PROJECTION,
-    )
-    logger.info('Queried %s total items across %s keywords', len(items), len(keywords))
-    keyword_results = _group_by_keyword(items)
-    prompts = [_analyze_keyword(keyword, results) for keyword, results in keyword_results.items()]
-    return _rank_prompts(prompts, limit)
+MAX_LIMIT = STORED_PER_LIST
 
 
 @api_handler
-@validate({
+@action_lists.action_list_endpoint({
     'type': {'type': str, 'choices': ['winning', 'losing', 'opportunities', 'all'], 'default': 'all'},
-    'limit': {'type': int, 'min': 1, 'max': MAX_LIMIT, 'default': DEFAULT_LIMIT},
-    **SCOPE_QUERY_PARAMS,
-})
-@optional_scope_keywords(lambda: dynamodb.Table(KEYWORDS_TABLE))
+    'limit': action_lists.limit_param(DEFAULT_LIMIT, MAX_LIMIT),
+}, lambda: dynamodb, paged=True)
 def handler(
-    event: dict[str, Any], context: Any, keywords: list[str] | None, type: str = 'all', limit: int = DEFAULT_LIMIT
+    event, context, report_scope: ReportScope, type: str = 'all', limit: int = DEFAULT_LIMIT, next_token: str | None = None,
 ) -> dict[str, Any]:
-    """
-    API handler for prompt insights.
-
-    Query params:
-        - type: 'winning', 'losing', 'opportunities', or 'all' (default: all)
-        - limit: Number of results per category (default: 20)
-        - keyword | group_id | keyword_ids | scope=all: the prompts to analyse
-          (optional; one keyword, a keyword group, a set of keyword ids or
-          every active keyword). Without one the tracked keywords (at most 50)
-          are analysed, as before.
-    """
+    """GET /api/prompt-insights (see the module docstring); ``type`` keeps one list (with the summary)."""
     config = get_brand_config()
-    insights = analyze_prompt_brand_correlation(config, keywords, limit)
-    if 'error' in insights:
-        # A missing prerequisite (no first-party brand, no keywords) is the
-        # caller's configuration to fix, so it gets 400 with the actual reason.
-        return validation_error(insights['error'], event)
-
-    # One list (with the summary) when a type is given; every list is already cut to `limit`.
-    list_key = _TYPE_LISTS.get(type)
-    if list_key is not None:
-        insights = {list_key: insights[list_key], 'summary': insights['summary']}
-
-    # The keyword reads stop at the request's deadline; the prompts of the keywords not read are missing.
-    return success_response({**insights, 'truncated': current_deadline().cut}, event)
+    # A missing prerequisite is the caller's configuration to fix: 400 with the actual reason.
+    if not tracked_brand_names(config)[0]:
+        return validation_error('No first-party brands configured', event)
+    if not report_scope.keywords:
+        return validation_error('No keywords configured', event)
+    request = action_lists.action_request(
+        'prompt-insights', 'prompts', {'limit': limit, 'type': type}, report_scope, config, event, next_token, job_params={},
+    )
+    answer = action_lists.serve_action_list(request, dynamodb, dynamodb.Table(SEARCH_RESULTS_TABLE), config)
+    if answer.body is None:
+        return answer.response or {}
+    body = answer.body
+    return success_response({'scope': report_scope.describe(), **body, 'truncated': bool(body.get('keywords_truncated'))}, event)

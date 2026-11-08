@@ -1,7 +1,10 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { render } from '@testing-library/react';
+import {
+  render, screen
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { buildInsight } from '../../../types/domain/insights-fixtures';
 import { sectionTitles } from '../layout/reportQueries-fixtures';
 import {
@@ -35,11 +38,33 @@ describe('InsightsSummarySection', () => {
     ]);
   });
 
+  it('says how many keywords a cut live read covers', () => {
+    renderSummary(loadedInsights({
+      keywords_truncated: true,
+      coverage: {
+        keywords_total: 160,
+        keywords_analyzed: 90,
+        complete: false,
+      },
+    }));
+
+    expect(screen.getByRole('note')).toHaveTextContent('Covers 90 of 160 keywords. The request ran out of time');
+  });
+
   it(`reads out at most ${TOP_INSIGHTS} insights`, () => {
     const many = Array.from({ length: TOP_INSIGHTS + 3 }, (_unused, index) => buildInsight({ id: `engine_play:engine-${index}` }));
     renderSummary(loadedInsights({ insights: many }));
 
     expect(insightLines(INSIGHTS_SUMMARY_TITLE)).toHaveLength(TOP_INSIGHTS);
+  });
+
+  it('reads out every insight once Show all is pressed', async () => {
+    const many = Array.from({ length: TOP_INSIGHTS + 3 }, (_unused, index) => buildInsight({ id: `engine_play:engine-${index}` }));
+    renderSummary(loadedInsights({ insights: many }));
+
+    await userEvent.click(screen.getByRole('button', { name: `Show all ${TOP_INSIGHTS + 3} insights` }));
+
+    expect(insightLines(INSIGHTS_SUMMARY_TITLE)).toHaveLength(TOP_INSIGHTS + 3);
   });
 
   it('says there is no insight, without a list, when the scope raises none', () => {

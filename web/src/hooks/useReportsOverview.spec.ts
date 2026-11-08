@@ -12,7 +12,7 @@ import {
   INVALID_REQUEST_STATE, renderAnsweredWith
 } from './useVisibilityMetrics-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   FAILED_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -30,10 +30,11 @@ describe('useReportsOverview', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useReportsOverview());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchReportsOverview'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchReportsOverview'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'overview',
     useHook: useReportsOverview,
     fetchName: 'fetchReportsOverview',

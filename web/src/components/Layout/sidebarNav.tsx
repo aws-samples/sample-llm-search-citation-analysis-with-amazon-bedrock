@@ -9,7 +9,7 @@ import {
 } from '../ui';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  ARCHIVE_PATHS, LIGHTBULB_PATHS, LINK_PATHS, PENCIL_ALT_PATHS, SEARCH_PATHS, TREND_UP_PATHS
+  ARCHIVE_PATHS, DOWNLOAD_PATHS, LIGHTBULB_PATHS, LINK_PATHS, PENCIL_ALT_PATHS, SEARCH_PATHS, TREND_UP_PATHS
 } from '../ui/iconPaths';
 import {
   SEO_CHILDREN, settingsChildren, type NavChild, type SettingsChildrenInput
@@ -46,13 +46,15 @@ const REPORTS_PATHS = ['M9 17v-6m3 6V7m3 10v-4M5 21h14a2 2 0 002-2V5a2 2 0 00-2-
 
 export interface NavInput {
   readonly schedulesCount: number;
+  /** Finished exports the member has not opened yet (the Exports badge). */
+  readonly exportsUnseen: number;
   /** What the Settings group lists: the member's sections, the keyword and market counts, the attention dots. */
   readonly settings: SettingsChildrenInput;
 }
 
-/** The sections in display order; Schedule carries the schedule count, SEO and Settings open to their pages. */
+/** The sections in display order; Schedule carries the schedule count, Exports the unseen exports, SEO and Settings open to their pages. */
 export function buildNavSections({
-  schedulesCount, settings
+  schedulesCount, exportsUnseen, settings
 }: NavInput): NavSection[] {
   return [
     {
@@ -168,6 +170,14 @@ export function buildNavSections({
           label: 'Raw Responses',
           icon: navIcon(ARCHIVE_PATHS),
           iconColor: 'text-slate-500',
+        },
+        {
+          id: 'exports',
+          path: '/exports',
+          label: 'Exports',
+          icon: navIcon(DOWNLOAD_PATHS),
+          iconColor: 'text-blue-500',
+          badge: exportsUnseen,
         },
       ],
     },

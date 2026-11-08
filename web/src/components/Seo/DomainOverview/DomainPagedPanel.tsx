@@ -14,7 +14,7 @@ import {
 } from '../../ui/DataTable';
 import { CompactNumber } from '../../ui/tableCells';
 import {
-  DomainPagedExport, type PagedExcel, type ShownAnswer
+  DomainPagedExport, type PagedExport, type ShownAnswer
 } from './DomainPagedExport';
 import {
   pagedRequest, sortedBy, type PagedQuery, type PagedRequest
@@ -73,13 +73,13 @@ interface Props<TSort extends string, TFilters, TRow, TResponse extends PagedAns
   readonly initialQuery: PagedQuery<TSort>;
   /** Shown before the first request (a button that sends `initialQuery`); none when the list loads with Analyze. */
   readonly start?: (load: () => void) => ReactNode;
-  /** An "Export to Excel" button above the table: the page on screen, or more rows asked again (paid). */
-  readonly excel?: PagedExcel<TRow, TSort, TFilters>;
+  /** An "Export" button above the table: a server export of the page on screen, or of more rows asked again (paid). */
+  readonly exported?: PagedExport;
 }
 
 /** A paged, sorted, filtered Labs list: every change of page, size, sort or filters is one paid page. */
 export function DomainPagedPanel<TSort extends string, TFilters, TRow, TResponse extends PagedAnswer<TRow>>({
-  target, scope, request, spec, initialQuery, columns, rowKey, start, excel
+  target, scope, request, spec, initialQuery, columns, rowKey, start, exported
 }: Props<TSort, TFilters, TRow, TResponse>) {
   const [query, setQuery] = useState<PagedQuery<TSort>>(initialQuery);
   const busy = request.state.status === 'loading';
@@ -100,8 +100,8 @@ export function DomainPagedPanel<TSort extends string, TFilters, TRow, TResponse
       <DomainTableStatus state={request.state} loadingLabel={spec.loadingLabel} columns={spec.skeletonColumns}>
         {(response) => (
           <>
-            {excel !== undefined && (
-              <DomainPagedExport excel={excel} response={response} target={target} query={query} toFilters={spec.toFilters} />
+            {exported !== undefined && (
+              <DomainPagedExport exported={exported} response={response} target={target} query={query} toFilters={spec.toFilters} />
             )}
             <DataTable rows={response.items} columns={columns} rowKey={rowKey} caption={spec.caption}
               sort={{

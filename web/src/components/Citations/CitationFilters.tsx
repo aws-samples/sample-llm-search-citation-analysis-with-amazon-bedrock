@@ -1,5 +1,4 @@
-import { StrokeIcon } from '../ui/StrokeIcon';
-import { DOWNLOAD_PATHS } from '../ui/iconPaths';
+import type { ReactNode } from 'react';
 import type { ContentTypeFilter } from '../../exporters/citationParser';
 
 const CONTENT_TYPE_OPTIONS: ReadonlyArray<readonly [ContentTypeFilter, string]> = [
@@ -20,7 +19,8 @@ interface CitationFiltersProps {
   contentType: ContentTypeFilter;
   setContentType: (contentType: ContentTypeFilter) => void;
   setCurrentPage: (page: number) => void;
-  onDownloadExcel: () => void;
+  /** The view's "Export all" (its full list with these filters). */
+  exportButton: ReactNode;
 }
 
 export const CitationFilters = ({
@@ -31,7 +31,7 @@ export const CitationFilters = ({
   contentType,
   setContentType,
   setCurrentPage,
-  onDownloadExcel,
+  exportButton,
 }: CitationFiltersProps) => {
   const handleClear = () => {
     setSearchQuery('');
@@ -98,13 +98,7 @@ export const CitationFilters = ({
           >
             Clear
           </button>
-          <button
-            onClick={onDownloadExcel}
-            className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
-          >
-            <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
-            <span className="sr-only sm:not-sr-only">Export</span>
-          </button>
+          {exportButton}
         </div>
       </div>
     </div>

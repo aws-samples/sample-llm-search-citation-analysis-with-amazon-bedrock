@@ -67,6 +67,39 @@ describe('Content Studio read decoders', () => {
     expect(received).toStrictEqual(ideas);
   });
 
+  it('hands the 2.45.0 coverage of the ideas answer to onScope', async () => {
+    const idea = buildApiContentIdea();
+    const coverage = {
+      keywords_total: 5000,
+      keywords_analyzed: 5000,
+      complete: true,
+    };
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(buildIdeasDecoderPayload(idea, {
+      coverage,
+      source: 'snapshot',
+      as_of: '2026-10-12T07:14:05Z',
+      stale: false,
+      refreshing: false,
+    })));
+    const onScope = vi.fn();
+
+    await fetchContentIdeas(undefined, onScope);
+
+    expect(onScope).toHaveBeenCalledWith({
+      coverage,
+      source: 'snapshot',
+      as_of: '2026-10-12T07:14:05Z',
+      stale: false,
+      refreshing: false,
+    });
+  });
+
+  it('rejects an ideas answer whose coverage is malformed', async () => {
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(buildIdeasDecoderPayload(buildApiContentIdea(), {coverage: { keywords_total: -1 },})));
+
+    await expect(fetchContentIdeas()).rejects.toThrow('Invalid ideas coverage');
+  });
+
   it('rejects the complete ideas response when one nested idea is malformed', async () => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
       buildIdeasDecoderPayload(buildApiContentIdea(), {

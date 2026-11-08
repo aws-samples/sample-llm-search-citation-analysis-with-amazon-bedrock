@@ -185,6 +185,36 @@ class TestPersonaFilter:
         assert body['searches'] == [unlabelled]
 
 
+class TestKeywordTextAndMarketFilters:
+    def test_keeps_the_rows_whose_keyword_holds_the_text_whatever_its_case(self, searches_module):
+        rows = [_row('openai', _LATEST, keyword='Hotel Spa Madrid'), _row('gemini', _OLDER, keyword='golf resort')]
+
+        _, body = _get_searches(searches_module, _paged(*rows), {'keyword_contains': 'spa m'})
+
+        assert body['searches'] == [rows[0]]
+
+    def test_keeps_the_rows_of_the_requested_market(self, searches_module):
+        rows = [_row('openai', _LATEST, market_id='es-es'), _row('gemini', _OLDER, market_id='fr-fr')]
+
+        _, body = _get_searches(searches_module, _paged(*rows), {'market_id': 'fr-fr'})
+
+        assert body['searches'] == [rows[1]]
+
+    def test_treats_rows_without_a_market_as_the_global_market(self, searches_module):
+        rows = [_row('openai', _LATEST), _row('gemini', _OLDER, market_id='fr-fr')]
+
+        _, body = _get_searches(searches_module, _paged(*rows), {'market_id': 'global'})
+
+        assert body['searches'] == [rows[0]]
+
+    def test_combines_the_text_with_the_provider_of_a_provider_read(self, searches_module):
+        rows = [_row('openai', _LATEST, keyword='spa hotel'), _row('openai', _OLDER, keyword='golf')]
+
+        _, body = _get_searches(searches_module, _paged(*rows), {'provider': 'openai', 'keyword_contains': 'SPA'})
+
+        assert body['searches'] == [rows[0]]
+
+
 class TestValidation:
     def test_rejects_a_limit_above_five_hundred_with_400_before_reading(self, searches_module):
         table = fake_table(query={'Items': []})

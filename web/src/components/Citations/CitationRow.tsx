@@ -11,6 +11,7 @@ import {
   isVideoCitation, type UrlBreakdown
 } from '../../exporters/citationParser';
 import { VideoBadge } from './VideoBadge';
+import { ExportAllButton } from '../ui/ExportAllButton';
 
 interface CitationRowProps {
   citation: TopUrl;
@@ -22,6 +23,8 @@ interface CitationRowProps {
   onToggleRow: (idx: number, url: string) => void;
   onViewDetails: (url: string, e: React.MouseEvent) => void;
   onKeywordClick: (keyword: string) => void;
+  /** The header's market (`null` = every market): the breakdown export's `market_id`. */
+  marketId: string | null;
 }
 
 export const CitationRow = ({
@@ -34,6 +37,7 @@ export const CitationRow = ({
   onToggleRow,
   onViewDetails,
   onKeywordClick,
+  marketId,
 }: CitationRowProps) => {
   // Group breakdown by keyword
   const keywordGroups: Record<string, UrlBreakdown[]> = {};
@@ -105,8 +109,14 @@ export const CitationRow = ({
               <>
                 {Object.keys(keywordGroups).length > 0 ? (
                   <div className="text-sm">
-                    <div className="font-medium text-gray-700 mb-3">
-                      Ranking for {keywordCount} keyword{keywordText}
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <span className="font-medium text-gray-700">
+                        Ranking for {keywordCount} keyword{keywordText}
+                      </span>
+                      <ExportAllButton view="url-breakdown" params={{
+                        url: citation.url,
+                        market_id: marketId,
+                      }} />
                     </div>
                     <div className="grid gap-2">
                       {Object.entries(keywordGroups).map(([keyword, items]) => {

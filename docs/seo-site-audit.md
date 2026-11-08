@@ -12,8 +12,9 @@ minutes of Lambda time.
 ## Who can do what
 
 - **Admins** start and cancel audits (Seo › Site audit). One audit runs at a time.
-- **Every signed-in user** reads the audits, their issues and the affected pages, and exports the issue list
-  as CSV.
+- **Every signed-in user** reads the audits, their issues and the affected pages, and exports a finished or
+  cancelled audit (Excel or CSV, built on the server; the file appears on the Exports page): the issue types, the
+  affected pages of every issue type in one sheet, and the AI crawler access read from robots.txt.
 
 ## What is crawled
 

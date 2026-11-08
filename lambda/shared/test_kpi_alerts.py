@@ -6,7 +6,10 @@ from copy import deepcopy
 from decimal import Decimal
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
+from shared.brand_names import normalize_brand_key
 from shared.kpi_alerts import (
     DEFAULT_ALERT_SETTINGS,
     KPI_VERSION,
@@ -16,11 +19,13 @@ from shared.kpi_alerts import (
     deterministic_content_change_id,
     marker_in_window,
     resolve_settings,
-    snapshot_metrics,
+    snapshot_metrics_from_tallies,
     ttl_for_timestamp,
     validate_settings,
 )
-from shared.kpi_engine import answers_from_rows
+from shared.kpi_engine import COMPETITOR, Answer, answers_from_rows, brand_kpis, brand_table
+from shared.kpi_tally import run_tally
+from testing.kpi_row_strategies import KEYWORDS, OWNED_DOMAINS, search_rows
 from testing.search_result_fixtures import successful_answer_row
 
 PREVIOUS_TIMESTAMP = '2026-09-01T10:00:00Z'
@@ -29,6 +34,8 @@ CURRENT_TIMESTAMP = '2026-09-02T10:00:00Z'
 LONGEST_EMAIL = f'{"a" * 64}@{"b" * 63}.{"c" * 63}.{"d" * 57}.com'
 #: 255 characters, every label within the pattern's 63-character limit.
 TOO_LONG_EMAIL = f'{"a" * 64}@{"b" * 63}.{"c" * 63}.{"d" * 58}.com'
+
+PROPERTY_SETTINGS = settings(max_examples=200, deadline=None)
 
 
 def _snapshot() -> dict:
@@ -258,6 +265,56 @@ def _row(keyword: str, *brands: tuple[str, str, int], provider: str = 'openai') 
         brands=brands,
         citations=['https://hotel-sol.com/spa'],
     )
+
+
+def snapshot_metrics(answers_by_keyword, owned_domains=(), tracked_competitors=(), brand_cap=None):
+    """``snapshot_metrics_from_tallies`` of each keyword's answers tallied as the run's rows tally them."""
+    tallies = {
+        keyword: run_tally(keyword, CURRENT_TIMESTAMP, answers, owned_domains, brand_cap=brand_cap, tracked_brands=tracked_competitors)
+        for keyword, answers in answers_by_keyword.items()
+    }
+    return snapshot_metrics_from_tallies(tallies, owned_domains, tracked_competitors)
+
+
+def answer_snapshot_metrics(answers_by_keyword, owned_domains=(), tracked_competitors=()):
+    """The oracle: the snapshot computed from the answers themselves (``snapshot_metrics`` before 2.45.0)."""
+    domains = list(owned_domains)
+    tracked = {key for key in map(normalize_brand_key, tracked_competitors) if key}
+    pooled = [answer for answers in answers_by_keyword.values() for answer in answers]
+    return {
+        'kpi_version': KPI_VERSION,
+        'kpis': brand_kpis(pooled, domains),
+        'keywords': [
+            {'keyword': keyword, 'mentioned': kpis['mentions'] > 0, 'average_position': kpis['average_position']}
+            for keyword, kpis in ((keyword, brand_kpis(list(answers), domains)) for keyword, answers in answers_by_keyword.items())
+        ],
+        'competitors': [
+            {'name': row['name'], 'best_position': row['best_position']}
+            for row in brand_table(pooled)
+            if row['classification'] == COMPETITOR and (not tracked or normalize_brand_key(row['name']) in tracked)
+        ],
+    }
+
+
+def _answers_by_keyword(rows) -> dict[str, list[Answer]]:
+    answers = [answer for answer in answers_from_rows(rows) if answer.timestamp]
+    return {keyword: [answer for answer in answers if answer.keyword == keyword] for keyword in KEYWORDS}
+
+
+class TestSnapshotFromTalliesEqualsTheAnswers:
+    @PROPERTY_SETTINGS
+    @given(rows=search_rows(), owned=OWNED_DOMAINS)
+    def test_snapshot_of_complete_tallies_equals_the_snapshot_of_the_answers(self, rows, owned) -> None:
+        answers = _answers_by_keyword(rows)
+
+        assert snapshot_metrics(answers, owned) == answer_snapshot_metrics(answers, owned)
+
+    @PROPERTY_SETTINGS
+    @given(rows=search_rows(), owned=OWNED_DOMAINS, tracked=st.lists(st.sampled_from(('Parador', 'MELIÁ', 'nh', 'Hotel Mar')), min_size=1, max_size=3))
+    def test_snapshot_of_capped_tallies_keeping_the_tracked_competitors_equals_the_answers(self, rows, owned, tracked) -> None:
+        answers = _answers_by_keyword(rows)
+
+        assert snapshot_metrics(answers, owned, tracked, brand_cap=1) == answer_snapshot_metrics(answers, owned, tracked)
 
 
 class TestSnapshotMetrics:

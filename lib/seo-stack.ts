@@ -71,7 +71,8 @@ export interface CitationAnalysisSeoStackProps extends cdk.StackProps {
 /**
  * A sibling of `CitationAnalysisStack` for the SEO features (DataForSEO keyword
  * data, SERPs, SEO vs GEO) and the Google AI Overviews engine. Separate because
- * the main stack sits at CloudFormation's 500-resource limit.
+ * the main stack was then at CloudFormation's 500-resource limit, and so the
+ * SEO features can be deployed or removed on their own.
  *
  * It builds its own shared layer version (a cross-stack layer reference would
  * block every main-stack deploy that rebuilds the layer, see `python-layer.ts`)

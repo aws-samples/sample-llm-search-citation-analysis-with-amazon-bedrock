@@ -7,7 +7,6 @@ import {
   extractLambdaEnvVars,
   extractWorkflowScaleSnapshot,
   findApiResourceId,
-  findLambdaLogicalId,
   findLogicalIdByName,
   resolvePath,
 } from './citation-analysis-stack-fixtures';
@@ -27,7 +26,7 @@ interface MarketsSnapshot {
   resourceCount: number;
   marketsMethods: ApiGatewayMethodSnapshot[];
   marketsPreflightCount: number;
-  configMgmtFunctionLogicalId: string;
+  configMgmtFunctionName: string;
   brandConfigTableLogicalId: string;
   keywordsTableLogicalId: string;
   configMgmtEnv: Record<string, unknown>;
@@ -63,7 +62,7 @@ export function synthesizeMarketsSnapshot(): MarketsSnapshot {
     resourceCount: Object.keys(typeof resources === 'object' && resources !== null ? resources : {}).length,
     marketsMethods: extractApiMethods(apiTemplate, marketsId),
     marketsPreflightCount: preflightCount(apiTemplate, marketsId),
-    configMgmtFunctionLogicalId: findLambdaLogicalId(template, CONFIG_MGMT),
+    configMgmtFunctionName: CONFIG_MGMT,
     brandConfigTableLogicalId,
     keywordsTableLogicalId,
     configMgmtEnv: extractLambdaEnvVars(template, CONFIG_MGMT),

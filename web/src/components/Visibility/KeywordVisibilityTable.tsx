@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import {
+  useState, type ReactNode
+} from 'react';
 import type { KeywordVisibilityRow } from '../../types';
 import type { KpiId } from '../../constants/kpiDefinitions';
 import { formatKpi } from '../../formatting/kpiFormatter';
@@ -121,9 +123,16 @@ function BodyRows({ rows }: { readonly rows: readonly KeywordVisibilityRow[] }) 
 
 /**
  * Every keyword of the scope with its latest run's KPIs, sortable by any
- * column; unknown values (and keywords without data) stay last.
+ * column; unknown values (and keywords without data) stay last. A paged
+ * scope sorts the rows loaded so far.
  */
-export function KeywordVisibilityTable({ rows }: { readonly rows: readonly KeywordVisibilityRow[] }) {
+export function KeywordVisibilityTable({
+  rows, footer
+}: {
+  readonly rows: readonly KeywordVisibilityRow[];
+  /** Below the table, e.g. the "Load more" of a paged scope. */
+  readonly footer?: ReactNode;
+}) {
   const [sortKey, setSortKey] = useState<KeywordSortKey>('visibility_score');
   const [descending, setDescending] = useState(true);
 
@@ -154,6 +163,7 @@ export function KeywordVisibilityTable({ rows }: { readonly rows: readonly Keywo
           </tbody>
         </table>
       </div>
+      {footer}
     </OverviewPanel>
   );
 }

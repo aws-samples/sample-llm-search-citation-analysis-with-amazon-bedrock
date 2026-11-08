@@ -1,12 +1,10 @@
 import {
-  useState, useEffect, useCallback, useId
+  useState, useId
 } from 'react';
 import { formatDate } from '../../formatting/dateFormatter';
 import { safeHref } from '../../infrastructure';
-import { fetchCrawlHistory } from '../../api/dashboard';
-import {
-  HistoryTab, type HistoryCrawl 
-} from './CrawlHistory';
+import { HistoryTab } from './CrawlHistory';
+import { useCrawlHistory } from './useCrawlHistory';
 import { BlockedPageBanner } from './BlockedPageBanner';
 import {
   VideoDetails, isVideoCrawl
@@ -192,32 +190,9 @@ export const CitationDetailModal = ({
   citation, onClose 
 }: CitationDetailModalProps) => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [history, setHistory] = useState<HistoryCrawl[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const panelId = useId();
-
-  const loadHistory = useCallback(async () => {
-    setHistoryLoading(true);
-    setHistoryError(null);
-    try {
-      const items = await fetchCrawlHistory(citation.normalized_url);
-      setHistory(items);
-      setSelectedHistoryIndex(0);
-    } catch (err) {
-      setHistoryError('Failed to load crawl history');
-      console.error('Error loading history:', err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [citation.normalized_url]);
-
-  useEffect(() => {
-    if (activeTab === 'history' && history.length === 0 && !historyLoading) {
-      loadHistory();
-    }
-  }, [activeTab, history.length, historyLoading, loadHistory]);
+  const crawlHistory = useCrawlHistory(citation.normalized_url, activeTab === 'history');
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -244,12 +219,15 @@ export const CitationDetailModal = ({
       case 'history':
         return (
           <HistoryTab
-            history={history}
-            historyLoading={historyLoading}
-            historyError={historyError}
+            url={citation.normalized_url}
+            history={crawlHistory.history}
+            historyLoading={crawlHistory.loading}
+            historyError={crawlHistory.error}
             selectedHistoryIndex={selectedHistoryIndex}
             onSelectHistory={setSelectedHistoryIndex}
-            onRetry={loadHistory}
+            onRetry={crawlHistory.retry}
+            onLoadMore={crawlHistory.loadMore}
+            loadingMore={crawlHistory.loadingMore}
           />
         );
       default:

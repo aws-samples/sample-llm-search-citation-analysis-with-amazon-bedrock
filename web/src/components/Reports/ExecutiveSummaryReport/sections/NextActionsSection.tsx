@@ -8,6 +8,7 @@ import {
   pendingSectionPlaceholder,
   type ReportSlice,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 /**
  * The "what to do next" panel — the report's call to action. Top three
@@ -46,6 +47,7 @@ export function NextActionsSection({
           <RecommendationCard key={`${rec.title}::${rec.action}`} rec={rec} />
         ))}
       </ol>
+      <p className="mt-2 text-right"><SeeAllLink to="/recommendations">See all recommendations</SeeAllLink></p>
     </ReportSection>
   );
 }

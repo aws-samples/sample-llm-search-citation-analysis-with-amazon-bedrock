@@ -16,7 +16,10 @@ The table, ``all``, market, group and group x market scopes are served from
 the citation rollup when it is current (``shared.citation_rollup_serve``):
 O(page) for the default order. Otherwise, and for one keyword or
 ``keyword_ids``, the rows are read live under caps and the request's time
-budget (``shared.citation_rollup_source``).
+budget (``shared.citation_rollup_source``). A stale rollup of a large scope
+(``shared.scope_source``, the rule every scoped view routes by) keeps serving
+the stale build's page with ``stale: true`` while the requested rebuild runs,
+instead of a live read the caps would cut (design 2.45.0 §1 row 16).
 """
 
 import logging
@@ -24,9 +27,12 @@ import os
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.api_response import success_response, validation_error
+from shared.bounded_counts import count_pages
 from shared.citation_pages import (
     CONTENT_TYPE_FILTERS,
     DICT_VIEW,
@@ -48,6 +54,7 @@ from shared.citation_rollup_source import (
 )
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
 from shared.decorators import api_handler, optional_limit, validate
+from shared.kpi_scope_serve import enabled_persona_count
 from shared.request_deadline import current_deadline
 from shared.response_budget import take_within_budget
 from shared.scope_params import (
@@ -56,6 +63,8 @@ from shared.scope_params import (
     keywords_table_name,
     scope_from_request,
 )
+from shared.scope_source import PERSONA_ENGINES, PLAIN_ENGINES, route_scope
+from shared.snapshot_artifacts import SOURCE_SNAPSHOT
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -176,6 +185,32 @@ def _live_page(report_scope: ReportScope | None, brand_config: dict[str, Any], r
 _LIVE = {'as_of': None, 'source': 'live', 'stale': False}
 
 
+def _active_keyword_count() -> int | None:
+    """The active keywords (the table scope's size) by COUNT query of StatusIndex; ``None`` when unread."""
+    try:
+        count, _complete = count_pages(
+            dynamodb.Table(KEYWORDS_TABLE).query, current_deadline(),
+            IndexName='StatusIndex', KeyConditionExpression=Key('status').eq('active'),
+        )
+    except (BotoCoreError, ClientError):
+        logger.exception('Could not count the active keywords; a stale table scope is read live')
+        return None
+    return count
+
+
+def _is_large(report_scope: ReportScope | None) -> bool:
+    """Whether a live read of the scope is over the live budget, so a stale rollup serves it instead."""
+    if report_scope is None:
+        kind, keywords = 'all', _active_keyword_count()
+        if keywords is None:
+            return False
+    else:
+        kind, keywords = report_scope.kind, len(report_scope.keywords)
+    return route_scope(
+        kind, keywords, personas=enabled_persona_count(dynamodb), engines=PERSONA_ENGINES, plain_engines=PLAIN_ENGINES,
+    ) == SOURCE_SNAPSHOT
+
+
 def _rollup_page(
     report_scope: ReportScope | None, brand_config: dict[str, Any], request: PageRequest,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
@@ -183,8 +218,9 @@ def _rollup_page(
 
     One keyword and ``keyword_ids`` scopes are not precomputed, nor is a scope
     without keywords worth a lookup. A build that does not match the scope's
-    keywords or the brand config is ``stale``: the answer is live and a
-    rebuild is requested.
+    keywords or the brand config is ``stale`` and a rebuild is requested: a
+    large scope the build holds is served from it (``stale: true``,
+    ``refreshing`` when a rebuild can run), any other is read live.
     """
     key = scope_key(report_scope)
     if rollup_reader is None or key is None or (report_scope is not None and not report_scope.keywords):
@@ -194,6 +230,9 @@ def _rollup_page(
         lookup = rollup_reader.lookup(key, fingerprint, brand_config.get('updated_at'))
         if lookup.scope is None:
             rollup_reader.request_rebuild(f"{'stale' if lookup.stale else 'missing'} {key}")
+            if lookup.previous is not None and _is_large(report_scope):
+                stale_page = rollup_reader.page(lookup.previous, request)
+                return stale_page, {'as_of': lookup.built_at, 'source': 'rollup', 'stale': True, 'refreshing': rollup_reader.rebuilds}
             return None, {**_LIVE, 'stale': lookup.stale}
         return rollup_reader.page(lookup.scope, request), {'as_of': lookup.built_at, 'source': 'rollup', 'stale': False}
     except ROLLUP_READ_ERRORS:
@@ -236,7 +275,9 @@ def handler(
     rollup, built after the last run; ``as_of`` is its build time) or
     ``live`` (read now; ``as_of`` is ``null``). ``stale: true`` means a
     rollup exists but no longer matches the scope's keywords or the brand
-    config, so the page was read live and a rebuild was requested.
+    config and a rebuild was requested: a large scope's page then comes from
+    that build (``source: rollup``, ``refreshing: true`` while the rebuild
+    runs), a small one's is read live.
     """
     start, rejected = _page_start(event, offset, next_token)
     if rejected:

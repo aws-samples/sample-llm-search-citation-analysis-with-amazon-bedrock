@@ -1,8 +1,20 @@
+import { useState } from 'react';
 import type {
   BrandClassification,
   BrandLeaderboardRow,
   BrandTrends,
 } from '../../../../types';
+import type {
+  ListPaging, ListRequest
+} from '../../../../api/scopedListPages';
+import {
+  isBrandLeaderboardRow, TREND_BRANDS_PAGING, VISIBILITY_BRANDS_PAGING
+} from '../../../../api/scopedListPagings';
+import {
+  useScopedList, type ScopedList
+} from '../../../../hooks/useScopedList';
+import { ScopedListFooter } from '../../../ui/ScopedListFooter';
+import { SectionExport } from '../../scopeReport/ScopeLists';
 import {
   emphasisColumn,
   ReportSection,
@@ -30,6 +42,40 @@ interface Props extends SectionFetchState {
   readonly emptyMessage?: string;
   /** The share of voice per brand over time, charted next to the donut when given. */
   readonly brandTrends?: BrandTrends;
+  /** The answer `brands` came from, its GET and where its brand list pages (2.45.0 wave 5). */
+  readonly pages?: {
+    readonly body: unknown;
+    readonly request: ListRequest | null;
+    readonly paging: ListPaging;
+  };
+}
+
+const NO_PAGES = {
+  body: null,
+  request: null,
+  paging: VISIBILITY_BRANDS_PAGING,
+} as const;
+
+/** "Show all N brands" under a leaderboard cut to its top 15; the whole list then pages on. */
+function ShowAllBrands({
+  list, shown, total, onShowAll
+}: {
+  readonly list: ScopedList<unknown>;
+  readonly shown: boolean;
+  readonly total: number;
+  readonly onShowAll: () => void;
+}) {
+  if (shown) return <ScopedListFooter list={list} noun="brands" />;
+  if (total <= MAX_BRANDS) return null;
+  return (
+    <button
+      type="button"
+      onClick={onShowAll}
+      className="print-hidden mt-2 text-sm font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300"
+    >
+      {`Show all ${total} brands`}
+    </button>
+  );
 }
 
 /** The subtitle of the leaderboard of one keyword's latest run. */
@@ -37,7 +83,7 @@ const KEYWORD_RANKINGS_SUBTITLE = 'Every brand the AI answers named for this key
   + 'First-party rows are highlighted.';
 const KEYWORD_RANKINGS_EMPTY = 'No brand mentions extracted for this keyword.';
 
-/** The most brands a printed leaderboard lists; the API sorts them by visibility score. */
+/** The most brands the leaderboard lists until "Show all"; the API sorts them by visibility score. */
 export const MAX_BRANDS = 15;
 
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
@@ -68,8 +114,10 @@ function rankingColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>>
  * brands in print.
  */
 export function BrandRankingsSection({
-  brands, loading, error, subtitle = KEYWORD_RANKINGS_SUBTITLE, emptyMessage = KEYWORD_RANKINGS_EMPTY, brandTrends
+  brands, loading, error, subtitle = KEYWORD_RANKINGS_SUBTITLE, emptyMessage = KEYWORD_RANKINGS_EMPTY, brandTrends, pages = NO_PAGES
 }: Props) {
+  const [showAll, setShowAll] = useState(false);
+  const list = useScopedList(pages.body, pages.request, pages.paging, isBrandLeaderboardRow);
   const gate = gateSection({
     title: 'Brand rankings',
     loading,
@@ -89,6 +137,8 @@ export function BrandRankingsSection({
     );
   }
 
+  const every = list.items.length === 0 ? gate.value : list.items;
+  const total = Math.max(list.total ?? 0, every.length);
   // Stryker disable next-line StringLiteral: Tailwind-only layout; the same charts render either way
   const chartsClass = brandTrends ? 'mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2' : 'mb-4';
   return (
@@ -97,13 +147,15 @@ export function BrandRankingsSection({
         <ShareOfVoicePanel brands={gate.value} />
         {brandTrends && <ShareOfVoiceTrendPanel trends={brandTrends} />}
       </div>
+      <SectionExport view="brand-leaderboard" request={pages.request} />
       <ReportTable
         columns={rankingColumns()}
-        rows={gate.value.slice(0, MAX_BRANDS)}
+        rows={showAll ? every : every.slice(0, MAX_BRANDS)}
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(brand) => brand.name}
         rowClassName={firstPartyRowClass}
       />
+      <ShowAllBrands list={list} shown={showAll} total={total} onShowAll={() => setShowAll(true)} />
     </ReportSection>
   );
 }
@@ -114,18 +166,29 @@ function firstPartyRowClass(brand: BrandLeaderboardRow): string {
 
 /** The leaderboard of one keyword's latest run (`/visibility`). */
 export function LatestRunRankingsSection({
-  visibility, loading, error
+  visibility, loading, error, request = null
 }: VisibilitySectionProps) {
-  return <BrandRankingsSection brands={visibility?.brands ?? null} loading={loading} error={error} />;
+  return (
+    <BrandRankingsSection
+      brands={visibility?.brands ?? null}
+      loading={loading}
+      error={error}
+      pages={{
+        body: visibility,
+        request,
+        paging: VISIBILITY_BRANDS_PAGING,
+      }}
+    />
+  );
 }
 
 /** What the all-keywords leaderboard covers: the latest period of every keyword. */
-const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
+const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period, '
   + 'by visibility score, and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.';
 
 /** The leaderboard pooled over each keyword's latest period (`/trends`), with the share of voice over time. */
 export function PooledRankingsSection({
-  trends, loading, error
+  trends, loading, error, request = null
 }: TrendSectionProps) {
   return (
     <BrandRankingsSection
@@ -133,6 +196,11 @@ export function PooledRankingsSection({
       brandTrends={trends?.brand_trends}
       loading={loading}
       error={error}
+      pages={{
+        body: trends,
+        request,
+        paging: TREND_BRANDS_PAGING,
+      }}
       subtitle={ALL_KEYWORDS_RANKINGS_SUBTITLE}
       emptyMessage="No brand mentions extracted in the latest periods."
     />

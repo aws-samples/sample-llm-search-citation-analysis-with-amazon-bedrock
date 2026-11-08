@@ -1,6 +1,5 @@
 /**
- * Health score, issue counts by severity and by group, and the AI-readiness panel of a finished audit (its AI
- * crawler table exports to Excel).
+ * Health score, issue counts by severity and by group, and the AI-readiness panel of a finished audit.
  */
 import type {
   AiReadiness, AuditSummary, BotAccess, SiteAudit
@@ -18,8 +17,6 @@ import {
   formatAuditDate,
   stopReasonText,
 } from './siteAuditFormat';
-import { exportAiCrawlersExcel } from './siteAuditExcel';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
 
 const CARD = 'bg-white rounded-lg border border-gray-200 p-4';
 
@@ -70,25 +67,17 @@ function BotRow({ bot }: { readonly bot: BotAccess }) {
 }
 
 function AiReadinessPanel({
-  readiness, issues, startUrl
+  readiness, issues
 }: {
   readonly readiness: AiReadiness;
   readonly issues: number;
-  readonly startUrl: string;
 }) {
   const unreachable = readiness.robots_kind === 'disallow_all';
   return (
     <section aria-label="AI readiness" className={`${CARD} space-y-3`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-base font-semibold text-gray-900">AI readiness</h3>
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-gray-500">{issues.toLocaleString()} AI-readiness issues</p>
-          {!unreachable && (
-            <ExportExcelButton onExport={() => exportAiCrawlersExcel(readiness.bots, startUrl)}
-              failureLabel="[seo] Site audit AI crawlers Excel export failed:" disabled={readiness.bots.length === 0}
-              title="Each AI crawler with its robots.txt access" />
-          )}
-        </div>
+        <p className="text-sm text-gray-500">{issues.toLocaleString()} AI-readiness issues</p>
       </div>
       <p className="text-sm text-gray-600">
         Whether answer engines can crawl, read and quote the site: robots.txt access for each AI crawler, snippet
@@ -130,7 +119,7 @@ export function SiteAuditSummary({
       <p className="text-sm text-gray-600">
         {GROUP_ORDER.map((group) => `${GROUP_LABELS[group]}: ${summary.counts_by_group[group]}`).join(' · ')}
       </p>
-      {readiness !== null && <AiReadinessPanel readiness={readiness} issues={summary.counts_by_group.ai_readiness} startUrl={audit.start_url} />}
+      {readiness !== null && <AiReadinessPanel readiness={readiness} issues={summary.counts_by_group.ai_readiness} />}
     </div>
   );
 }

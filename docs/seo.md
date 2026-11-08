@@ -5,8 +5,10 @@ for, who links to it, how a business shows on Google Maps, and whether your site
 engines and answer engines. Search data comes from [DataForSEO](https://dataforseo.com/), a pay-per-use API.
 
 Everything lives in its own stack, `CitationAnalysisSeoStack` (`lib/seo-stack.ts`), with its own API
-(`CitationAnalysis-SeoApi`, Cognito-protected, routes under `/api/seo/`), because the main stack is at
-CloudFormation's 500-resource limit.
+(`CitationAnalysis-SeoApi`, Cognito-protected, routes under `/api/seo/`), so it can be deployed and removed without
+touching the main stack. It imports only the user pool and the `CitationAnalysis-CorsOrigin` export from
+`CitationAnalysisStack`; the [README](../README.md#stacks-and-deploy-order) lists the five stacks and their deploy
+order.
 
 ## Where to find it
 
@@ -28,7 +30,8 @@ and the browser's back button works.
 Elsewhere in the dashboard:
 
 - **Keyword Explorer** (Keyword Research › Keyword Explorer): keyword ideas for a seed in the header market with
-  search volume, 12-month trend, keyword difficulty, CPC, competition and intent; filters, CSV export, the Google
+  search volume, 12-month trend, keyword difficulty, CPC, competition and intent; filters, Export all (from the
+  cached answer, on the server), the Google
   results page of a keyword (top 20, or 50 on request) and "Track keywords" into a keyword group. Every national
   research stores its rows' metrics in `CitationAnalysis-SeoKeywordMetrics`, so tracking adds no cost. "Use a tracked
   keyword" fills the seed with one of the header market's Settings keywords (no lookup until Search).
@@ -43,7 +46,10 @@ Elsewhere in the dashboard:
 - **Dashboard**: two cards, *SEO vs GEO* (keywords per quadrant) and *Rankings* (tracked keywords in Google's top 3
   and top 10 at each tracker's newest check). Both are free reads of stored data; the dashboard never starts a paid
   call.
-- **MCP tools** `get_keyword_metrics` and `get_seo_geo_comparison` (read only, no DataForSEO call).
+- **MCP tools**: free reads of the stored SEO data (`get_keyword_metrics`, `get_seo_geo_comparison`,
+  `get_seo_recommendations`, `get_rank_tracking`, `get_domain_snapshots`, `get_backlink_snapshots`,
+  `get_site_audits`, `get_local_job`) and the paid lookups and jobs behind an estimate and a confirmation token
+  (`estimate_seo_*`, `run_seo_*`, `start_seo_job`). See [mcp.md](mcp.md).
 
 The header market selector applies to every SEO page: lookups run in the selected market (the global market when
 every market is combined).
@@ -99,9 +105,9 @@ How spending is kept in check (there are no spend caps):
 - Paid lookups run only when you press the button; opening a page, switching tabs or focusing a field costs nothing.
 - Batch and recurring work (rank checks and schedules, snapshots, audits, the rank grid, Lighthouse batches) asks
   for confirmation first, naming the paid calls it starts when the count is known.
-- The dashboard shows no prices: no cost captions, estimates or charged amounts on the SEO screens, the Keyword
-  Explorer or the SEO vs GEO report. The figures in these docs are for reference; the DataForSEO card in
-  Settings › AI Providers shows the account balance.
+- The dashboard shows no prices, except in the paid export dialog: no cost captions, estimates or charged amounts
+  on the SEO screens, the Keyword Explorer or the SEO vs GEO report. The figures in these docs are for reference;
+  the DataForSEO card in Settings › AI Providers shows the account balance.
 - Answers are cached (keyword research 24 h, a seed with no ideas 1 h, results pages and domain lookups 12 h,
   backlinks 6 h), so a repeat is free until the entry expires; an empty answer never replaces cached data.
 - DataForSEO bills a call when it is made, so a billed call that timed out or failed is never re-sent automatically,
@@ -109,6 +115,22 @@ How spending is kept in check (there are no spend caps):
 - Scheduled work uses DataForSEO's queued mode, which costs less than live calls.
 
 The SEO API's stage throttle (20 requests a second) is the only rate limit.
+
+## Exports
+
+Every SEO table exports as Excel or CSV through the dashboard's server export service (2.45.0); nothing is built in
+the browser, and the file appears on the Exports page (kept 7 days). The export worker reads the rows by invoking
+the SEO router, `CitationAnalysis-SeoRouter`, by name, so SEO exports need this stack deployed.
+
+- **Stored data, free:** SEO vs GEO (keywords and traffic share), a rank tracker's results, a finished or cancelled
+  site audit, a Lighthouse result, Domain Overview traffic snapshots.
+- **Cached answers, free:** Local SEO (businesses, local results, a finished rank grid), the Keyword Explorer and the
+  SERP competitors read cache-only forms of their routes. When the answer has left the cache, the export fails with a "no longer cached" message (search again, then
+  export) instead of paying.
+- **Paged from DataForSEO, priced:** Domain Overview keywords and pages, and the three Backlinks tables. The export
+  dialog asks how many rows (up to 10,000) and shows the price; the server refuses an export without that
+  confirmation or at a different price, reads 1,000-row windows, and re-reads a window it already paid for only from
+  the cache, so no window is billed twice. "Export the N rows on screen (free)" exports the cached page.
 
 ## Markets
 

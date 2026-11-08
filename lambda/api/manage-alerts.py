@@ -9,13 +9,14 @@ from collections.abc import KeysView
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 sys.path.insert(0, '/opt/python')
 
+from shared.alert_lists import BadCursorError, ListPage, alerts_page, content_changes_page
 from shared.api_response import not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
+from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
 from shared.decorators import (
     RouteNotHandledError,
     api_handler,
@@ -68,16 +69,6 @@ dynamodb = boto3.resource('dynamodb')
 sns = boto3.client('sns')
 
 
-def _query_alert_status(status: str, limit: int) -> list[dict[str, Any]]:
-    response = dynamodb.Table(ALERTS_TABLE).query(
-        IndexName='StatusCreatedIndex',
-        KeyConditionExpression=Key('status').eq(status),
-        ScanIndexForward=False,
-        Limit=limit,
-    )
-    return response.get('Items', [])
-
-
 @validate({
     'status': {
         'type': str,
@@ -85,23 +76,27 @@ def _query_alert_status(status: str, limit: int) -> list[dict[str, Any]]:
         'default': 'open',
     },
     'limit': _LIMIT_RULE,
+    **CURSOR_QUERY_PARAM,
 })
 def _list_alerts(
     event: dict[str, Any],
     context: Any,
     status: str,
     limit: int,
+    next_token: str | None = None,
 ) -> dict[str, Any]:
-    """GET /api/alerts — newest alerts through the status GSI only."""
+    """GET /api/alerts — newest alerts through the status GSI: ``limit`` a page, ``next_token`` for the next, ``total`` of the whole list."""
     statuses = ('open', 'acknowledged') if status == 'all' else (status,)
-    items = [
-        item
-        for selected_status in statuses
-        for item in _query_alert_status(selected_status, limit)
-    ]
-    items.sort(key=lambda item: str(item.get('created_at', '')), reverse=True)
-    selected = items[:limit]
-    return success_response({'items': selected, 'count': len(selected)}, event)
+    try:
+        page = alerts_page(dynamodb.Table(ALERTS_TABLE), statuses, limit, next_token)
+    except BadCursorError:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+    return success_response(_page_body(page, page.items), event)
+
+
+def _page_body(page: ListPage, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """A list page's answer: its items, ``count`` on the page, ``total`` of the list and ``next_token``."""
+    return {'items': items, 'count': len(items), 'total': page.total, 'total_approximate': page.total_approximate, 'next_token': page.next_token}
 
 
 def _alert_id(event: dict[str, Any]) -> str | None:
@@ -459,20 +454,21 @@ def _content_change_response(item: dict[str, Any]) -> dict[str, Any]:
 @validate({
     'group_id': {'required': True, 'type': str, 'max_length': 64},
     'limit': _LIMIT_RULE,
+    **CURSOR_QUERY_PARAM,
 })
 def _list_content_changes(
     event: dict[str, Any],
     context: Any,
     group_id: str,
     limit: int,
+    next_token: str | None = None,
 ) -> dict[str, Any]:
-    response = dynamodb.Table(CONTENT_CHANGES_TABLE).query(
-        KeyConditionExpression=Key('group_id').eq(group_id),
-        ScanIndexForward=False,
-        Limit=limit,
-    )
-    items = [_content_change_response(item) for item in response.get('Items', [])]
-    return success_response({'items': items, 'count': len(items)}, event)
+    """GET /api/alerts/content-changes — a group's markers newest first: ``limit`` a page, ``next_token``, ``total``."""
+    try:
+        page = content_changes_page(dynamodb.Table(CONTENT_CHANGES_TABLE), group_id, limit, next_token)
+    except BadCursorError:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+    return success_response(_page_body(page, [_content_change_response(item) for item in page.items]), event)
 
 
 def _validate_content_change(

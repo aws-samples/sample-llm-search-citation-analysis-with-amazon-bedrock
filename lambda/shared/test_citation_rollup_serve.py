@@ -116,6 +116,16 @@ class TestLookup:
 
         assert (lookup.scope, lookup.stale) == (None, True)
 
+    def test_keeps_the_stale_builds_entry_of_the_scope_as_previous(self, reader, s3):
+        lookup = reader.lookup('group:coast', keyword_fingerprint(['keyword 000']), _BRAND_UPDATED_AT)
+
+        assert lookup.previous == json.loads(s3.objects[CURRENT_KEY])['scopes']['group:coast']
+
+    def test_has_no_previous_entry_for_a_scope_the_build_never_held(self, reader):
+        lookup = reader.lookup('group:never-built', keyword_fingerprint(['keyword 000']), _BRAND_UPDATED_AT)
+
+        assert (lookup.stale, lookup.previous) == (True, None)
+
     def test_is_stale_when_the_brand_config_changed_since_the_build(self, reader):
         lookup = reader.lookup('table', None, '2026-11-04T00:00:00Z')
 

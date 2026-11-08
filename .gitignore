@@ -90,3 +90,5 @@ web/reports/
 
 # scripts/validate.sh step logs and timings
 .cache/
+# Local planning notes (kept out of git)
+docs/pending.md

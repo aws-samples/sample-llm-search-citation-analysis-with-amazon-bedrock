@@ -1,15 +1,12 @@
 /**
- * One measured page: its four category scores, its metrics against their thresholds and the top fixes; the
- * metrics and the fixes each export to Excel.
+ * One measured page: its four category scores, its metrics against their thresholds and the top fixes. "Export all"
+ * writes its metrics and failed audits on the server (`seo-lighthouse`, the stored result).
  */
 import type {
   CompletedResult, LighthouseAudit, LighthouseResult, LighthouseScores
 } from '../../../types/api/seoPerformance';
 import { safeHref } from '../../../infrastructure';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
-import {
-  exportMetricsExcel, exportOpportunitiesExcel
-} from './lighthouseExcel';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import {
   METRICS, RATING_CLASSES, RATING_LABELS, SCORE_LABELS, descriptionParts, deviceLabel, formatMetric, metricRating,
   savingsText, scoreRating, thresholdNote, type MetricDefinition
@@ -91,29 +88,32 @@ function AuditItem({ audit }: { readonly audit: LighthouseAudit }) {
   );
 }
 
-function CompletedReport({ result }: { readonly result: CompletedResult }) {
+function CompletedReport({
+  runId, result
+}: {
+  readonly runId: string;
+  readonly result: CompletedResult;
+}) {
   return (
     <div className="space-y-3">
+      <div className="flex justify-end">
+        <ExportAllButton view="seo-lighthouse" params={{
+          run_id: runId,
+          url: result.url,
+          device: result.device,
+        }} />
+      </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {SCORE_KEYS.map((key) => <ScoreTile key={key} label={SCORE_LABELS[key]} score={result.scores[key]} />)}
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <h5 className="text-sm font-semibold text-gray-900">Metrics</h5>
-        <ExportExcelButton onExport={() => exportMetricsExcel(result)} failureLabel="[seo] Lighthouse metrics Excel export failed:"
-          title="The six page speed metrics of this result" />
-      </div>
+      <h5 className="text-sm font-semibold text-gray-900">Metrics</h5>
       <table className="min-w-full text-sm" aria-label="Page speed metrics">
         <tbody className="divide-y divide-gray-100">
           {METRICS.map((metric) => <MetricRow key={metric.key} metric={metric} value={result.metrics[metric.key]} />)}
         </tbody>
       </table>
       <div>
-        <div className="flex items-center justify-between gap-2">
-          <h5 className="text-sm font-semibold text-gray-900">Top opportunities</h5>
-          <ExportExcelButton onExport={() => exportOpportunitiesExcel(result)}
-            failureLabel="[seo] Lighthouse opportunities Excel export failed:" disabled={result.failed_audits.length === 0}
-            title="The failed audits of this result" />
-        </div>
+        <h5 className="text-sm font-semibold text-gray-900">Top opportunities</h5>
         {result.failed_audits.length === 0
           ? <p className="text-sm text-gray-600">No failed audit: nothing to fix on this page.</p>
           : <ul className="divide-y divide-gray-100">{result.failed_audits.map((audit) => <AuditItem key={audit.id} audit={audit} />)}</ul>}
@@ -122,18 +122,25 @@ function CompletedReport({ result }: { readonly result: CompletedResult }) {
   );
 }
 
-function ResultBody({ result }: { readonly result: LighthouseResult | null }) {
+function ResultBody({
+  runId, result
+}: {
+  readonly runId: string;
+  readonly result: LighthouseResult | null;
+}) {
   if (result === null) return <p className="text-sm text-gray-500">Waiting to be measured…</p>;
   if (result.status === 'measuring') return <p className="text-sm text-gray-500">Measuring (up to a minute)…</p>;
   if (result.status === 'failed') {
     return <p role="alert" className="text-sm text-red-700">{result.error}</p>;
   }
-  return <CompletedReport result={result} />;
+  return <CompletedReport runId={runId} result={result} />;
 }
 
 export function LighthouseReport({
-  url, device, result
+  runId, url, device, result
 }: {
+  /** The stored run the result belongs to (what the export reads). */
+  readonly runId: string;
   readonly url: string;
   readonly device: 'mobile' | 'desktop';
   readonly result: LighthouseResult | null;
@@ -143,7 +150,7 @@ export function LighthouseReport({
       <h4 className="text-sm font-semibold text-gray-900 break-all">
         {url} <span className="font-normal text-gray-500">· {deviceLabel(device)}</span>
       </h4>
-      <ResultBody result={result} />
+      <ResultBody runId={runId} result={result} />
     </article>
   );
 }

@@ -51,13 +51,10 @@ class PagedTable:
         return ordered if forward else ordered[::-1]
 
     def _page(self, ordered: list[dict[str, Any]], params: Mapping[str, Any], key_names: Sequence[str]) -> dict[str, Any]:
-        start = params.get('ExclusiveStartKey')
-        if start is not None:
-            positions = [index for index, row in enumerate(ordered) if all(row.get(n) == start[n] for n in key_names)]
-            ordered = ordered[positions[0] + 1:] if positions else []
+        ordered = rows_after(ordered, params.get('ExclusiveStartKey'), key_names)
         size = min(params.get('Limit', len(ordered)), self.max_page_rows or len(ordered))
         page = ordered[:size]
-        response: dict[str, Any] = {'Items': [_project(row, params) for row in page]}
+        response: dict[str, Any] = {'Items': [project(row, params) for row in page]}
         if len(ordered) > size and page:
             response['LastEvaluatedKey'] = {name: page[-1][name] for name in key_names}
         return response
@@ -77,7 +74,16 @@ class PagedTable:
         return self._page(list(self.rows), params, self._key_attributes(None))
 
 
-def _project(row: dict[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+def rows_after(rows: list[dict[str, Any]], start: Mapping[str, Any] | None, key_names: Sequence[str]) -> list[dict[str, Any]]:
+    """The rows after the one whose key is ``start`` (an ``ExclusiveStartKey``; every row without one); none when no row has it."""
+    if start is None:
+        return rows
+    positions = [index for index, row in enumerate(rows) if all(row.get(name) == start[name] for name in key_names)]
+    return rows[positions[0] + 1:] if positions else []
+
+
+def project(row: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """``row`` with only the attributes of the request's ``ProjectionExpression`` (aliases resolved); whole without one."""
     projection = params.get('ProjectionExpression')
     if projection is None:
         return dict(row)

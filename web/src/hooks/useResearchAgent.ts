@@ -4,7 +4,7 @@ import {
 import {
   deleteKeywordResearch,
   fetchKeywordResearch,
-  fetchKeywordResearchHistory,
+  fetchKeywordResearchHistoryPage,
   retryKeywordResearch,
   startResearchAgent,
 } from '../api/keywordResearch';
@@ -26,6 +26,10 @@ interface UseResearchAgentReturn {
   /** True while a run is being started. */
   starting: boolean;
   loadingJobs: boolean;
+  /** True while older runs are being appended. */
+  loadingMore: boolean;
+  /** Appends the next page of older runs; absent once every run is listed. */
+  loadMore: (() => Promise<void>) | undefined;
   error: string | null;
   start: (request: StartAgentRequest) => Promise<KeywordResearchItem | null>;
   select: (id: string | null) => void;
@@ -52,6 +56,8 @@ function replaceJob(jobs: KeywordResearchItem[], job: KeywordResearchItem): Keyw
  */
 export const useResearchAgent = (): UseResearchAgentReturn => {
   const [jobs, setJobs] = useState<KeywordResearchItem[]>([]);
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The full row of the opened run (the history listing omits the prompt).
   const [detail, setDetail] = useState<KeywordResearchItem | null>(null);
@@ -83,9 +89,10 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   const refresh = useCallback(async (): Promise<void> => {
     setLoadingJobs(true);
     try {
-      const items = await fetchKeywordResearchHistory('agent');
+      const page = await fetchKeywordResearchHistoryPage('agent');
       if (!mountedRef.current) return;
-      setJobs(items);
+      setJobs(page.items);
+      setNextToken(page.nextToken);
     } catch (err) {
       if (!isAbortError(err)) reportFailure(err, 'loading runs');
     } finally {
@@ -93,6 +100,22 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     }
   }, [reportFailure]);
   // Stryker restore ArrayDeclaration
+
+  /** Appends the next page of older runs (the listing used to stop at its first page). */
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (nextToken === null) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchKeywordResearchHistoryPage('agent', nextToken);
+      if (!mountedRef.current) return;
+      setJobs((prev) => [...prev, ...page.items.filter((item) => !prev.some((job) => job.id === item.id))]);
+      setNextToken(page.nextToken);
+    } catch (err) {
+      if (!isAbortError(err)) reportFailure(err, 'loading older runs');
+    } finally {
+      if (mountedRef.current) setLoadingMore(false);
+    }
+  }, [nextToken, reportFailure]);
 
   useEffect(() => {
     void refresh();
@@ -206,6 +229,8 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     selected,
     starting,
     loadingJobs,
+    loadingMore,
+    loadMore: nextToken === null ? undefined : loadMore,
     error,
     start,
     select,

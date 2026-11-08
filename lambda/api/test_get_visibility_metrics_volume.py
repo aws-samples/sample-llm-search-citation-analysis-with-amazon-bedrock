@@ -5,7 +5,7 @@ Before: ``brands`` listed every brand the answers named. A 100-keyword scope
 whose answers each name 50 local brands (hotels, airlines, agencies) holds
 5,000 rows of ~350 bytes (more with accented names): ~1.8 MB, growing with
 every keyword and engine, while the dashboard shows the top of the
-leaderboard. Now the view lists the ``BRANDS_LIMIT`` most visible brands,
+leaderboard (the scope here is the largest one read live, 97 keywords). Now the view lists the ``BRANDS_LIMIT`` most visible brands,
 then the first-party and tracked brands ranked below them, with
 ``brands_total`` and each row's ``position``.
 """
@@ -31,7 +31,9 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 visibility_handler = handler_fixture(_API_DIR, 'get-visibility-metrics.py', 'get_visibility_metrics_volume_under_test', env=REPORT_TABLES_ENV)
 
 _ENGINES = ('openai', 'perplexity', 'gemini', 'claude')
-_KEYWORDS = [f'hoteles con encanto en la región {index:03d}' for index in range(100)]
+#: The largest scope read live at 10 personas x 4 engines plus Google AI Overviews (``LIVE_ROWS_BUDGET``).
+_KEYWORD_COUNT = 97
+_KEYWORDS = [f'hoteles con encanto en la región {index:03d}' for index in range(_KEYWORD_COUNT)]
 _LOCAL_BRANDS = 50
 
 
@@ -78,7 +80,7 @@ class TestBrandLeaderboard:
         body = body_and_response[0]
 
         assert (body['brands_total'], [row['position'] for row in body['brands'][:BRANDS_LIMIT]]) == (
-            100 * _LOCAL_BRANDS + 2, list(range(1, BRANDS_LIMIT + 1)),
+            _KEYWORD_COUNT * _LOCAL_BRANDS + 2, list(range(1, BRANDS_LIMIT + 1)),
         )
 
     def test_lists_the_first_party_and_tracked_brands_ranked_below_the_top(self, body_and_response):

@@ -5,7 +5,7 @@ import { renderHook } from '@testing-library/react';
 import { useCompetitorRollup } from './useCompetitorRollup';
 import { mockSingleCompetitorRollup } from './useCompetitorRollup-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {failedToLoadOnBackendError} from './useAnalysisEndpoint-failure-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -16,10 +16,11 @@ describe('useCompetitorRollup', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useCompetitorRollup());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchCompetitorRollup'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchCompetitorRollup'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'competitor',
     useHook: useCompetitorRollup,
     fetchName: 'fetchCompetitorRollup',
@@ -27,9 +28,13 @@ describe('useCompetitorRollup', () => {
     defaultResponse: mockSingleCompetitorRollup,
     defaultArgs: ['Unknown'],
     requests: [
-      ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Adidas', 'a competitor is given', ['Adidas']],
-      ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Brand+%26+Co', 'the competitor name has special characters', ['Brand & Co']],
-      ['https://api.test.com/reports/competitor?keyword_limit=75&competitor=Adidas', 'a keyword limit is given', ['Adidas', 75]],
+      ['https://api.test.com/reports/competitor?scope=all&competitor=Adidas&limit=100', 'a competitor is given', ['Adidas']],
+      ['https://api.test.com/reports/competitor?scope=all&competitor=Brand+%26+Co&limit=100', 'the competitor name has special characters', ['Brand & Co']],
+      ['https://api.test.com/reports/competitor?group_id=hotel-sol&competitor=Adidas&limit=100', 'a keyword group scope is given', ['Adidas', {
+        kind: 'group',
+        groupId: 'hotel-sol',
+      }]],
+      ['https://api.test.com/reports/competitor?scope=all&competitor=Adidas&limit=75', 'a page size is given', ['Adidas', undefined, 75]],
     ],
     successes: [
       ['single-competitor rollup', mockSingleCompetitorRollup, ['Adidas']],

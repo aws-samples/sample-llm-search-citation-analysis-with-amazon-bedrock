@@ -1,8 +1,12 @@
-# Citation Analysis System
+# Citation Analysis System: track your brand's visibility in AI search (GEO / AEO)
+
+An open-source, self-hosted AI visibility tracker for generative engine optimization (GEO) and answer engine optimization (AEO), built on AWS. It shows how OpenAI (the models behind ChatGPT), Perplexity, Gemini, Claude and, optionally, Google AI Overviews mention and cite your brand, which sources they cite for your competitors but not for you, and what content to create next. It accompanies the AWS Builder Center article [Track your brand's visibility in AI search with a citation analysis tool](https://builder.aws.com/content/39o3JtrRqnsKKyKF0r5ZODrP751/track-your-brands-visibility-in-ai-search-with-a-citation-analysis-tool).
 
 > **Important:** This is sample code for demonstration and educational purposes. It is not intended for production use without additional security review and testing. You should work with your security and compliance teams to meet your organizational requirements before deploying to production environments.
 
-A serverless system that tracks how AI engines (OpenAI, Perplexity, Gemini, Claude) mention and cite brands. It sends your keywords to each engine with web search enabled, stores every answer and its citations, extracts the brands named, crawls the cited pages with Amazon Bedrock AgentCore, and reports visibility KPIs, competitor benchmarks and content gaps in a React dashboard. It is deployed with AWS CDK (TypeScript); the backend is Python 3.12 Lambda functions orchestrated by AWS Step Functions.
+A serverless system that tracks how AI engines (OpenAI, Perplexity, Gemini, Claude and, optionally, Google AI Overviews) mention and cite brands. It sends your keywords to each engine with web search enabled, stores every answer and its citations, extracts the brands named, crawls the cited pages with Amazon Bedrock AgentCore, and reports visibility KPIs, competitor benchmarks and content gaps in a React dashboard. An optional SEO stack puts Google organic data from DataForSEO (rankings, domains, backlinks, local results, site audits) next to the AI-visibility figures. It is deployed with AWS CDK (TypeScript) as five CloudFormation stacks; the backend is Python 3.12 Lambda functions orchestrated by AWS Step Functions.
+
+Further documentation: [KPI definitions](docs/kpi-definitions.md), [SEO](docs/seo.md) (with one page per SEO feature), [GEO KPI corrections](docs/geo-corrections.md), [MCP server](docs/mcp.md), [design system](docs/design-system.md) and the [changelog](CHANGELOG.md), which has the upgrade notes of every release.
 
 ## Features
 
@@ -11,22 +15,22 @@ The dashboard sidebar has these sections:
 | Section | Pages |
 |---|---|
 | Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs, cited domains and the scope's three most pressing insights; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown; YouTube videos are counted once per video whatever link was cited, tagged *Video* and filterable, and their title, channel and thumbnail come from YouTube oEmbed instead of a browser crawl), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track); the last three take the same keyword, group or all-keywords scope as Visibility |
-| Research | **Keyword Research**: Expand, Competitor (analyse a competitor website), Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History |
+| Research | **Keyword Research**: Related Keywords, Keyword Explorer (search volume, difficulty, CPC and intent from DataForSEO; SEO stack), Competitor Analysis (analyse a competitor website), Research Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History. **SEO** (SEO stack): Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance and Local SEO; see [docs/seo.md](docs/seo.md) |
 | Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
-| Reporting | **Reports**: nine print-ready reports (below), plus custom reports you build from their sections |
-| Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3) |
+| Reporting | **Reports**: ten print-ready reports (below), plus custom reports you build from their sections |
+| Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3), **Exports** (your Excel and CSV exports of the last 7 days) |
 | Operations | **Run Analysis**, **Schedule** (EventBridge Scheduler runs) |
-| Configuration | **Settings**: Keywords (with keyword groups), Markets, Brand Tracking, Personas, AI Providers, Alerts, Users (admins only) |
+| Configuration | **Settings**: Keywords (with keyword groups), Markets, Brand Tracking, Personas, AI Providers (with the DataForSEO login under SEO data), Bedrock Models, Alerts, Users (admins only), AI Assistants (MCP connection guide) |
 
-Most views export to Excel, the header's PDF button prints the current view (print mode, `?print=1`), and the UI has light, dark and system themes. A first-run guide walks through setup, and a banner flags a provider that is failing.
+Every data view has **Export all** (Excel or CSV), which exports the view's full data with its current filters. The export runs on the server, however large it is, and the file appears on the **Exports** page; a header badge, a toast and, if you allow it, a browser notification say when it is ready. Content Studio's DOCX is the only file built in the browser. The header's PDF button prints the current view (print mode, `?print=1`), and the UI has light, dark and system themes. A first-run guide walks through setup, and a banner flags a provider that is failing.
 
-![Dashboard overview](docs/dashboard.png)
+![AI visibility dashboard: total searches, citations, pages crawled and keywords, citations by AI engine (OpenAI, Perplexity, Gemini, Claude) and brand mentions](docs/dashboard.png)
 
-![Brand mentions](docs/brandmentions.png)
+![Brand Mentions view: the brands AI engines name for a keyword, ranked by position and score, with each brand's classification and the engines that mentioned it](docs/brandmentions.png)
 
-![Citation gap analysis](docs/citationgapanalysis.png)
+![Citation Gap Analysis view: domains AI engines cite for competitors but not for your brand, with gap counts and coverage](docs/citationgapanalysis.png)
 
-![Content Studio](docs/contentstudio.png)
+![Content Studio view: AI-generated content ideas based on visibility gaps and competitor analysis](docs/contentstudio.png)
 
 ### Reports
 
@@ -40,6 +44,7 @@ Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingVie
 | AI Engines | `/reports/engines` | AI search specialist |
 | Sources | `/reports/sources` | SEO and digital PR |
 | Sentiment | `/reports/sentiment` | Brand / communications lead |
+| SEO vs GEO | `/reports/seo-geo` | SEO and AI search lead (needs the SEO stack; see [docs/seo-metrics.md](docs/seo-metrics.md)) |
 | Competitor Gap Report | `/reports/competitor` (`/reports/competitor/:competitor`) | Content / PR strategist |
 | Content Action Plan | `/reports/content-action-plan` | Content strategist |
 | Keyword Deep Dive | `/reports/keyword` (`/reports/keyword/:keyword`) | SEO / AI search lead |
@@ -54,16 +59,32 @@ The Visibility tab, the per-group report, the Executive Summary, Brand Visibilit
 
 ## Architecture
 
-![Architecture diagram](architecture-diagram.png)
+![Architecture of release 2.45.0: the main, API, MCP, SEO and Web Search CDK stacks](architecture-diagram.png)
+
+The editable source is [docs/architecture.drawio](docs/architecture.drawio).
 
 ### Workflows (Step Functions)
 
-- **`CitationAnalysis-Workflow`** (one execution per analysis run, 7-day timeout): ParseKeywords (writes the run's keyword list to `runs/<execution>/keywords.json` in the keywords bucket) → ProcessKeywords Distributed Map (one child execution per keyword: SearchAllProviders, a Parallel state calling every provider at once through its own `CitationAnalysis-Search-<provider>` Lambda → MergeProviderResults → DeduplicateCitations → CrawlCitations Map → SummarizeKeywordResult; results written to S3) → GenerateSummary (reads the results from S3, stores the full report under `execution-summaries/`) → KpiAlerts → GenerateInsights (a Map with one ReportInsights invocation per fully covered keyword group and market, four at a time, skipped when no group is complete) → BuildCitationRollup (per-scope citation totals and pages under `citation-rollups/` in the keywords bucket, which `GET /api/citations` serves without scanning the Citations table). A failed alert, insight or rollup step keeps the report. The run's state and history stay the same size however many keywords it covers, and there is no per-run keyword cap. Keywords run 20 at a time by default (`-c processKeywordsConcurrency=N`) and citations are crawled 10 at a time per keyword (`-c crawlConcurrency=N`). Each provider has a cap on calls in flight across the whole run (`-c providerConcurrency`); a keyword whose provider is at its cap waits for a free slot, and every client waits out rate limits (`Retry-After`, `x-ratelimit-reset`) instead of failing, so no provider call is lost to throttling. SerpAPI searches are submitted asynchronously and read back from its Search Archive, so a slow search is waited for rather than re-sent. A failed crawl or alert evaluation does not fail the run; up to 10% of keywords may fail (reported as `completed_with_errors`) before the run stops. `runs/` objects expire after 30 days.
+- **`CitationAnalysis-Workflow`** (one execution per analysis run, 7-day timeout): ParseKeywords (writes the run's keyword list to `runs/<execution>/keywords.json` in the keywords bucket) → ProcessKeywords Distributed Map (one child execution per keyword: SearchAllProviders, a Parallel state calling every provider at once through its own `CitationAnalysis-Search-<provider>` Lambda → MergeProviderResults → DeduplicateCitations → CrawlCitations Map → SummarizeKeywordResult; results written to S3) → GenerateSummary (reads the results from S3, stores the full report under `execution-summaries/`) → KpiAlerts → BuildScopeSnapshots (the scope snapshots under `scope-snapshots/` in the keywords bucket, which the scoped views serve for scopes too large to read live; see below) → GenerateInsights (a Map with one ReportInsights invocation per fully covered keyword group and market, four at a time, skipped when no group is complete) → BuildCitationRollup (per-scope citation totals and pages under `citation-rollups/` in the keywords bucket, which `GET /api/citations` serves without scanning the Citations table). A failed alert, snapshot, insight or rollup step keeps the report. The run's state and history stay the same size however many keywords it covers, and there is no per-run keyword cap. Keywords run 20 at a time by default (`-c processKeywordsConcurrency=N`) and citations are crawled 10 at a time per keyword (`-c crawlConcurrency=N`). Each provider has a cap on calls in flight across the whole run (`-c providerConcurrency`); a keyword whose provider is at its cap waits for a free slot, and every client waits out rate limits (`Retry-After`, `x-ratelimit-reset`) instead of failing, so no provider call is lost to throttling. SerpAPI searches are submitted asynchronously and read back from its Search Archive, so a slow search is waited for rather than re-sent. A failed crawl or alert evaluation does not fail the run; up to 10% of keywords may fail (reported as `completed_with_errors`) before the run stops. `runs/` objects expire after 30 days.
 - **`CitationAnalysis-KeywordResearch`** (one execution per research job, 60-minute timeout; the API marks a job failed only after 65 minutes): PlanResearch → ExecuteResearchSteps Map (up to 10 steps in parallel) → EvaluateResearch → continue? → PlanResearch … | FinalizeResearch. Each step checkpoints its result into the job row, so a failed provider keeps the other results and can be retried on its own.
+- **`CitationAnalysis-ScopeSnapshotBuild`** (6-hour timeout; every step runs on `CitationAnalysis-ScopeSnapshotWorker`): the distributed scope snapshot and citation rollup build that GenerateSummary starts when the build needs more than one 450 MB unit or Citations holds more than 100,000 rows. PlanSnapshotBuild → in parallel FoldUnits → SeriesBatches (each batch loops 480 s turns until done) and RollupShards → RollupMerges → PublishSnapshotBuild; the Distributed Maps run 10 items at a time and every step is idempotent. One build runs at a time; smaller tenants build in process.
+- **`CitationAnalysis-Export`** (one execution per export, 7-day timeout): PrepareExport → ExportChunk until every row is written → FinalizeExport; any failure → MarkExportFailed. Each chunk is one `CitationAnalysis-ExportWorker` invocation that writes rows until 60 s before its 900 s timeout, uploads S3 multipart parts and saves a cursor, so an export of any size finishes.
+- **SEO state machines** (SEO stack, every step on `CitationAnalysis-SeoJobs`): `CitationAnalysis-SeoRankCheck` (rank checks: on demand, or for due trackers when the `CitationAnalysis-SeoRankTrackingTick` rule invokes the jobs function), `CitationAnalysis-SiteAudit`, `CitationAnalysis-SeoDomainSnapshots` and `CitationAnalysis-SeoBacklinkSnapshots` (weekly rules `CitationAnalysis-SeoDomainSnapshotsWeekly` and `CitationAnalysis-SeoBacklinkSnapshotsWeekly`), `CitationAnalysis-SeoLocalJob` (local rank grid, reviews, profile updates) and `CitationAnalysis-SeoLighthouse`.
+
+With `-c seoEngine=true`, SearchAllProviders also calls `CitationAnalysis-Search-google_ai_overview` (in the SEO stack) once per keyword, whatever the personas.
+
+**Complete scoped views.** A scoped view (a keyword group, a market or all keywords) is read live when the estimated rows, keywords × (max(1, enabled personas) × engines + one Google AI Overviews answer) × runs needed, are at most 8,000 (`shared/scope_source.py`; at 10 personas that is 97 keywords); one keyword or a selection of up to 100 keywords is always live. A larger scope is served from the scope snapshot: `all`, every market and every larger group or group × market, rebuilt after each run and after keyword, group, market, brand-configuration or persona changes. The snapshot is built from one `KeywordLatest` object per keyword (`scope-snapshots/keywords/`), which DeduplicateCitations writes with the KPI row, and a per-scope series of up to 365 runs. A view the snapshot does not hold (another number of days, an older run, no build yet) answers `202 {status: "computing"}` while a view job computes it, and the same request answers 200 once it is stored. Every scoped answer carries `coverage` (`keywords_total`, `keywords_analyzed`, `complete`), `source`, `as_of` and `stale`, which the dashboard shows as "Covers X of Y keywords"; list cursors are tied to their build and answer `400 cursor_expired` when it is gone.
 
 ### Lambda functions
 
-All functions run Python 3.12. CPU-bound functions are sized for CPU, which Lambda allocates in proportion to memory: 1,769 MB (one vCPU) for API-StatsInsights, API-CitationsContent, API-GetBrandMentions, KpiAlerts and ReportInsights; 1,024 MB for API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt and ParseKeywords; 1,024 MB and 300 s for Deduplication, which also records each keyword run's KPI counts; 3,008 MB and 900 s for GenerateSummary, which also builds the citation rollup. API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
+All functions run Python 3.12. Lambda allocates CPU in proportion to memory. The 2.45.0 sizes are the owner's decision of 2026-11-07, informed by AWS Lambda Power Tuning of the read-only routes, a 30-day CloudWatch REPORT audit (no function at 60% of its memory) and per-invocation probes at 10x volume (5,000 keywords, 365 runs, 10 personas; tracemalloc):
+
+- **1,769 MB (one vCPU):** API-StatsInsights, API-CitationsContent, API-GetBrandMentions and ReportInsights (they deserialize thousands of rows per request, and the live window row cap scales with memory); KpiAlerts (300 s); ExportWorker (900 s); GenerateSummary (900 s), which builds the run summary and, in process, a citation rollup of up to 100,000 Citations rows and a snapshot build within one 450 MB unit; ScopeSnapshotWorker (900 s), whose fold units, series turns, rollup shards and merges peaked at about 606 MB of heap and under 600 CPU s at 10x.
+- **1,024 MB:** API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-ManageBrandConfig, API-GetPersonaRankings, ParseKeywords, Crawler, and Deduplication (300 s), which also records each keyword run's KPI counts and `KeywordLatest` object.
+- **512 MB:** API-Health, API-ManageUsers, API-SelfReflection, API-ContentStudio, API-Exports, Mcp, the Search functions, ResearchWorker and ContentStudioWorker.
+- **256 MB:** KpiWriteFailureRelay.
+
+API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
 
 | Function | Code | Role |
 |---|---|---|
@@ -72,9 +93,13 @@ All functions run Python 3.12. CPU-bound functions are sized for CPU, which Lamb
 | API-StatsInsights, API-CitationsContent, API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-GetBrandMentions, API-ManageBrandConfig, API-GetPersonaRankings, API-SelfReflection, API-ContentStudio, API-ManageUsers, API-Health | `lambda/api/*.py` | REST API handlers; the consolidated functions bundle several handler files each |
 | ContentStudioWorker | `lambda/api/content-studio.py` | Content generation, fed by a DynamoDB stream and a 5-minute reconcile rule |
 | ReportInsights | `lambda/report-insights/` | GenerateInsights workflow step and on-demand regenerate: one Bedrock narrative per fully covered keyword group |
+| ScopeSnapshotWorker | `lambda/generate-summary/` | Every step of the distributed scope snapshot build (`CitationAnalysis-ScopeSnapshotBuild`) |
+| ExportWorker, API-Exports | `lambda/export-worker/`, `lambda/api/exports.py` | The export service: the `CitationAnalysis-Export` steps, and the `/api/exports` routes |
+| KpiWriteFailureRelay | inline (`lib/constructs/kpi-write-failure-alarm.ts`) | Publishes the KPI write-failure alarm to the KPI alerts topic |
 | Mcp (stack `CitationAnalysisMcpStack`) | `lambda/mcp/` | MCP server: JSON-RPC over Streamable HTTP, tool catalogue, replays tool calls against the API handler Lambdas |
+| SeoRouter, SeoJobs, Search-google_ai_overview (stack `CitationAnalysisSeoStack`) | `lambda/seo/`, `lambda/seo-jobs/`, `lambda/search/` | The SEO API's one router (512 MB), every step of the SEO state machines (1,024 MB, 15 minutes), and the Google AI Overviews engine |
 
-Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `bs4` and `tzdata`) used by every function except the crawler, and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
+Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `bs4` and `tzdata`) used by every function except the crawler (the SEO stack builds its own version, `CitationAnalysis-SeoSharedLayer`, and the MCP stack `CitationAnalysis-McpSharedLayer`, from the same directory), and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
 
 ### Data
 
@@ -85,6 +110,8 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands and its `market_id` |
 | Citations | keyword / normalized_url | Every deduplicated citation, with `content_type` (`video` or `page`) |
 | KeywordRunKpis | keyword / run_timestamp | One row of KPI counts per keyword and run (at most 25 brands), which the history views add up instead of re-reading every answer; see [KPI backfill](#kpi-backfill) |
+| KeywordRunBrands | keyword / run_timestamp | The full brand list of a keyword run, written only when it names more than 25 brands; read by the scope series and window view jobs |
+| Exports | export_id | Export jobs (GSI `OwnerCreatedIndex` owner / created_at; TTL 7 days) |
 | CrawledContent | normalized_url / crawled_at | Crawled page content, summaries and SEO data |
 | Keywords | id | Keywords; `group_ids` holds group membership, `market_id` the market, `concept_id` the keyword a translation localizes |
 | KeywordGroups | id | Keyword groups |
@@ -97,7 +124,10 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | CustomReports | id | Saved custom reports (title, ordered blocks, period; at most 50) |
 | SelfReflection | keyword_brand / persona_timestamp | Ranking analysis cache (24 h TTL) |
 | RecommendationStatus | recommendation_id | Action Center item status (TTL) |
+| ReportInsights | scope_key / run_timestamp | Written insights per keyword group and market (TTL), read by the reports |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
+
+These 24 tables are in `CitationAnalysisStack`. `CitationAnalysisMcpStack` adds `CitationAnalysis-McpState` (spend tokens, per-caller counters, audit), and `CitationAnalysisSeoStack` adds the six below.
 
 The SEO stack (`CitationAnalysisSeoStack`) adds its own tables, with the same settings. Measurements are kept and
 never expire (Silver); only caches, receipts, locks and crawl bookkeeping carry a TTL:
@@ -115,15 +145,17 @@ The `seo` bucket (`citation-analysis-seo-<account>`) holds `seo/cache/<key>.json
 `seo/lighthouse/<run>-<index>.json` (full Lighthouse reports), `seo/domain-snapshots/<domain>/<market>/<snapshot_at>.json`
 (a snapshot's ranked keywords, written once) and `seo/site-audit/<id>/robots.txt`.
 
-S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). The SEO stack adds `seo` (its oversized cache payloads, Lighthouse reports, domain-snapshot keywords and robots.txt copies), so `raw-responses` holds only the providers' answers. KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
+S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files, run summaries, the citation rollup, the scope snapshots under `scope-snapshots/` and the export files under `exports/<owner>/<id>/`; view job results and export files expire after 7 days), `raw-responses` (the providers' answers only), `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). The SEO stack adds `seo` (oversized cache payloads, Lighthouse reports, domain-snapshot keywords and robots.txt copies). KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
 
 ### API and hosting
 
-A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. It has its own stack, `CitationAnalysisApiStack` (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`), which imports the API Lambdas, the user pool, the web bucket and the distribution from `CitationAnalysisStack` and is deployed after it; it also writes `config.json` (`{"apiUrl": "<stage URL>/api"}`) into the web bucket, which the dashboard reads at startup, so the API URL is not built into the bundle. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
+A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. It has its own stack, `CitationAnalysisApiStack` (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`), which takes nothing from `CitationAnalysisStack` by cross-stack reference (it builds the API Lambdas' ARNs from their fixed names and the web bucket name from the account, and reads the user pool id, the distribution id and the dashboard origin from SSM parameters the main stack writes: `/citation-analysis/user-pool-id`, `/citation-analysis/web-distribution-id`, `/citation-analysis/cors-origin`) and is deployed after it; it also writes `config.json` (`{"apiUrl": "<stage URL>/api"}`) into the web bucket, which the dashboard reads at startup, so the API URL is not built into the bundle. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. Exports are `POST /api/exports {view, params, format}`, `GET /api/exports`, `GET`/`DELETE /api/exports/{id}` and `POST /api/exports/{id}/seen` on API-Exports: any signed-in user can export, sees only their own exports (Admin included), and has at most 5 queued or running; a download is a 15-minute presigned URL minted on each request, and the file key is never returned. The SEO exports need the SEO stack: the export worker invokes `CitationAnalysis-SeoRouter` by name. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
+
+The SEO features have their own REST API in `CitationAnalysisSeoStack` (`lib/seo-stack.ts`): `CitationAnalysis-SeoApi`, routes under `/api/seo/`, one router Lambda (`CitationAnalysis-SeoRouter`), a Cognito authorizer on the same user pool and a stage throttle of 20 requests per second (burst 40). The stack imports only the user pool and the `CitationAnalysis-CorsOrigin` export from the main stack. Its URL is the stack output `SeoApiUrl`, which `scripts/build-web.sh` builds into the dashboard as `VITE_SEO_API_URL`; without the stack, the SEO pages say the SEO stack is not deployed. Setup, pages, permissions and DataForSEO prices: [docs/seo.md](docs/seo.md).
 
 ### MCP server (preview)
 
-A second stack, `CitationAnalysisMcpStack`, holds an MCP server for AI assistants (Kiro, Claude.ai and Claude Code, ChatGPT, Amazon Quick): a Streamable HTTP endpoint, `POST /mcp` on its own REST API (`CitationAnalysis-McpApi`) behind its own CloudFront distribution, which gives the server a host root so clients find the OAuth discovery documents where RFC 9728 and RFC 8414 put them (`https://<dist>.cloudfront.net/mcp`, `https://<dist>.cloudfront.net/.well-known/...`), and one Lambda (`CitationAnalysis-Mcp`, reserved concurrency 10) that replays every tool call against the existing API handler Lambdas as the signed-in user, so permissions and figures are the dashboard's. `tools/list` advertises eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools` → `describe_tool` → `call_tool` over a catalogue of 26 more (`lambda/mcp/catalogue.py`), and two prompts (`geo_audit`, `setup_brand_tracking`); `-c mcpPinnedTools` promotes catalogue entries to the direct list. Operations that spend money take two steps: `estimate_run` / `estimate_research` / `estimate_content_brief` return a call count and a single-use confirmation token (5 minutes, bound to the caller and the exact request), which `start_run` (admin only, as on the dashboard) / `start_research` / `generate_content_brief` must present. Per-caller limits default to 1 run in flight, 5 runs and 20 research or content jobs per UTC day and 50 keywords per run (`-c mcpLimits='{"runsPerDay":10}'`); tokens, counters and an audit record of every write and spend call live in the on-demand `CitationAnalysis-McpState` table. User management, provider keys, brand-configuration and schedule writes and deletes are not exposed. Clients sign in with OAuth 2.1 and PKCE through a Cognito Managed Login domain (`citation-analysis-<account>`) and a public `mcp` app client (1-hour access tokens, 90-day refresh tokens). The protected-resource metadata (at `/.well-known/oauth-protected-resource/mcp`) names the distribution's base URL as the authorization server, and the API serves its metadata at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, pointing at Cognito's endpoints and advertising PKCE S256 (Cognito's own discovery document omits `code_challenge_methods_supported`, which makes Claude and ChatGPT refuse to connect). The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run` and a client that sends the endpoint as the RFC 8707 `resource` parameter gets an access token whose `aud` is the endpoint. Behind the Cognito authorizer the Lambda checks the token's issuer, client, use and audience; an anonymous call gets `401` with a `WWW-Authenticate` pointer to the protected-resource metadata (RFC 9728). Register each client's callback URL with `-c mcpRedirectUris`; the stack outputs `McpUrl`, `McpClientId`, `McpAuthorizeUrl`, `McpTokenUrl` and `McpResourceMetadataUrl` are what a client's connection form asks for. Per-client steps are in [docs/mcp.md](docs/mcp.md) and, for signed-in users, on the dashboard's Settings › AI assistants section (`/settings/ai-assistants`), which takes the URL and client id from the stack outputs at build time. The stack lives in `lib/mcp-stack.ts` and can be destroyed on its own. Dynamic client registration is not offered; clients use the pre-registered `McpClientId`.
+A second stack, `CitationAnalysisMcpStack`, holds an MCP server for AI assistants (Kiro, Claude.ai and Claude Code, ChatGPT, Amazon Quick): a Streamable HTTP endpoint, `POST /mcp` on its own REST API (`CitationAnalysis-McpApi`) behind its own CloudFront distribution, which gives the server a host root so clients find the OAuth discovery documents where RFC 9728 and RFC 8414 put them (`https://<dist>.cloudfront.net/mcp`, `https://<dist>.cloudfront.net/.well-known/...`), and one Lambda (`CitationAnalysis-Mcp`, reserved concurrency 10) that replays every tool call against the existing API handler Lambdas as the signed-in user, so permissions and figures are the dashboard's. `tools/list` advertises eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools` → `describe_tool` → `call_tool` over a catalogue of 44 more (`lambda/mcp/catalogue.py`; among them the SEO reads and the DataForSEO spend tools, which need the SEO stack), and two prompts (`geo_audit`, `setup_brand_tracking`); `-c mcpPinnedTools` promotes catalogue entries to the direct list. Operations that spend money take two steps: `estimate_run` / `estimate_research` / `estimate_content_brief` return a call count and a single-use confirmation token (5 minutes, bound to the caller and the exact request), which `start_run` (admin only, as on the dashboard) / `start_research` / `generate_content_brief` must present (the DataForSEO operations work the same way: `estimate_seo_*` then `run_seo_*` or, for admins, `start_seo_job`). Per-caller limits default to 1 run in flight, 5 runs and 20 research or content jobs per UTC day, 50 keywords per run and 50 DataForSEO lookups or SEO jobs per UTC day (`-c mcpLimits='{"runsPerDay":10}'`); tokens, counters and an audit record of every write and spend call live in the on-demand `CitationAnalysis-McpState` table. User management, provider keys, brand-configuration and schedule writes and deletes are not exposed. Clients sign in with OAuth 2.1 and PKCE through a Cognito Managed Login domain (`citation-analysis-<account>`) and a public `mcp` app client (1-hour access tokens, 90-day refresh tokens). The protected-resource metadata (at `/.well-known/oauth-protected-resource/mcp`) names the distribution's base URL as the authorization server, and the API serves its metadata at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, pointing at Cognito's endpoints and advertising PKCE S256 (Cognito's own discovery document omits `code_challenge_methods_supported`, which makes Claude and ChatGPT refuse to connect). The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run` and a client that sends the endpoint as the RFC 8707 `resource` parameter gets an access token whose `aud` is the endpoint. Behind the Cognito authorizer the Lambda checks the token's issuer, client, use and audience; an anonymous call gets `401` with a `WWW-Authenticate` pointer to the protected-resource metadata (RFC 9728). Register each client's callback URL with `-c mcpRedirectUris`; the stack outputs `McpUrl`, `McpClientId`, `McpAuthorizeUrl`, `McpTokenUrl` and `McpResourceMetadataUrl` are what a client's connection form asks for. Per-client steps are in [docs/mcp.md](docs/mcp.md) and, for signed-in users, on the dashboard's Settings › AI assistants section (`/settings/ai-assistants`), which takes the URL and client id from the stack outputs at build time. The stack lives in `lib/mcp-stack.ts` and can be destroyed on its own. Dynamic client registration is not offered; clients use the pre-registered `McpClientId`.
 
 Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or an agent's `mcpServers`), after `http://localhost:5173/oauth/callback` (the default `mcpRedirectUris` value) is registered; Kiro opens the Managed Login page in the browser and stores the token:
 
@@ -144,19 +176,23 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 ## Project structure
 
 ```
-├── bin/                     # CDK app entry point (stacks CitationAnalysisStack, CitationAnalysisApiStack, CitationAnalysisMcpStack, CitationAnalysisWebSearchStack)
+├── bin/                     # CDK app entry point (five stacks: CitationAnalysisStack, CitationAnalysisApiStack, CitationAnalysisMcpStack, CitationAnalysisSeoStack, CitationAnalysisWebSearchStack)
 ├── lib/
-│   ├── citation-analysis-stack.ts
+│   ├── citation-analysis-stack.ts  # Tables, buckets, workflows, Lambdas, Cognito, CloudFront
 │   ├── api-stack.ts         # Dashboard REST API stack (+ config.json)
 │   ├── mcp-stack.ts         # MCP server stack
-│   └── constructs/          # auth.ts (Cognito), rest-api.ts (dashboard routes), bedrock-model-access.ts, mcp-server.ts
+│   ├── seo-stack.ts         # SEO API, SEO jobs and the Google AI Overviews engine (features in seo-features.ts)
+│   ├── web-search-stack.ts  # Amazon Bedrock Web Search gateway
+│   └── constructs/          # auth.ts (Cognito), rest-api.ts (dashboard routes), tables.ts, provider-search.ts, kpi-write-failure-alarm.ts, bedrock-model-access.ts, mcp-server.ts, seo-api.ts and one seo-<feature>.ts per SEO page
 ├── lambda/
-│   ├── api/                 # API handlers
-│   ├── mcp/                 # MCP server: auth, protocol, catalogue, tool search, invoker
+│   ├── api/                 # API handlers (exports.py: the /api/exports routes)
+│   ├── mcp/                 # MCP server: auth, protocol, catalogue, tool search, invoker, spend tools
 │   ├── search/              # Provider queries, brand extraction, web-search providers
-│   ├── deduplication/  crawler/  parse-keywords/  generate-summary/  kpi-alerts/
+│   ├── deduplication/  crawler/  parse-keywords/  generate-summary/  kpi-alerts/  report-insights/
+│   ├── export-worker/       # Export service steps (CitationAnalysis-Export)
+│   ├── seo/  seo-jobs/      # SEO API router handlers; SEO state machine steps
 │   ├── research-worker/     # Keyword research state machine steps
-│   ├── shared/              # Shared modules (KPI engine, clients, decorators, config)
+│   ├── shared/              # Shared modules (KPI engine, scope snapshots, export sources, DataForSEO client, clients, decorators, config)
 │   ├── layer/  crawler-layer/   # Layer build scripts and requirements
 │   ├── testing/             # Test support: module loader, DynamoDB stubs, events, env
 │   ├── conftest.py
@@ -165,7 +201,7 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 │   ├── api/  components/  constants/  exporters/  formatting/
 │   ├── hooks/  infrastructure/  types/
 │   └── test/                # Test support
-├── docs/                    # kpi-definitions.md, design-system.md, screenshots
+├── docs/                    # kpi-definitions.md, geo-corrections.md, seo*.md, mcp.md, design-system.md, screenshots
 ├── scripts/                 # Deploy, build and quality-gate scripts
 └── cdk.json
 ```
@@ -196,6 +232,23 @@ npm run deploy      # same as ./scripts/deploy.sh
 
 `scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys every stack (`cdk deploy --all`), rebuilds the dashboard with the new Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
 
+### Stacks and deploy order
+
+| Stack | Holds | Depends on |
+|---|---|---|
+| `CitationAnalysisStack` | Tables, buckets, workflows, workflow and API Lambdas, Cognito, CloudFront, the SSM parameters the other stacks read | Nothing |
+| `CitationAnalysisApiStack` | The dashboard REST API and `config.json` | Main stack (SSM parameters and fixed function names, no CloudFormation imports) |
+| `CitationAnalysisMcpStack` | The MCP server, its API, distribution and `CitationAnalysis-McpState` | Main stack (imports function ARNs and the user pool) |
+| `CitationAnalysisSeoStack` | The SEO API, SEO tables, state machines and jobs, the Google AI Overviews engine | Main stack (imports the user pool and `CitationAnalysis-CorsOrigin`) |
+| `CitationAnalysisWebSearchStack` | The Amazon Bedrock Web Search gateway, in `webSearchRegion` | Nothing (the main stack reaches it by SSM parameter name) |
+
+`cdk deploy --all` (and so `npm run deploy`) deploys the main stack first and the others after it. When you deploy stacks one at a time, deploy `CitationAnalysisStack` first. Two exceptions to "main first":
+
+- **Google AI Overviews:** the main workflow calls the engine's Lambda by name only when deployed with `-c seoEngine=true`. Deploy the SEO stack once without the flag, then deploy again with `-c seoEngine=true` (see [docs/seo.md](docs/seo.md#setup)).
+- **SEO exports** invoke `CitationAnalysis-SeoRouter` by name, so they work once the SEO stack exists; every other export works without it.
+
+Upgrading from an earlier release: read that release's upgrade notes in [CHANGELOG.md](CHANGELOG.md). The two upgrades below change how the stacks fit together.
+
 <details>
 <summary>Manual deployment</summary>
 
@@ -208,7 +261,7 @@ bash lambda/crawler-layer/build-layer.sh
 (cd web && npm install && npm run build)   # synth requires web/dist
 npm run build
 cdk bootstrap                              # first time per account/region
-cdk deploy --all                           # CitationAnalysisStack first, then the API, MCP and web search stacks
+cdk deploy --all                           # CitationAnalysisStack first, then the API, MCP, SEO and web search stacks
 ./scripts/deploy-web.sh                    # rebuild with the stack outputs, upload, invalidate CloudFront
 ```
 
@@ -217,7 +270,7 @@ cdk deploy --all                           # CitationAnalysisStack first, then t
 <details>
 <summary>Upgrading from 2.42.0 or earlier (the API moves to its own stack)</summary>
 
-2.44.0 moves the REST API out of `CitationAnalysisStack` (which had 499 of CloudFormation's 500 resources and now has about 188) into `CitationAnalysisApiStack` (about 315). Upgrade with the usual `npm run deploy` (or rebuild `web/dist` with the new `./scripts/build-web.sh`, then `cdk deploy --all`). In that one deploy:
+2.44.0 moves the REST API out of `CitationAnalysisStack` (which had 499 of CloudFormation's 500 resources, and about 188 after the move; its spec now caps it at 350) into `CitationAnalysisApiStack` (about 315, capped at 400). Upgrade with the usual `npm run deploy` (or rebuild `web/dist` with the new `./scripts/build-web.sh`, then `cdk deploy --all`). In that one deploy:
 
 1. CloudFormation updates `CitationAnalysisStack`: it uploads the new dashboard and, in its cleanup phase, deletes the old API. No table, bucket, function, user pool or distribution is replaced.
 2. CDK then creates `CitationAnalysisApiStack`: a new API with a **new URL**, and `config.json` pointing at it.
@@ -225,6 +278,22 @@ cdk deploy --all                           # CitationAnalysisStack first, then t
 Between the two the dashboard API is unavailable for a few minutes: the new dashboard shows "The API is being updated" and opens by itself once `config.json` exists; a tab still running the old dashboard gets errors and must be reloaded. Scripts or bookmarks that call the old `execute-api` URL must switch to the `ApiGatewayUrl` output of `CitationAnalysisApiStack` (same export name, `CitationAnalysis-ApiGatewayUrl`). The MCP server calls the Lambdas directly and is not affected. Do not deploy a `web/dist` built by an older `build-web.sh`: it has the old API URL built in.
 
 If another stack imports `CitationAnalysis-ApiGatewayUrl`, CloudFormation cannot delete the old export, so the `CitationAnalysisStack` update fails and rolls back; remove the import, deploy, then import the new export. After the deploy, run the [KPI backfill](#kpi-backfill) once.
+
+</details>
+
+<details>
+<summary>Upgrading from 2.44.0 (the API stack stops importing from the main stack)</summary>
+
+In 2.44.0, `CitationAnalysisApiStack` imports 16 CloudFormation exports of `CitationAnalysisStack` (CDK's automatic `CitationAnalysisStack:ExportsOutput…` exports: the API Lambdas' ARNs, the user pool ARN, the web bucket name and the distribution id and domain). CloudFormation can neither change nor remove an export another stack imports, so any later rename or replacement of those resources would block the main stack's deploys. From 2.45.0 the API stack imports nothing. It builds the function ARNs from their fixed names and reads the other values from SSM parameters.
+
+The usual `npm run deploy` (or `cdk deploy --all`) upgrades in one run:
+
+1. `CitationAnalysisStack` is updated first. It adds the SSM parameters and keeps every export the deployed API stack imports, under the same names (`retainLegacyApiStackExports` in `lib/citation-analysis-stack.ts`). Removing them now would fail with "Export … cannot be deleted as it is in use by CitationAnalysisApiStack".
+2. `CitationAnalysisApiStack` is updated next. It stops importing the exports. The API keeps its URL. CloudFormation may replace the Lambda invoke permissions, whose `FunctionName` changes from an import to the same ARN as text, and it creates each new permission before it deletes the old one.
+
+The release after 2.45.0 removes `retainLegacyApiStackExports`, and with it the exports. Deploy 2.45.0 before that release: an API stack still on 2.44.0 would block it. If you deploy the two stacks separately, deploy `CitationAnalysisStack` first: the API stack reads the new SSM parameters at deploy time.
+
+After the deploy, run the `latest` backfill once (see [KPI backfill](#kpi-backfill)) so the scope snapshots cover every keyword from the first build.
 
 </details>
 
@@ -270,6 +339,18 @@ done
 
 The backfill skips runs whose row is current. Add `"rebuild": true` to the first payload to rewrite every row.
 
+The same action with `"latest": true` rebuilds every keyword's `KeywordLatest` object, the input of the scope snapshots, instead of the KPI rows. Run it once after upgrading to 2.45.0; with `"chain": true` it invokes itself until it is done and then starts a snapshot build, so one asynchronous call is enough:
+
+```bash
+aws lambda invoke --function-name CitationAnalysis-Deduplication --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"action":"backfill_keyword_run_kpis","latest":true,"chain":true}' out.json
+```
+
+Brand-configuration and persona saves start this backfill themselves. A snapshot build that finds a keyword whose newest run is missing from its object serves that keyword's scopes as stale, with `coverage.complete: false`, and asks for its backfill.
+
+DeduplicateCitations writes the row and the keyword's `KeywordLatest` object best effort: a failed write is logged and counted as `KeywordRunKpisWriteFailure` (namespace `CitationAnalysis/KpiRollup`). The alarm `CitationAnalysis-KeywordRunKpisWriteFailure` fires on the first failure in a 5-minute period and emails the KPI alert subscribers (Settings › Alerts) through the `CitationAnalysis-KpiAlerts` topic. A small relay Lambda (`CitationAnalysis-KpiWriteFailureRelay`) publishes the message, because the topic uses the AWS-managed SNS key and CloudWatch alarms cannot publish to a topic encrypted with that key. When the alarm fires, run the backfill above.
+
 ## Getting started
 
 1. **Create the first user.** Self sign-up is off. Create an administrator with the CLI and add it to the `Admin` group; admins can then invite users from **Settings > Users**.
@@ -295,6 +376,8 @@ The backfill skips runs whose row is current. Add `"rebuild": true` to the first
    **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity lists the Agent API models (`perplexity/sonar`, `openai/gpt-6-luna`, ...), and you can type any id. A Perplexity model saved before 2.37.0 (`sonar`, `sonar-pro`, `sonar-reasoning-pro`) is read as `perplexity/sonar`. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
 
    The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl, Amazon Bedrock Web Search). They add cited links to a run but write no answer, so they do not count towards the KPIs. Amazon Bedrock Web Search needs no key: see [Web search gateway](#web-search-gateway). A SerpAPI key also enables the research agent's Google signals step.
+
+   With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use. Enable **Google AI Overviews** there once the main stack is deployed with `-c seoEngine=true`. Steps: [docs/seo.md](docs/seo.md#setup).
 
 3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your **First Party Brands** and competitors (**Expand Brand** and **Find Competitors** suggest more with Bedrock), and add your **Owned Domains**. Each competitor can list its own domains too (**Find Competitors** suggests them, unticked until you confirm), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
@@ -344,18 +427,19 @@ If model access is managed elsewhere, skip all of this with `cdk deploy -c skipM
 |---|---|---|
 | `processKeywordsConcurrency` | `20` | Keywords processed in parallel per run |
 | `crawlConcurrency` | `10` | Cited pages crawled in parallel per keyword |
-| `providerConcurrency` | `{"openai":10,"perplexity":3,"gemini":10,"claude":5,"brave":10,"tavily":10,"exa":5,"serpapi":5,"firecrawl":2,"agentcore":5}` | Most calls each provider may have in flight across the whole run (reserved concurrency of its `CitationAnalysis-Search-<provider>` Lambda). Override any subset, e.g. `-c providerConcurrency='{"perplexity":5,"firecrawl":10}'`; `0` means no cap. The defaults suit free and entry-tier keys; raise them for paid plans. They reserve 60 Lambda concurrency, so an account with a low Lambda concurrency limit must lower them (AWS keeps at least 100 unreserved). |
+| `providerConcurrency` | `{"openai":10,"perplexity":3,"gemini":10,"claude":5,"brave":10,"tavily":10,"exa":5,"serpapi":5,"firecrawl":2,"agentcore":5}` | Most calls each provider may have in flight across the whole run (reserved concurrency of its `CitationAnalysis-Search-<provider>` Lambda). Override any subset, e.g. `-c providerConcurrency='{"perplexity":5,"firecrawl":10}'`; `0` means no cap. The defaults suit free and entry-tier keys; raise them for paid plans. They reserve 65 Lambda concurrency, so an account with a low Lambda concurrency limit must lower them (AWS keeps at least 100 unreserved). The Google AI Overviews function in the SEO stack has a fixed cap of 5, which this key does not change. |
 | `providerPacing` | `{"perplexity":1.1,"firecrawl":12}` | Fewest seconds between two requests to a provider across every slot, kept through a shared send-time ledger in the ProviderConfig table (`lambda/shared/provider_pacing.py`). A cap bounds calls in flight, not how often they start: Perplexity allows about one request a second per key and Firecrawl's plan counts searches per minute, refused ones included. Override any subset, e.g. `-c providerPacing='{"perplexity":0,"firecrawl":6}'`; `0` means no pacing. |
 | `skipModelProvisioning` | `false` | Skip the Anthropic form and Marketplace subscriptions |
 | `anthropicCompanyName`, `anthropicCompanyWebsite`, `anthropicIndustry`, `anthropicUseCases` | `Citation Analysis`, `https://aws.amazon.com/bedrock/`, `Technology`, "Summarize content and generate new marketing content." | Details submitted on the Anthropic form |
 | `dev` | off | `-c dev=true` lets `http://localhost:5173` call the API (`cd web && npm run dev`) |
 | `mcpRedirectUris` | `["http://localhost:5173/oauth/callback","http://localhost:5173/callback"]` (Kiro, Claude Code) | OAuth callback URLs of the MCP clients (exact match in Cognito), as a JSON array or a comma-separated string |
 | `mcpPinnedTools` | none | Catalogue operations the MCP server also lists as direct tools, e.g. `-c mcpPinnedTools=get_prompt_insights,list_providers` |
-| `mcpLimits` | `{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}` | Per-caller limits of the MCP spend tools; override any subset as a JSON object; `0` turns that spend off |
+| `mcpLimits` | `{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"seoCallsPerDay":50}` | Per-caller limits of the MCP spend tools; override any subset as a JSON object; `0` turns that spend off |
+| `seoEngine` | `false` | `-c seoEngine=true` adds Google AI Overviews to the analysis workflow; deploy `CitationAnalysisSeoStack` first, since the workflow calls its Lambda by name |
 
 ### Secrets
 
-The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemini,claude,brave,tavily,exa,serpapi,firecrawl}-key`. The tenth provider, `agentcore` (Amazon Bedrock Web Search), has no secret: it uses IAM. **Settings > AI Providers** creates or updates a secret when you save a key; `aws secretsmanager create-secret --name citation-analysis/<provider>-key --secret-string <key>` works too.
+The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemini,claude,brave,tavily,exa,serpapi,firecrawl}-key`. The tenth provider, `agentcore` (Amazon Bedrock Web Search), has no secret: it uses IAM. **Settings > AI Providers** creates or updates a secret when you save a key; `aws secretsmanager create-secret --name citation-analysis/<provider>-key --secret-string <key>` works too. The SEO stack imports `citation-analysis/dataforseo-key` (`login:password`), which **Settings > AI Providers > SEO data** creates.
 
 ### Web search gateway
 
@@ -373,6 +457,8 @@ Until the stack is deployed the provider shows **Gateway not deployed** in **Set
 - **MCP server:** OAuth 2.1 authorization-code flow with PKCE on a public app client (no client secret, no implicit grant), scopes `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run`, RFC 8707 audience binding, 90-day refresh tokens. Its Cognito authorizer validates access tokens only, and the Lambda rejects a token whose issuer, client id, `token_use` or audience is not this server's. Tool calls run as the token's user with that user's groups, so admin-only routes stay admin-only. Spend tools need a single-use confirmation token from their estimate and are capped per caller (`mcpLimits`); every write and spend call leaves an audit record (365 days) in `CitationAnalysis-McpState`. The Cognito Managed Login domain is the only hosted sign-in page the sample defines; the dashboard itself does not use it.
 - **Edge:** CloudFront with HTTPS redirect and security headers (CSP, HSTS, frame DENY). There is no WAF, by design, so the sample stays pay-per-use: the API relies on the Cognito authorizer, a 100 rps / 200 burst stage throttle and a 10,000 requests/day usage plan. See [SECURITY.md](SECURITY.md#aws-waf) to add one.
 - **CORS:** API error responses and each Lambda allow only the CloudFront origin (read from SSM `/citation-analysis/cors-origin`).
+- **SEO API:** the same Cognito user pool authorizes every `/api/seo/` route, behind a 20 rps / 40 burst stage throttle. Recurring or scheduled paid work is for the `Admin` group; one-off lookups are open to every signed-in user. The cache-only SEO routes the export worker reads have no API Gateway method.
+- **Exports:** files are private under `exports/<owner>/<id>/` in the keywords bucket and expire after 7 days. A download is a 15-minute presigned URL minted on each request for the owner's own file; another user's export answers 404, Admin included. CSV text cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'`.
 - **Data:** S3 buckets block public access and require TLS; DynamoDB and S3 are encrypted at rest; API keys live in Secrets Manager; Lambda logs are kept 30 days.
 
 To allow self sign-up, set `selfSignUpEnabled: true` in `lib/constructs/auth.ts` and remove `hideSignUp` from the `Authenticator` in `web/src/App.tsx`.
@@ -383,7 +469,7 @@ To allow self sign-up, set `selfSignUpEnabled: true` in `lib/constructs/auth.ts`
 
 > Unit prices below were taken from each vendor's pricing page on 26 May 2026, at US East (N. Virginia) rates. Prices change; re-check the linked pages before sizing a workload.
 
-You pay AWS for the infrastructure and Bedrock, and each external AI provider on your account with them. AI charges usually dominate. With no batching or prompt caching, AI cost scales with `keywords × providers × personas × runs`.
+You pay AWS for the infrastructure and Bedrock, and each external AI provider on your account with them. AI charges usually dominate. With no batching or prompt caching, AI cost scales with `keywords × providers × personas × runs`. The SEO stack's DataForSEO calls are billed by DataForSEO per call, on your DataForSEO account; list prices per feature are in [docs/seo.md](docs/seo.md#prices).
 
 ### AWS infrastructure
 
@@ -392,7 +478,7 @@ For 100 keywords analysed weekly across four providers and three personas (about
 | Service | Monthly | Notes |
 |---|---|---|
 | [Bedrock AgentCore Browser](https://aws.amazon.com/bedrock/agentcore/pricing/) | $5–20 | One browser session per newly cited URL; the main variable |
-| [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2–10 | 21 tables; $0.625/M writes, $0.125/M reads, $0.25/GB above 25 GB |
+| [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2–10 | 31 tables across the stacks (24 in the main stack); $0.625/M writes, $0.125/M reads, $0.25/GB above 25 GB |
 | [Lambda](https://aws.amazon.com/lambda/pricing/) | $1–3 | Mostly within the free tier |
 | [API Gateway REST](https://aws.amazon.com/api-gateway/pricing/) | $1–5 | $3.50/M calls |
 | [S3](https://aws.amazon.com/s3/pricing/) | $1–5 | Raw responses, screenshots, access logs |
@@ -441,9 +527,9 @@ With the infrastructure above, this workload costs roughly $75–110 a month. An
 - Disable providers and personas you do not need: each multiplies the call count.
 - Run weekly rather than daily for about a seventh of the cost.
 - Pick a cheaper model for any engine in **Settings > AI Providers** (for example Claude Haiku over Sonnet).
-- Lower the crawl concurrency (`CrawlCitations`, `maxConcurrency: 3` in `lib/citation-analysis-stack.ts`) to spread AgentCore usage.
+- Lower the crawl concurrency (`-c crawlConcurrency=N`, default 10) to spread AgentCore usage.
 - `SearchResults`, `Citations` and `CrawledContent` have no TTL; add one if you do not need full history.
-- Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `aws:cloudformation:stack-name = CitationAnalysisStack` cost allocation tag once it is activated.
+- Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `Application = CitationAnalysis` tag (set on all five stacks) once it is activated as a cost allocation tag.
 
 ## Development
 

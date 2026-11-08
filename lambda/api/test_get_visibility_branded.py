@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from shared.kpi_engine import answer_from_row, answers_from_rows
+from shared.kpi_engine import answer_from_row
 from testing.events import parse_response
 from testing.report_scope_fixtures import brand, load_scoped_handler, result, scoped_report
 
@@ -19,12 +19,18 @@ def _branded(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, 'branded': True}
 
 
+def _neutral(row: dict[str, Any]) -> dict[str, Any]:
+    return {**row, 'branded': False}
+
+
 _ROWS = {
     'hotel coruna spa': [
         _branded(result('hotel coruna spa', 'openai', [_HOTEL])),
-        result('hotel coruna spa', 'gemini', [_HOTEL]),
-        result('hotel coruna spa', 'claude', []),
+        _neutral(result('hotel coruna spa', 'gemini', [_HOTEL])),
+        _neutral(result('hotel coruna spa', 'claude', [])),
     ],
+    # Stored before the branded flag (2.43.0): no row carries it.
+    'hotel marino spa': [result('hotel marino spa', 'openai', [_HOTEL]), result('hotel marino spa', 'gemini', [])],
     'best hotels galicia': [],
     'hotel marino beach': [],
 }
@@ -71,21 +77,9 @@ class TestUnclassifiedPreviousRun:
         assert new is not None
         assert (old.branded_classified, new.branded_classified) == (False, True)
 
-    def test_names_the_keywords_whose_run_predates_the_flag(self, visibility):
-        run = {
-            'old': answers_from_rows([result('old', 'openai', [_HOTEL])]),
-            'new': answers_from_rows([{**result('new', 'openai', [_HOTEL]), 'branded': False}]),
-        }
+    @pytest.mark.parametrize('branded', ['neutral', 'branded'])
+    def test_leaves_a_run_stored_before_the_flag_out_of_a_filtered_view(self, visibility_env, branded):
+        assert visibility_env.body({'keyword': 'hotel marino spa', 'branded': branded})['kpis']['answers'] == 0
 
-        assert visibility._unclassified_keywords(run) == ['old']
-
-    def test_reports_how_many_keywords_a_filtered_view_could_not_compare(self, visibility_env):
-        body = visibility_env.body({'keyword': 'hotel coruna spa', 'branded': 'neutral'})
-
-        assert body['change_unclassified_keywords'] == 0
-
-    def test_counts_the_keywords_whose_latest_run_predates_the_flag_in_a_filtered_view(self, visibility_env):
-        filtered = visibility_env.body({'keyword': 'hotel coruna spa', 'branded': 'branded'})
-        every = visibility_env.body({'keyword': 'hotel coruna spa'})
-
-        assert (filtered['unclassified_keywords'], every['unclassified_keywords']) == (1, 0)
+    def test_keeps_a_run_stored_before_the_flag_in_the_unfiltered_view(self, visibility_env):
+        assert visibility_env.body({'keyword': 'hotel marino spa'})['kpis']['answers'] == 2

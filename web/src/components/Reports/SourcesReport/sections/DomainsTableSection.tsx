@@ -2,13 +2,12 @@ import { Link } from 'react-router-dom';
 import type {
   SourceRow, VisibilityResponse
 } from '../../../../types';
-import {
-  ReportTable, type ReportTableColumn
-} from '../../layout/ReportTable';
+import type { ReportTableColumn } from '../../layout/ReportTable';
 import { domainFigureColumns } from '../../layout/domainColumns';
 import {
-  LatestRunSection, type ScopeSectionProps
+  LatestRunSection, ScopeSourceTable, type ScopeSectionProps
 } from '../../scopeReport';
+import type { ScopeReportData } from '../../scopeReport/useScopeReportData';
 
 const CITATION_GAPS_PATH = '/citation-gaps';
 
@@ -37,13 +36,6 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
   }),
 ];
 
-/** "Listing the 25 most cited of 40 domains." when the API listed only the top of them; `null` otherwise. */
-function listedDomainsNote({
-  sources, sources_total: total
-}: VisibilityResponse): string | null {
-  return sources.length < total ? `Listing the ${sources.length} most cited of ${total} domains.` : null;
-}
-
 function noSourceCited({ sources }: VisibilityResponse): string | null {
   return sources.length === 0 ? 'No answer cites a source yet.' : null;
 }
@@ -53,12 +45,15 @@ function domainKey(source: SourceRow): string {
   return source.domain;
 }
 
-function DomainsTable({ visibility }: { readonly visibility: VisibilityResponse }) {
-  const note = listedDomainsNote(visibility);
+function DomainsTable({
+  report, visibility
+}: {
+  readonly report: ScopeReportData;
+  readonly visibility: VisibilityResponse;
+}) {
   return (
     <>
-      <ReportTable columns={COLUMNS} rows={visibility.sources} rowKey={domainKey} />
-      {note !== null && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{note}</p>}
+      <ScopeSourceTable report={report} visibility={visibility} columns={COLUMNS} rowKey={domainKey} />
       <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
         Which sources cite your competitors but not you?
         {' '}
@@ -78,7 +73,7 @@ export function DomainsTableSection({ report }: ScopeSectionProps) {
       subtitle="The domains the latest runs cite, most cited first. Your owned domains carry a badge."
       emptyMessage={noSourceCited}
     >
-      {(visibility) => <DomainsTable visibility={visibility} />}
+      {(visibility) => <DomainsTable report={report} visibility={visibility} />}
     </LatestRunSection>
   );
 }
