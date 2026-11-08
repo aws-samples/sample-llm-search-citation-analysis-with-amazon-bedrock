@@ -52,7 +52,7 @@ from shared.lighthouse_runs import (
     start_execution,
 )
 from shared.lighthouse_sample import MAX_SAMPLE_PAGES, is_measurable, select_sample
-from shared.seo_spend_limit import reserve_queued_calls
+from shared.seo_spend_limit import release_queued_calls, reserve_queued_calls
 from shared.site_audit_repository import AuditStore
 from shared.utils import get_timestamp
 
@@ -123,6 +123,8 @@ def _reuse_or_start(event: dict[str, Any], receipt: dict[str, Any], build: Calla
         start_execution(run)
     except (ClientError, BotoCoreError, KeyError) as error:
         logger.warning('lighthouse run %s could not start: %s', run['run_id'], type(error).__name__)
+        # Nothing ran, so nothing is billed: the call counted for it goes back to the user's day.
+        release_queued_calls()
         fail_run(run, START_FAILED_MESSAGE)
         remember_run(run)
         return seo_error(502, 'INTERNAL_ERROR', START_FAILED_MESSAGE, event)

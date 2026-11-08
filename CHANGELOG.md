@@ -31,7 +31,8 @@ One daily limit of paid DataForSEO calls per user, set in Settings, for every cl
     `shared/dataforseo_client.py`). The call that would pass it is not sent, and the request answers 429
     `DAILY_LIMIT`.
   - A lookup whose billed work the SEO jobs Lambda does later counts it when it is started, all at once: a local
-    rank grid one call per grid point, a single Lighthouse run one call. It is not started when they do not fit.
+    rank grid one call per grid point, a single Lighthouse run one call. It is not started when they do not fit,
+    and a job that then fails to start gives its calls back (nothing was billed).
   - `0` turns paid lookups off. Admin SEO jobs (rank checks, snapshots, site audits, Lighthouse batches) are not
     counted; each is confirmed with its price.
 - **The limit is set in Settings** › AI Providers › SEO data (`daily_call_limit` on the `dataforseo` ProviderConfig

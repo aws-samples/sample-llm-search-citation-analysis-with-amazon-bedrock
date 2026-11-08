@@ -45,8 +45,19 @@ from shared.spend_audit import audit_item, put_audit
 from shared.utils import utc_now
 
 __all__ = [
-    'DAILY_LIMIT_CODE', 'PAID_ROUTES', 'DailyCalls', 'counter_key', 'daily_calls', 'is_paid', 'limit', 'limited',
-    'reserve_queued_calls', 'spender', 'take',
+    'DAILY_LIMIT_CODE',
+    'PAID_ROUTES',
+    'DailyCalls',
+    'counter_key',
+    'daily_calls',
+    'give_back',
+    'is_paid',
+    'limit',
+    'limited',
+    'release_queued_calls',
+    'reserve_queued_calls',
+    'spender',
+    'take',
 ]
 
 logger = logging.getLogger(__name__)
@@ -98,6 +109,16 @@ def take(caller: str, allowed: int, table: Any = None, calls: int = 1) -> bool:
     ))
 
 
+def give_back(caller: str, calls: int, table: Any = None) -> None:
+    """Take ``calls`` back off ``caller``'s count today: work they were counted for never started."""
+    if calls > 0:
+        (table or _counter_table()).update_item(
+            Key={'cache_key': counter_key(caller, _today())},
+            UpdateExpression='ADD calls :calls',
+            ExpressionAttributeValues={':calls': -calls},
+        )
+
+
 @dataclass(frozen=True)
 class DailyCalls:
     """A user's paid one-off DataForSEO calls today, the limit and when the count starts again."""
@@ -138,6 +159,7 @@ class _Meter:
         self.who = who
         self.allowed = allowed
         self.calls = 0
+        self.queued = 0
         self.refused = False
 
     def reserve(self, calls: int, what: str) -> None:
@@ -166,6 +188,16 @@ def reserve_queued_calls(calls: int, what: str) -> None:
     meter = _active_meter.get()
     if meter is not None:
         meter.reserve(calls, what)
+        meter.queued += calls
+
+
+def release_queued_calls() -> None:
+    """Give back the calls ``reserve_queued_calls`` counted in this request: the job did not start, nothing is billed."""
+    meter = _active_meter.get()
+    if meter is not None and meter.queued:
+        give_back(meter.who, meter.queued)
+        meter.calls -= meter.queued
+        meter.queued = 0
 
 
 def _audit(event: dict[str, Any], meter: _Meter, status: int) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
 
 from shared import dataforseo_business as business
 from shared import dataforseo_local_serp as local_serp
@@ -178,6 +179,16 @@ class TestStartJobDailyLimit:
 
         assert (status, body['code'], limit.counter.calls_of('admin@example.com'), start_execution.call_count) == (
             429, 'DAILY_LIMIT', 0, 0)
+
+
+    def test_gives_the_points_back_when_the_job_cannot_start(self, local_module, memory, start_execution, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 100)
+        start_execution.side_effect = ClientError({'Error': {'Code': 'ExecutionLimitExceeded'}}, 'StartExecution')
+
+        _status, body = self.start(local_module, limit, 5)
+
+        assert (body['job']['status'], limit.counter.calls_of('admin@example.com')) == ('failed', 0)
+        assert [(item['outcome'], item['calls']) for item in limit.audit_items()] == [('http_200', 0)]
 
 
 class TestStartJob:

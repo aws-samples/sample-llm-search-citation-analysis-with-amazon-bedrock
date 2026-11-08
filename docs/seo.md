@@ -81,7 +81,8 @@ script on the REST API, AI assistants through MCP and the server exports all go 
 which counts each billed DataForSEO call (a lookup that makes three calls uses three; a cached answer uses none).
 The call that would pass the limit is not sent, and the request answers 429 `DAILY_LIMIT`. A paid lookup whose
 billed work the SEO jobs Lambda does later (a local rank grid: one task per grid point; a single Lighthouse run:
-one call) counts those calls when it is started, all at once, and is not started when they do not fit. `GET /api/seo/daily-calls`
+one call) counts those calls when it is started, all at once, and is not started when they do not fit. A job that then
+fails to start gives its calls back, since nothing was billed. `GET /api/seo/daily-calls`
 answers your calls today, the limit and when it resets. Every paid lookup writes an audit record (who, which route,
 how it ended, how many calls) to `CitationAnalysis-McpState`, kept 365 days, and so does an Admin's change to the
 limit. That table belongs to the MCP stack, which `npm run deploy` deploys with the others; without it the

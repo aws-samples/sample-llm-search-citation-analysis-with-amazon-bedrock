@@ -86,6 +86,15 @@ class TestSingleLighthouseDailyLimit:
             429, 'DAILY_LIMIT', 0, 0)
 
 
+    def test_gives_the_call_back_when_the_run_cannot_start(self, api, monkeypatch):
+        limit = install_daily_limit(monkeypatch, 100)
+        api.start_execution.side_effect = ClientError({'Error': {'Code': 'ExecutionLimitExceeded'}}, 'StartExecution')
+
+        status, _body = self.start(api)
+
+        assert (status, limit.counter.calls_of('admin@example.com')) == (502, 0)
+
+
 class TestSingleLighthouse:
     def test_starts_a_run_for_an_owned_page(self, api: Api):
         status, body = api.call('POST', '/lighthouse', body={'url': 'www.example.com', 'device': 'desktop'})

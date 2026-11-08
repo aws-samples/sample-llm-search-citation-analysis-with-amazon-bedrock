@@ -55,7 +55,7 @@ from shared.local_seo_jobs import (
     receipt_job,
     save_job,
 )
-from shared.seo_spend_limit import reserve_queued_calls
+from shared.seo_spend_limit import release_queued_calls, reserve_queued_calls
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -309,8 +309,8 @@ def stepfunctions_client() -> Any:
     return boto3.client('stepfunctions')
 
 
-def start_execution(job: dict[str, Any]) -> None:
-    """Start (or restart, for a timed-out job) the job's state machine; a failure marks the job failed."""
+def start_execution(job: dict[str, Any]) -> bool:
+    """Start (or restart, for a timed-out job) the job's state machine; a failure marks the job failed (``False``)."""
     job['runs'] = int(job.get('runs') or 0) + 1
     save_job(job)
     try:
@@ -321,6 +321,8 @@ def start_execution(job: dict[str, Any]) -> None:
     except (ClientError, BotoCoreError, KeyError) as error:
         logger.warning('local job %s could not start: %s', job['job_id'], type(error).__name__)
         fail_job(job, 'INTERNAL_ERROR', START_FAILED_MESSAGE)
+        return False
+    return True
 
 
 def business_job_request(kind: str, args: dict[str, Any], market: req.LocalMarket) -> tuple[dict[str, Any], float]:
@@ -372,7 +374,9 @@ def handle_start_job(event: dict[str, Any], _context: Any, *, kind: str, market_
         reserve_queued_calls(args['grid_size'] ** 2 if kind == 'grid' else 1, f'local {kind} job')
         job = new_job(kind, request, cost)
         put_receipt(kind, request, job['job_id'])
-        start_execution(job)
+        if not start_execution(job):
+            # Nothing was posted, so nothing is billed: the calls counted for it go back to the user's day.
+            release_queued_calls()
     elif job['status'] == 'timed_out':
         job['status'] = 'collecting'
         start_execution(job)

@@ -199,6 +199,9 @@ class InMemorySpendCounter:
         key = kwargs['Key']['cache_key']
         values = kwargs['ExpressionAttributeValues']
         calls = int(self.items.get(key, {}).get('calls', 0))
+        if ':room' not in values:
+            self.items[key] = {**self.items.get(key, {'cache_key': key}), 'calls': calls + values[':calls']}
+            return
         if calls > values[':room']:
             raise conditional_check_failure('UpdateItem')
         self.items[key] = {'cache_key': key, 'calls': calls + values[':calls'], 'ttl': values[':ttl']}
