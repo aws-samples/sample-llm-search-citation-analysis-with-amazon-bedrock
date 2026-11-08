@@ -27,8 +27,9 @@ process.
   failed conversation fetch costs only the follow-up, never the review. The conversation is untrusted
   text: capped in size (whole oldest entries are dropped first; the reviewer's own last review is always kept),
   read as data, and every line of a body is quoted so a comment cannot forge an author or a maintainer role. The reviewer's
-  own comment, edited in place on every push, is dated by its last edit. A steering attempt in a comment is named as a concern, not a blocking finding,
-  so a commenter cannot force a BLOCKING verdict on someone else's pull request.
+  own comment, edited in place on every push, is dated by its last edit. A steering attempt in someone else's comment is named as a concern, not a blocking
+  finding, so a commenter cannot force a BLOCKING verdict on someone else's pull request; in the PR author's own
+  comment it stays blocking.
 - The lockfile excerpt the reviewer reads is cut to 300 characters per line.
 
 ## [2.42.2] - 2026-11-08
