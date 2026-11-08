@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import {
-  BANNER, MARKER, MAX_BODY, buildIssueComment, isTriageReply, parseReply, threadMarkdown,
+  BANNER, MARKER, MAX_BODY, buildIssueComment, isTriageReply, parseReply, threadMarkdown, withoutFrame,
 } from './issue.mjs'
 
 const ISSUE = {
@@ -89,4 +89,37 @@ test('a reply wrapped in a code fence or with bold keys still parses', () => {
     tenets: 'n/a',
     reply: 'See README.md, "Deployment".' 
   })
+})
+
+const POSTED = buildIssueComment({
+  label: 'enhancement',
+  tenets: 'aligned',
+  reply: 'Which market?',
+})
+
+test('an earlier reply reaches the triager without its banner and footer', () => {
+  const md = threadMarkdown(ISSUE, [{
+    user: { login: 'github-actions[bot]' },
+    body: POSTED,
+  }])
+  assert.match(md, /## Comment by \[kiro\]\n\nWhich market\?\n/)
+  assert.doesNotMatch(md, /automated issue triage|Triage: \*\*/)
+})
+
+test('a banner and footer the triager copied into its answer are dropped, so the comment has one of each', () => {
+  const echoed = `${BANNER}\n\nThanks.\n\n---\n&lt;sub>Triage: **enhancement**. Judged against TENETS.md</sub>`
+  const body = buildIssueComment({
+    label: 'enhancement',
+    tenets: 'aligned',
+    reply: echoed,
+  })
+  assert.equal(body.split(BANNER).length - 1, 1)
+  assert.equal(body.match(/sub>Triage:/g).length, 1)
+  assert.doesNotMatch(body, /&lt;sub>/)
+  assert.match(body, /\n\nThanks\.\n\n---\n<sub>Triage/)
+})
+
+test('a horizontal rule inside the reply is kept; only the one before a footer goes', () => {
+  assert.equal(withoutFrame('A\n\n---\n\nB'), 'A\n\n---\n\nB')
+  assert.equal(withoutFrame(POSTED), 'Which market?')
 })

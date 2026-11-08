@@ -9,6 +9,20 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.45.1] - 2026-11-08
+
+### Fixed
+
+- **A Kiro issue triage reply carries one banner and one footer** (`scripts/kiro-issue/issue.mjs`). Earlier replies
+  reached the triager with their banner and footer, and the triager copied them into its answer, so a comment showed
+  the banner twice and a second, HTML-escaped footer (`&lt;sub>`). Earlier replies now reach it without that frame,
+  and a banner or footer in its answer is dropped before the comment is built.
+
+### Changed
+
+- The tenet 8 gap row in TENETS.md names the export state machine's `WaitForViewJob` wait-and-re-check, tracked in
+  [#214](https://github.com/aws-samples/sample-llm-search-citation-analysis-with-amazon-bedrock/issues/214).
+
 ## [2.45.0] - 2026-11-08
 
 2.44.0 made KPI history complete, but a scoped view still read at most 100 keywords (`capped_scope`), and several
