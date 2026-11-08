@@ -67,11 +67,13 @@ const historicalTrendsEndpoint = {
  */
 export function useHistoricalTrends() {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(historicalTrendsEndpoint);
   const fetchHistoricalTrends = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared import scope_params
-from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.answer_text_fixtures import answer_texts_dynamodb, projected_search_table, serve_answer_texts
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
@@ -32,6 +31,9 @@ from testing.window_budget_fixtures import request_deadline_of, spent_request_bu
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=REPORT_TABLES_ENV)
+
+#: One keyword more than the 2.44.0 scope cap (100): a live scope now reads all of them.
+_PAST_FORMER_CAP = 101
 
 
 class KeywordsReadFailure(Exception):
@@ -171,13 +173,15 @@ class TestReads:
         sort = search_table.query.call_args.kwargs['KeyConditionExpression'].get_expression()['values'][1]
         assert (sort.expression_operator, sort.get_expression()['values'][1]) == ('begins_with', f'{RUN}#')
 
-    def test_caps_the_scope_at_the_scope_keyword_cap(self, sentiment_handler) -> None:
-        many = [{'id': f'k{index}', 'keyword': f'kw {index:03}', 'status': 'active'} for index in range(SCOPE_KEYWORDS_CAP + 1)]
+    def test_reads_every_keyword_of_a_live_scope_past_the_former_keyword_cap(self, sentiment_handler) -> None:
+        many = [{'id': f'k{index}', 'keyword': f'kw {index:03}', 'status': 'active'} for index in range(_PAST_FORMER_CAP)]
         search = projected_search_table({})
         with patch.object(sentiment_handler, 'dynamodb', answer_texts_dynamodb({}, active_keywords_table(many), search)):
             _status, body = call(sentiment_handler, {'scope': 'all', 'sentiment': 'negative'})
 
-        assert (body['keywords_truncated'], search.query.call_count) == (True, SCOPE_KEYWORDS_CAP)
+        assert (body['keywords_truncated'], body['coverage'], search.query.call_count) == (
+            False, {'keywords_total': _PAST_FORMER_CAP, 'keywords_analyzed': _PAST_FORMER_CAP, 'complete': True}, _PAST_FORMER_CAP + 3,
+        )
 
     def test_builds_its_dynamodb_resource_with_the_pooled_scope_helper(self) -> None:
         pooled = MagicMock(name='pooled-scope-resource')

@@ -6,6 +6,8 @@ import { InfoTooltip } from '../ui/InfoTooltip';
 interface Props {
   /** The heading; also names the region for assistive technology. */
   readonly title: string;
+  /** The region's element id, for in-page "See all" links. */
+  readonly id?: string;
   /** How the panel's figure is measured, in an "i" tooltip next to the heading. */
   readonly info?: string;
   /** Controls shown at the heading's right, e.g. range buttons. */
@@ -15,11 +17,11 @@ interface Props {
 
 /** One card of the Visibility tab: a named region with a heading, optional tooltip and actions. */
 export function OverviewPanel({
-  title, info, actions, children
+  title, id, info, actions, children
 }: Props) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className="bg-white rounded-lg shadow-sm p-4 space-y-3">
+    <section id={id} aria-labelledby={headingId} className="bg-white rounded-lg shadow-sm p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center">
           <h3 id={headingId} className="text-lg font-medium">{title}</h3>

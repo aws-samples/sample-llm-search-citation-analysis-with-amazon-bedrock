@@ -12,6 +12,8 @@ import { useResearchAgent } from './useResearchAgent';
 
 export interface AgentApiScript {
   history?: KeywordResearchItem[];
+  /** The second history page (after token `older`); without it the first page is the last. */
+  olderHistory?: KeywordResearchItem[];
   /** Successive GET /{id} answers per id; the last one repeats. */
   snapshots?: Record<string, KeywordResearchItem[]>;
   /** Makes POST /agent fail with this structured 4xx body. */
@@ -36,9 +38,13 @@ function agentOperation(url: string, method: string): AgentOperation | 'read' {
 
 export interface AgentHookResult { current: ReturnType<typeof useResearchAgent> }
 
-/** GET /keyword-research/history: the scripted runs. */
-function historyResponse(script: AgentApiScript): Response {
-  return createMockJsonResponse({ items: script.history ?? [] });
+/** GET /keyword-research/history: the scripted runs; with `olderHistory`, a second page after token `older`. */
+function historyResponse(script: AgentApiScript, url: string): Response {
+  if (url.includes('next_token=older')) return createMockJsonResponse({ items: script.olderHistory ?? [] });
+  return createMockJsonResponse({
+    items: script.history ?? [],
+    ...(script.olderHistory === undefined ? {} : { next_token: 'older' }),
+  });
 }
 
 /** POST /keyword-research/agent: the new pending run, or the scripted 4xx rejection. */
@@ -61,7 +67,7 @@ function retryRunResponse(): Response {
 function scriptAgentApi(script: AgentApiScript): void {
   const nextSnapshot = createJobSnapshotReplay(script.snapshots);
   const answers: Record<AgentOperation | 'read', (url: string) => Response> = {
-    history: () => historyResponse(script),
+    history: (url) => historyResponse(script, url),
     start: () => startRunResponse(script),
     retry: retryRunResponse,
     delete: () => createMockJsonResponse({ message: 'deleted' }),

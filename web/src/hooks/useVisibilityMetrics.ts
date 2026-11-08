@@ -47,11 +47,13 @@ const visibilityMetricsEndpoint = {
  */
 export function useVisibilityMetrics() {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(visibilityMetricsEndpoint);
   const fetchVisibilityMetrics = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

@@ -140,6 +140,14 @@ class TestPagesAndCompetitors:
 
         assert [item['domain'] for item in body['items']] == ['b.example', 'a.example']
 
+    def test_answers_a_cached_only_competitors_miss_409_not_cached_without_calling_labs(self, domains_module, seo_boundary):
+        fetch = MagicMock(return_value=([], 0.018))
+
+        status, body = call(domains_module, 'POST', '/api/seo/domains/competitors',
+                            body={'keywords': ['cheap flights'], 'cached_only': True}, serp_competitors=fetch)
+
+        assert (status, body['code'], fetch.call_count) == (409, 'NOT_CACHED', 0)
+
     def test_refuses_competitors_without_keywords(self, domains_module):
         status, body = call(domains_module, 'POST', '/api/seo/domains/competitors', body={'keywords': []})
 
@@ -261,10 +269,12 @@ class TestExport:
 
         assert (answer.sent_window, answer.body['offset']) == ((0, 50), None)
 
-    def test_carries_the_labs_export_prices_on_every_answer(self, domains_module, path):
+    def test_carries_the_labs_export_prices_and_twelve_hour_cache_on_every_answer(self, domains_module, path):
         body = Export(domains_module, path, {'target': 'example.com'}).body
 
-        assert body['export'] == {'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.012, 'row_usd': 0.00012}
+        assert body['export'] == {
+            'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.012, 'row_usd': 0.00012, 'cache_hours': 12,
+        }
 
     def test_caches_a_chunk_under_its_offset_and_limit(self, domains_module, seo_boundary, path):
         Export(domains_module, path, CHUNK)
@@ -305,3 +315,23 @@ class TestExport:
         answer = Export(domains_module, path, {**CHUNK, field: value})
 
         assert (answer.status, answer.body['field'], answer.fetch.call_count) == (400, field, 0)
+
+
+@pytest.mark.parametrize('path', list(LOOKUPS))
+class TestCachedOnly:
+    def test_answers_a_cached_only_miss_409_not_cached_without_calling_labs(self, domains_module, path):
+        answer = Export(domains_module, path, {**CHUNK, 'cached_only': True})
+
+        assert (answer.status, answer.body['code'], answer.fetch.call_count) == (409, 'NOT_CACHED', 0)
+
+    def test_answers_a_cached_only_hit_from_the_cache_for_free(self, domains_module, seo_boundary, path):
+        seo_boundary.get_cached.return_value = {'items': [], 'total_count': 0, 'has_more': False, 'fetched_at': 'x'}
+
+        answer = Export(domains_module, path, {**CHUNK, 'cached_only': True})
+
+        assert (answer.status, answer.body['estimated_cost_usd'], answer.fetch.call_count) == (200, 0.0, 0)
+
+    def test_stores_nothing_on_a_cached_only_miss(self, domains_module, seo_boundary, path):
+        Export(domains_module, path, {**CHUNK, 'cached_only': True})
+
+        assert seo_boundary.put_cached.call_count == 0

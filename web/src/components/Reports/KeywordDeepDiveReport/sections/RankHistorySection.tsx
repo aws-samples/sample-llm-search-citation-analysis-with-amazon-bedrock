@@ -21,7 +21,7 @@ function subtitleFor(trends: HistoricalTrendsResponse | null): string {
  * the first and last period.
  */
 export function RankHistorySection({
-  trends, loading, error 
+  trends, loading, error, request = null
 }: TrendSectionProps) {
   const pending = pendingSectionPlaceholder({
     title: TITLE,
@@ -43,5 +43,5 @@ export function RankHistorySection({
     );
   }
 
-  return <KpiHistorySection title={TITLE} subtitle={subtitleFor(trends)} points={points} />;
+  return <KpiHistorySection title={TITLE} subtitle={subtitleFor(trends)} points={points} request={request} />;
 }

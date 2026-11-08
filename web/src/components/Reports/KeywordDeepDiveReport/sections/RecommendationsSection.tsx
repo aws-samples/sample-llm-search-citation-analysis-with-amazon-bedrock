@@ -7,6 +7,7 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 interface Props extends SectionFetchState {
   readonly recommendations: RecommendationsResponse | null;
@@ -113,6 +114,7 @@ export function RecommendationsSection({
           </li>
         ))}
       </ol>
+      <p className="mt-2 text-right"><SeeAllLink to="/recommendations">See all recommendations</SeeAllLink></p>
     </ReportSection>
   );
 }

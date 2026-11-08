@@ -13,3 +13,12 @@ export function idleEndpointState(...functionNames: readonly string[]): Record<s
     ...Object.fromEntries(functionNames.map((name) => [name, anyFunction])),
   };
 }
+
+/** `idleEndpointState` of a 2.45.0 scoped hook, which also returns `computing` and `request`. */
+export function idleScopedEndpointState(...functionNames: readonly string[]): Record<string, unknown> {
+  return {
+    ...idleEndpointState(...functionNames),
+    computing: null,
+    request: null,
+  };
+}

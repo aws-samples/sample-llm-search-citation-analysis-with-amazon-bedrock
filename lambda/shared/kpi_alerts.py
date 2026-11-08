@@ -17,7 +17,8 @@ from typing import Any
 from shared.brand_names import normalize_brand_key
 from shared.constants import UNRANKED_SENTINEL
 from shared.kpi_comparison import COMPARABLE, PeriodComparison, answers_by_keyword
-from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
+from shared.kpi_engine import COMPETITOR, Answer
+from shared.kpi_tally import RunTally, run_tally, tally_brand_table, tally_kpis
 from shared.markets import GLOBAL_MARKET_ID, market_scoped_key
 from shared.string_lists import normalize_string_list
 from shared.utils import parse_timestamp
@@ -363,15 +364,18 @@ def _improvement_alert(
     )]
 
 
-def snapshot_metrics(
-    answers_by_keyword: Mapping[str, Iterable[Answer]],
+def snapshot_metrics_from_tallies(
+    tallies_by_keyword: Mapping[str, RunTally],
     owned_domains: Iterable[str] = (),
     tracked_competitors: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """The measured part of a group snapshot, from the answers of each of the group's keywords in one run.
+    """The measured part of a group snapshot, from each of the group's keywords' tally of one run (``shared.kpi_tally``).
 
     ``kpis`` pools every answer (the group report's run value); ``keywords``
-    and ``competitors`` feed the lost-mention and new-competitor rules.
+    and ``competitors`` feed the lost-mention and new-competitor rules. The
+    figures equal those of the answers the tallies count (2.45.0: the
+    KeywordRunKpis rows serve the alerts without re-reading the answers);
+    ``competitors`` needs every competitor kept, or at least the tracked ones.
 
     ``competitors`` keeps only the brands configured as competitors when
     ``tracked_competitors`` names them (any spelling): the new-competitor rule
@@ -382,22 +386,31 @@ def snapshot_metrics(
     """
     domains = list(owned_domains)
     tracked = {key for key in map(normalize_brand_key, tracked_competitors) if key}
-    per_keyword = {keyword: list(answers) for keyword, answers in answers_by_keyword.items()}
-    keyword_kpis = {keyword: brand_kpis(answers, domains) for keyword, answers in per_keyword.items()}
-    pooled = [answer for answers in per_keyword.values() for answer in answers]
+    tallies = list(tallies_by_keyword.values())
     return {
         'kpi_version': KPI_VERSION,
-        'kpis': brand_kpis(pooled, domains),
+        'kpis': tally_kpis(tallies, domains),
         'keywords': [
             {'keyword': keyword, 'mentioned': kpis['mentions'] > 0, 'average_position': kpis['average_position']}
-            for keyword, kpis in keyword_kpis.items()
+            for keyword, kpis in ((keyword, tally_kpis([tally], domains)) for keyword, tally in tallies_by_keyword.items())
         ],
         'competitors': [
             {'name': row['name'], 'best_position': row['best_position']}
-            for row in brand_table(pooled)
+            for row in tally_brand_table(tallies)
             if row['classification'] == COMPETITOR and (not tracked or normalize_brand_key(row['name']) in tracked)
         ],
     }
+
+
+def snapshot_metrics(
+    answers_by_keyword: Mapping[str, Iterable[Answer]],
+    owned_domains: Iterable[str] = (),
+    tracked_competitors: Iterable[str] = (),
+) -> dict[str, Any]:
+    """``snapshot_metrics_from_tallies`` of answers in hand (each keyword's answers tallied whole, every brand kept)."""
+    domains = list(owned_domains)
+    tallies = {keyword: run_tally(keyword, '', answers, domains) for keyword, answers in answers_by_keyword.items()}
+    return snapshot_metrics_from_tallies(tallies, domains, tracked_competitors)
 
 
 def compare_snapshots(

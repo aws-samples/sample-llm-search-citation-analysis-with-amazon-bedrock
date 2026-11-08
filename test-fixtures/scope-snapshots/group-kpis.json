@@ -1,0 +1,1283 @@
+{
+  "route": "GET /api/reports/group-kpis",
+  "paging": {
+    "list": "keywords",
+    "view": "keywords",
+    "cursor": "snapshot",
+    "token": "keywords_next_token",
+    "total": "keywords_total"
+  },
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all",
+        "days": "90"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "view": "summary",
+        "days": 90,
+        "since": "2026-07-03T09:00:00.000000Z",
+        "group_run_min_coverage": 50.0,
+        "citations_configured": true,
+        "runs": [
+          {
+            "timestamp": "2026-09-29T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": null
+          },
+          {
+            "timestamp": "2026-09-30T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": {
+              "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+              "deltas": {
+                "answers": 0,
+                "mentions": 1,
+                "mention_rate": 12.5,
+                "share_of_voice": 5.3,
+                "average_position": -0.3,
+                "top_1_share": 12.5,
+                "top_3_share": 12.5,
+                "visibility_score": 8.2,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 3.4,
+                "net_sentiment": 10.0,
+                "engine_coverage": 0.0,
+                "keyword_coverage": 0.0
+              },
+              "trends": {
+                "mention_rate": "improving",
+                "share_of_voice": "improving",
+                "average_position": "stable",
+                "top_1_share": "improving",
+                "top_3_share": "improving",
+                "visibility_score": "improving",
+                "citation_rate": "improving",
+                "citation_share": "improving",
+                "net_sentiment": "improving",
+                "engine_coverage": "stable",
+                "keyword_coverage": "stable"
+              },
+              "keywords_entered": [],
+              "keywords_left": [],
+              "drivers_count": 2
+            }
+          }
+        ],
+        "runs_truncated": false,
+        "runs_total": 2,
+        "keywords": [
+          {
+            "keyword": "hotel en a coruña",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 3,
+                "mention_rate": 75.0,
+                "share_of_voice": 50.0,
+                "average_position": 1.67,
+                "top_1_share": 25.0,
+                "top_3_share": 75.0,
+                "visibility_score": 62.1,
+                "citations": 2,
+                "citation_rate": 50.0,
+                "citation_share": 16.7,
+                "net_sentiment": 66.7,
+                "sentiment_split": {
+                  "positive": 2,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 75.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 1,
+                  "mention_rate": 25.0,
+                  "share_of_voice": 10.0,
+                  "average_position": -0.33,
+                  "top_1_share": 25.0,
+                  "top_3_share": 25.0,
+                  "visibility_score": 15.4,
+                  "citations": 1,
+                  "citation_rate": 25.0,
+                  "citation_share": 5.6,
+                  "net_sentiment": 16.7,
+                  "engine_coverage": 25.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 2,
+                "mention_rate": 50.0,
+                "share_of_voice": 33.3,
+                "average_position": 3.0,
+                "top_1_share": 0.0,
+                "top_3_share": 25.0,
+                "visibility_score": 34.6,
+                "citations": 1,
+                "citation_rate": 25.0,
+                "citation_share": 8.3,
+                "net_sentiment": 50.0,
+                "sentiment_split": {
+                  "positive": 1,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 50.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 0,
+                  "mention_rate": 0.0,
+                  "share_of_voice": 0.0,
+                  "average_position": -0.25,
+                  "top_1_share": 0.0,
+                  "top_3_share": 0.0,
+                  "visibility_score": 1.0,
+                  "citations": 0,
+                  "citation_rate": 0.0,
+                  "citation_share": 1.2,
+                  "net_sentiment": 0.0,
+                  "engine_coverage": 0.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          }
+        ],
+        "truncated_before": null,
+        "keywords_total": 5000,
+        "keywords_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna",
+        "days": "90"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "keywords_truncated": false,
+        "view": "summary",
+        "days": 90,
+        "since": "2026-07-03T09:00:00.000000Z",
+        "group_run_min_coverage": 50.0,
+        "citations_configured": true,
+        "runs": [
+          {
+            "timestamp": "2026-09-29T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": null
+          },
+          {
+            "timestamp": "2026-09-30T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": {
+              "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+              "deltas": {
+                "answers": 0,
+                "mentions": 1,
+                "mention_rate": 12.5,
+                "share_of_voice": 5.3,
+                "average_position": -0.3,
+                "top_1_share": 12.5,
+                "top_3_share": 12.5,
+                "visibility_score": 8.2,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 3.4,
+                "net_sentiment": 10.0,
+                "engine_coverage": 0.0,
+                "keyword_coverage": 0.0
+              },
+              "trends": {
+                "mention_rate": "improving",
+                "share_of_voice": "improving",
+                "average_position": "stable",
+                "top_1_share": "improving",
+                "top_3_share": "improving",
+                "visibility_score": "improving",
+                "citation_rate": "improving",
+                "citation_share": "improving",
+                "net_sentiment": "improving",
+                "engine_coverage": "stable",
+                "keyword_coverage": "stable"
+              },
+              "keywords_entered": [],
+              "keywords_left": [],
+              "drivers_count": 2
+            }
+          }
+        ],
+        "runs_truncated": false,
+        "runs_total": 2,
+        "keywords": [
+          {
+            "keyword": "hotel en a coruña",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 3,
+                "mention_rate": 75.0,
+                "share_of_voice": 50.0,
+                "average_position": 1.67,
+                "top_1_share": 25.0,
+                "top_3_share": 75.0,
+                "visibility_score": 62.1,
+                "citations": 2,
+                "citation_rate": 50.0,
+                "citation_share": 16.7,
+                "net_sentiment": 66.7,
+                "sentiment_split": {
+                  "positive": 2,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 75.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 1,
+                  "mention_rate": 25.0,
+                  "share_of_voice": 10.0,
+                  "average_position": -0.33,
+                  "top_1_share": 25.0,
+                  "top_3_share": 25.0,
+                  "visibility_score": 15.4,
+                  "citations": 1,
+                  "citation_rate": 25.0,
+                  "citation_share": 5.6,
+                  "net_sentiment": 16.7,
+                  "engine_coverage": 25.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 2,
+                "mention_rate": 50.0,
+                "share_of_voice": 33.3,
+                "average_position": 3.0,
+                "top_1_share": 0.0,
+                "top_3_share": 25.0,
+                "visibility_score": 34.6,
+                "citations": 1,
+                "citation_rate": 25.0,
+                "citation_share": 8.3,
+                "net_sentiment": 50.0,
+                "sentiment_split": {
+                  "positive": 1,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 50.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 0,
+                  "mention_rate": 0.0,
+                  "share_of_voice": 0.0,
+                  "average_position": -0.25,
+                  "top_1_share": 0.0,
+                  "top_3_share": 0.0,
+                  "visibility_score": 1.0,
+                  "citations": 0,
+                  "citation_rate": 0.0,
+                  "citation_share": 1.2,
+                  "net_sentiment": 0.0,
+                  "engine_coverage": 0.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          }
+        ],
+        "truncated_before": null,
+        "keywords_next_token": null,
+        "keywords_total": 2,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all",
+        "days": "90"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "view": "summary",
+        "days": 90,
+        "since": "2026-07-03T09:00:00.000000Z",
+        "group_run_min_coverage": 50.0,
+        "citations_configured": true,
+        "runs": [
+          {
+            "timestamp": "2026-09-29T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": null
+          },
+          {
+            "timestamp": "2026-09-30T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": {
+              "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+              "deltas": {
+                "answers": 0,
+                "mentions": 1,
+                "mention_rate": 12.5,
+                "share_of_voice": 5.3,
+                "average_position": -0.3,
+                "top_1_share": 12.5,
+                "top_3_share": 12.5,
+                "visibility_score": 8.2,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 3.4,
+                "net_sentiment": 10.0,
+                "engine_coverage": 0.0,
+                "keyword_coverage": 0.0
+              },
+              "trends": {
+                "mention_rate": "improving",
+                "share_of_voice": "improving",
+                "average_position": "stable",
+                "top_1_share": "improving",
+                "top_3_share": "improving",
+                "visibility_score": "improving",
+                "citation_rate": "improving",
+                "citation_share": "improving",
+                "net_sentiment": "improving",
+                "engine_coverage": "stable",
+                "keyword_coverage": "stable"
+              },
+              "keywords_entered": [],
+              "keywords_left": [],
+              "drivers_count": 2
+            }
+          }
+        ],
+        "runs_truncated": false,
+        "runs_total": 2,
+        "keywords": [
+          {
+            "keyword": "hotel en a coruña",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 3,
+                "mention_rate": 75.0,
+                "share_of_voice": 50.0,
+                "average_position": 1.67,
+                "top_1_share": 25.0,
+                "top_3_share": 75.0,
+                "visibility_score": 62.1,
+                "citations": 2,
+                "citation_rate": 50.0,
+                "citation_share": 16.7,
+                "net_sentiment": 66.7,
+                "sentiment_split": {
+                  "positive": 2,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 75.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 1,
+                  "mention_rate": 25.0,
+                  "share_of_voice": 10.0,
+                  "average_position": -0.33,
+                  "top_1_share": 25.0,
+                  "top_3_share": 25.0,
+                  "visibility_score": 15.4,
+                  "citations": 1,
+                  "citation_rate": 25.0,
+                  "citation_share": 5.6,
+                  "net_sentiment": 16.7,
+                  "engine_coverage": 25.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 2,
+                "mention_rate": 50.0,
+                "share_of_voice": 33.3,
+                "average_position": 3.0,
+                "top_1_share": 0.0,
+                "top_3_share": 25.0,
+                "visibility_score": 34.6,
+                "citations": 1,
+                "citation_rate": 25.0,
+                "citation_share": 8.3,
+                "net_sentiment": 50.0,
+                "sentiment_split": {
+                  "positive": 1,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 50.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 0,
+                  "mention_rate": 0.0,
+                  "share_of_voice": 0.0,
+                  "average_position": -0.25,
+                  "top_1_share": 0.0,
+                  "top_3_share": 0.0,
+                  "visibility_score": 1.0,
+                  "citations": 0,
+                  "citation_rate": 0.0,
+                  "citation_share": 1.2,
+                  "net_sentiment": 0.0,
+                  "engine_coverage": 0.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          }
+        ],
+        "truncated_before": null,
+        "keywords_total": 5000,
+        "keywords_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all",
+        "days": "45"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-group-kpis-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all",
+        "days": "90"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia",
+        "days": "90"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "keywords_truncated": true,
+        "view": "summary",
+        "days": 90,
+        "since": "2026-07-03T09:00:00.000000Z",
+        "group_run_min_coverage": 50.0,
+        "citations_configured": true,
+        "runs": [
+          {
+            "timestamp": "2026-09-29T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 4,
+              "mention_rate": 50.0,
+              "share_of_voice": 36.4,
+              "average_position": 2.5,
+              "top_1_share": 12.5,
+              "top_3_share": 37.5,
+              "visibility_score": 40.1,
+              "citations": 2,
+              "citation_rate": 25.0,
+              "citation_share": 9.1,
+              "net_sentiment": 50.0,
+              "sentiment_split": {
+                "positive": 2,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": null
+          },
+          {
+            "timestamp": "2026-09-30T06:00:00.000000Z",
+            "keywords_with_data": 2,
+            "keywords_total": 2,
+            "coverage": 100.0,
+            "is_group_run": true,
+            "kpis": {
+              "answers": 8,
+              "mentions": 5,
+              "mention_rate": 62.5,
+              "share_of_voice": 41.7,
+              "average_position": 2.2,
+              "top_1_share": 25.0,
+              "top_3_share": 50.0,
+              "visibility_score": 48.3,
+              "citations": 3,
+              "citation_rate": 37.5,
+              "citation_share": 12.5,
+              "net_sentiment": 60.0,
+              "sentiment_split": {
+                "positive": 3,
+                "neutral": 2,
+                "negative": 0,
+                "mixed": 0
+              },
+              "engine_coverage": 75.0,
+              "keyword_coverage": 100.0,
+              "engines": 4,
+              "keywords": 2
+            },
+            "models": {
+              "claude": [
+                "claude-sonnet-5-5"
+              ],
+              "gemini": [
+                "gemini-3.6-flash"
+              ],
+              "openai": [
+                "gpt-5-mini"
+              ],
+              "perplexity": [
+                "perplexity/sonar"
+              ]
+            },
+            "change": {
+              "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+              "deltas": {
+                "answers": 0,
+                "mentions": 1,
+                "mention_rate": 12.5,
+                "share_of_voice": 5.3,
+                "average_position": -0.3,
+                "top_1_share": 12.5,
+                "top_3_share": 12.5,
+                "visibility_score": 8.2,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 3.4,
+                "net_sentiment": 10.0,
+                "engine_coverage": 0.0,
+                "keyword_coverage": 0.0
+              },
+              "trends": {
+                "mention_rate": "improving",
+                "share_of_voice": "improving",
+                "average_position": "stable",
+                "top_1_share": "improving",
+                "top_3_share": "improving",
+                "visibility_score": "improving",
+                "citation_rate": "improving",
+                "citation_share": "improving",
+                "net_sentiment": "improving",
+                "engine_coverage": "stable",
+                "keyword_coverage": "stable"
+              },
+              "keywords_entered": [],
+              "keywords_left": [],
+              "drivers_count": 2
+            }
+          }
+        ],
+        "runs_truncated": false,
+        "runs_total": 2,
+        "keywords": [
+          {
+            "keyword": "hotel en a coruña",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 3,
+                "mention_rate": 75.0,
+                "share_of_voice": 50.0,
+                "average_position": 1.67,
+                "top_1_share": 25.0,
+                "top_3_share": 75.0,
+                "visibility_score": 62.1,
+                "citations": 2,
+                "citation_rate": 50.0,
+                "citation_share": 16.7,
+                "net_sentiment": 66.7,
+                "sentiment_split": {
+                  "positive": 2,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 75.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 1,
+                  "mention_rate": 25.0,
+                  "share_of_voice": 10.0,
+                  "average_position": -0.33,
+                  "top_1_share": 25.0,
+                  "top_3_share": 25.0,
+                  "visibility_score": 15.4,
+                  "citations": 1,
+                  "citation_rate": 25.0,
+                  "citation_share": 5.6,
+                  "net_sentiment": 16.7,
+                  "engine_coverage": 25.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 2,
+                "mention_rate": 50.0,
+                "share_of_voice": 33.3,
+                "average_position": 3.0,
+                "top_1_share": 0.0,
+                "top_3_share": 25.0,
+                "visibility_score": 34.6,
+                "citations": 1,
+                "citation_rate": 25.0,
+                "citation_share": 8.3,
+                "net_sentiment": 50.0,
+                "sentiment_split": {
+                  "positive": 1,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 50.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 0,
+                  "mention_rate": 0.0,
+                  "share_of_voice": 0.0,
+                  "average_position": -0.25,
+                  "top_1_share": 0.0,
+                  "top_3_share": 0.0,
+                  "visibility_score": 1.0,
+                  "citations": 0,
+                  "citation_rate": 0.0,
+                  "citation_share": 1.2,
+                  "net_sentiment": 0.0,
+                  "engine_coverage": 0.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          }
+        ],
+        "truncated_before": null,
+        "keywords_next_token": null,
+        "keywords_total": 2,
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "page": {
+      "description": "The second page of keywords (snapshot cursor); next_token is null on the last page.",
+      "query": {
+        "scope": "all",
+        "days": "90",
+        "view": "keywords",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords": [
+          {
+            "keyword": "hotel en a coruña",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 3,
+                "mention_rate": 75.0,
+                "share_of_voice": 50.0,
+                "average_position": 1.67,
+                "top_1_share": 25.0,
+                "top_3_share": 75.0,
+                "visibility_score": 62.1,
+                "citations": 2,
+                "citation_rate": 50.0,
+                "citation_share": 16.7,
+                "net_sentiment": 66.7,
+                "sentiment_split": {
+                  "positive": 2,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 75.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 1,
+                  "mention_rate": 25.0,
+                  "share_of_voice": 10.0,
+                  "average_position": -0.33,
+                  "top_1_share": 25.0,
+                  "top_3_share": 25.0,
+                  "visibility_score": 15.4,
+                  "citations": 1,
+                  "citation_rate": 25.0,
+                  "citation_share": 5.6,
+                  "net_sentiment": 16.7,
+                  "engine_coverage": 25.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          },
+          {
+            "keyword": "hotel cerca de riazor",
+            "runs_count": 2,
+            "latest": {
+              "timestamp": "2026-09-30T06:00:00.000000Z",
+              "kpis": {
+                "answers": 4,
+                "mentions": 2,
+                "mention_rate": 50.0,
+                "share_of_voice": 33.3,
+                "average_position": 3.0,
+                "top_1_share": 0.0,
+                "top_3_share": 25.0,
+                "visibility_score": 34.6,
+                "citations": 1,
+                "citation_rate": 25.0,
+                "citation_share": 8.3,
+                "net_sentiment": 50.0,
+                "sentiment_split": {
+                  "positive": 1,
+                  "neutral": 1,
+                  "negative": 0,
+                  "mixed": 0
+                },
+                "engine_coverage": 50.0,
+                "keyword_coverage": 100.0,
+                "engines": 4,
+                "keywords": 1
+              },
+              "change": {
+                "previous_timestamp": "2026-09-29T06:00:00.000000Z",
+                "mention": null,
+                "deltas": {
+                  "answers": 0,
+                  "mentions": 0,
+                  "mention_rate": 0.0,
+                  "share_of_voice": 0.0,
+                  "average_position": -0.25,
+                  "top_1_share": 0.0,
+                  "top_3_share": 0.0,
+                  "visibility_score": 1.0,
+                  "citations": 0,
+                  "citation_rate": 0.0,
+                  "citation_share": 1.2,
+                  "net_sentiment": 0.0,
+                  "engine_coverage": 0.0,
+                  "keyword_coverage": 0.0
+                }
+              }
+            }
+          }
+        ],
+        "keywords_total": 5000,
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjIwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "cursor_expired": {
+      "description": "The token names a build that is gone (snapshot) or a keyword set that changed (keyword): restart the list without next_token.",
+      "query": {
+        "scope": "all",
+        "days": "90",
+        "view": "keywords",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 400,
+      "body": {
+        "error": "The list changed since this page was read; start again from the first page",
+        "code": "cursor_expired",
+        "field": "next_token"
+      }
+    },
+    "drivers_computing": {
+      "description": "view=drivers of a large group whose build does not hold the window (a membership change, another days): 202 while a view job computes it.",
+      "query": {
+        "scope": "all",
+        "days": "45",
+        "view": "drivers"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-group-kpis-drivers-9e20",
+          "started_at": "2026-10-12T07:22:03Z"
+        },
+        "retry_after_ms": 2000
+      }
+    }
+  }
+}

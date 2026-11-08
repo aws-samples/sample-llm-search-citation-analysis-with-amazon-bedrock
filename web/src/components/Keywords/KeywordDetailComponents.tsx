@@ -4,6 +4,7 @@ import {
   ChevronDownIcon, CloseIcon 
 } from '../ui';
 import { StrokeIcon } from '../ui/StrokeIcon';
+import { ExportAllButton } from '../ui/ExportAllButton';
 import { EXTERNAL_LINK_PATHS } from '../ui/iconPaths';
 import {
   PROVIDER, providerColor, providerName
@@ -153,12 +154,15 @@ export const DetailHeader = ({
         <StatItem label="Last Run" value={new Date(stats.lastRun).toLocaleDateString()} />
       </div>
     </div>
-    <button
-      onClick={onClose}
-      className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm shrink-0"
-    >
-      <CloseIcon className="w-3.5 h-3.5" />Close
-    </button>
+    <div className="flex items-start gap-2 shrink-0">
+      <ExportAllButton view="searches" params={{ keyword }} />
+      <button
+        onClick={onClose}
+        className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm shrink-0"
+      >
+        <CloseIcon className="w-3.5 h-3.5" />Close
+      </button>
+    </div>
   </div>
 );
 

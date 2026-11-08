@@ -4,11 +4,13 @@ import {
 import {
   render, screen
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { BrandLeaderboardRow } from '../../../../types';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import {
   BrandRankingsSection, MAX_BRANDS
 } from './BrandRankingsSection';
+import { VISIBILITY_BRANDS_PAGING } from '../../../../api/scopedListPagings';
 import {
   buildBrandRow, buildBrandTrends, buildVisibility
 } from '../../layout/reportPayload-fixtures';
@@ -91,10 +93,32 @@ describe('BrandRankingsSection rows', () => {
     expect(sectionTable(TITLE)[1][8]).toBe('other');
   });
 
-  it('lists at most the printable number of brands', () => {
+  it('lists at most the top brands until Show all is pressed', () => {
     renderRankings(Array.from({ length: MAX_BRANDS + 3 }, (_, index) => buildBrandRow(`Brand ${index}`)));
 
     expect(sectionTable(TITLE)).toHaveLength(MAX_BRANDS + 1);
+  });
+
+  it('lists every loaded brand once Show all is pressed', async () => {
+    renderRankings(Array.from({ length: MAX_BRANDS + 3 }, (_, index) => buildBrandRow(`Brand ${index}`)));
+
+    await userEvent.click(screen.getByRole('button', { name: `Show all ${MAX_BRANDS + 3} brands` }));
+
+    expect(sectionTable(TITLE)).toHaveLength(MAX_BRANDS + 4);
+  });
+
+  it('counts Show all against every brand of the scope when the answer has more pages', () => {
+    const visibility = buildVisibility({
+      brands: Array.from({ length: MAX_BRANDS + 1 }, (_, index) => buildBrandRow(`Brand ${index}`)),
+      brands_total: 240,
+    });
+    render(<BrandRankingsSection brands={visibility.brands} loading={false} error={null} pages={{
+      body: visibility,
+      request: null,
+      paging: VISIBILITY_BRANDS_PAGING,
+    }} />);
+
+    expect(screen.getByRole('button', { name: 'Show all 240 brands' })).toBeInTheDocument();
   });
 });
 

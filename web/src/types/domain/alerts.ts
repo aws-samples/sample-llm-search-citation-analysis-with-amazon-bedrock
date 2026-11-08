@@ -52,6 +52,10 @@ export interface AlertItem {
 export interface AlertsResponse {
   items: AlertItem[];
   count: number;
+  /** The next page (`next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  next_token?: string | null;
+  /** Every alert of the status filter (2.45.0 wave 5; `count` is the page's). */
+  total?: number;
 }
 
 export interface AlertAcknowledgement {
@@ -247,7 +251,9 @@ export function isAlertsResponse(candidate: unknown): candidate is AlertsRespons
     && Array.isArray(candidate.items)
     && candidate.items.every(isAlertItem)
     && isInteger(candidate.count)
-    && candidate.count >= candidate.items.length;
+    && candidate.count >= candidate.items.length
+    && (candidate.next_token === undefined || candidate.next_token === null || typeof candidate.next_token === 'string')
+    && (candidate.total === undefined || isInteger(candidate.total));
 }
 
 export function isAlertAcknowledgement(candidate: unknown): candidate is AlertAcknowledgement {
@@ -303,5 +309,7 @@ export function isContentChangesResponse(candidate: unknown): candidate is Conte
     && Array.isArray(candidate.items)
     && candidate.items.every(isContentChangeMarker)
     && isInteger(candidate.count)
-    && candidate.count >= candidate.items.length;
+    && candidate.count >= candidate.items.length
+    && (candidate.next_token === undefined || candidate.next_token === null || typeof candidate.next_token === 'string')
+    && (candidate.total === undefined || isInteger(candidate.total));
 }

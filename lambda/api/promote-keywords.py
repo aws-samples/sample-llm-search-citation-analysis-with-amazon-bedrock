@@ -44,6 +44,7 @@ from shared.keyword_store import (
     validate_keyword_text,
 )
 from shared.requested_group_ids import validate_requested_group_ids
+from shared.snapshot_triggers import rebuilds_snapshot
 from shared.utils import (
     get_timestamp,
     load_keyword_identities,
@@ -170,6 +171,7 @@ def _validated_market_id(body):
     return validate_keyword_market(reference.value, brand_config_table)
 
 
+@rebuilds_snapshot('keywords promoted')
 @api_handler
 @route_handler({'POST': _promote_keywords})
 def handler(event, context):

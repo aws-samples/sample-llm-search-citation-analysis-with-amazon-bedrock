@@ -17,7 +17,8 @@ import { lambdaSourceCode } from './python-layer';
  * own REST API that exposes the Citation Analysis API as tools to AI
  * assistants, protected as an OAuth 2.1 resource (RFC 9728) by the existing
  * Cognito user pool. It has its own API (and lives in its own stack) because
- * the main API sits at CloudFormation's 500-resource limit.
+ * the main stack was then at CloudFormation's 500-resource limit, and so it
+ * can be removed without touching the dashboard.
  *
  * Cognito is the authorization server. This construct adds what the pool is
  * missing for that role: a resource server whose custom scopes end up in the

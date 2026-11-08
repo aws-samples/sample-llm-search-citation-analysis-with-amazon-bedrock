@@ -37,26 +37,47 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared import answer_queries, bounded_counts, dynamodb_batch, markets, scope_params
+from shared import (
+    answer_queries,
+    artifact_registry,
+    bounded_counts,
+    dynamodb_batch,
+    markets,
+    scope_params,
+    scope_snapshot_serve,
+    utils,
+)
 from shared.api_response import success_response, validation_error
+from shared.artifact_stats import NAME as STATS_BUILDER_NAME
 from shared.bounded_counts import Count, Deadline
 from shared.config import PROVIDERS
 from shared.decorators import api_handler, optional_provider, validate
 from shared.env_vars import resolve_table_env
+from shared.keyword_groups import describe_scope
+from shared.kpi_scope_serve import keyword_count_route
 from shared.search_results import search_results_table_name
+from shared.snapshot_artifacts import (
+    SOURCE_LIVE,
+    SnapshotArtifacts,
+    artifacts_envelope,
+    coverage,
+    live_envelope,
+    with_scope_contract,
+)
 from shared.utils import get_timestamp
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # Enough pooled connections for the parallel partition counts of a market.
 dynamodb = scope_params.scoped_dynamodb_resource()
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 SEARCH_RESULTS_TABLE = search_results_table_name()
@@ -90,6 +111,8 @@ class MarketKeywords:
 
     texts: frozenset[str]
     complete: bool = True
+    active: frozenset[str] = frozenset()
+    """The texts of the market's active keywords: the ones its scope snapshot covers."""
 
 
 @dataclass(frozen=True)
@@ -102,6 +125,9 @@ class LastExecution:
 
 # A last execution that could not be read and was never cached.
 _UNKNOWN_LAST_EXECUTION = LastExecution(None, approximate=True)
+
+# A market keyword list that could not be read and was never cached: every total from it is an estimate.
+_UNREAD_KEYWORDS = MarketKeywords(frozenset(), complete=False)
 
 
 def _cached_value[ValueT](cache_key: str, label: str, read: Callable[[], ValueT], fallback: ValueT) -> ValueT:
@@ -159,13 +185,17 @@ def _market_keyword_texts(market_id: str) -> MarketKeywords:
     items, truncated = dynamodb_batch.collect_capped_items(
         keywords_table.scan,
         MARKET_KEYWORD_SCAN_MAX_PAGES,
-        ProjectionExpression='#kw, market_id',
-        ExpressionAttributeNames={'#kw': 'keyword'},
+        ProjectionExpression='#kw, market_id, #st',
+        ExpressionAttributeNames={'#kw': 'keyword', '#st': 'status'},
     )
-    return MarketKeywords(frozenset(
-        item['keyword'] for item in items
+    rows = [
+        item for item in items
         if isinstance(item.get('keyword'), str) and item['keyword'] and markets.keyword_market_id(item) == market_id
-    ), complete=not truncated)
+    ]
+    return MarketKeywords(
+        frozenset(item['keyword'] for item in rows), complete=not truncated,
+        active=frozenset(item['keyword'] for item in rows if item.get('status') == 'active'),
+    )
 
 
 def _counted(count: Count, keywords: MarketKeywords) -> Count:
@@ -241,13 +271,55 @@ def _market_last_execution(
     return _cached_value(f'last_execution#market#{market_id}', SEARCH_RESULTS_TABLE, newest, _UNKNOWN_LAST_EXECUTION)
 
 
-def _market_stats(market_id: str, deadline: Deadline) -> tuple[dict[str, Count], LastExecution]:
-    """The market's totals and its last execution, read at the same time under ``deadline``."""
-    market_keywords = _read_once(lambda: _market_keyword_texts(market_id))
+def _market_stats(market_id: str, deadline: Deadline, market_keywords: Callable[[], MarketKeywords] | None = None) -> tuple[dict[str, Count], LastExecution]:
+    """The totals and the last execution of ``market_keywords`` (default: every keyword of the market), read at the same time under ``deadline``.
+
+    ``market_id`` keys the per-container cache: pass another key for another keyword set.
+    """
+    market_keywords = market_keywords or _read_once(lambda: _market_keyword_texts(market_id))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         last_execution = pool.submit(_market_last_execution, market_keywords, market_id, deadline)
         counts = _market_counts(market_keywords, market_id, deadline)
         return counts, last_execution.result()
+
+
+@dataclass(frozen=True)
+class MarketStats:
+    """A market's totals and last execution, and the build they came from (``None``: read live)."""
+
+    counts: dict[str, Count]
+    last_execution: LastExecution
+    artifacts: SnapshotArtifacts | None = None
+
+
+def _snapshot_market_stats(market_id: str, every: Callable[[], MarketKeywords], deadline: Deadline) -> MarketStats | None:
+    """A large market's totals from its scope snapshot (exact as of the build), or ``None`` to read them live.
+
+    The build covers the market's active keywords; the keywords it does not
+    (paused or deleted ones the Keywords table still carries) are counted
+    live, so the totals cover every keyword of the market as the live path does.
+    ``None`` for a market within the live budget, one whose keyword scan was
+    cut short, or one no build holds totals for. The active keywords come from
+    the same scan as the totals' keyword list, so no other read is made.
+    """
+    keywords = every()
+    if not keywords.complete or keyword_count_route('all', len(keywords.active)) == SOURCE_LIVE:
+        return None
+    descriptor = {'mode': 'all', 'market_ids': [market_id]}
+    scope = scope_params.ReportScope(
+        kind='all', keywords=tuple(sorted(keywords.active, key=str.casefold)), scope=descriptor,
+        label=describe_scope(descriptor), market_id=market_id,
+    )
+    artifacts = scope_snapshot_serve.open_snapshot(scope, utils.get_brand_config().get('updated_at'))
+    stored = artifact_registry.serve_view(STATS_BUILDER_NAME, artifacts, {}) if artifacts is not None else None
+    if artifacts is None or stored is None:
+        return None
+    active = frozenset(scope.keywords)
+    rest = _read_once(lambda: MarketKeywords(every().texts - active, every().complete))
+    counts, last = _market_stats(f'{market_id}#outside-snapshot', deadline, rest)
+    totals = {name: Count(count.value + int(stored.get(name) or 0), count.approximate) for name, count in counts.items()}
+    stamps = [stamp for stamp in (last.timestamp, stored.get('last_execution')) if stamp]
+    return MarketStats(totals, LastExecution(max(stamps, default=None), last.approximate), artifacts)
 
 
 def _latest_provider_execution(provider: str | None) -> str | None:
@@ -276,6 +348,16 @@ def _latest_provider_execution(provider: str | None) -> str | None:
     return max(timestamps) if timestamps else None
 
 
+def _stats_body(counts: dict[str, Count], last_execution: str | None, market_fields: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **{total: count.value for total, count in counts.items()},
+        'counts_approximate': any(count.approximate for count in counts.values()),
+        'last_execution': last_execution,
+        'timestamp': get_timestamp(),
+        **market_fields,
+    }
+
+
 @api_handler
 @validate({
     # Any provider has a last run, so the filter takes the search providers too (unlike answer-based endpoints).
@@ -302,18 +384,12 @@ def handler(event, context, provider=None, market_id=None):
 
     deadline = Deadline(bounded_counts.COUNT_TIME_BUDGET_SECONDS)
     if market is None:
-        counts = _all_counts(deadline)
-        last_execution = _latest_provider_execution(provider)
-        market_fields = {}
-    else:
-        counts, market_last = _market_stats(market, deadline)
-        last_execution = market_last.timestamp
-        market_fields = {MARKET_PARAM: market, 'last_execution_approximate': market_last.approximate}
-
-    return success_response({
-        **{total: count.value for total, count in counts.items()},
-        'counts_approximate': any(count.approximate for count in counts.values()),
-        'last_execution': last_execution,
-        'timestamp': get_timestamp(),
-        **market_fields,
-    }, event)
+        return success_response(_stats_body(_all_counts(deadline), _latest_provider_execution(provider), {}), event)
+    every = _read_once(lambda: _cached_value(f'keywords#market#{market}', KEYWORDS_TABLE, lambda: _market_keyword_texts(market), _UNREAD_KEYWORDS))
+    stats = _snapshot_market_stats(market, every, deadline) or MarketStats(*_market_stats(market, deadline, every))
+    body = _stats_body(stats.counts, stats.last_execution.timestamp, {
+        MARKET_PARAM: market, 'last_execution_approximate': stats.last_execution.approximate,
+    })
+    keywords = stats.counts['unique_keywords'].value
+    envelope = live_envelope() if stats.artifacts is None else artifacts_envelope(stats.artifacts)
+    return success_response(with_scope_contract(body, coverage(keywords, keywords), envelope), event)

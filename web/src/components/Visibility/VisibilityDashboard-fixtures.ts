@@ -1,4 +1,7 @@
 import { vi } from 'vitest';
+import {
+  scopedHookState, type ScopedHookStateOverrides
+} from '../../test/scopedHookState';
 import type {
   HistoricalTrendsResponse, PersonaRankingsResponse, VisibilityResponse
 } from '../../types';
@@ -6,20 +9,14 @@ import type { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import type { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import type { usePersonaRankings } from '../../hooks/usePersonaRankings';
 
-interface HookStateOverrides {
-  readonly loading?: boolean;
-  readonly error?: string | null;
-}
-
 /** What `useVisibilityMetrics` returns with `data`, idle and error-free unless overridden. */
 export function buildVisibilityHookResult(
   data: VisibilityResponse | null,
-  overrides: HookStateOverrides = {},
+  overrides: ScopedHookStateOverrides = {},
 ): ReturnType<typeof useVisibilityMetrics> {
   return {
     data,
-    loading: overrides.loading ?? false,
-    error: overrides.error ?? null,
+    ...scopedHookState(overrides),
     fetchVisibilityMetrics: vi.fn(),
   };
 }
@@ -27,12 +24,11 @@ export function buildVisibilityHookResult(
 /** What `useHistoricalTrends` returns with `data`, idle and error-free unless overridden. */
 export function buildTrendsHookResult(
   data: HistoricalTrendsResponse | null,
-  overrides: HookStateOverrides = {},
+  overrides: ScopedHookStateOverrides = {},
 ): ReturnType<typeof useHistoricalTrends> {
   return {
     data,
-    loading: overrides.loading ?? false,
-    error: overrides.error ?? null,
+    ...scopedHookState(overrides),
     fetchHistoricalTrends: vi.fn(),
   };
 }

@@ -5,6 +5,7 @@ import { fetchKeywordSearches } from '../../api/searchPages';
 import type { Search } from '../../types';
 import { summarizeSearches } from '../../formatting/searchSummary';
 import { Spinner } from '../ui/Spinner';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { useTheme } from '../../hooks/useTheme';
 import { getChartTheme } from '../ui/chartTheme';
 import {
@@ -31,6 +32,7 @@ import {
   DetailHeader,
   SearchItem,
 } from './KeywordDetailComponents';
+import { SeeAllLink } from '../ui/SeeAllLink';
 
 ChartJS.register(
   CategoryScale,
@@ -55,6 +57,9 @@ export const KeywordDetail = ({
   onNavigateToRawResponses,
 }: KeywordDetailProps) => {
   const [stats, setStats] = useState<KeywordStats | null>(null);
+  const [runs, setRuns] = useState<Search[]>([]);
+  const [olderToken, setOlderToken] = useState<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
   const [expandedResponse, setExpandedResponse] = useState<number | null>(null);
@@ -63,23 +68,42 @@ export const KeywordDetail = ({
     fetchKeywordStats();
   }, [keyword]);
 
+  const showRuns = (searches: Search[]) => {
+    const {
+      sorted, latestTimestamp, ...totals
+    } = summarizeSearches(searches);
+    setRuns(searches);
+    setStats({
+      ...totals,
+      lastRun: latestTimestamp ?? '',
+      searches: sorted,
+    });
+  };
+
   const fetchKeywordStats = async () => {
     try {
       setLoading(true);
-      const searches = await fetchKeywordSearches(keyword);
-      const {
-        sorted, latestTimestamp, ...totals
-      } = summarizeSearches(searches);
-
-      setStats({
-        ...totals,
-        lastRun: latestTimestamp ?? '',
-        searches: sorted,
-      });
+      const batch = await fetchKeywordSearches(keyword);
+      showRuns(batch.searches);
+      setOlderToken(batch.nextToken);
     } catch (err) {
       console.error('Error fetching keyword stats:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadOlderRuns = async () => {
+    if (olderToken === null) return;
+    setLoadingOlder(true);
+    try {
+      const batch = await fetchKeywordSearches(keyword, olderToken);
+      showRuns([...runs, ...batch.searches]);
+      setOlderToken(batch.nextToken);
+    } catch (err) {
+      console.error('Error fetching older keyword runs:', err);
+    } finally {
+      setLoadingOlder(false);
     }
   };
 
@@ -126,6 +150,11 @@ export const KeywordDetail = ({
             onNavigateToRawResponses={onNavigateToRawResponses}
             buildRawResponsesPath={buildRawResponsesPath}
           />
+          <LoadMoreButton
+            onLoadMore={olderToken === null ? undefined : loadOlderRuns}
+            loading={loadingOlder}
+            label="Load older runs"
+          />
         </div>
       </div>
     </div>
@@ -158,7 +187,10 @@ const ChartsSection = ({
         <Line data={lineChartData} options={lineChartOptions(theme)} />
       </div>
       <div className="bg-gray-50 p-3 sm:p-4 rounded-lg">
-        <h3 className="font-semibold text-gray-900 mb-4 text-sm sm:text-base">Top 10 Citations</h3>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h3 className="font-semibold text-gray-900 text-sm sm:text-base">Top 10 Citations</h3>
+          <SeeAllLink to="/citations">See all citations</SeeAllLink>
+        </div>
         <Bar data={barChartData} options={barChartOptions(theme)} />
       </div>
     </div>

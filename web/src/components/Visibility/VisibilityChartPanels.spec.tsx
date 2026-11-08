@@ -30,7 +30,7 @@ function renderGroupEngines() {
 }
 
 function renderGroupSources() {
-  return render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+  return render(<SourcesPanel sources={buildGroupSources()} />);
 }
 
 describe('BrandShareOfVoicePanel', () => {
@@ -65,7 +65,7 @@ describe('EnginesPanel', () => {
 
     expect(aboutButton(ENGINES_TITLE)).toHaveAccessibleDescription(
       'The KPIs over each AI engine\'s answers alone. The chart compares the mention rate, '
-        + 'visibility score and citation rate on a 0–100 scale; the table adds the other KPIs, and the Excel export every one.',
+        + 'visibility score and citation rate on a 0–100 scale; the table adds the other KPIs, and Export all every one.',
     );
   });
 
@@ -137,22 +137,19 @@ describe('SourcesPanel', () => {
     render(<SourcesPanel sources={[buildSourceRow('blog.example', {
       citation_rate: null,
       citation_share: null,
-    })]} total={1} />);
+    })]} />);
 
     expect(bodyRowCells(panelTable(SOURCES_TITLE))[0].slice(2, 4)).toStrictEqual(['—', '—']);
   });
 
-  it.each([
-    ['3 of 12 cited domains, most cited first.', buildGroupSources(), 12],
-    ['1 of 1 cited domain, most cited first.', [buildSourceRow('booking.com')], 1],
-  ])('says "%s" under the table, counting every cited domain', (note, sources, total) => {
-    render(<SourcesPanel sources={sources} total={total} />);
+  it('shows the paging footer it is given under the table', () => {
+    render(<SourcesPanel sources={buildGroupSources()} footer={<p>Showing 3 of 12 cited domains</p>} />);
 
-    expect(within(panelTitled(SOURCES_TITLE)).getByText(note)).toBeInTheDocument();
+    expect(within(panelTitled(SOURCES_TITLE)).getByText('Showing 3 of 12 cited domains')).toBeInTheDocument();
   });
 
   it('says no domain is cited, without a table, when the answers cite none', () => {
-    render(<SourcesPanel sources={[]} total={0} />);
+    render(<SourcesPanel sources={[]} />);
 
     expect(within(panelTitled(SOURCES_TITLE)).getByText('No cited domain yet.')).toBeInTheDocument();
     expect(within(panelTitled(SOURCES_TITLE)).queryByRole('table')).not.toBeInTheDocument();

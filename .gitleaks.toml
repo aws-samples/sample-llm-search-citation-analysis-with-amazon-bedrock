@@ -34,7 +34,7 @@ paths = [
 ]
 
 # Reviewed false positives of the default `generic-api-key` rule: pagination cursors in tests and
-# fixtures. Each is base64url of a short JSON object (`eyJ` = `{"`, e.g. `{"offset":1}`) or of a
+# fixtures (including the cross-language JSON fixtures under test-fixtures/). Each is base64url of a short JSON object (`eyJ` = `{"`, e.g. `{"offset":1}`) or of a
 # "not-a-…" placeholder. A real JWT starts the same way but is far longer and carries dots, so the
 # length cap and the alphabet keep it out; outside test and fixture files the rule is unchanged.
 [[allowlists]]
@@ -45,6 +45,7 @@ paths = [
   '''(^|/)test_[^/]+\.py$''',
   '''\.spec\.tsx?$''',
   '''-fixtures\.tsx?$''',
+  '''^test-fixtures/.+\.json$''',
 ]
 regexTarget = "secret"
 regexes = ['''^(eyJ[A-Za-z0-9_-]{6,60}|bm90LWEt[A-Za-z0-9_-]{0,40})$''']

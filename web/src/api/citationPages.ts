@@ -2,18 +2,13 @@
  * Reads of the server-paged GET /citations endpoint.
  *
  * The API sorts and filters a scope's distinct URLs and returns one page plus
- * scope-wide totals; the Citations table asks for the page it shows, and the
- * Excel export follows `next_token` over every page of the same order and
- * filters, with each URL's keyword texts.
+ * scope-wide totals; the Citations table asks for the page it shows. The
+ * full list is exported by the export service (`citations` view).
  */
 import { apiGet } from './client';
-import {
-  collectCursorPages, withNextToken, type CursorPage
-} from './cursorPages';
-import type {
-  CitationsPage, TopUrl
-} from '../types';
+import type { CitationsPage } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
+import { isScopeCoverage } from '../types/domain/scopeCoverageDecoders';
 import type {
   ContentTypeFilter, SortConfig
 } from '../exporters/citationParser';
@@ -46,12 +41,20 @@ function isNumberField(record: Record<string, unknown>, name: string): boolean {
   return typeof record[name] === 'number';
 }
 
-/** Whether the optional provenance fields (`source`, `as_of`, `stale`) are absent or well-formed. */
+/**
+ * Whether the optional provenance fields are absent or well-formed: `source` (`rollup` before
+ * 2.45.0, `snapshot` or `live` since), `as_of`, `stale`, and the 2.45.0 `refreshing` and `coverage`.
+ */
+const CITATION_SOURCES: ReadonlySet<unknown> = new Set([undefined, 'rollup', 'snapshot', 'live']);
+
+const isOptionalBoolean = (value: unknown): boolean => value === undefined || typeof value === 'boolean';
+
 function hasValidProvenance(record: Record<string, unknown>): boolean {
-  const { source } = record;
-  return (source === undefined || source === 'rollup' || source === 'live')
+  return CITATION_SOURCES.has(record.source)
     && (record.as_of === undefined || record.as_of === null || typeof record.as_of === 'string')
-    && (record.stale === undefined || typeof record.stale === 'boolean');
+    && isOptionalBoolean(record.stale)
+    && isOptionalBoolean(record.refreshing)
+    && (record.coverage === undefined || isScopeCoverage(record.coverage));
 }
 
 /** Whether `value` is a `GET /citations` page with its totals. */
@@ -91,33 +94,4 @@ export async function fetchCitationsPage(
     throw new CitationPageError('Citations API returned an invalid page');
   }
   return payload;
-}
-
-/**
- * Every URL `query` selects, in its order, each with its keyword texts:
- * what the Excel export writes. Rejects, without a partial list, when a page
- * fails, is malformed or repeats a token.
- */
-export async function fetchAllCitationUrls(
-  query: CitationListQuery,
-  options: {
-    readonly includeKeywords?: boolean;
-    readonly signal?: AbortSignal 
-  } = {}
-): Promise<TopUrl[]> {
-  const params = {
-    ...citationListParams(query),
-    limit: String(MAX_CITATIONS_PAGE),
-    ...(options.includeKeywords === true ? { include_keywords: 'true' } : {}),
-  };
-  return collectCursorPages(
-    async (nextToken: string | null): Promise<CursorPage<TopUrl>> => {
-      const page = await fetchCitationsPage(withNextToken(params, nextToken) ?? {}, options.signal);
-      return {
-        items: page.top_urls,
-        nextToken: page.next_token,
-      };
-    },
-    () => new CitationPageError('Citations API repeated a continuation token')
-  );
 }

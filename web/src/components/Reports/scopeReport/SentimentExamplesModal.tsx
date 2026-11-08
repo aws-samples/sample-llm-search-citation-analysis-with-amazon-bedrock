@@ -1,3 +1,4 @@
+import { ScopeCoverageNote } from '../../ui/ScopeCoverageNote';
 import type { ReportScope } from '../../../types';
 import type {
   SentimentExamplesResponse, SentimentLabel
@@ -7,6 +8,8 @@ import { SectionPlaceholder } from '../layout/SectionPlaceholder';
 import { providerName } from '../../../constants/providers';
 import { SentimentExampleCard } from './SentimentExampleCard';
 import { SENTIMENT_TONES } from './sentimentTone';
+import { ExportAllButton } from '../../ui/ExportAllButton';
+import { requestParams } from '../../../api/exports';
 import {
   useSentimentExamplePages, type SentimentExamplePages
 } from './useSentimentExamplePages';
@@ -95,12 +98,14 @@ export function SentimentExamplesModal({
     data, loading, error
   } = pages;
 
-  const truncatedNote = data?.keywords_truncated ? ' · not every keyword of the scope is included' : '';
-
   return (
     <div className="print-hidden">
       <Modal isOpen onClose={onClose} size="4xl" title={`${SENTIMENT_TONES[sentiment].label} answers · ${engineLabel(provider)}`}>
-        <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">{`${scopeLabel} · each keyword's latest run${truncatedNote}`}</p>
+        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+          <p className="text-sm text-gray-600 dark:text-gray-300">{`${scopeLabel} · each keyword's latest run`}</p>
+          <ExportAllButton view="sentiment-examples" params={loading ? null : requestParams(pages.request)} />
+        </div>
+        <ScopeCoverageNote response={data} className="mb-4" />
         {loading && (
           <output className="block">
             <SectionPlaceholder variant="loading" message="Loading the answers…" />

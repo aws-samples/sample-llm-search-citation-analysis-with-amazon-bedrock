@@ -5,7 +5,9 @@
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../infrastructure';
-import { getDomain } from '../formatting/urlFormatter';
+import {
+  collectCursorPages, type CursorPage
+} from '../api/cursorPages';
 import type { TopUrl } from '../types';
 
 /** One keyword/provider pair that cited a URL (`GET /api/url-breakdown`). */
@@ -59,39 +61,31 @@ export function isVideoCitation(citation: TopUrl): boolean {
   return citation.content_type === 'video';
 }
 
-/** The Type cell of the citation export. */
-function citationTypeLabel(citation: TopUrl): 'Video' | 'Page' {
-  return isVideoCitation(citation) ? 'Video' : 'Page';
-}
-
-/** Column widths of the citation export, one per `citationExportRows` column, in order. */
-export const CITATION_EXPORT_COLUMNS = [
-  { wch: 8 }, { wch: 80 }, { wch: 30 }, { wch: 8 }, { wch: 10 }, { wch: 15 }, { wch: 60 },
-];
-
-/** The rows of the citation Excel export, ranked in the order given. */
-export function citationExportRows(citations: TopUrl[]) {
-  return citations.map((citation, idx) => ({
-    Rank: idx + 1,
-    URL: citation.url,
-    Domain: getDomain(citation.url),
-    Type: citationTypeLabel(citation),
-    Keywords: citation.keyword_count ?? 0,
-    'Citation Count': citation.citation_count,
-    'Keyword List': (citation.keywords ?? []).join(', '),
-  }));
+/** One page of `GET /url-breakdown` for `url` (and the market), after `nextToken`. */
+async function fetchBreakdownPage(url: string, marketId: string | null, nextToken: string | null): Promise<CursorPage<UrlBreakdown>> {
+  const params = new URLSearchParams({
+    url,
+    ...(marketId === null ? {} : { market_id: marketId }),
+    ...(nextToken === null ? {} : { next_token: nextToken }),
+  });
+  const response = await authenticatedFetch(`${API_BASE_URL}/url-breakdown?${params.toString()}`);
+  const json = await response.json() as {
+    breakdown?: UrlBreakdown[];
+    next_token?: string | null
+  };
+  return {
+    items: json.breakdown ?? [],
+    nextToken: json.next_token ?? null,
+  };
 }
 
 /**
- * Fetch breakdown data for a URL.
+ * Every keyword × engine row of one cited URL (`GET /url-breakdown`), in the header's market
+ * when one is picked, following `next_token` to the API's last page; empty when a page fails.
  */
-export async function fetchBreakdownData(url: string): Promise<UrlBreakdown[]> {
+export async function fetchBreakdownData(url: string, marketId: string | null = null): Promise<UrlBreakdown[]> {
   try {
-    const response = await authenticatedFetch(
-      `${API_BASE_URL}/url-breakdown?url=${encodeURIComponent(url)}`
-    );
-    const json = await response.json() as { breakdown?: UrlBreakdown[] };
-    return json.breakdown ?? [];
+    return await collectCursorPages((nextToken) => fetchBreakdownPage(url, marketId, nextToken));
   } catch {
     return [];
   }

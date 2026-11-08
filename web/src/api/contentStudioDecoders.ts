@@ -167,12 +167,41 @@ function decodeContentHistoryItem(value: unknown): ContentStudioHistory {
   };
 }
 
+/** Where an ideas page sits in the whole list (2.45.0 wave 5): the next page's cursor and every idea's count. */
+export interface ContentIdeasPageInfo {
+  /** `null` on the last page. */
+  readonly nextToken: string | null;
+  /** Every idea of the scope (`ideas_total`, else `total_count`). */
+  readonly total: number;
+}
+
+/** The cursor of the next ideas page; `null` on the last (an older answer has none). */
+function ideasNextToken(payload: Record<string, unknown>): string | null {
+  const token = payload.ideas_next_token;
+  if (token === undefined || token === null || token === '') return null;
+  if (typeof token !== 'string') throw invalid('ideas next_token');
+  return token;
+}
+
+export function decodeContentIdeasPageInfo(payload: unknown): ContentIdeasPageInfo {
+  if (!isRecord(payload)) throw invalid('ideas response');
+  const total = payload.ideas_total ?? payload.total_count;
+  return {
+    nextToken: ideasNextToken(payload),
+    total: decodeInteger(total, 'idea count'),
+  };
+}
+
+/**
+ * One page of ideas. A page that is the last one holds exactly `total_count` ideas; a page with a
+ * further page (`ideas_next_token`) holds part of them.
+ */
 export function decodeContentIdeasResponse(payload: unknown): ContentIdea[] {
   if (!isRecord(payload) || !Array.isArray(payload.ideas)) throw invalid('ideas response');
   const expectedCount = decodeInteger(payload.total_count, 'idea count');
   if (typeof payload.generated_at !== 'string') throw invalid('generation timestamp');
   const ideas = payload.ideas.map(decodeContentIdea);
-  if (ideas.length !== expectedCount) throw invalid('idea count');
+  if (ideasNextToken(payload) === null && payload.ideas_total === undefined && ideas.length !== expectedCount) throw invalid('idea count');
   return ideas;
 }
 

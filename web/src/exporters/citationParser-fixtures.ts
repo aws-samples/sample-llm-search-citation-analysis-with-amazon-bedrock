@@ -11,7 +11,7 @@ export const DESC_KEYWORDS = {
   direction: 'desc' 
 } satisfies SortConfig;
 
-export function buildCitation(overrides: Partial<TopUrl> = {}): TopUrl {
+function buildCitation(overrides: Partial<TopUrl> = {}): TopUrl {
   return {
     url: 'https://example.com/article',
     citation_count: 5,

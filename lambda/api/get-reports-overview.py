@@ -15,6 +15,12 @@ Why this endpoint exists rather than the frontend composing /trends and
 - Surfaces a stable "executive summary" shape that the Executive Summary
   report can rely on without re-shaping data on the client.
 
+Complete for every scope (2.45.0): the trend part is ``/trends``'s
+(``trends_for_scope``): live for a scope within the live budget, else the
+scope snapshot's preset, else a view job (202, route ``reports-overview``).
+The body carries ``/trends``'s ``coverage``, ``source``, ``as_of``,
+``stale`` and ``refreshing``; the top movers come from every keyword's trend.
+
 Query params:
   - days (int, 1-365, default 30): trend window for the rollup.
   - period (day|week|month, default day): aggregation grain.
@@ -34,19 +40,22 @@ sys.path.insert(0, '/opt/python')
 
 import boto3
 
+from shared import scope_snapshot_serve
 from shared.api_response import success_response
+from shared.artifact_trends import top_movers
 from shared.decorators import api_handler, validate
-from shared.keyword_run_kpis import tracked_brand_names
 from shared.kpi_engine import owned_domains_from
 from shared.request_deadline import current_deadline
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
+    all_active_scope,
     keywords_table_name,
     load_sibling_function,
     scope_from_request,
 )
 from shared.scoped_reports import TREND_WINDOW_PARAMS
+from shared.snapshot_artifacts import SOURCE_SNAPSHOT
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -104,20 +113,34 @@ def _recs_helper() -> Callable:
 # Aggregation
 # ----------------------------------------------------------------------
 
-def _mover(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        'keyword': row['keyword'],
-        'visibility_score': row['kpis']['visibility_score'],
-        'change': row['change']['deltas']['visibility_score'],
-    }
+#: The route's name for view jobs.
+ROUTE = 'reports-overview'
+
+#: The view-job route and artifact builder the recommendations of a large scope are served by (``shared.artifact_recommendations``).
+RECOMMENDATIONS_ROUTE = 'recommendations'
+RECOMMENDATIONS_BUILDER = 'recommendations'
 
 
-def top_movers(keyword_trends: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """The ``limit`` keywords whose visibility score rose the most, and those whose score fell the most, since their previous period."""
-    changed = [_mover(row) for row in keyword_trends if row.get('change') and row['change']['deltas']['visibility_score'] is not None]
-    improvers = sorted((mover for mover in changed if mover['change'] > 0), key=lambda mover: -mover['change'])
-    decliners = sorted((mover for mover in changed if mover['change'] < 0), key=lambda mover: mover['change'])
-    return improvers[:limit], decliners[:limit]
+def _snapshot_recommendations(
+    scope: ReportScope | None, config: dict[str, Any], top: int, event: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """A large scope's ``top`` recommendations from its scope snapshot (the live rules would read every keyword), or the response to send instead.
+
+    The trends came from the snapshot, so the scope is past the live budget.
+    A build that does not hold the scope's recommendations has the
+    recommendations view job compute them; until it has, the overview
+    answers with the job's 202 (or its failure), as for its trend part.
+    """
+    resolved = scope if scope is not None else all_active_scope(dynamodb.Table(KEYWORDS_TABLE))
+    answered = scope_snapshot_serve.serve_snapshot_request(scope_snapshot_serve.SnapshotRequest(
+        RECOMMENDATIONS_ROUTE, RECOMMENDATIONS_BUILDER, {'limit': top}, resolved, config.get('updated_at'), event,
+    ))
+    if not isinstance(answered, tuple):
+        return [], answered
+    return list(answered[0]['recommendations']), None
+
+#: The scope contract fields the overview takes from its trend body.
+_CONTRACT_FIELDS = ('coverage', 'source', 'as_of', 'stale', 'refreshing')
 
 
 def build_overview(
@@ -126,6 +149,7 @@ def build_overview(
     days: int,
     top: int,
     scope: ReportScope | None = None,
+    event: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Compose the Executive Summary payload from the trend view and the recommendations.
@@ -139,8 +163,21 @@ def build_overview(
     The time budget bounds the read like ``/trends`` (``truncated_before``,
     ``keywords_truncated``); ``truncated`` is true when it ran out before the
     recommendations were read, and ``top_recommendations`` is then empty.
+    A scope whose trends come from its snapshot takes its recommendations
+    from the same snapshot, or from the recommendations view job (202 until
+    it has run) when the build holds none.
+
+    When the trend part is not ready (202, a failed view job, a bad cursor)
+    that response is returned as it is, with ``statusCode``.
     """
-    trends = _trends_helper()(scope, period, days, owned_domains_from(config), tracked_brand_names(config))
+    # Every keyword_trends row (page_size None): the top movers rank them all.
+    result = _trends_helper()(
+        scope, period, days, owned_domains_from(config),
+        page_size=None, route=ROUTE, brand_config_updated_at=config.get('updated_at'), event=event,
+    )
+    if result.response is not None:
+        return result.response
+    trends = result.body
     top_improving, top_declining = top_movers(trends['keyword_trends'], top)
     # A scope with no active keyword gets no recommendations: an empty list would
     # read as "discover the active keywords" to the loader and widen the report.
@@ -148,6 +185,10 @@ def build_overview(
     out_of_time = current_deadline().stop_reading('the overview recommendations')
     if out_of_time or (scope is not None and not scope.keywords):
         recommendations: list[dict[str, Any]] = []
+    elif trends.get('source') == SOURCE_SNAPSHOT:
+        recommendations, pending = _snapshot_recommendations(scope, config, top, event)
+        if pending is not None:
+            return pending
     else:
         recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
 
@@ -172,6 +213,7 @@ def build_overview(
         'top_improving': top_improving,
         'top_declining': top_declining,
         'top_recommendations': recommendations[:top],
+        **{name: trends[name] for name in _CONTRACT_FIELDS},
     }
 
 
@@ -202,5 +244,7 @@ def handler(
     if rejected:
         return rejected
     config = get_brand_config()
-    payload = build_overview(config, period=period, days=days, top=top, scope=report_scope)
+    payload = build_overview(config, period=period, days=days, top=top, scope=report_scope, event=event)
+    if 'statusCode' in payload:
+        return payload
     return success_response(payload, event)

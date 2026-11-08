@@ -6,6 +6,7 @@
  * `lambda/shared/group_kpi_history.py`.
  */
 import type { ReportScopeInfo } from './baseTypes';
+import type { ScopedResponseFields } from './scopeCoverage';
 import type { KpiId } from '../../constants/kpiDefinitions';
 import {
   isNullableString, isRecord
@@ -102,7 +103,7 @@ export interface KeywordRunSummary {
   latest: KeywordRun | null;
 }
 
-export interface GroupKpiHistoryResponse {
+export interface GroupKpiHistoryResponse extends ScopedResponseFields {
   scope: ReportScopeInfo;
   days: number;
   group_run_min_coverage: number;
@@ -112,9 +113,15 @@ export interface GroupKpiHistoryResponse {
   runs: GroupRun[];
   /** Older runs were left out to keep the summary within its size budget. */
   runs_truncated: boolean;
+  /** Every run of the window (2.45.0 wave 5); `view=runs` pages them all, oldest first. */
+  runs_total?: number;
   /** The run the read stopped at when the period holds more data than one report reads; `null` when read whole. */
   truncated_before: string | null;
+  /** The first page of keywords (all of them before 2.45.0). */
   keywords: KeywordRunSummary[];
+  /** The next page (`view=keywords&next_token=`); `null`/absent on the last. */
+  keywords_next_token?: string | null;
+  keywords_total?: number;
 }
 
 /** The keywords that drove one compared group run (`view=drivers`). */
@@ -136,7 +143,8 @@ export interface GroupRunDriversPage {
   next_token: string | null;
 }
 
-function isGroupRun(value: unknown): value is GroupRun {
+/** One run of the window (the summary's `runs`, a `view=runs` page's `runs`). */
+export function isGroupRun(value: unknown): value is GroupRun {
   return isRecord(value)
     && typeof value.timestamp === 'string'
     && typeof value.is_group_run === 'boolean'
@@ -148,7 +156,8 @@ function isKeywordRunHistory(value: unknown): value is KeywordRunHistory {
   return isRecord(value) && typeof value.keyword === 'string' && Array.isArray(value.runs);
 }
 
-function isKeywordRunSummary(value: unknown): value is KeywordRunSummary {
+/** One keyword of the group KPI summary: its name, how many runs it has, its latest run or `null`. */
+export function isKeywordRunSummary(value: unknown): value is KeywordRunSummary {
   return isRecord(value)
     && typeof value.keyword === 'string'
     && typeof value.runs_count === 'number'

@@ -81,3 +81,11 @@ export function formatAuditDate(iso: string | null): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 }
+
+/** An issue's details in full: `key: value` (lists joined with commas), separated by " · " (the server export's rule too). */
+export function issueDetailText(details: Record<string, unknown>): string {
+  return Object.entries(details).map(([key, value]) => {
+    const shown = Array.isArray(value) ? value.join(', ') : String(value);
+    return `${key.replaceAll('_', ' ')}: ${shown}`;
+  }).join(' · ');
+}

@@ -59,10 +59,39 @@ describe('useContentActionPlan', () => {
     expect(fetchCitationGaps).toHaveBeenCalledWith({ kind: 'all' }, 50);
   });
 
-  it('fires the content-studio ideas and history fetches', () => {
+  it('fires the content-studio ideas fetch over every keyword and the history fetch', () => {
     renderPlan();
-    expect(fetchIdeas).toHaveBeenCalledWith();
+    expect(fetchIdeas).toHaveBeenCalledWith({ scope: 'all' });
     expect(fetchHistory).toHaveBeenCalledWith();
+  });
+
+  it('loads the next ideas page until none is left', () => {
+    const loadMoreIdeas = vi.fn();
+    mockStudio.mockReturnValue({
+      ...buildStudioSnapshot({
+        fetchIdeas,
+        fetchHistory,
+        ideaCount: 1,
+      }),
+      ideasHasMore: true,
+      loadMoreIdeas,
+    });
+    renderPlan();
+    expect(loadMoreIdeas).toHaveBeenCalledWith();
+  });
+
+  it('is not ready while history pages are left to load', () => {
+    mockStudio.mockReturnValue({
+      ...buildStudioSnapshot({
+        fetchIdeas,
+        fetchHistory,
+        briefCount: 1,
+      }),
+      historyHasMore: true,
+      historyLoadingMore: true,
+    });
+    const { result } = renderPlan();
+    expect(result.current.ready).toBe(false);
   });
 
   it('reports ready=true once both data sources have settled with content', () => {

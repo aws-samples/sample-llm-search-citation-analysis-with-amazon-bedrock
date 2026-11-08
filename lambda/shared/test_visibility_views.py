@@ -299,10 +299,10 @@ class TestTrendView:
 
         assert [(brand['name'], brand['mentions']) for brand in brands] == [(RIVAL, 3), (HOTEL, 2)]
 
-    def test_caps_the_latest_leaderboard(self):
+    def test_keeps_every_brand_of_the_latest_leaderboard(self):
         answers = {'spa': [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(12)))]}
 
-        assert (len(tallied_trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (10, 10)
+        assert (len(tallied_trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (12, 10)
 
     def test_says_when_a_run_kept_only_its_top_brands(self):
         answers = [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(4)))]

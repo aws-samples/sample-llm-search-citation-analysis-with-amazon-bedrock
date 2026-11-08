@@ -92,10 +92,11 @@ export function BrandVisibilityReport({ keywords }: Props) {
       {scope.kind === 'group' && (
         <GroupKpiReport
           scope={scope}
-          scopeLabel={describeReportScope(scope, groups)}
           history={data.groupHistory}
+          request={data.groupHistoryRequest}
           loading={data.groupHistoryLoading}
           error={data.groupHistoryError}
+          computing={data.groupHistoryComputing}
           days={days}
           onDaysChange={setDays}
         />
@@ -130,7 +131,7 @@ function AllKeywordsSections({ data }: SectionsProps) {
       <PooledRankingsSection {...slice} />
       <TrendHistorySection {...slice} />
       <MoversSection {...slice} />
-      <PerKeywordTableSection {...slice} />
+      <PerKeywordTableSection {...slice} request={data.trendsRequest} />
       <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </>
   );

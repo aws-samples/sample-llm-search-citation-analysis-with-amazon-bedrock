@@ -22,7 +22,6 @@ import pytest
 from shared.scope_params import (
     MARKET_PARAM,
     MAX_KEYWORD_IDS,
-    SCOPE_KEYWORDS_CAP,
     SCOPE_MAX_WORKERS,
     SCOPE_PARAMS,
     SCOPE_QUERY_PARAMS,
@@ -33,7 +32,6 @@ from shared.scope_params import (
     map_scope_keywords,
     parse_scope_params,
     scope_from_request,
-    scope_keywords_from_request,
     scoped_dynamodb_resource,
 )
 
@@ -277,14 +275,6 @@ class TestMarketFilter:
 
         assert (error, scope is not None) == (None, True)
 
-    def test_answers_400_for_a_market_with_no_active_keyword(self):
-        keywords, rejected = scope_keywords_from_request(EVENT, {'market_id': 'fr-fr'}, _keywords_table(MARKET_ACTIVE))
-
-        assert keywords is None
-        assert _rejection(rejected) == (
-            400, {'error': 'No active keywords match the selected scope (all active keywords, market fr-fr).', 'field': 'scope'},
-        )
-
     def test_a_market_satisfies_a_required_scope(self):
         scope, rejected = scope_from_request(EVENT, {'market_id': 'pt-pt'}, _keywords_table(MARKET_ACTIVE), required=True)
 
@@ -345,32 +335,6 @@ class TestScopeFromRequest:
 
         assert scope is None
         assert _rejection(rejected) == (400, {'error': 'Provide keyword, group_id or keyword_ids', 'field': 'keyword'})
-
-
-class TestScopeKeywordsFromRequest:
-    """The keyword-text form of `scope_from_request`, shared by Action Center and Prompt Insights."""
-
-    def test_returns_the_scopes_keyword_texts(self):
-        keywords, rejected = scope_keywords_from_request(EVENT, {'group_id': 'coruna'}, _keywords_table(ACTIVE))
-
-        assert rejected is None
-        assert keywords == ['best hotels galicia', 'hotel coruna spa']
-
-    def test_leaves_the_default_to_the_caller_when_no_scope_is_given(self):
-        assert scope_keywords_from_request(EVENT, {'keyword': None, 'group_id': None}, _keywords_table(ACTIVE)) == (None, None)
-
-    def test_refuses_a_scope_with_no_active_keyword_on_the_scope_field(self):
-        """An empty list would read as "all keywords" to a loader, widening the view instead of narrowing it."""
-        keywords, rejected = scope_keywords_from_request(EVENT, {'group_id': 'no-such-group'}, _keywords_table(ACTIVE))
-
-        assert keywords is None
-        assert _rejection(rejected) == (400, {'error': 'No active keywords match the selected scope (1 group(s)).', 'field': 'scope'})
-
-    def test_passes_a_malformed_scope_rejection_through(self):
-        keywords, rejected = scope_keywords_from_request(EVENT, {'keyword': 'a', 'scope': 'all'}, _keywords_table(ACTIVE))
-
-        assert keywords is None
-        assert _rejection(rejected)[0] == 400
 
 
 @pytest.fixture
@@ -447,8 +411,6 @@ class TestMapScopeKeywords:
 
         assert executor.call_args.kwargs == {'max_workers': 2}
 
-    def test_caps_a_scoped_report_at_one_hundred_keywords(self):
-        assert SCOPE_KEYWORDS_CAP == 100
 
 
 class TestScopedDynamodbResource:

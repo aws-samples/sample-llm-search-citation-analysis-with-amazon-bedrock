@@ -22,7 +22,7 @@ describe('/api/markets', () => {
   });
 
   it('puts every verb behind Cognito and the ConfigMgmt function', () => {
-    expect(unguardedVerbs(snapshot.marketsMethods, snapshot.configMgmtFunctionLogicalId)).toStrictEqual(FULLY_GUARDED);
+    expect(unguardedVerbs(snapshot.marketsMethods, snapshot.configMgmtFunctionName)).toStrictEqual(FULLY_GUARDED);
   });
 
   it('answers the CORS preflight like every other resource', () => {

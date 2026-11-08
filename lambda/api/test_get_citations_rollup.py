@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared import scope_source
 from shared.citation_rollup import CURRENT_KEY
 from shared.citation_rollup_serve import RollupReader
 from testing.citation_rollup_fixtures import (
@@ -53,12 +54,20 @@ def table() -> SegmentedTable:
 
 
 def _get(module: Any, s3: FakeS3 | None, table: SegmentedTable, query: dict[str, str] | None, *, lambda_client: Any = None,
-         active: list[dict[str, Any]] = _ACTIVE) -> dict[str, Any]:
+         active: list[dict[str, Any]] = _ACTIVE, brand_config: dict[str, Any] | None = None) -> dict[str, Any]:
     reader = None if s3 is None else RollupReader(s3, ROLLUP_BUCKET, lambda_client=lambda_client, function_name='summary')
     with patch.object(module, 'rollup_reader', reader):
-        status, body = get_citations(module, table, query, active_keywords=active)
+        status, body = get_citations(module, table, query, active_keywords=active, brand_config=brand_config)
     assert status == 200
     return body
+
+
+_GROWN = [{**row, 'group_ids': {'coast'}} if row['id'] == 'k9' else row for row in _ACTIVE]
+
+
+def _grown_group(module: Any, s3: FakeS3, table: SegmentedTable, lambda_client: Any = None) -> dict[str, Any]:
+    """The coast group's first page after a keyword joined it since the build."""
+    return _get(module, s3, table, {'group_id': 'coast'}, lambda_client=lambda_client, active=_GROWN)
 
 
 class TestServedFromTheRollup:
@@ -87,9 +96,7 @@ class TestServedFromTheRollup:
 
 class TestAnsweredLive:
     def test_answers_live_and_stale_when_the_groups_keywords_changed(self, citations_module, s3, table, lambda_client):
-        changed = [{**row, 'group_ids': {'coast'}} if row['id'] == 'k9' else row for row in _ACTIVE]
-
-        body = _get(citations_module, s3, table, {'group_id': 'coast'}, lambda_client=lambda_client, active=changed)
+        body = _grown_group(citations_module, s3, table, lambda_client)
 
         assert (body['source'], body['stale'], body['total_citations']) == ('live', True, 7 * 60)
 
@@ -116,3 +123,46 @@ class TestAnsweredLive:
         body = _get(citations_module, s3, table, {'keyword': 'keyword 003'})
 
         assert (body['source'], s3.reads) == ('live', [])
+
+
+#: A live budget the 12-keyword tenant's group and table scopes are over (6 keywords x 10 personas x 4 engines x 2 runs = 480 rows).
+_SMALL_LIVE_BUDGET = 100
+
+
+@pytest.fixture
+def large_scopes():
+    with patch.object(scope_source, 'LIVE_ROWS_BUDGET', _SMALL_LIVE_BUDGET):
+        yield
+
+
+@pytest.fixture
+def grown_group_page(citations_module, s3, table, lambda_client) -> dict[str, Any]:
+    """The grown coast group's page while it is over the live budget."""
+    with patch.object(scope_source, 'LIVE_ROWS_BUDGET', _SMALL_LIVE_BUDGET):
+        return _grown_group(citations_module, s3, table, lambda_client)
+
+
+@pytest.mark.usefixtures('large_scopes')
+class TestStaleLargeScope:
+    def test_serves_the_stale_builds_group_page_marked_stale_and_refreshing(self, grown_group_page):
+        assert (grown_group_page['source'], grown_group_page['stale'], grown_group_page['refreshing'], grown_group_page['total_citations']) == (
+            'rollup', True, True, 6 * 60,
+        )
+
+    @pytest.mark.usefixtures('grown_group_page')
+    def test_reads_no_citations_row_for_a_stale_large_scope(self, table):
+        assert table.scans == []
+
+    @pytest.mark.usefixtures('grown_group_page')
+    def test_requests_one_rebuild_of_the_stale_large_scope(self, lambda_client):
+        assert [json.loads(call.kwargs['Payload'])['reason'] for call in lambda_client.invoke.call_args_list] == ['stale group:coast']
+
+    def test_is_not_refreshing_without_a_builder_lambda(self, citations_module, s3, table):
+        body = _grown_group(citations_module, s3, table)
+
+        assert (body['source'], body['stale'], body['refreshing']) == ('rollup', True, False)
+
+    def test_serves_the_stale_table_scope_after_a_brand_config_change(self, citations_module, s3, table, lambda_client):
+        body = _get(citations_module, s3, table, None, lambda_client=lambda_client, brand_config={'updated_at': '2099-01-01T00:00:00Z'})
+
+        assert (body['source'], body['stale'], body['total_citations']) == ('rollup', True, len(_ROWS))

@@ -21,7 +21,7 @@ import {
 
 interface BrandDetailModalProps {
   brand: AggregatedBrand;
-  /** The summary's scope and filters, for "Show all appearances". */
+  /** The summary's scope and filters, for "Show more appearances". */
   appearancesRequest?: BrandAppearancesRequest | null;
   providerData: ProviderBrandData[];
   keyword: string;

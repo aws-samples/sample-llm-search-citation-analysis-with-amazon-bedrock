@@ -24,6 +24,11 @@ interface CitationAnalysisTableSpec {
   globalSecondaryIndexes?: CitationAnalysisIndexSpec[];
 }
 
+/** A string key attribute named `name`. */
+export function stringKey(name: string): dynamodb.Attribute {
+  return { name, type: dynamodb.AttributeType.STRING };
+}
+
 /**
  * One DynamoDB table with the settings every Citation Analysis table shares:
  * on-demand billing, AWS-managed encryption, point-in-time recovery and

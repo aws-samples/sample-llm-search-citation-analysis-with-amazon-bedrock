@@ -8,6 +8,7 @@ import {
   KPI_DEFINITIONS, type KpiId
 } from '../../../../constants/kpiDefinitions';
 import { useRunDrivers } from '../../../../hooks/useGroupKpiDetail';
+import { AppendedPagesFooter } from './AppendedPagesFooter';
 import {
   emphasisColumn, kpiColumn, ReportSection, ReportTable, type ReportTableColumn
 } from '../../layout';
@@ -81,7 +82,7 @@ function DriversTable({
   scope, run, change
 }: DriversTableProps) {
   const {
-    drivers, loading, error
+    drivers, loading, error, more
   } = useRunDrivers(scope, run, change);
   if (error !== null) {
     return <p role="alert" className="text-sm text-red-700">{`Could not load the keywords behind this change: ${error}`}</p>;
@@ -89,8 +90,13 @@ function DriversTable({
   if (loading || drivers === null) {
     return <p className={NOTE_CLASS}>{`Loading the ${change.drivers_count} keywords behind this change…`}</p>;
   }
-  // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-  return <ReportTable columns={driverColumns()} rows={drivers} rowKey={(driver) => driver.keyword} />;
+  return (
+    <>
+      {/* Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical */}
+      <ReportTable columns={driverColumns()} rows={drivers} rowKey={(driver) => driver.keyword} />
+      <AppendedPagesFooter more={more} label="Load more keywords" />
+    </>
+  );
 }
 
 /**

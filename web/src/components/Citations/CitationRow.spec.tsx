@@ -6,6 +6,11 @@ import {
 } from 'vitest';
 import { CitationRow } from './CitationRow';
 import type { TopUrl } from '../../types';
+import {
+  chooseExportFormat, mockStartExport
+} from '../../test/exportsApiMock';
+
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
 const mockCitation: TopUrl = {
   url: 'https://example.com/test',
@@ -32,6 +37,7 @@ describe('CitationRow', () => {
     onToggleRow: vi.fn(),
     onViewDetails: vi.fn(),
     onKeywordClick: vi.fn(),
+    marketId: 'es-es',
   };
 
   const renderInTable = (ui: React.ReactElement) => render(<table><tbody>{ui}</tbody></table>);
@@ -114,5 +120,20 @@ describe('CitationRow', () => {
     renderInTable(<CitationRow {...defaultProps} />);
 
     expect(screen.queryByTitle('YouTube video')).not.toBeInTheDocument();
+  });
+
+  it('exports the whole keyword × engine breakdown of the URL in the header market', async () => {
+    renderInTable(<CitationRow {...defaultProps} isExpanded={true} />);
+
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'url-breakdown',
+      params: {
+        market_id: 'es-es',
+        url: 'https://example.com/test',
+      },
+      format: 'xlsx',
+    });
   });
 });

@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import pytest
-from seo_export import EXPORT_MAX_ROWS, ExportWindowError, RowWindow, export_pricing, row_window
+from seo_export import (
+    EXPORT_MAX_ROWS,
+    EXPORT_ROWS_PER_REQUEST,
+    ExportWindowError,
+    RowWindow,
+    export_pricing,
+    row_window,
+)
+
+from shared import export_source_seo_paid
 
 
 def test_reads_a_request_without_limit_as_its_page():
@@ -39,7 +48,13 @@ def test_keys_a_chunk_as_offset_and_limit():
     assert RowWindow(offset=200, limit=100, exported=True).cache_key == {'offset': 200, 'limit': 100}
 
 
-def test_prices_with_the_given_request_and_row_constants():
-    assert export_pricing(0.024, 0.000036) == {
-        'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.024, 'row_usd': 0.000036,
+def test_prices_with_the_given_request_and_row_constants_and_cache_window():
+    assert export_pricing(0.024, 0.000036, 21_600) == {
+        'max_rows': 10_000, 'rows_per_request': 1000, 'request_usd': 0.024, 'row_usd': 0.000036, 'cache_hours': 6,
     }
+
+
+def test_the_server_export_reads_the_same_row_limits_the_routes_serve():
+    assert (export_source_seo_paid.EXPORT_MAX_ROWS, export_source_seo_paid.ROWS_PER_REQUEST) == (
+        EXPORT_MAX_ROWS, EXPORT_ROWS_PER_REQUEST,
+    )

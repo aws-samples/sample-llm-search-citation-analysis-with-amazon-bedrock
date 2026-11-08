@@ -21,6 +21,9 @@ import {
   getErrorMessage, isAbortError
 } from '../infrastructure';
 import { apiRequestErrors } from './useAnalysisEndpoint';
+import {
+  STALE_REFETCH_INTERVAL_MS, STALE_REFETCH_LIMIT
+} from './useStaleRefetch';
 
 /**
  * `GET /citations?market_id=&limit=`: one market's provider, brand and
@@ -97,6 +100,29 @@ interface Loaded {
 }
 
 /**
+ * The refetch round of request `key`: while its page is a stale snapshot being rebuilt, the round
+ * goes up every 10 s (at most 18 times) so the page is read again; a new request starts at 0.
+ */
+function useStaleSnapshotRound(key: string, loaded: Loaded | null): number {
+  const [refetch, setRefetch] = useState({
+    key,
+    round: 0,
+  });
+  const round = refetch.key === key ? refetch.round : 0;
+  const stalePage = loaded?.key === key && loaded.page?.stale === true && loaded.page.source !== 'live';
+
+  useEffect(() => {
+    if (!stalePage || round >= STALE_REFETCH_LIMIT) return undefined;
+    const timer = setTimeout(() => setRefetch({
+      key,
+      round: round + 1,
+    }), STALE_REFETCH_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [stalePage, round, key, loaded]);
+  return round;
+}
+
+/**
  * The Citations table's page for the header's market (every market combined
  * when none is picked), sorted, filtered and paged by the API; requested
  * again whenever the market or `request` changes.
@@ -110,6 +136,7 @@ export function useMarketCitations(request: CitationTableRequest): MarketCitatio
   } = request;
   const key = JSON.stringify([column, direction, urlContains, minCitations, contentType, page, pageSize, marketId]);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const round = useStaleSnapshotRound(key, loaded);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,7 +171,7 @@ export function useMarketCitations(request: CitationTableRequest): MarketCitatio
       }
     );
     return () => controller.abort();
-  }, [key, column, direction, urlContains, minCitations, contentType, page, pageSize, marketId]);
+  }, [key, round, column, direction, urlContains, minCitations, contentType, page, pageSize, marketId]);
 
   return {
     citations: loaded?.page?.top_urls ?? [],

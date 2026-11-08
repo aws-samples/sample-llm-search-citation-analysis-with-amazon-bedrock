@@ -20,7 +20,9 @@ from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.constants import MAX_QUERY_PROMPTS_DEFAULT
 from shared.decorators import api_handler, parse_json_body, validate
+from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
+from shared.snapshot_triggers import rebuilds_keyword_latest
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 MAX_PROMPTS = int(os.environ.get('MAX_QUERY_PROMPTS', MAX_QUERY_PROMPTS_DEFAULT))
 
 
+@rebuilds_keyword_latest('query prompts changed')
 @api_handler
 def handler(event, context):
     """
@@ -66,12 +69,8 @@ def handler(event, context):
 
 
 def list_prompts(event, context):
-    """GET /api/query-prompts - List all query prompts."""
-    # Scan with headroom over MAX_PROMPTS so tuning the cap upward doesn't
-    # silently truncate the UI. 5x buffer is arbitrary but comfortable for
-    # the business-soft-cap scale.
-    response = query_prompts_table.scan(Limit=max(50, MAX_PROMPTS * 5))
-    items: list[dict[str, Any]] = response.get('Items', [])
+    """GET /api/query-prompts - List every query prompt (the scan follows every page, 2.45.0 wave 5)."""
+    items: list[dict[str, Any]] = collect_all_items(query_prompts_table.scan)
     # Sort by created_at descending
     items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
     return success_response(items, event)

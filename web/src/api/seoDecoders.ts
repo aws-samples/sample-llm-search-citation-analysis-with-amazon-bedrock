@@ -83,7 +83,8 @@ function isExportPricing(value: unknown): boolean {
     && isNumber(value.max_rows)
     && isNumber(value.rows_per_request)
     && isNumber(value.request_usd)
-    && isNumber(value.row_usd);
+    && isNumber(value.row_usd)
+    && isNumber(value.cache_hours);
 }
 
 /** The export window (`offset`, `limit`, null on a page) and the `export` pricing of a DataForSEO-paged table answer. */

@@ -241,31 +241,6 @@ export function buildTrendsResponse(overrides: Partial<HistoricalTrendsResponse>
   };
 }
 
-
-/** The export's KPI cells of `buildKpis()`, headed "<Label> (<unit>)". */
-export const BUILT_KPI_CELLS: Readonly<Record<string, number>> = {
-  Answers: 20,
-  Mentions: 12,
-  'Mention rate (%)': 60,
-  'Share of voice (%)': 25,
-  'Average position': 1.8,
-  'Top-1 share (%)': 40,
-  'Top-3 share (%)': 55,
-  'Visibility score (0-100)': 52.4,
-  Citations: 6,
-  'Citation rate (%)': 30,
-  'Citation share (%)': 12.5,
-  'Net sentiment (-100 to +100)': 15,
-  'Engine coverage (%)': 75,
-  'Keyword coverage (%)': 80,
-};
-
-/** The export's KPI cells of a keyword without data: every one empty. */
-export const EMPTY_KPI_CELLS: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(BUILT_KPI_CELLS).map((header) => [header, ''])
-);
-
-
 /** The words of the KPI history chart of `buildTrendsResponse()`: RUN_1's day, then the KPIs of RUN_2 as the latest. */
 export const GROUP_TREND_CAPTION = 'Mention rate, Share of voice, Visibility score and Citation rate over 2 periods from 2026-09-01 to 2026-09-08, '
   + 'on a 0–100 scale. Latest (2026-09-08): Mention rate 60.0%, Share of voice 25.0%, Visibility score 52.4, Citation rate 30.0%.';

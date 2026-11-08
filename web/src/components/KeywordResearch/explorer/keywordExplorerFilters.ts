@@ -5,9 +5,13 @@
  * A row whose metric is unknown (null) fails every active bound on that metric, so "max difficulty 30"
  * never keeps a Google Ads row without difficulty (null must not compare as 0).
  * Unknown values sort last in both directions, so a descending sort never opens with empty cells.
+ *
+ * The export route applies the same rules server side (`lambda/seo/seo-keywords.py` `explorer_rows`); the cases
+ * in `lambda/testing/keyword_explorer_filter_cases.json` run against both, so the table and its export agree.
  */
+import type { ViewParams } from '../../../api/exports';
 import type {
-  KeywordIntent, KeywordRow
+  KeywordIntent, KeywordResearchRequest, KeywordRow
 } from '../../../types/api/seo';
 
 export const INTENT_ORDER: readonly KeywordIntent[] = ['informational', 'commercial', 'transactional', 'navigational', 'unknown'];
@@ -153,5 +157,30 @@ export function nextSort(current: KeywordSort, field: SortField): KeywordSort {
   return {
     field,
     direction: current.direction === 'desc' ? 'asc' : 'desc',
+  };
+}
+
+/**
+ * The `seo-keyword-explorer` export of the table: the research that was sent (`limit` as `count`, the export
+ * drops paging names) with the table's filters and sort. The server reads that research from the cache only.
+ */
+export function explorerExportParams(request: KeywordResearchRequest, filters: KeywordFilters, sort: KeywordSort): ViewParams {
+  return {
+    keyword: request.keyword,
+    market_id: request.market_id,
+    mode: request.mode,
+    count: request.limit,
+    group_keywords: request.group_keywords,
+    clickstream: request.clickstream,
+    include: filters.include.trim(),
+    exclude: filters.exclude.trim(),
+    min_volume: parseBound(filters.minVolume),
+    max_volume: parseBound(filters.maxVolume),
+    max_difficulty: parseBound(filters.maxDifficulty),
+    min_cpc: parseBound(filters.minCpc),
+    max_cpc: parseBound(filters.maxCpc),
+    intents: filters.intents.join(','),
+    sort: sort.field,
+    direction: sort.direction,
   };
 }

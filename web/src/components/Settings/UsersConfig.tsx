@@ -25,6 +25,7 @@ import {
 } from './UserPresentation';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 interface PageNotice {
   readonly tone: 'success' | 'warning';
@@ -107,6 +108,7 @@ export function UsersConfig() {
     <div className="space-y-6">
       <SettingsSectionHeader title="Users" description="Invite people and choose who can change settings.">
         <div className="flex items-center gap-2">
+          <ConfigListExport list="users" />
           <Button
             variant="secondary"
             leadingIcon={<RefreshIcon className="w-4 h-4" />}

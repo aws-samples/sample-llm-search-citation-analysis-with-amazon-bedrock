@@ -192,10 +192,16 @@ ignore_decorators = [
 # html.parser.HTMLParser calls these overrides by name (the site audit's page reader).
 # avg_position / median_position: SerpCompetitor fields that only dataclasses.asdict reads (the
 # domain-overview competitor rows are sent to the dashboard as they are).
+# TypedDict keys the code writes only as dict literals (a key is never read as an attribute):
+#   notified, download_url, download_expires_at — shared/export_contract.py ExportSummary,
+#   built by lambda/api/exports.py and read by the dashboard (web/src/types/domain/exports.ts).
 ignore_names = [
     "trust_env",
     "handle_starttag", "handle_startendtag", "handle_endtag", "handle_data",
     "avg_position", "median_position",
+    "notified",
+    "download_url",
+    "download_expires_at",
 ]
 # 60% is the tier vulture assigns every unused function, class, method,
 # attribute and variable; only unused imports (90%) and unreachable code (100%)

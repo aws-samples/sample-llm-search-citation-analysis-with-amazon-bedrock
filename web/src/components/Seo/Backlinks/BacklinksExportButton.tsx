@@ -1,9 +1,8 @@
-import { fetchBacklinksTable } from '../../../api/seoBacklinks';
+import type { ViewParams } from '../../../api/exports';
 import type {
   BacklinksTab, BacklinksTableRequest, BacklinksTableResponse
 } from '../../../types/api/seoBacklinks';
 import { PaidExportButton } from '../../ui/PaidExportButton';
-import { exportBacklinksExcel } from './backlinksExcel';
 import { TAB_LABELS } from './backlinksFormat';
 
 interface Props<TTab extends BacklinksTab> {
@@ -15,9 +14,23 @@ interface Props<TTab extends BacklinksTab> {
   readonly disabled: boolean;
 }
 
+/** The `seo-backlinks` export params of a table: the request's fields, its filters as JSON. */
+export function backlinksExportParams(tab: BacklinksTab, list: BacklinksTableRequest): ViewParams {
+  return {
+    tab,
+    target: list.target,
+    scope: list.scope,
+    sort_field: list.sort_field,
+    sort_order: list.sort_order,
+    filters: JSON.stringify(list.filters),
+    include_spam: list.include_spam,
+    mode: list.mode,
+  };
+}
+
 /**
- * "Export to Excel" of a backlinks table: the rows on screen for free, or up to 10,000 rows of the same sorted,
- * filtered table asked again from DataForSEO, after the user saw the price.
+ * "Export" of a backlinks table: a server export of the page on screen for free, or of up to 10,000 rows of the
+ * same sorted, filtered table asked again from DataForSEO, after the user saw and confirmed the price.
  */
 export function BacklinksExportButton<TTab extends BacklinksTab>({
   tab, list, loaded, disabled
@@ -28,16 +41,12 @@ export function BacklinksExportButton<TTab extends BacklinksTab>({
       pricing: loaded.export,
       totalCount: loaded.total_count,
       onScreenRows: loaded.rows.length,
-      fetchChunk: async (offset, limit, signal) => {
-        const chunk = await fetchBacklinksTable(tab, {
-          ...list,
-          offset,
-          limit,
-        }, { signal });
-        return chunk.rows;
+      view: 'seo-backlinks',
+      params: backlinksExportParams(tab, list),
+      screenPage: {
+        page: loaded.page,
+        page_size: loaded.page_size,
       },
-      onDownload: (rows) => exportBacklinksExcel(tab, rows, loaded.target),
-      onDownloadScreen: () => exportBacklinksExcel(tab, loaded.rows, loaded.target),
     }} />
   );
 }

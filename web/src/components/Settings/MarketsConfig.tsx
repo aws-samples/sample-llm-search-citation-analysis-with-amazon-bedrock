@@ -16,6 +16,7 @@ import {
 import { MarketForm } from './MarketForm';
 import { MAX_MARKETS } from './marketFormModel';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 interface MarketsConfigProps { readonly isAdmin: boolean; }
 
@@ -192,7 +193,10 @@ export function MarketsConfig({ isAdmin }: MarketsConfigProps) {
         title="Markets"
         description="The countries and languages keywords are asked from. A keyword without a market is asked as before."
       >
-        <HeaderActions isAdmin={isAdmin} catalog={catalog} editing={editing !== null} onAdd={() => editor.setEditing({ kind: 'new' })} />
+        <div className="flex items-center gap-2">
+          <ConfigListExport list="markets" />
+          <HeaderActions isAdmin={isAdmin} catalog={catalog} editing={editing !== null} onAdd={() => editor.setEditing({ kind: 'new' })} />
+        </div>
       </SettingsSectionHeader>
 
       <ErrorAlert message={catalog.error} />

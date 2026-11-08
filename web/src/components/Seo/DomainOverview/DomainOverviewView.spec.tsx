@@ -7,29 +7,27 @@ import {
 } from '../../../api/seoDomains';
 import { isSeoApiConfigured } from '../../../api/seo';
 import userEvent from '@testing-library/user-event';
-import { EXPORT_EXCEL_LABEL } from '../../ui/ExportExcelButton';
+import { PAID_EXPORT_LABEL } from '../../ui/PaidExportButton';
+import { exportPlan } from '../../../exporters/paidExport';
 import {
   findBrandTrackingLinkElement, getAnalyzeOwnDomainElement, mockBrandSettings, NO_OWN_DOMAIN, OWN_DOMAIN, quickPickDomains
 } from '../settingsDomains-fixtures';
 import {
-  analyzeAndClick, analyzeDomain, buildExampleExport, exportedTable, mockDomainAnswers, openPagedExport, pagedExportVia,
+  analyzeAndClick, analyzeDomain, mockDomainAnswers, openPagedExport, pagedExportVia,
   renderDomainOverview, SeoRefusal, sentRequest, submitDomain, SWISS_MARKET_ID, type DomainClick
 } from './DomainOverviewView-fixtures';
 import {
-  buildDomainKeywords, buildDomainPages, buildDomainSnapshots, buildRankedKeyword, buildSerpCompetitors
+  buildDomainKeywords, buildDomainSnapshots, buildSerpCompetitors, LABS_EXPORT
 } from '../../../api/seoDomains-fixtures';
 import {
-  COMPETITOR_EXCEL_COLUMNS, KEYWORD_EXCEL_COLUMNS, PAGE_EXCEL_COLUMNS, SNAPSHOT_EXCEL_COLUMNS
-} from './domainExcel';
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoDomains');
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
 vi.mock('../../../hooks/useSeoSettings');
-vi.mock('../../../exporters/tableExcel', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../../exporters/tableExcel')>(),
-  exportTableToExcel: vi.fn(),
-}));
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 
 const SNAPSHOT_BUTTON = {
   role: 'button',
@@ -58,8 +56,6 @@ const COMPETITORS_CLICKS = [{
 }] as const;
 
 const NO_CLICKS: readonly DomainClick[] = [];
-
-const COMPETITORS_EXPORT_TITLE = 'The SERP competitors of the 1 keywords searched';
 
 beforeEach(() => {
   vi.mocked(isSeoApiConfigured).mockReturnValue(true);
@@ -287,49 +283,77 @@ describe('stored snapshots', () => {
   });
 });
 
-const SCREEN_ROW_DOWNLOAD = 'Download the 1 rows on screen (free)';
+const SCREEN_ROW_EXPORT = 'Export the 1 rows on screen (free)';
 
-describe('Export to Excel', () => {
+describe('Export', () => {
   it.each([
     {
       table: 'ranked keywords',
       clicks: NO_CLICKS,
-      expected: buildExampleExport(KEYWORD_EXCEL_COLUMNS, buildDomainKeywords().items, 'Ranked keywords', 'domain-keywords'),
+      params: {
+        table: 'keywords',
+        sort: 'traffic',
+      },
     },
     {
       table: 'top pages',
       clicks: PAGES_CLICKS,
-      expected: buildExampleExport(PAGE_EXCEL_COLUMNS, buildDomainPages().items, 'Top pages', 'domain-pages'),
+      params: {
+        table: 'pages',
+        sort: 'traffic',
+      },
     },
-  ])('exports the $table on screen under their sheet name and file prefix', async ({
-    clicks, expected
+  ])('queues the $table page on screen as a free server export', async ({
+    clicks, params
   }) => {
-    expect(await pagedExportVia(SCREEN_ROW_DOWNLOAD, ...clicks)).toStrictEqual(expected);
+    expect(await pagedExportVia(SCREEN_ROW_EXPORT, ...clicks)).toMatchObject({
+      view: 'seo-domain',
+      params: {
+        ...params,
+        target: 'example.com',
+        page: '1',
+        page_size: '50',
+      },
+    });
   });
 
   it.each([
     {
       table: 'SERP competitors',
-      title: COMPETITORS_EXPORT_TITLE,
       clicks: COMPETITORS_CLICKS,
-      expected: buildExampleExport(COMPETITOR_EXCEL_COLUMNS, buildSerpCompetitors().items, 'SERP competitors', 'domain-competitors'),
+      params: {
+        keywords: JSON.stringify(buildDomainKeywords().items.map((row) => row.keyword)),
+        market_id: buildSerpCompetitors().market_id,
+        table: 'SERP competitors',
+      },
     },
     {
-      table: 'stored snapshots',
-      title: 'The 1 stored snapshots of example.com',
+      table: 'Traffic snapshots',
       clicks: [SHOW_SNAPSHOTS],
-      expected: buildExampleExport(SNAPSHOT_EXCEL_COLUMNS, buildDomainSnapshots().snapshots, 'Traffic snapshots', 'domain-snapshots'),
+      params: {
+        domain: buildDomainSnapshots().domain,
+        market_id: buildDomainSnapshots().market_id,
+        table: 'Traffic snapshots',
+      },
     },
-  ])('exports the $table on screen at once under their sheet name and file prefix', async ({
-    title, clicks, expected
+  ])('queues a server export of the $table on screen', async ({
+    clicks, params
   }) => {
-    expect(await exportedTable(title, ...clicks)).toStrictEqual(expected);
+    await analyzeAndClick(...clicks);
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'seo-domain-tables',
+      params,
+      format: 'xlsx',
+    });
   });
 
   it.each([
     ['opening the ranked-keywords export dialog', () => openPagedExport()],
-    ['downloading the ranked keywords on screen', () => pagedExportVia(SCREEN_ROW_DOWNLOAD)],
-  ])('requests no keywords beyond the page on screen when %s', async (_step, step) => {
+    ['exporting the ranked keywords on screen', () => pagedExportVia(SCREEN_ROW_EXPORT)],
+    ['starting the paid ranked-keywords export', () => pagedExportVia('Start export')],
+  ])('asks DataForSEO for no keywords beyond the page on screen when %s', async (_step, step) => {
     await step();
 
     expect(fetchDomainKeywords).toHaveBeenCalledTimes(1);
@@ -338,51 +362,38 @@ describe('Export to Excel', () => {
   it('names the ranked keywords in the export dialog', async () => {
     await openPagedExport();
 
-    expect(screen.getByRole('dialog', { name: 'Export ranked keywords to Excel' })).toHaveTextContent('Price: up to $0.03 · 1 DataForSEO request');
+    expect(screen.getByRole('dialog', { name: 'Export ranked keywords' })).toHaveTextContent('Price: up to $0.03 · 1 DataForSEO request');
   });
 
-  it('asks the ranked keywords from the first row with the sort on screen', async () => {
-    await pagedExportVia('Download', {
+  it('queues the ranked keywords with the sort, filters and market on screen at their confirmed price', async () => {
+    const queued = await pagedExportVia('Start export', {
       role: 'button',
       name: 'Volume',
     });
-
     const page = sentRequest(fetchDomainKeywords, 1);
-    const chunk = sentRequest(fetchDomainKeywords, 2);
 
-    expect(chunk).toMatchObject({
+    expect(queued?.params).toMatchObject({
+      table: 'keywords',
       target: page?.target,
       market_id: page?.market_id,
       sort: 'volume',
       order: 'desc',
-      filters: page?.filters,
-      offset: 0,
-      limit: 120,
-    });
-    expect(chunk).not.toHaveProperty('page');
-  });
-
-  it('exports every ranked keyword the export fetched', async () => {
-    const fetched = [buildRankedKeyword({ keyword: 'flight deals' }), buildRankedKeyword({ keyword: 'last minute flights' })];
-    vi.mocked(fetchDomainKeywords).mockResolvedValueOnce(buildDomainKeywords()).mockResolvedValueOnce(buildDomainKeywords({ items: fetched }));
-
-    expect((await pagedExportVia('Download'))?.rows).toStrictEqual(fetched);
-  });
-
-  it('asks the top pages export from the first row of the list', async () => {
-    await pagedExportVia('Download', ...PAGES_CLICKS);
-
-    expect(sentRequest(fetchDomainPages, 1)).toMatchObject({
-      sort: 'traffic',
-      offset: 0,
-      limit: 1,
+      filters: JSON.stringify(page?.filters),
+      rows: '120',
+      price_usd: String(exportPlan(120, LABS_EXPORT).priceUsd),
     });
   });
 
-  it('labels the ranked-keywords export "Export to Excel"', async () => {
+  it('queues the top pages export without a page', async () => {
+    const queued = await pagedExportVia('Start export', ...PAGES_CLICKS);
+
+    expect(queued?.params).not.toHaveProperty('page');
+  });
+
+  it('labels the ranked-keywords export "Export"', async () => {
     await analyzeDomain();
 
-    expect(screen.getByRole('button', { name: EXPORT_EXCEL_LABEL })).toHaveAttribute('title', 'Choose how many rows to export from DataForSEO');
+    expect(screen.getByRole('button', { name: PAID_EXPORT_LABEL })).toHaveAttribute('title', 'Choose how many rows to export from DataForSEO');
   });
 
   it('disables the ranked-keywords export when the page has no keyword', async () => {
@@ -394,7 +405,7 @@ describe('Export to Excel', () => {
 
     await submitDomain();
 
-    expect(await screen.findByRole('button', { name: EXPORT_EXCEL_LABEL })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: PAID_EXPORT_LABEL })).toBeDisabled();
   });
 
   it('disables the SERP competitors export when none was found', async () => {
@@ -402,6 +413,6 @@ describe('Export to Excel', () => {
 
     await analyzeAndClick(...COMPETITORS_CLICKS);
 
-    expect(await screen.findByTitle(COMPETITORS_EXPORT_TITLE)).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /^Export all$/ })).toBeDisabled();
   });
 });

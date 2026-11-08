@@ -36,16 +36,22 @@ precomputed; they are small and read live.
 
 from __future__ import annotations
 
-import gzip
-import hashlib
-import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Any
-
-from botocore.exceptions import ClientError
 
 from shared.citation_pages import EntryView, TopUrl, url_domain
 from shared.scope_params import ReportScope
+from shared.snapshot_store import (
+    ALL_SCOPE,
+    decode_json,
+    encode_json,
+    group_scope,
+    is_missing_object,
+    keyword_fingerprint,
+    market_scope,
+    named_scope_key,
+    scope_dir,
+)
 
 BUILD_ACTION = 'build_citation_rollup'
 """The GenerateSummary event ``action`` that builds the rollup."""
@@ -59,7 +65,6 @@ CHUNK_SIZE = 1000
 CHUNK_CONTENT_TYPES = ('all', 'video', 'page')
 
 TABLE_SCOPE = 'table'
-ALL_SCOPE = 'all'
 
 CompactEntry = list[Any]
 """One ``entries`` row: ``[url, citation_count, keyword_count, content_type, domain, by_provider, keyword_indices]``."""
@@ -73,35 +78,9 @@ COMPACT_VIEW: EntryView[CompactEntry] = EntryView(
 )
 
 
-def market_scope(market_id: str) -> str:
-    return f'market:{market_id}'
-
-
-def group_scope(group_id: str, market_id: str | None = None) -> str:
-    return f'group:{group_id}' if market_id is None else f'group:{group_id}|market:{market_id}'
-
-
 def scope_key(report_scope: ReportScope | None) -> str | None:
     """The rollup scope serving ``report_scope``, or ``None`` when it is not precomputed (one keyword, ids)."""
-    if report_scope is None:
-        return TABLE_SCOPE
-    if report_scope.kind == 'all':
-        return ALL_SCOPE if report_scope.market_id is None else market_scope(report_scope.market_id)
-    if report_scope.kind == 'group':
-        group_ids = report_scope.scope.get('group_ids') or []
-        return group_scope(str(group_ids[0]), report_scope.market_id) if len(group_ids) == 1 else None
-    return None
-
-
-def scope_dir(key: str) -> str:
-    """An S3-safe directory name for a scope key."""
-    return hashlib.sha256(key.encode('utf-8')).hexdigest()[:20]
-
-
-def keyword_fingerprint(keywords: Iterable[str]) -> str:
-    """A digest of a keyword set, independent of order and duplicates."""
-    digest = hashlib.sha256('\n'.join(sorted(set(keywords))).encode('utf-8'))
-    return digest.hexdigest()[:32]
+    return TABLE_SCOPE if report_scope is None else named_scope_key(report_scope)
 
 
 def build_prefix(build_id: str) -> str:
@@ -151,14 +130,31 @@ def expand_entry(row: CompactEntry, keywords: list[str], include_keywords: bool)
     return entry
 
 
-def is_missing_object(error: ClientError) -> bool:
-    """Whether an S3 ``ClientError`` says the object does not exist."""
-    return str(error.response.get('Error', {}).get('Code')) in ('NoSuchKey', '404', 'NotFound')
-
-
-def encode_json(value: Any) -> bytes:
-    return gzip.compress(json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode('utf-8'), compresslevel=5)
-
-
-def decode_json(body: bytes) -> Any:
-    return json.loads(gzip.decompress(body))
+__all__ = [
+    'ALL_SCOPE',
+    'BUILD_ACTION',
+    'CHUNK_CONTENT_TYPES',
+    'CHUNK_SIZE',
+    'COMPACT_VIEW',
+    'CURRENT_KEY',
+    'FORMAT_VERSION',
+    'REBUILD_MARKER_KEY',
+    'ROLLUP_PREFIX',
+    'TABLE_SCOPE',
+    'CompactEntry',
+    'build_prefix',
+    'chunk_count',
+    'chunk_key',
+    'compact_entries',
+    'decode_json',
+    'encode_json',
+    'entries_key',
+    'expand_entry',
+    'group_scope',
+    'is_missing_object',
+    'keyword_fingerprint',
+    'manifest_key',
+    'market_scope',
+    'scope_dir',
+    'scope_key',
+]

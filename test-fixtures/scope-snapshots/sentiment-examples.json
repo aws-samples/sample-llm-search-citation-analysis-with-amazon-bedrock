@@ -1,0 +1,389 @@
+{
+  "route": "GET /api/visibility/sentiment-examples",
+  "paging": {
+    "list": "examples",
+    "view": null,
+    "cursor": "keyword",
+    "token": "next_token",
+    "total": "total"
+  },
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "sentiment": "positive",
+        "provider": null,
+        "classification": "first_party",
+        "total": 41237,
+        "examples": [
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "claude",
+            "persona": "default",
+            "persona_name": null,
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 1,
+            "sentiment": "positive",
+            "quote": "Hotel Coruña Mar destaca por sus vistas a la bahía.",
+            "reason": "Praised for location and views.",
+            "ranking_context": "Listed first among seafront hotels.",
+            "answer": "1. Hotel Coruña Mar: frente al puerto, destaca por sus vistas a la bahía. 2. Meliá Galicia: ...",
+            "answer_truncated": false
+          },
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "openai",
+            "persona": "qp-family",
+            "persona_name": "Familia con niños",
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 2,
+            "sentiment": "positive",
+            "quote": "Habitaciones familiares amplias y desayuno excelente.",
+            "reason": "Recommended for families.",
+            "ranking_context": "Second after Meliá Galicia.",
+            "answer": "Para familias: 1. Meliá Galicia ... 2. Hotel Coruña Mar, habitaciones familiares amplias y desayuno excelente.",
+            "answer_truncated": false
+          }
+        ],
+        "next_token": "eyJmIjoia3dmcC01MDAwLTlkMWUwNGI3IiwiayI6MiwiciI6MjB9",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "keywords_truncated": false,
+        "sentiment": "positive",
+        "provider": null,
+        "classification": "first_party",
+        "total": 2,
+        "examples": [
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "claude",
+            "persona": "default",
+            "persona_name": null,
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 1,
+            "sentiment": "positive",
+            "quote": "Hotel Coruña Mar destaca por sus vistas a la bahía.",
+            "reason": "Praised for location and views.",
+            "ranking_context": "Listed first among seafront hotels.",
+            "answer": "1. Hotel Coruña Mar: frente al puerto, destaca por sus vistas a la bahía. 2. Meliá Galicia: ...",
+            "answer_truncated": false
+          },
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "openai",
+            "persona": "qp-family",
+            "persona_name": "Familia con niños",
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 2,
+            "sentiment": "positive",
+            "quote": "Habitaciones familiares amplias y desayuno excelente.",
+            "reason": "Recommended for families.",
+            "ranking_context": "Second after Meliá Galicia.",
+            "answer": "Para familias: 1. Meliá Galicia ... 2. Hotel Coruña Mar, habitaciones familiares amplias y desayuno excelente.",
+            "answer_truncated": false
+          }
+        ],
+        "next_token": null,
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "sentiment": "positive",
+        "provider": null,
+        "classification": "first_party",
+        "total": 41237,
+        "examples": [
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "claude",
+            "persona": "default",
+            "persona_name": null,
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 1,
+            "sentiment": "positive",
+            "quote": "Hotel Coruña Mar destaca por sus vistas a la bahía.",
+            "reason": "Praised for location and views.",
+            "ranking_context": "Listed first among seafront hotels.",
+            "answer": "1. Hotel Coruña Mar: frente al puerto, destaca por sus vistas a la bahía. 2. Meliá Galicia: ...",
+            "answer_truncated": false
+          },
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "openai",
+            "persona": "qp-family",
+            "persona_name": "Familia con niños",
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 2,
+            "sentiment": "positive",
+            "quote": "Habitaciones familiares amplias y desayuno excelente.",
+            "reason": "Recommended for families.",
+            "ranking_context": "Second after Meliá Galicia.",
+            "answer": "Para familias: 1. Meliá Galicia ... 2. Hotel Coruña Mar, habitaciones familiares amplias y desayuno excelente.",
+            "answer_truncated": false
+          }
+        ],
+        "next_token": "eyJmIjoia3dmcC01MDAwLTlkMWUwNGI3IiwiayI6MiwiciI6MjB9",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-sentiment-examples-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia",
+        "sentiment": "positive",
+        "classification": "first_party"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "keywords_truncated": true,
+        "sentiment": "positive",
+        "provider": null,
+        "classification": "first_party",
+        "total": 2,
+        "examples": [
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "claude",
+            "persona": "default",
+            "persona_name": null,
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 1,
+            "sentiment": "positive",
+            "quote": "Hotel Coruña Mar destaca por sus vistas a la bahía.",
+            "reason": "Praised for location and views.",
+            "ranking_context": "Listed first among seafront hotels.",
+            "answer": "1. Hotel Coruña Mar: frente al puerto, destaca por sus vistas a la bahía. 2. Meliá Galicia: ...",
+            "answer_truncated": false
+          },
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "openai",
+            "persona": "qp-family",
+            "persona_name": "Familia con niños",
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 2,
+            "sentiment": "positive",
+            "quote": "Habitaciones familiares amplias y desayuno excelente.",
+            "reason": "Recommended for families.",
+            "ranking_context": "Second after Meliá Galicia.",
+            "answer": "Para familias: 1. Meliá Galicia ... 2. Hotel Coruña Mar, habitaciones familiares amplias y desayuno excelente.",
+            "answer_truncated": false
+          }
+        ],
+        "next_token": null,
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "page": {
+      "description": "The second page of examples (keyword cursor); next_token is null on the last page.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party",
+        "next_token": "eyJmIjoia3dmcC01MDAwLTlkMWUwNGI3IiwiayI6MiwiciI6MjB9"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "sentiment": "positive",
+        "provider": null,
+        "classification": "first_party",
+        "total": 41237,
+        "examples": [
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "claude",
+            "persona": "default",
+            "persona_name": null,
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 1,
+            "sentiment": "positive",
+            "quote": "Hotel Coruña Mar destaca por sus vistas a la bahía.",
+            "reason": "Praised for location and views.",
+            "ranking_context": "Listed first among seafront hotels.",
+            "answer": "1. Hotel Coruña Mar: frente al puerto, destaca por sus vistas a la bahía. 2. Meliá Galicia: ...",
+            "answer_truncated": false
+          },
+          {
+            "keyword": "hotel en a coruña",
+            "provider": "openai",
+            "persona": "qp-family",
+            "persona_name": "Familia con niños",
+            "timestamp": "2026-10-12T06:00:00.000000Z",
+            "brand": "Hotel Coruña Mar",
+            "rank": 2,
+            "sentiment": "positive",
+            "quote": "Habitaciones familiares amplias y desayuno excelente.",
+            "reason": "Recommended for families.",
+            "ranking_context": "Second after Meliá Galicia.",
+            "answer": "Para familias: 1. Meliá Galicia ... 2. Hotel Coruña Mar, habitaciones familiares amplias y desayuno excelente.",
+            "answer_truncated": false
+          }
+        ],
+        "next_token": "eyJmIjoia3dmcC01MDAwLTlkMWUwNGI3IiwiayI6NSwiciI6MH0",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "cursor_expired": {
+      "description": "The token names a build that is gone (snapshot) or a keyword set that changed (keyword): restart the list without next_token.",
+      "query": {
+        "scope": "all",
+        "sentiment": "positive",
+        "classification": "first_party",
+        "next_token": "eyJmIjoia3dmcC01MDAwLTlkMWUwNGI3IiwiayI6MiwiciI6MjB9"
+      },
+      "status": 400,
+      "body": {
+        "error": "The list changed since this page was read; start again from the first page",
+        "code": "cursor_expired",
+        "field": "next_token"
+      }
+    }
+  }
+}

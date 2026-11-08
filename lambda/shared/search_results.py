@@ -22,14 +22,13 @@ from typing import Any
 
 from boto3.dynamodb.conditions import Key
 
-# One projected Scan page is enough to enumerate a small Keywords table; the cap
-# keeps a large table from turning the call into a full-table read.
-DEFAULT_KEYWORD_SCAN_LIMIT = 500
-
-# Rows read per keyword to isolate its latest run. One run writes one row per
-# provider x persona (9 providers x a handful of personas today), so 50
-# comfortably covers a full run while keeping the read small.
+# Rows a page of ``query_latest_run`` reads. One run writes one row per
+# provider x persona; a page this size holds most runs whole, and the read
+# carries on page after page until it reaches an older run (2.45.0: a run
+# of 9 providers x 10 personas is 90 rows, more than one page).
 LATEST_RUN_ITEM_LIMIT = 50
+#: Pages ``query_latest_run`` reads at most (a run is far smaller: providers x ``MAX_QUERY_PROMPTS_PER_RUN``).
+LATEST_RUN_MAX_PAGES = 40
 
 # What ``query_latest_run`` reads of each row: never the answer text.
 LATEST_RUN_PROJECTION = '#ts, provider, citations, brands'
@@ -39,17 +38,6 @@ def search_results_table_name() -> str:
     """The SearchResults table, from the required ``DYNAMODB_TABLE_SEARCH_RESULTS`` variable."""
     return os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 
-
-def scan_keyword_texts(table: Any, limit: int = DEFAULT_KEYWORD_SCAN_LIMIT) -> list[str]:
-    """The ``keyword`` of up to ``limit`` rows of ``table``, read as one projected Scan page.
-
-    Lists the partitions a report fans out over: normally the Keywords table,
-    or SearchResults itself where a handler falls back to it. Rows without a
-    keyword are skipped.
-    """
-    response = table.scan(ProjectionExpression='keyword', Limit=limit)
-    items: list[dict[str, Any]] = response.get('Items', [])
-    return [item['keyword'] for item in items if item.get('keyword')]
 
 
 def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -63,16 +51,28 @@ def latest_run(items: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
 
 
 def query_latest_run(table: Any, keyword: str) -> tuple[str, list[dict[str, Any]]]:
-    """``latest_run`` of ``keyword``'s newest ``LATEST_RUN_ITEM_LIMIT`` rows, read as one projected page.
+    """``latest_run`` of ``keyword``: every row of its newest run, read newest first in pages of ``LATEST_RUN_ITEM_LIMIT``.
 
-    The projection (``LATEST_RUN_PROJECTION``) never includes the answer text.
-    A keyword without rows gives ``('', [])``.
+    Pages are read until one reaches an older run (or the partition ends),
+    so a run longer than a page is read whole. The projection
+    (``LATEST_RUN_PROJECTION``) never includes the answer text. A keyword
+    without rows gives ``('', [])``.
     """
-    response = table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword),
-        ScanIndexForward=False,
-        Limit=LATEST_RUN_ITEM_LIMIT,
-        ProjectionExpression=LATEST_RUN_PROJECTION,
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
-    return latest_run(response.get('Items', []))
+    query: dict[str, Any] = {
+        'KeyConditionExpression': Key('keyword').eq(keyword),
+        'ScanIndexForward': False,
+        'Limit': LATEST_RUN_ITEM_LIMIT,
+        'ProjectionExpression': LATEST_RUN_PROJECTION,
+        'ExpressionAttributeNames': {'#ts': 'timestamp'},
+    }
+    items: list[dict[str, Any]] = []
+    for _ in range(LATEST_RUN_MAX_PAGES):
+        response = table.query(**query)
+        page = response.get('Items', [])
+        items.extend(page)
+        newest = items[0].get('timestamp') if items else None
+        start_key = response.get('LastEvaluatedKey')
+        if not start_key or any(item.get('timestamp') != newest for item in page):
+            break
+        query['ExclusiveStartKey'] = start_key
+    return latest_run(items)

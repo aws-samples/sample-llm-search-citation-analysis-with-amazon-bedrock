@@ -498,3 +498,15 @@ class TestAgentHistory:
 
         assert response['statusCode'] == 200
         assert table.query.call_args.kwargs['KeyConditionExpression']._values[1] == 'agent'
+
+
+def test_templates_list_every_saved_template_past_the_first_scan_page():
+    table = research_table_stub()
+    table.scan.side_effect = [
+        {'Items': [{'id': 's1', 'name': 'Beta', 'system_prompt': 'x'}], 'LastEvaluatedKey': {'id': 's1'}},
+        {'Items': [{'id': 's2', 'name': 'Alpha', 'system_prompt': 'y'}]},
+    ]
+
+    items = _body(_call_templates(table, 'GET'))['items']
+
+    assert [item['id'] for item in items if not item['builtin']] == ['s2', 's1']

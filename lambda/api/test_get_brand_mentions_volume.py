@@ -8,8 +8,9 @@ the group answer carried every appearance twice (``brands`` plus
 at 49 MB for this data set (a 60-keyword group: 15 MB); now about 0.6 MB
 whatever the group size. A single keyword with eighteen 60,000-character Spanish
 answers (9 engines x 2 personas) was 2.1 MB (grows with answer length); the
-answer text is now cut at 12,000 characters (0.74 MB). A scope answer reads
-the group's first ``SCOPE_KEYWORDS_CAP`` keywords (``keywords_truncated``).
+answer text is now cut at 12,000 characters (0.74 MB). The group (200 x 18 =
+3,600 latest-run rows) is within ``scope_source.LIVE_ROWS_BUDGET``, so a scope
+answer reads every keyword (no keyword cap since 2.45.0).
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords, volume_rows
 from testing.paging import follow_next_token
 from testing.report_scope_fixtures import load_scoped_handler, scoped_report
@@ -30,8 +30,8 @@ from testing.response_size import assert_within_page_budget
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GROUP_KEYWORDS = 200
-#: The keywords of the group a scope answer reads: the first SCOPE_KEYWORDS_CAP.
-_READ_KEYWORDS = SCOPE_KEYWORDS_CAP
+#: The keywords of the group a scope answer reads: all of them (live, within the rows budget).
+_READ_KEYWORDS = _GROUP_KEYWORDS
 _PAGE_KEYWORDS = 3
 
 
@@ -70,12 +70,12 @@ def test_summary_reports_every_brand_when_the_brand_list_is_capped(brand_mention
     )
 
 
-def test_summary_reads_the_first_scope_keywords_of_a_large_group(brand_mentions, group_rows):
+def test_summary_reads_every_keyword_of_a_large_live_group(brand_mentions, group_rows):
     with _report(brand_mentions, group_rows, _GROUP_KEYWORDS) as report:
         body = report.body({'group_id': VOLUME_GROUP_ID})
 
     assert (body['keywords_analyzed'], body['keywords_truncated'], body['scope']['keyword_count']) == (
-        _READ_KEYWORDS, True, _GROUP_KEYWORDS,
+        _READ_KEYWORDS, False, _GROUP_KEYWORDS,
     )
 
 

@@ -12,7 +12,12 @@ import type {
   CrawledContent, SEOAnalysis
 } from '../../types';
 
-vi.mock('../../api/dashboard', () => ({ fetchCrawlHistory: vi.fn(() => Promise.resolve([])) }));
+vi.mock('../../api/dashboard', () => ({
+  fetchCrawlHistory: vi.fn(() => Promise.resolve({
+    items: [],
+    nextToken: null,
+  })),
+}));
 
 describe('CitationDetailModal overview', () => {
   it('shows the load time, content size, citations and provider count', () => {

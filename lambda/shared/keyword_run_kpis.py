@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,7 +46,7 @@ from shared.answer_queries import query_keyword_run_rows
 from shared.brand_names import COMPETITOR, FIRST_PARTY
 from shared.emf_metrics import emit_count
 from shared.env_vars import resolve_table_env
-from shared.kpi_engine import OTHER, answers_from_rows, owned_domains_from
+from shared.kpi_engine import OTHER, Answer, answers_from_rows, owned_domains_from
 from shared.kpi_tally import COUNT_FIELDS, BrandTally, RunTally, run_tally
 from shared.request_deadline import Deadline
 from shared.utils import get_timestamp
@@ -89,18 +89,23 @@ def tracked_brand_names(brand_config: Mapping[str, Any]) -> list[str]:
 # Rows
 # ---------------------------------------------------------------------------
 
-def tally_item(tally: RunTally, built_at: str | None = None) -> dict[str, Any]:
-    """The table row of ``tally``."""
-    engines = {provider: [list(counts), list(tally.models.get(provider, ()))] for provider, counts in tally.engines.items()}
+def encode_brands(tally: RunTally) -> str:
+    """The ``brands`` attribute of ``tally``: its brands in the compact layout above, as JSON."""
     providers = list(tally.engines)
     brands = {
         'p': providers,
         'b': [
             [brand.key, brand.name, _CLASSES.index(brand.classification), *brand[3:8], list(brand.split),
-             sum(1 << providers.index(engine) for engine in brand.engines)]
+             sum(1 << providers.index(engine) for engine in brand.engines if engine in providers)]
             for brand in tally.brands
         ],
     }
+    return json.dumps(brands, ensure_ascii=False, separators=(',', ':'))
+
+
+def tally_item(tally: RunTally, built_at: str | None = None) -> dict[str, Any]:
+    """The table row of ``tally``."""
+    engines = {provider: [list(counts), list(tally.models.get(provider, ()))] for provider, counts in tally.engines.items()}
     return {
         'keyword': tally.keyword,
         'run_timestamp': tally.timestamp,
@@ -108,17 +113,17 @@ def tally_item(tally: RunTally, built_at: str | None = None) -> dict[str, Any]:
         'answers': tally.answers,
         'owned': tally.owned,
         'engines': json.dumps(engines, separators=(',', ':')),
-        'brands': json.dumps(brands, ensure_ascii=False, separators=(',', ':')),
+        'brands': encode_brands(tally),
         'brands_total': tally.brands_total,
         'built_at': built_at or get_timestamp(),
     }
 
 
-def _brands(encoded: Mapping[str, Any]) -> tuple[BrandTally, ...]:
-    """The brands of a row's ``brands`` attribute.
+def decode_brands(encoded: Mapping[str, Any]) -> tuple[BrandTally, ...]:
+    """The brands of a decoded ``brands`` attribute (``encode_brands``).
 
-    The row is ours (``tally_item``), so its JSON already holds the types and
-    only the shape is checked: a year's window decodes millions of brands.
+    The row is ours, so its JSON already holds the types and only the shape is
+    checked: a year's window decodes millions of brands.
     """
     providers: list[str] = encoded['p']
     combos: dict[int, tuple[str, ...]] = {}
@@ -147,7 +152,7 @@ def tally_from_item(item: Mapping[str, Any]) -> RunTally | None:
         return None
     try:
         engines = json.loads(str(item.get('engines') or '{}'))
-        brands = _brands(json.loads(str(item['brands']))) if 'brands' in item else ()
+        brands = decode_brands(json.loads(str(item['brands']))) if 'brands' in item else ()
         counts = {str(provider): _counts(entry[0]) for provider, entry in engines.items()}
         return RunTally(
             keyword=str(item['keyword']),
@@ -167,13 +172,26 @@ def tally_from_item(item: Mapping[str, Any]) -> RunTally | None:
 # Writing
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class RunTallies:
+    """One keyword run counted twice: ``capped`` is the KeywordRunKpis row, ``full`` keeps every brand (KeywordRunBrands, KeywordLatest)."""
+
+    capped: RunTally
+    full: RunTally
+
+
+def run_tally_pair(keyword: str, timestamp: str, answers: Sequence[Answer], brand_config: Mapping[str, Any]) -> RunTallies:
+    """``answers`` (one keyword, one run) tallied with ``BRANDS_PER_RUN`` brands and with every brand."""
+    owned = owned_domains_from(brand_config)
+    capped = run_tally(keyword, timestamp, answers, owned, brand_cap=BRANDS_PER_RUN, tracked_brands=tracked_brand_names(brand_config))
+    full = capped if capped.brands_total <= BRANDS_PER_RUN else run_tally(keyword, timestamp, answers, owned)
+    return RunTallies(capped, full)
+
+
 def build_run_tally(search_table: Any, keyword: str, timestamp: str, brand_config: Mapping[str, Any]) -> RunTally:
     """The tally of ``keyword``'s run ``timestamp``, read from every SearchResults row of the run."""
     answers = answers_from_rows(query_keyword_run_rows(search_table, keyword, timestamp))
-    return run_tally(
-        keyword, timestamp, answers, owned_domains_from(brand_config),
-        brand_cap=BRANDS_PER_RUN, tracked_brands=tracked_brand_names(brand_config),
-    )
+    return run_tally_pair(keyword, timestamp, answers, brand_config).capped
 
 
 def put_run_tally(table: Any, tally: RunTally) -> None:
@@ -206,11 +224,12 @@ def _window_condition(keyword: str, since: str, until: str | None) -> Any:
 
 
 def query_stored_runs(
-    table: Any, keyword: str, since: str, *, until: str | None = None, brands: bool = True, deadline: Deadline,
+    table: Any, keyword: str, since: str, *, until: str | None = None, brands: bool = True, limit: int | None = None, deadline: Deadline,
 ) -> StoredRuns:
     """``keyword``'s rollup rows from ``since`` through the run ``until``, newest first, checking ``deadline`` between pages.
 
     ``brands`` False leaves the brand counts unread (views that list no brand).
+    ``limit`` keeps only the newest ``limit`` rows and stops reading there.
     When the deadline stops the read, the oldest row read becomes ``cut`` and
     is dropped too, as a raw window read drops its possibly partial oldest run.
     """
@@ -222,10 +241,12 @@ def query_stored_runs(
     }
     items: list[Mapping[str, Any]] = []
     while True:
+        if limit is not None:
+            params['Limit'] = limit - len(items)
         response = table.query(**params)
         items.extend(response.get('Items') or [])
         last_key = response.get('LastEvaluatedKey')
-        if not last_key:
+        if not last_key or (limit is not None and len(items) >= limit):
             return StoredRuns([tally for tally in map(tally_from_item, reversed(items)) if tally is not None])
         if deadline.stop_reading('a keyword rollup read'):
             cut = str(items[-1]['run_timestamp'])
@@ -255,13 +276,17 @@ def stored_timestamps(table: Any, keyword: str) -> dict[str, str]:
 __all__ = [
     'BRANDS_PER_RUN',
     'FORMAT_VERSION',
+    'RunTallies',
     'StoredRuns',
     'build_run_tally',
+    'decode_brands',
     'emit_write_failure_metric',
+    'encode_brands',
     'keyword_run_kpis_table',
     'keyword_run_kpis_table_name',
     'put_run_tally',
     'query_stored_runs',
+    'run_tally_pair',
     'stored_timestamps',
     'tally_from_item',
     'tally_item',

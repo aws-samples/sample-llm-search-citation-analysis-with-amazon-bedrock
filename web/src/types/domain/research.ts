@@ -120,7 +120,6 @@ export interface ResearchStep {
   status: ResearchStepStatus;
   keyword_count: number;
   error_message?: string | null;
-  finished_at?: string | null;
   /** Research agent: the round the step belongs to. */
   round?: number;
   /** Research agent: the planned search query this step ran. */
@@ -230,7 +229,6 @@ export interface KeywordResearchItem {
   steps_done?: number;
   steps_failed?: number;
   updated_at?: string;
-  finished_at?: string;
   /** Research agent fields (absent on expansion / competitor jobs). */
   config?: AgentConfig;
   round?: number;

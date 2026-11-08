@@ -31,6 +31,8 @@ const fetchHistoricalTrends = vi.fn();
 function mockVisibilitySlice(slice: ReportSlice<VisibilityResponse>) {
   vi.mocked(useVisibilityMetrics).mockReturnValue({
     ...slice,
+    computing: null,
+    request: null,
     fetchVisibilityMetrics,
   });
 }
@@ -38,6 +40,8 @@ function mockVisibilitySlice(slice: ReportSlice<VisibilityResponse>) {
 function mockTrendSlice(slice: ReportSlice<HistoricalTrendsResponse>) {
   vi.mocked(useHistoricalTrends).mockReturnValue({
     ...slice,
+    computing: null,
+    request: null,
     fetchHistoricalTrends,
   });
 }

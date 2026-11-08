@@ -6,7 +6,6 @@ import type {
   DomainTargetRequest,
   RankedKeywordRow,
 } from '../../../types/api/seoDomains';
-import { fetchDomainKeywords } from '../../../api/seoDomains';
 import {
   Chip, CompactNumber, PositionBadge, ScoreChip, UrlCell
 } from '../../ui/tableCells';
@@ -23,7 +22,6 @@ import {
 import {
   firstQuery, pagedRequest
 } from './domainPagedQuery';
-import { KEYWORD_EXCEL_COLUMNS } from './domainExcel';
 
 const FIRST_QUERY = firstQuery<DomainKeywordSort>('traffic');
 
@@ -102,12 +100,9 @@ export function DomainKeywordsPanel(props: DomainListProps<DomainKeywordsRequest
   return (
     <DomainPagedPanel {...props} spec={SPEC} initialQuery={FIRST_QUERY} columns={COLUMNS}
       rowKey={(row) => `${row.keyword}|${row.url ?? ''}`}
-      excel={{
-        columns: KEYWORD_EXCEL_COLUMNS,
-        sheetName: 'Ranked keywords',
-        filePrefix: 'domain-keywords',
+      exported={{
+        table: 'keywords',
         tableName: 'ranked keywords',
-        fetchRows: fetchDomainKeywords,
       }} />
   );
 }

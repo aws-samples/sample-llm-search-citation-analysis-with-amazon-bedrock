@@ -11,10 +11,12 @@ import {
   screen, waitFor
 } from '@testing-library/react';
 import {
-  buildKeywordRow, buildOrganicItem, buildResearchResponse, buildSerpResponse
+  buildOrganicItem, buildResearchResponse, buildSerpResponse
 } from '../../../api/seo-fixtures';
 import { useMarketKeywords } from '../../../hooks/useSeoSettings';
-import { exportKeywordRowsExcel } from './keywordExplorerExcel';
+import {
+  chooseExportFormat, mockStartExport
+} from '../../../test/exportsApiMock';
 import {
   BRAZIL_MARKET_ID, buildMarketKeywordsRead, buildPromotionOutcome, openSerpFor, renderExplorer, searchAndWaitForRows,
   searchFor, trackKeyword
@@ -29,7 +31,7 @@ vi.mock('../../../api/seo', () => ({
   seoErrorMessage: (failure: unknown) => (failure instanceof Error ? failure.message : 'failed'),
 }));
 vi.mock('../../../api/keywords', () => ({ promoteKeywords: vi.fn() }));
-vi.mock('./keywordExplorerExcel', () => ({ exportKeywordRowsExcel: vi.fn() }));
+vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../api/keywordGroups', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../../api/keywordGroups')>(),
   fetchKeywordGroups: vi.fn(),
@@ -120,33 +122,63 @@ describe('KeywordExplorer search', () => {
   });
 });
 
-describe('KeywordExplorer Excel export', () => {
-  it('offers Export to Excel beside the filters and no CSV export', async () => {
+describe('KeywordExplorer export', () => {
+  it('offers Export all beside the filters and no CSV-only export', async () => {
     renderExplorer();
     await searchAndWaitForRows('boutique hotel');
 
     expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeEnabled();
   });
 
-  it('exports the keywords shown, in their sorted order, for the searched seed', async () => {
-    vi.mocked(researchKeywords).mockResolvedValue(buildResearchResponse({
-      rows: [buildKeywordRow({
-        keyword: 'boutique hotel lisbon',
-        search_volume: 50 
-      }), buildKeywordRow()],
-    }));
+  it('exports the researched seed with the default sort from the server cache', async () => {
+    renderExplorer();
+    await searchAndWaitForRows('boutique hotel');
+
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport.mock.lastCall?.[0].params).toStrictEqual({
+      clickstream: 'false',
+      count: '150',
+      direction: 'desc',
+      group_keywords: 'false',
+      keyword: 'boutique hotel',
+      market_id: BRAZIL_MARKET_ID,
+      mode: 'auto',
+      sort: 'search_volume',
+    });
+  });
+
+  it('exports with the filters the table applies', async () => {
     renderExplorer();
     const user = await searchAndWaitForRows('boutique hotel');
-    await user.click(screen.getByRole('button', { name: 'Export to Excel' }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    await user.type(screen.getByLabelText('Min volume'), '100');
+    await user.type(screen.getByLabelText('Include terms'), 'hotel');
 
-    expect(exportKeywordRowsExcel).toHaveBeenCalledWith(
-      [buildKeywordRow(), buildKeywordRow({
-        keyword: 'boutique hotel lisbon',
-        search_volume: 50,
-      })],
-      'boutique hotel',
-    );
+    await chooseExportFormat('csv');
+
+    expect(mockStartExport.mock.lastCall?.[0].params).toStrictEqual({
+      clickstream: 'false',
+      count: '150',
+      direction: 'desc',
+      group_keywords: 'false',
+      include: 'hotel',
+      keyword: 'boutique hotel',
+      market_id: BRAZIL_MARKET_ID,
+      min_volume: '100',
+      mode: 'auto',
+      sort: 'search_volume',
+    });
+  });
+
+  it('disables the export when the filters keep no keyword', async () => {
+    renderExplorer();
+    const user = await searchAndWaitForRows('boutique hotel');
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    await user.type(screen.getByLabelText('Include terms'), 'no such term');
+
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeDisabled();
   });
 });
 

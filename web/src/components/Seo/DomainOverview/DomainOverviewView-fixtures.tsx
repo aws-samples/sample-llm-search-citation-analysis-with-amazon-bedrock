@@ -8,7 +8,8 @@ import userEvent from '@testing-library/user-event';
 import {
   expect, vi
 } from 'vitest';
-import { EXPORT_EXCEL_LABEL } from '../../ui/ExportExcelButton';
+import { PAID_EXPORT_LABEL } from '../../ui/PaidExportButton';
+import { mockStartExport } from '../../../test/exportsApiMock';
 import {
   fetchDomainKeywords, fetchDomainOverview, fetchDomainPages, fetchDomainSnapshots, fetchSerpCompetitors, takeDomainSnapshot
 } from '../../../api/seoDomains';
@@ -22,9 +23,6 @@ import {
 import { MemoryRouter } from 'react-router-dom';
 import { DomainOverviewView } from './DomainOverviewView';
 import { mockBrandSettings } from '../settingsDomains-fixtures';
-import {
-  exportTableToExcel, type ExcelTableColumn, type TableExport
-} from '../../../exporters/tableExcel';
 
 export const SWISS_MARKET_ID = 'ch-de';
 
@@ -89,39 +87,22 @@ export function sentRequest<TRequest>(lookup: (request: TRequest) => Promise<unk
   return vi.mocked(lookup).mock.calls[call]?.[0];
 }
 
-/** Analyzes example.com, clicks `clicks`, then the export titled `title`; returns what the (mocked) exporter got. */
-export async function exportedTable(title: string, ...clicks: readonly DomainClick[]) {
-  const user = await analyzeAndClick(...clicks);
-  await user.click(await screen.findByTitle(title));
-  return vi.mocked(exportTableToExcel).mock.lastCall?.[0];
-}
-
-/** Analyzes example.com, clicks `clicks`, then the visible paged list's "Export to Excel": the export dialog is open. */
+/** Analyzes example.com, clicks `clicks`, then the visible paged list's "Export": the export dialog is open. */
 export async function openPagedExport(...clicks: readonly DomainClick[]) {
   const user = await analyzeAndClick(...clicks);
-  await user.click(await screen.findByRole('button', { name: EXPORT_EXCEL_LABEL }));
+  await user.click(await screen.findByRole('button', { name: PAID_EXPORT_LABEL }));
   return user;
 }
 
-/** Opens the paged export after `clicks`, then presses `button` in the dialog; returns what the (mocked) exporter got. */
+/**
+ * Opens the paged export after `clicks`, then presses `button` in the dialog; returns the server export it queued
+ * (specs mock `api/exports` with `test/exportsApiMock`).
+ */
 export async function pagedExportVia(button: string, ...clicks: readonly DomainClick[]) {
   const user = await openPagedExport(...clicks);
   await user.click(screen.getByRole('button', { name: button }));
   await waitFor(() => {
-    expect(vi.mocked(exportTableToExcel).mock.calls).toHaveLength(1);
+    expect(mockStartExport.mock.calls).toHaveLength(1);
   });
-  return vi.mocked(exportTableToExcel).mock.lastCall?.[0];
-}
-
-/** The export of `rows` of example.com under `columns`. */
-export function buildExampleExport<TRow>(
-  columns: ReadonlyArray<ExcelTableColumn<TRow>>, rows: readonly TRow[], sheetName: string, filePrefix: string
-): TableExport<TRow> {
-  return {
-    columns,
-    rows,
-    sheetName,
-    filePrefix,
-    scopeLabel: 'example.com',
-  };
+  return mockStartExport.mock.lastCall?.[0];
 }

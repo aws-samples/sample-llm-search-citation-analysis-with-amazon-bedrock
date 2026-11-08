@@ -170,7 +170,7 @@ const seoElementRows = (seoElements: StoredSeoElements): SeoElementRowProps[] =>
     textRow('Meta Keywords', seoElements.meta_keywords),
     tagsRow('H1 Tags', seoElements.h1_tags),
     tagsRow('H2 Tags', seoElements.h2_tags),
-    tagsRow('H3 Tags', seoElements.h3_tags?.slice(0, 5)),
+    tagsRow('H3 Tags', seoElements.h3_tags),
     textRow('OG Title', seoElements.og_title),
     textRow('OG Description', seoElements.og_description),
     textRow('Canonical URL', seoElements.canonical, true),

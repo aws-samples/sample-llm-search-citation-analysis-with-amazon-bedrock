@@ -23,6 +23,14 @@ invoke would run a write or spend route twice. A router that does not answer
 in time is the ``upstream_timeout`` tool error, which says a write may still
 complete, instead of API Gateway's 504 with no audit line.
 
+View jobs (2.45.0): a scoped read no snapshot holds answers ``202
+{status: 'computing', job, retry_after_ms}`` while a view job computes it,
+and the same call answers 200 once the result is stored. That is no error:
+the tool result says the figures are being computed and to call again in
+``retry_after_seconds`` (``isError`` false). A job that failed answers 200
+``{status: 'failed', message}`` once; that is a tool error, and calling again
+starts the job anew.
+
 Every call emits exactly one structured audit line
 ``{caller_sub, tool, operation, outcome, ms}`` (plus ``reason`` when the call
 was refused); tokens and bodies are never logged. Calls of write and spend
@@ -60,7 +68,9 @@ _PREVIEW_MARGIN = 100
 _CURSOR_KEY = 'next_token'
 #: What a cut page of a paginated answer tells the model (its ``next_token`` skips the items cut).
 CUT_PAGE_NOTE = 'Items of this page were cut to fit; ask again with a smaller limit before following next_token.'
-_ERROR_FIELDS = ('error', 'details', 'field')
+_ERROR_FIELDS = ('error', 'details', 'field', 'code')
+#: What a ``400 cursor_expired`` answer tells the model (2.45.0: the snapshot build behind the cursor is gone).
+CURSOR_EXPIRED_NOTE = 'The list changed since this cursor was issued; call again without next_token to restart it.'
 
 #: Seconds of the request kept after a router answers: shaping the result, the audit line, the response.
 ROUTER_RESERVE_SECONDS = 1.0
@@ -320,6 +330,8 @@ def error_result(operation: str, status: int, body: Any) -> JsonObject:
     text = f'{operation} failed ({status}): {details.get("error") or "request failed"}'
     if 'details' in details:
         text = f'{text} - {details["details"]}'
+    if details.get('code') == 'cursor_expired':
+        text = f'{text} - {CURSOR_EXPIRED_NOTE}'
     return tool_result(text, {'status': status, **details}, is_error=True)
 
 
@@ -393,10 +405,56 @@ def timeout_result(operation: Tool) -> JsonObject:
     )
 
 
+def is_computing_body(status: int, body: Any) -> bool:
+    """A ``202`` view-job answer: ``{status: 'computing', job: {id, started_at}, retry_after_ms}``."""
+    if status != 202 or not isinstance(body, dict) or body.get('status') != 'computing':
+        return False
+    job, wait = body.get('job'), body.get('retry_after_ms')
+    return isinstance(job, dict) and isinstance(job.get('id'), str) and isinstance(wait, int) and not isinstance(wait, bool) and wait > 0
+
+
+def is_failed_job_body(body: Any) -> bool:
+    """A ``200`` answer of a view job that failed: ``{status: 'failed', message}``."""
+    return isinstance(body, dict) and body.get('status') == 'failed' and isinstance(body.get('message'), str)
+
+
+def computing_result(operation: Tool, body: JsonObject) -> JsonObject:
+    """A view job is computing the answer: not an error, call the same tool again in ``retry_after_seconds``."""
+    seconds = max(1, math.ceil(body['retry_after_ms'] / 1000))
+    structured: JsonObject = {
+        'status': 'computing',
+        'job': body['job'],
+        'retry_after_ms': body['retry_after_ms'],
+        'retry_after_seconds': seconds,
+    }
+    text = (
+        f'{operation.name}: computing the complete figures for this scope; '
+        f'call again with the same arguments in {seconds} s.'
+    )
+    return tool_result(text, structured)
+
+
+def failed_job_result(operation: Tool, body: JsonObject) -> JsonObject:
+    """The view job behind the answer failed: a tool error; calling again starts a new job."""
+    message = body['message']
+    return tool_result(
+        f'{operation.name}: the view job failed ({message}); call again to start it anew.',
+        {'status': 'failed', 'error': 'view_job_failed', 'details': message},
+        is_error=True,
+    )
+
+
 def answer_result(operation: Tool, status: int, body: Any, arguments: JsonObject) -> JsonObject:
-    """The tool result of the handler's answer: shaped data on a 2xx, its refusal otherwise."""
+    """The tool result of the handler's answer: shaped data on a 2xx, its refusal otherwise.
+
+    A ``202`` computing answer and a failed view job are reported as such, before any shaping.
+    """
+    if is_computing_body(status, body):
+        return computing_result(operation, body)
     if not 200 <= status < 300:
         return error_result(operation.name, status, body)
+    if is_failed_job_body(body):
+        return failed_job_result(operation, body)
     try:
         return success_result(operation, body, arguments)
     except NotFound as missing:

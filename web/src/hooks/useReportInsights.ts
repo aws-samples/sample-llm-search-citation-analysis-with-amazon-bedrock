@@ -35,7 +35,7 @@ const reportInsightsEndpoint = {
  */
 export function useReportInsights(scope: ReportScope, days: number) {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(reportInsightsEndpoint);
   // The scope object is rebuilt by callers on every render; key the request on
   // its encoded form so a same-value scope does not refetch.
@@ -52,6 +52,8 @@ export function useReportInsights(scope: ReportScope, days: number) {
   }, [refetch]);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

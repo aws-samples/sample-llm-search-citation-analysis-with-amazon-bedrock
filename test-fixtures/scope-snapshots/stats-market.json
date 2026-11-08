@@ -1,0 +1,113 @@
+{
+  "route": "GET /api/stats?market_id",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "market_id": "es-00"
+      },
+      "status": 200,
+      "body": {
+        "total_searches": 96,
+        "total_citations": 412,
+        "total_crawled": 187,
+        "unique_keywords": 12,
+        "counts_approximate": false,
+        "last_execution": "2026-09-18T09:14:22.512304Z",
+        "timestamp": "2026-09-18T10:02:41.118902Z",
+        "market_id": "es",
+        "last_execution_approximate": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "market_id": "es-00"
+      },
+      "status": 200,
+      "body": {
+        "total_searches": 96,
+        "total_citations": 412,
+        "total_crawled": 187,
+        "unique_keywords": 12,
+        "counts_approximate": false,
+        "last_execution": "2026-09-18T09:14:22.512304Z",
+        "timestamp": "2026-09-18T10:02:41.118902Z",
+        "market_id": "es",
+        "last_execution_approximate": false,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "market_id": "es-00"
+      },
+      "status": 200,
+      "body": {
+        "total_searches": 96,
+        "total_citations": 412,
+        "total_crawled": 187,
+        "unique_keywords": 12,
+        "counts_approximate": false,
+        "last_execution": "2026-09-18T09:14:22.512304Z",
+        "timestamp": "2026-09-18T10:02:41.118902Z",
+        "market_id": "es",
+        "last_execution_approximate": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "market_id": "es-00"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-stats-market-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "market_id": "es-00"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    }
+  }
+}

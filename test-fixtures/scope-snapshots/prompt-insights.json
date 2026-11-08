@@ -1,0 +1,293 @@
+{
+  "route": "GET /api/prompt-insights",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "total_prompts_analyzed": 2,
+        "winning_prompts": [
+          {
+            "keyword": "hotel en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 75.0,
+              "providers": [
+                "openai",
+                "gemini",
+                "claude"
+              ]
+            },
+            "competitors": {
+              "mentions": 5,
+              "best_rank": 2,
+              "provider_coverage": 100.0,
+              "providers": [
+                "openai",
+                "perplexity",
+                "gemini",
+                "claude"
+              ]
+            },
+            "total_providers": 4,
+            "status": "winning",
+            "score": 73.5
+          }
+        ],
+        "winning_prompts_total": 1,
+        "winning_prompts_next_token": null,
+        "losing_prompts": [],
+        "losing_prompts_total": 0,
+        "losing_prompts_next_token": null,
+        "opportunity_prompts": [
+          {
+            "keyword": "hotel boutique en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 0,
+              "best_rank": null,
+              "provider_coverage": 0.0,
+              "providers": []
+            },
+            "competitors": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 50.0,
+              "providers": [
+                "openai",
+                "perplexity"
+              ]
+            },
+            "total_providers": 4,
+            "status": "opportunity",
+            "opportunity_score": 40.0
+          }
+        ],
+        "opportunity_prompts_total": 1,
+        "opportunity_prompts_next_token": null,
+        "summary": {
+          "winning_count": 1,
+          "losing_count": 0,
+          "opportunity_count": 1,
+          "win_rate": 50.0
+        },
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna"
+      },
+      "status": 200,
+      "body": {
+        "total_prompts_analyzed": 2,
+        "winning_prompts": [
+          {
+            "keyword": "hotel en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 75.0,
+              "providers": [
+                "openai",
+                "gemini",
+                "claude"
+              ]
+            },
+            "competitors": {
+              "mentions": 5,
+              "best_rank": 2,
+              "provider_coverage": 100.0,
+              "providers": [
+                "openai",
+                "perplexity",
+                "gemini",
+                "claude"
+              ]
+            },
+            "total_providers": 4,
+            "status": "winning",
+            "score": 73.5
+          }
+        ],
+        "winning_prompts_total": 1,
+        "winning_prompts_next_token": null,
+        "losing_prompts": [],
+        "losing_prompts_total": 0,
+        "losing_prompts_next_token": null,
+        "opportunity_prompts": [
+          {
+            "keyword": "hotel boutique en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 0,
+              "best_rank": null,
+              "provider_coverage": 0.0,
+              "providers": []
+            },
+            "competitors": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 50.0,
+              "providers": [
+                "openai",
+                "perplexity"
+              ]
+            },
+            "total_providers": 4,
+            "status": "opportunity",
+            "opportunity_score": 40.0
+          }
+        ],
+        "opportunity_prompts_total": 1,
+        "opportunity_prompts_next_token": null,
+        "summary": {
+          "winning_count": 1,
+          "losing_count": 0,
+          "opportunity_count": 1,
+          "win_rate": 50.0
+        },
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "total_prompts_analyzed": 2,
+        "winning_prompts": [
+          {
+            "keyword": "hotel en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 75.0,
+              "providers": [
+                "openai",
+                "gemini",
+                "claude"
+              ]
+            },
+            "competitors": {
+              "mentions": 5,
+              "best_rank": 2,
+              "provider_coverage": 100.0,
+              "providers": [
+                "openai",
+                "perplexity",
+                "gemini",
+                "claude"
+              ]
+            },
+            "total_providers": 4,
+            "status": "winning",
+            "score": 73.5
+          }
+        ],
+        "winning_prompts_total": 1,
+        "winning_prompts_next_token": null,
+        "losing_prompts": [],
+        "losing_prompts_total": 0,
+        "losing_prompts_next_token": null,
+        "opportunity_prompts": [
+          {
+            "keyword": "hotel boutique en a coruña",
+            "timestamp": "2026-09-18T09:00:00.000000Z",
+            "first_party": {
+              "mentions": 0,
+              "best_rank": null,
+              "provider_coverage": 0.0,
+              "providers": []
+            },
+            "competitors": {
+              "mentions": 3,
+              "best_rank": 1,
+              "provider_coverage": 50.0,
+              "providers": [
+                "openai",
+                "perplexity"
+              ]
+            },
+            "total_providers": 4,
+            "status": "opportunity",
+            "opportunity_score": 40.0
+          }
+        ],
+        "opportunity_prompts_total": 1,
+        "opportunity_prompts_next_token": null,
+        "summary": {
+          "winning_count": 1,
+          "losing_count": 0,
+          "opportunity_count": 1,
+          "win_rate": 50.0
+        },
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-prompt-insights-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    }
+  }
+}

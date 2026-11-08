@@ -4,6 +4,8 @@ import {
   gateSection,
   type VisibilitySectionProps,
 } from '../../layout';
+import { SectionExport } from '../../scopeReport/ScopeLists';
+
 import {
   ChartPanel, EngineKpiChart
 } from '../../charts';
@@ -20,7 +22,7 @@ export const ENGINE_CHART_SUBTITLE = 'Mention rate, visibility score and citatio
  * differences, which say where each engine ranks the first-party brands.
  */
 export function EngineKpisSection({
-  visibility, loading, error
+  visibility, loading, error, request = null
 }: VisibilitySectionProps) {
   const gate = gateSection({
     title: TITLE,
@@ -41,6 +43,7 @@ export function EngineKpisSection({
       <ChartPanel title={ENGINE_CHART_TITLE} subtitle={ENGINE_CHART_SUBTITLE} className="mb-4">
         <EngineKpiChart engines={engines} />
       </ChartPanel>
+      <SectionExport view="engines" request={request} />
       <EngineKpiTable engines={engines} />
     </ReportSection>
   );

@@ -1,0 +1,504 @@
+{
+  "route": "GET /api/reports/competitor",
+  "paging": {
+    "list": "rollup.outranked_keywords",
+    "view": null,
+    "cursor": "snapshot",
+    "token": "rollup.outranked_keywords_next_token",
+    "total": "rollup.outranked_keywords_total"
+  },
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "generated_at": "2026-10-07T08:15:02.418391Z",
+        "keywords_analyzed": 5000,
+        "keywords_truncated": false,
+        "competitor": "Meliá Galicia",
+        "rollup": {
+          "competitor": "Meliá Galicia",
+          "outranked_keywords": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "their_best_rank": 1,
+              "our_best_rank": 4,
+              "rank_delta": 3,
+              "providers": [
+                "gemini",
+                "openai"
+              ]
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "their_best_rank": 2,
+              "our_best_rank": null,
+              "rank_delta": null,
+              "providers": [
+                "perplexity"
+              ]
+            }
+          ],
+          "exclusive_source_count": 3,
+          "high_priority_source_count": 2,
+          "outreach_targets": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+              "domain": "tripadvisor.es",
+              "priority": "high",
+              "citation_count": 3,
+              "provider_count": 2,
+              "providers": [
+                "gemini",
+                "openai"
+              ],
+              "lift_score": 2.77
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "url": "https://www.booking.com/city/es/a-coruna.es.html",
+              "domain": "booking.com",
+              "priority": "medium",
+              "citation_count": 2,
+              "provider_count": 1,
+              "providers": [
+                "perplexity"
+              ],
+              "lift_score": 1.1
+            }
+          ],
+          "outreach_targets_total": 2,
+          "outreach_targets_next_token": null,
+          "outranked_keywords_total": 5000,
+          "outranked_keywords_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+        },
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "generated_at": "2026-10-07T08:15:02.418391Z",
+        "keywords_analyzed": 2,
+        "keywords_truncated": false,
+        "competitor": "Meliá Galicia",
+        "rollup": {
+          "competitor": "Meliá Galicia",
+          "outranked_keywords": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "their_best_rank": 1,
+              "our_best_rank": 4,
+              "rank_delta": 3,
+              "providers": [
+                "gemini",
+                "openai"
+              ]
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "their_best_rank": 2,
+              "our_best_rank": null,
+              "rank_delta": null,
+              "providers": [
+                "perplexity"
+              ]
+            }
+          ],
+          "exclusive_source_count": 3,
+          "high_priority_source_count": 2,
+          "outreach_targets": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+              "domain": "tripadvisor.es",
+              "priority": "high",
+              "citation_count": 3,
+              "provider_count": 2,
+              "providers": [
+                "gemini",
+                "openai"
+              ],
+              "lift_score": 2.77
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "url": "https://www.booking.com/city/es/a-coruna.es.html",
+              "domain": "booking.com",
+              "priority": "medium",
+              "citation_count": 2,
+              "provider_count": 1,
+              "providers": [
+                "perplexity"
+              ],
+              "lift_score": 1.1
+            }
+          ],
+          "outreach_targets_total": 2,
+          "outreach_targets_next_token": null,
+          "outranked_keywords_next_token": null,
+          "outranked_keywords_total": 2
+        },
+        "next_token": null,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "generated_at": "2026-10-07T08:15:02.418391Z",
+        "keywords_analyzed": 5000,
+        "keywords_truncated": false,
+        "competitor": "Meliá Galicia",
+        "rollup": {
+          "competitor": "Meliá Galicia",
+          "outranked_keywords": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "their_best_rank": 1,
+              "our_best_rank": 4,
+              "rank_delta": 3,
+              "providers": [
+                "gemini",
+                "openai"
+              ]
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "their_best_rank": 2,
+              "our_best_rank": null,
+              "rank_delta": null,
+              "providers": [
+                "perplexity"
+              ]
+            }
+          ],
+          "exclusive_source_count": 3,
+          "high_priority_source_count": 2,
+          "outreach_targets": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+              "domain": "tripadvisor.es",
+              "priority": "high",
+              "citation_count": 3,
+              "provider_count": 2,
+              "providers": [
+                "gemini",
+                "openai"
+              ],
+              "lift_score": 2.77
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "url": "https://www.booking.com/city/es/a-coruna.es.html",
+              "domain": "booking.com",
+              "priority": "medium",
+              "citation_count": 2,
+              "provider_count": 1,
+              "providers": [
+                "perplexity"
+              ],
+              "lift_score": 1.1
+            }
+          ],
+          "outreach_targets_total": 2,
+          "outreach_targets_next_token": null,
+          "outranked_keywords_total": 5000,
+          "outranked_keywords_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+        },
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-reports-competitor-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia",
+        "competitor": "Meliá Galicia",
+        "limit": "100"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "generated_at": "2026-10-07T08:15:02.418391Z",
+        "keywords_analyzed": 2,
+        "keywords_truncated": true,
+        "competitor": "Meliá Galicia",
+        "rollup": {
+          "competitor": "Meliá Galicia",
+          "outranked_keywords": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "their_best_rank": 1,
+              "our_best_rank": 4,
+              "rank_delta": 3,
+              "providers": [
+                "gemini",
+                "openai"
+              ]
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "their_best_rank": 2,
+              "our_best_rank": null,
+              "rank_delta": null,
+              "providers": [
+                "perplexity"
+              ]
+            }
+          ],
+          "exclusive_source_count": 3,
+          "high_priority_source_count": 2,
+          "outreach_targets": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+              "domain": "tripadvisor.es",
+              "priority": "high",
+              "citation_count": 3,
+              "provider_count": 2,
+              "providers": [
+                "gemini",
+                "openai"
+              ],
+              "lift_score": 2.77
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "url": "https://www.booking.com/city/es/a-coruna.es.html",
+              "domain": "booking.com",
+              "priority": "medium",
+              "citation_count": 2,
+              "provider_count": 1,
+              "providers": [
+                "perplexity"
+              ],
+              "lift_score": 1.1
+            }
+          ],
+          "outreach_targets_total": 2,
+          "outreach_targets_next_token": null,
+          "outranked_keywords_next_token": null,
+          "outranked_keywords_total": 2
+        },
+        "next_token": null,
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "page": {
+      "description": "The second page of rollup.outranked_keywords (snapshot cursor); next_token is null on the last page.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "generated_at": "2026-10-07T08:15:02.418391Z",
+        "keywords_analyzed": 5000,
+        "keywords_truncated": false,
+        "competitor": "Meliá Galicia",
+        "rollup": {
+          "competitor": "Meliá Galicia",
+          "outranked_keywords": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "their_best_rank": 1,
+              "our_best_rank": 4,
+              "rank_delta": 3,
+              "providers": [
+                "gemini",
+                "openai"
+              ]
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "their_best_rank": 2,
+              "our_best_rank": null,
+              "rank_delta": null,
+              "providers": [
+                "perplexity"
+              ]
+            }
+          ],
+          "exclusive_source_count": 3,
+          "high_priority_source_count": 2,
+          "outreach_targets": [
+            {
+              "keyword": "hotel con spa en galicia",
+              "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+              "domain": "tripadvisor.es",
+              "priority": "high",
+              "citation_count": 3,
+              "provider_count": 2,
+              "providers": [
+                "gemini",
+                "openai"
+              ],
+              "lift_score": 2.77
+            },
+            {
+              "keyword": "hotel cerca de riazor",
+              "url": "https://www.booking.com/city/es/a-coruna.es.html",
+              "domain": "booking.com",
+              "priority": "medium",
+              "citation_count": 2,
+              "provider_count": 1,
+              "providers": [
+                "perplexity"
+              ],
+              "lift_score": 1.1
+            }
+          ],
+          "outreach_targets_total": 2,
+          "outreach_targets_next_token": null,
+          "outranked_keywords_total": 5000,
+          "outranked_keywords_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjIwMH0"
+        },
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjIwMH0",
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "cursor_expired": {
+      "description": "The token names a build that is gone (snapshot) or a keyword set that changed (keyword): restart the list without next_token.",
+      "query": {
+        "scope": "all",
+        "competitor": "Meliá Galicia",
+        "limit": "100",
+        "next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjEwMH0"
+      },
+      "status": 400,
+      "body": {
+        "error": "The list changed since this page was read; start again from the first page",
+        "code": "cursor_expired",
+        "field": "next_token"
+      }
+    }
+  }
+}

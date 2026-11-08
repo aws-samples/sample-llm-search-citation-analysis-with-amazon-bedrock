@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
-  fetchAllSearches, fetchKeywordSearches, isSearchesPage, SearchPageError
+  fetchKeywordSearches, isSearchesPage, SearchPageError
 } from './searchPages';
 import {
   answerSearchPages, NEWER_RUN, OLDER_RUN, TWO_SEARCH_PAGES
@@ -31,31 +31,6 @@ describe('isSearchesPage', () => {
   });
 });
 
-describe('fetchAllSearches', () => {
-  it('returns every run of every page in page order', async () => {
-    answerSearchPages(TWO_SEARCH_PAGES);
-
-    expect(await fetchAllSearches()).toStrictEqual([NEWER_RUN, OLDER_RUN]);
-  });
-
-  it('asks for the largest pages the API serves', async () => {
-    answerSearchPages({ '': [[NEWER_RUN], null] });
-
-    await fetchAllSearches();
-
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/searches?limit=500', expect.anything());
-  });
-
-  it('rejects when the API repeats a token', async () => {
-    answerSearchPages({
-      '': [[NEWER_RUN], 'loop'],
-      loop: [[OLDER_RUN], 'loop'],
-    });
-
-    await expect(fetchAllSearches()).rejects.toThrow(new SearchPageError('Searches API repeated a continuation token'));
-  });
-});
-
 describe('fetchKeywordSearches', () => {
   it('asks for the keyword runs with their answer text', async () => {
     answerSearchPages({ '': [[NEWER_RUN], null] });
@@ -70,10 +45,13 @@ describe('fetchKeywordSearches', () => {
   it('follows the pages until the API reports the last one', async () => {
     answerSearchPages(TWO_SEARCH_PAGES);
 
-    expect(await fetchKeywordSearches('vuelos a cusco')).toStrictEqual([NEWER_RUN, OLDER_RUN]);
+    expect(await fetchKeywordSearches('vuelos a cusco')).toStrictEqual({
+      searches: [NEWER_RUN, OLDER_RUN],
+      nextToken: null,
+    });
   });
 
-  it('stops once it holds the newest max rows', async () => {
+  it('stops after the page that reaches max rows and keeps its token for the older runs', async () => {
     const third = {
       ...OLDER_RUN,
       timestamp: '2026-09-16T10:00:00Z',
@@ -83,7 +61,23 @@ describe('fetchKeywordSearches', () => {
       older: [[third], null],
     });
 
-    expect(await fetchKeywordSearches('vuelos a cusco', 1)).toStrictEqual([NEWER_RUN]);
+    expect(await fetchKeywordSearches('vuelos a cusco', null, 1)).toStrictEqual({
+      searches: [NEWER_RUN, OLDER_RUN],
+      nextToken: 'older',
+    });
+  });
+
+  it('continues after the token of the previous batch', async () => {
+    const third = {
+      ...OLDER_RUN,
+      timestamp: '2026-09-16T10:00:00Z',
+    };
+    answerSearchPages({ older: [[third], null] });
+
+    expect(await fetchKeywordSearches('vuelos a cusco', 'older')).toStrictEqual({
+      searches: [third],
+      nextToken: null,
+    });
   });
 
   it('rejects a malformed page', async () => {

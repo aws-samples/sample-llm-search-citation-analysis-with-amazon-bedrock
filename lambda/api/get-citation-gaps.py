@@ -1,20 +1,29 @@
 """
-Citation Gap Analysis API
+Citation Gap Analysis API — GET /api/citation-gaps
 
-Identifies citation sources where competitors are mentioned but your brand isn't.
-Helps discover opportunities to get mentioned on high-value sources.
+Citation sources where competitors are mentioned but your brand isn't: the
+URLs an AI answer cites next to a competitor and never next to a first-party
+brand (``shared.citation_gap_rules``), from each keyword's latest run.
 
-Features:
-- Gap identification: Sources citing competitors but not you
-- Source ranking by citation frequency
-- Domain authority indicators
-- Actionable recommendations
+- ``keyword``: that keyword's gaps (the first 50), covered sources (20) and
+  domain summary (20) of its whole latest run, enriched with crawl metadata;
+  always read live. Each list carries ``<list>_total`` and
+  ``<list>_next_token``; ``view=gaps|covered|domains`` with that token pages
+  the rest (``KEYWORD_PAGE`` a page; a token of another run is
+  ``cursor_expired``).
+- any other scope (``group_id`` | ``keyword_ids`` | ``scope=all``; without
+  one, every active keyword): every keyword's summary, sorted by its
+  high-priority gaps, ``limit`` a page (``keyword_summaries_next_token`` /
+  ``next_token`` for the next, ``keyword_summaries_total``), the first 30 of
+  every gap of the scope ranked (``top_gaps``, crawl-enriched; ``gaps_total``,
+  ``gaps_next_token``; ``view=gaps`` pages every gap) and the totals over
+  every keyword; computed live or served from the ``gaps`` artifacts, per
+  ``shared.action_scope_serve``. ``gaps_truncated`` says a keyword's stored
+  findings predate the full gap list (a KeywordLatest rebuild completes it).
 """
 
-import concurrent.futures
 import os
 import sys
-from collections import defaultdict
 from typing import Any
 
 import boto3
@@ -23,60 +32,43 @@ from botocore.config import Config
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
-from shared.brand_visibility import tracked_brand_names
-from shared.constants import priority_rank
-from shared.decorators import api_handler, validate
+from shared.action_scope_serve import action_list_endpoint, action_request, limit_param, serve_action_list
+from shared.api_response import success_response, validation_error
+from shared.citation_gap_rules import (
+    KEYWORD_COVERED_LIMIT,
+    KEYWORD_DOMAINS_LIMIT,
+    KEYWORD_GAPS_LIMIT,
+    first_party_brand_error,
+    is_first_party_domain,
+    keyword_gap_result,
+)
+from shared.decorators import api_handler
 from shared.dynamodb_batch import query_latest_per_key
-from shared.kpi_engine import is_owned_domain, normalize_domain, percent
-from shared.scope_params import (
-    SCOPE_KEYWORDS_CAP,
-    SCOPE_QUERY_PARAMS,
-    ReportScope,
-    all_active_scope,
-    keywords_table_name,
-    scope_from_request,
-)
+from shared.scope_params import ReportScope
 from shared.search_results import query_latest_run, search_results_table_name
-from shared.utils import extract_domain, get_brand_config
-from shared.youtube import content_type_for
+from shared.snapshot_artifacts import encode_snapshot_cursor, snapshot_page_start
+from shared.utils import get_brand_config
 
-# Classification runs in at most six threads, then final response enrichment
-# runs in a separate pool capped at ten. The phases never nest, so ten is both
-# the DynamoDB HTTP connection ceiling and the endpoint's maximum I/O fan-out.
+# Crawl enrichment runs in a pool capped at ten; the keyword fan-out uses the
+# shared scope pool (``map_scope_keywords``), so the resource pools 50.
 CRAWLED_CONTENT_MAX_WORKERS = 10
-dynamodb = boto3.resource(
-    'dynamodb',
-    config=Config(max_pool_connections=CRAWLED_CONTENT_MAX_WORKERS),
-)
+dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 
-KEYWORDS_TABLE = keywords_table_name()
-
-# Concurrency for SearchResults classification in the all-keywords path.
-# Crawl enrichment starts only after this pool has closed.
-_KEYWORD_ANALYSIS_WORKERS = 6
-
-# Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = search_results_table_name()
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
+#: Keyword summaries per page by default, and at most (``limit``).
+DEFAULT_LIMIT = 10
+MAX_LIMIT = 100
 
-def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
-    """
-    Check whether `domain` belongs to a first-party brand.
+#: The views: the whole answer, or one page of a list (``gaps`` for any scope; ``covered``, ``domains`` for one keyword).
+VIEWS = ('summary', 'gaps', 'covered', 'domains')
+#: Each one-keyword list: its view, its key and how many the answer lists first.
+KEYWORD_LISTS = {'gaps': ('gaps', KEYWORD_GAPS_LIMIT), 'covered': ('covered_sources', KEYWORD_COVERED_LIMIT), 'domains': ('domain_summary', KEYWORD_DOMAINS_LIMIT)}
+#: Items a one-keyword ``view`` page holds.
+KEYWORD_PAGE = 50
 
-    Uses ONLY the explicit `first_party_domains` allow-list from brand config,
-    matched the KPI engine's way (`kpi_engine.is_owned_domain` on
-    `normalize_domain` hosts): the registered domain or a subdomain of it.
-
-    The previous implementation also fell back to substring matching against
-    tracked brand names ("Inn" matching both "Holiday Inn" and "linkedin.com"),
-    which produced false positives that silently flipped competitor URLs into
-    the first-party bucket. That fallback is removed — if a deployment wants
-    a domain treated as first-party, it must be in the config.
-    """
-    normalized = normalize_domain(domain)
-    return normalized is not None and is_owned_domain(normalized, config.get('first_party_domains') or [])
+__all__ = ['handler', 'is_first_party_domain']
 
 
 def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
@@ -88,7 +80,6 @@ def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
     """
     if not urls:
         return {}
-
     table = dynamodb.Table(CRAWLED_CONTENT_TABLE)
     raw = query_latest_per_key(
         table=table,
@@ -103,7 +94,6 @@ def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
             '#crawled': 'crawled_at',
         },
     )
-
     shaped: dict[str, dict[str, Any]] = {}
     for url, item in raw.items():
         if not item:
@@ -129,275 +119,94 @@ def _enrich_sources(sources: list[dict[str, Any]]) -> None:
         source.update(crawled_info.get(source['url'], {}))
 
 
-def fuzzy_match_brand(brand_name: str, parent_company: str, tracked_list: list[str]) -> bool:
-    """Fuzzy-match one extracted brand against tracked brand names."""
-    brand_name_lower = brand_name.lower()
-    parent_company_lower = (parent_company or '').lower()
-
-    for tracked in tracked_list:
-        tracked_lower = tracked.lower()
-        tracked_words = set(tracked_lower.split())
-
-        if tracked_lower in brand_name_lower or brand_name_lower in tracked_lower:
-            return True
-
-        if parent_company_lower and (tracked_lower in parent_company_lower or parent_company_lower in tracked_lower):
-            return True
-
-        significant_words = [word for word in tracked_words if len(word) > 3]
-        for word in significant_words:
-            if word in brand_name_lower:
-                return True
-
-        core_brand = tracked_words - {'hotels', 'hotel', 'international', 'group', 'inc', 'corp', 'company'}
-        for core in core_brand:
-            if len(core) > 3 and core in brand_name_lower:
-                return True
-
-    return False
+def _run_build(result: dict[str, Any]) -> str:
+    """The build id of a one-keyword list token: the run it pages (a newer run expires it)."""
+    return f'run-{result.get("timestamp") or "none"}'
 
 
-def _classify_mentioned_brands(
-    brands: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
-) -> tuple[set[str], set[str]]:
-    """Split one answer's brand mentions into first-party and competitor names."""
-    mentioned_first_party: set[str] = set()
-    mentioned_competitors: set[str] = set()
-
-    for brand in brands:
-        brand_name = brand.get('name', '')
-        parent_company = brand.get('parent_company', '')
-        classification = brand.get('classification', '')
-
-        if classification == 'first_party':
-            mentioned_first_party.add(brand_name)
-        elif classification == 'competitor':
-            mentioned_competitors.add(brand_name)
-        elif fuzzy_match_brand(brand_name, parent_company, first_party_list):
-            mentioned_first_party.add(brand_name)
-        elif fuzzy_match_brand(brand_name, parent_company, competitors_list):
-            mentioned_competitors.add(brand_name)
-
-    return mentioned_first_party, mentioned_competitors
+def _first_pages(result: dict[str, Any]) -> dict[str, Any]:
+    """The one-keyword answer: each list's first items with ``<list>_total`` and ``<list>_next_token``."""
+    build = _run_build(result)
+    body = dict(result)
+    for key, first in KEYWORD_LISTS.values():
+        items = result[key]
+        body.update({key: items[:first], f'{key}_total': len(items), f'{key}_next_token': encode_snapshot_cursor(first, len(items), build)})
+    return body
 
 
-def _map_sources_to_brands(
-    latest_items: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
-) -> dict[str, dict[str, Any]]:
-    """Index citations by URL with provider, count, and mentioned-brand data."""
-    source_brand_map: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        'first_party': set(),
-        'competitors': set(),
-        'providers': set(),
-        'citation_count': 0,
-    })
-
-    for item in latest_items:
-        provider = item.get('provider', '')
-        mentioned_first_party, mentioned_competitors = _classify_mentioned_brands(
-            item.get('brands', []), first_party_list, competitors_list
-        )
-
-        for citation in item.get('citations', []):
-            domain = extract_domain(citation)
-            source_brand_map[citation]['providers'].add(provider)
-            source_brand_map[citation]['citation_count'] += 1
-            source_brand_map[citation]['domain'] = domain
-            source_brand_map[citation]['first_party'].update(mentioned_first_party)
-            source_brand_map[citation]['competitors'].update(mentioned_competitors)
-
-    return source_brand_map
-
-
-def _gaps_and_covered_sources(
-    source_brand_map: dict[str, dict[str, Any]], config: dict[str, Any]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Classify and rank third-party sources without crawl enrichment."""
-    third_party = {
-        url: data for url, data in source_brand_map.items()
-        if not is_first_party_domain(data['domain'], config)
-    }
-
-    gaps: list[dict[str, Any]] = []
-    covered_sources: list[dict[str, Any]] = []
-
-    for url, data in third_party.items():
-        source_info = {
-            'url': url,
-            'domain': data['domain'],
-            'content_type': content_type_for(url),
-            'citation_count': data['citation_count'],
-            'providers': list(data['providers']),
-            'provider_count': len(data['providers']),
-            'first_party_brands': list(data['first_party']),
-            'competitor_brands': list(data['competitors']),
-        }
-
-        if data['competitors'] and not data['first_party']:
-            source_info['priority'] = 'high' if len(data['providers']) >= 2 else 'medium'
-            gaps.append(source_info)
-        elif data['first_party']:
-            covered_sources.append(source_info)
-
-    gaps.sort(key=lambda source: (
-        priority_rank(source.get('priority')),
-        -source['citation_count'],
-    ))
-    covered_sources.sort(key=lambda source: -source['citation_count'])
-
-    return gaps, covered_sources
-
-
-def classify_latest_run(
-    latest_items: list[dict[str, Any]], config: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-    """One keyword's latest-run rows (``provider``, ``citations``, ``brands``) as ``(gaps, covered_sources, cited_urls)``.
-
-    Both lists ranked and not enriched; ``cited_urls`` counts every distinct
-    URL the rows cite. Also what ``/reports/competitor`` classifies its rows with.
-    """
-    first_party_list, competitors_list = tracked_brand_names(config)
-    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
-    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
-    return gaps, covered_sources, len(source_brand_map)
-
-
-def _first_party_brand_error(config: dict[str, Any]) -> dict[str, str] | None:
-    """Return the public error contract when first-party brands are missing."""
-    tracked_brands = config.get('tracked_brands', {})
-    if tracked_brands.get('first_party', []):
-        return None
-    return {'error': 'No first-party brands configured'}
-
-
-def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Build one keyword response with final slices but without crawl metadata."""
-    configuration_error = _first_party_brand_error(config)
-    if configuration_error is not None:
-        return configuration_error
-
-    latest_timestamp, latest_items = query_latest_run(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
-    if not latest_items:
-        return {'error': f'No data found for keyword: {keyword}'}
-
-    gaps, covered_sources, cited_urls = classify_latest_run(latest_items, config)
-
-    domain_gaps: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for gap in gaps:
-        domain_gaps[gap['domain']].append(gap)
-
-    high_priority_gaps = [gap for gap in gaps if gap.get('priority') == 'high']
-
-    return {
-        'keyword': keyword,
-        'timestamp': latest_timestamp,
-        'gaps': gaps[:50],
-        'covered_sources': covered_sources[:20],
-        'domain_summary': [
-            {
-                'domain': domain,
-                'gap_count': len(urls),
-                'total_citations': sum(url['citation_count'] for url in urls),
-            }
-            for domain, urls in sorted(domain_gaps.items(), key=lambda item: -len(item[1]))[:20]
-        ],
-        'summary': {
-            'gap_count': len(gaps),
-            'covered_count': len(covered_sources),
-            'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': percent(len(covered_sources), cited_urls) if cited_urls else 0,
-        },
-    }
+def _keyword_result(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
+    """One keyword's gap result over every row of its latest run, every list whole (not enriched)."""
+    if first_party_brand_error(config) is None:
+        timestamp, rows = query_latest_run(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
+    else:
+        timestamp, rows = '', []
+    return keyword_gap_result(keyword, timestamp, rows, config)
 
 
 def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Analyze one keyword and enrich only its returned response slices."""
-    result = _build_citation_gap_result(keyword, config)
+    """One keyword's answer from its whole latest run: each list's first page, its returned sources enriched."""
+    result = _keyword_result(keyword, config)
     if 'error' in result:
         return result
-
-    _enrich_sources([*result['gaps'], *result['covered_sources']])
-    return result
-
-
-def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportScope | None) -> dict[str, Any]:
-    """Analyze citation gaps across the active keywords of a scope.
-
-    Every scope reads a bounded number of keyword partitions: ``limit`` of
-    every active keyword (the default and ``scope=all``), or a group's or id
-    list's keywords up to ``SCOPE_KEYWORDS_CAP`` (``limit`` never cuts a group
-    below that). ``keywords_truncated`` says whether keywords were left out.
-    """
-    configuration_error = _first_party_brand_error(config)
-    if configuration_error is not None:
-        return configuration_error
-
-    keywords_table = dynamodb.Table(KEYWORDS_TABLE)
-    resolved = scope if scope is not None else all_active_scope(keywords_table)
-    keywords = sorted(resolved.keywords, key=str.casefold)
-    if scope is not None and scope.kind != 'all':
-        limit = min(max(limit, len(keywords)), SCOPE_KEYWORDS_CAP)
-
-    selected_keywords = keywords[:limit]
-    all_gaps: list[dict[str, Any]] = []
-    keyword_summaries: list[dict[str, Any]] = []
-
-    if not selected_keywords:
-        results: list[dict[str, Any]] = []
-    else:
-        workers = min(_KEYWORD_ANALYSIS_WORKERS, len(selected_keywords))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(
-                lambda keyword: _build_citation_gap_result(keyword, config),
-                selected_keywords,
-            ))
-
-    for keyword, result in zip(selected_keywords, results, strict=True):
-        if 'error' not in result:
-            keyword_summaries.append({
-                'keyword': keyword,
-                'gap_count': result['summary']['gap_count'],
-                'high_priority_gaps': result['summary']['high_priority_gaps'],
-                'coverage_rate': result['summary']['coverage_rate'],
-            })
-            for gap in result['gaps'][:5]:
-                gap['keyword'] = keyword
-                all_gaps.append(gap)
-
-    all_gaps.sort(key=lambda gap: (
-        priority_rank(gap.get('priority')),
-        -gap['citation_count'],
-    ))
-    top_gaps = all_gaps[:30]
-    _enrich_sources(top_gaps)
-
-    return {
-        'scope': resolved.describe(),
-        'keywords_truncated': len(selected_keywords) < len(keywords),
-        'keywords_analyzed': len(keyword_summaries),
-        'keyword_summaries': sorted(keyword_summaries, key=lambda summary: -summary['high_priority_gaps']),
-        'top_gaps': top_gaps,
-        'total_gaps': sum(summary['gap_count'] for summary in keyword_summaries),
-        'total_high_priority': sum(summary['high_priority_gaps'] for summary in keyword_summaries),
-    }
+    body = _first_pages(result)
+    _enrich_sources([*body['gaps'], *body['covered_sources']])
+    return body
 
 
-def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int) -> dict[str, Any]:
-    """Return one-keyword analysis or a rollup for the requested scope."""
-    if scope is not None and scope.is_single_keyword:
-        return analyze_citation_gaps(scope.keywords[0], config)
-    return analyze_all_keywords_gaps(config, limit, scope)
+def keyword_list_page(keyword: str, config: dict[str, Any], view: str, next_token: str | None, event: dict[str, Any]) -> dict[str, Any]:
+    """One ``view`` page of a keyword's list (``KEYWORD_PAGE`` items from the token's offset), its sources enriched."""
+    result = _keyword_result(keyword, config)
+    if 'error' in result:
+        return success_response(result, event)
+    key, _first = KEYWORD_LISTS[view]
+    cursor, rejected = snapshot_page_start(next_token, _run_build(result), (), event)
+    if rejected is not None:
+        return rejected
+    offset = cursor.offset if cursor else 0
+    items = result[key]
+    page = [dict(item) for item in items[offset:offset + KEYWORD_PAGE]]
+    if key != 'domain_summary':
+        _enrich_sources(page)
+    return success_response({
+        'keyword': keyword, 'timestamp': result['timestamp'], key: page, f'{key}_total': len(items),
+        'next_token': encode_snapshot_cursor(offset + KEYWORD_PAGE, len(items), _run_build(result)),
+    }, event)
+
+
+def scope_gaps(
+    report_scope: ReportScope, config: dict[str, Any], limit: int, next_token: str | None, event: dict[str, Any], view: str = 'summary',
+) -> dict[str, Any]:
+    """The scope rollup's response (one page of keyword summaries, the enriched first gaps and the totals) or one ``view=gaps`` page."""
+    params = {'limit': limit, 'scope': report_scope.describe(), 'view': view}
+    request = action_request('citation-gaps', 'gaps', params, report_scope, config, event, next_token, job_params={})
+    gaps = serve_action_list(request, dynamodb, dynamodb.Table(SEARCH_RESULTS_TABLE), config)
+    body = gaps.body
+    if body is None:
+        return gaps.response or {}
+    if view == 'gaps':
+        _enrich_sources(body['gaps'])
+        return success_response(body, event)
+    _enrich_sources(body['top_gaps'])
+    return success_response({**body, 'next_token': body['keyword_summaries_next_token']}, event)
 
 
 @api_handler
-@validate({
-    **SCOPE_QUERY_PARAMS,
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 10},
-})
-def handler(event: dict[str, Any], context: Any, limit: int = 10, **scope_params: str | None) -> dict[str, Any]:
-    """Return citation gaps for one keyword, a group, explicit ids, or all active keywords."""
-    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
-    if rejected:
-        return rejected
-
-    return success_response(gaps_for_scope(report_scope, get_brand_config(), limit), event)
+@action_list_endpoint({
+    'limit': limit_param(DEFAULT_LIMIT, MAX_LIMIT),
+    'view': {'type': str, 'choices': list(VIEWS), 'default': VIEWS[0]},
+}, lambda: dynamodb, paged=True)
+def handler(
+    event, context, report_scope: ReportScope, limit: int = DEFAULT_LIMIT, next_token: str | None = None, view: str = 'summary',
+) -> dict[str, Any]:
+    """Citation gaps of one keyword, a group, explicit ids, or every active keyword (see the module docstring)."""
+    config = get_brand_config()
+    configuration_error = first_party_brand_error(config)
+    if configuration_error is not None:
+        return success_response(configuration_error, event)
+    if report_scope.is_single_keyword:
+        if view == 'summary':
+            return success_response(analyze_citation_gaps(report_scope.keywords[0], config), event)
+        return keyword_list_page(report_scope.keywords[0], config, view, next_token, event)
+    if view not in ('summary', 'gaps'):
+        return validation_error(f'view={view} pages one keyword\'s list; a scope pages view=gaps', event, 'view')
+    return scope_gaps(report_scope, config, limit, next_token, event, view)

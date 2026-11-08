@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.44.0",
+  "version": "2.45.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,8 +29,7 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "tailwindcss": "^4.3.4",
-    "unified": "^11.0.5",
-    "xlsx-js-style": "^1.2.0"
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@stryker-mutator/core": "10.1.1",

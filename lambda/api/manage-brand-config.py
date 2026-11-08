@@ -49,6 +49,7 @@ from shared.llm_json import parse_llm_json
 from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError, ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.request_deadline import current_deadline
+from shared.snapshot_triggers import rebuilds_keyword_latest
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -694,6 +695,7 @@ def _get_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return success_response(config, event)
 
 
+@rebuilds_keyword_latest('brand config saved')
 @require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
@@ -744,6 +746,7 @@ def _save_config(event: dict[str, Any], context: Any, body: dict, industry: str)
     }, event)
 
 
+@rebuilds_keyword_latest('brand config reset')
 @require_group(ADMIN_GROUP)
 def _reset_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """DELETE /brand-config - Reset to defaults.

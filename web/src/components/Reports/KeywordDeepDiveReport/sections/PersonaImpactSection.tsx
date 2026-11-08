@@ -10,6 +10,8 @@ import {
   type SectionFetchState,
   gateSection,
 } from '../../layout';
+import { ExportAllButton } from '../../../ui/ExportAllButton';
+
 
 interface Props extends SectionFetchState {readonly personas: PersonaRankingsResponse | null;}
 
@@ -92,6 +94,9 @@ export function PersonaImpactSection({
       title="Persona impact"
       subtitle="Where in your persona library does this keyword perform best, and where does it slip?"
     >
+      <div className="mb-2 flex justify-end">
+        <ExportAllButton view="persona-rankings" params={{ keyword: gate.value.keyword }} />
+      </div>
       <ReportTable
         columns={COLUMNS}
         rows={firstParty}

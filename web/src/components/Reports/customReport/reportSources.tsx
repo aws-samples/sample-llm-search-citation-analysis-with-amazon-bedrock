@@ -20,6 +20,8 @@ import { useExecutiveSummary } from '../ExecutiveSummaryReport/useExecutiveSumma
 import { useKeywordDeepDive } from '../KeywordDeepDiveReport/useKeywordDeepDive';
 import { useReportReady } from '../layout/useReportReady';
 import type { ReportSlice } from '../layout/sectionGate';
+import type { InsightsSectionProps } from '../insights/InsightsTableSection';
+import type { ListRequest } from '../../../api/scopedListPages';
 import {
   useScopeReportData, type ScopeReportData
 } from '../scopeReport/useScopeReportData';
@@ -46,6 +48,8 @@ export interface GroupKpiSource {
   /** The group: the drivers and keyword runs are read for it on demand. */
   readonly scope: ReportScope;
   readonly history: ReportSlice<GroupKpiHistoryResponse>;
+  /** The GET `history` answered: the keyword list loads its next pages with it, and the blocks export it. */
+  readonly request?: ListRequest | null;
   readonly days: number;
   readonly runTimestamp: string | null;
   readonly selectRun: (timestamp: string) => void;
@@ -67,7 +71,7 @@ export interface CompetitorSource {
 type DeepDiveSource = ReturnType<typeof useKeywordDeepDive> & { readonly keyword: string };
 
 /** `/reports/insights` for the scope over the report period, as the insights blocks read it. */
-export interface InsightsSource extends ReportSlice<ReportInsightsResponse> {readonly ready: boolean;}
+export interface InsightsSource extends InsightsSectionProps {readonly ready: boolean;}
 
 export interface ReportSources {
   readonly inputs: ReportInputs;
@@ -164,6 +168,7 @@ function GroupKpiSourceLayer({
       loading: history.loading,
       error: history.error,
     },
+    request: history.request,
     days: inputs.days,
     runTimestamp,
     selectRun,
@@ -227,7 +232,7 @@ function InsightsSourceLayer({
   inputs, children
 }: SourceProps) {
   const {
-    data, loading, error
+    data, loading, error, request
   } = useReportInsights(inputs.scope, inputs.days);
   const slice: ReportSlice<ReportInsightsResponse> = {
     data,
@@ -237,6 +242,7 @@ function InsightsSourceLayer({
   const ready = useReportReady([slice]);
   const insights: InsightsSource = {
     ...slice,
+    request,
     ready,
   };
   return <SourceLayer patch={{ insights }}>{children}</SourceLayer>;

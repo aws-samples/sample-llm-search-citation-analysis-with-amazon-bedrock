@@ -61,7 +61,7 @@ export const INSIGHT_BLOCKS: readonly DataBlockDefinition[] = [
       description,
       sources: ['insights'],
       scopes,
-      render: ({ insights }) => insights && <Section data={insights.data} loading={insights.loading} error={insights.error} />,
+      render: ({ insights }) => insights && <Section data={insights.data} loading={insights.loading} error={insights.error} request={insights.request} />,
     };
   }),
   NARRATIVE_BLOCK,

@@ -1,21 +1,26 @@
-import {
-  exportTableToExcel, type TableExport
-} from '../../../exporters/tableExcel';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
+import type { ViewParams } from '../../../api/exports';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 
-interface Props<TRow> extends TableExport<TRow> {
-  /** Hover text: what the file holds. */
-  readonly title: string;
+interface Props {
+  /** The `seo-domain-tables` sheet the export holds. */
+  readonly table: 'SERP competitors' | 'Traffic snapshots';
+  /** What the table on screen was read with; `null` while there is nothing to export. */
+  readonly params: ViewParams | null;
 }
 
-/** The right-aligned "Export to Excel" row above a Domain Overview table: the rows on screen, never a new paid call. */
-export function DomainExportButton<TRow>({
-  title, ...table
-}: Props<TRow>) {
+/**
+ * The right-aligned export above a Domain Overview table: a server export (Exports center) of the answer on
+ * screen, read from the SEO API's cache or stored snapshots, never a new paid call.
+ */
+export function DomainExportButton({
+  table, params
+}: Props) {
   return (
     <div className="flex justify-end">
-      <ExportExcelButton onExport={() => exportTableToExcel(table)} failureLabel={`[seo] ${table.sheetName} Excel export failed:`}
-        disabled={table.rows.length === 0} title={title} />
+      <ExportAllButton view="seo-domain-tables" params={params === null ? null : {
+        ...params,
+        table,
+      }} />
     </div>
   );
 }

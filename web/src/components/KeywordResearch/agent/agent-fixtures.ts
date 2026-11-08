@@ -129,7 +129,6 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
     tracking_count: 2,
     proposal_source: 'model',
     created_at: '2026-09-18T10:00:00Z',
-    finished_at: '2026-09-18T10:06:00Z',
     round: 2,
     steps_total: 4,
     steps_done: 4,

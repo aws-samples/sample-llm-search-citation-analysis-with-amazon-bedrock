@@ -11,7 +11,6 @@ import {
 } from '../../ui/tableCells';
 import { DomainTableStatus } from './DomainTableStatus';
 import { DomainExportButton } from './DomainExportButton';
-import { COMPETITOR_EXCEL_COLUMNS } from './domainExcel';
 import {
   CACHED_NOTE, decimalText
 } from './domainFormat';
@@ -20,8 +19,6 @@ interface Props {
   /** The keywords of the ranked-keywords page on screen. */
   readonly keywords: readonly string[];
   readonly marketId: string | undefined;
-  /** The analyzed target, named in the export's file name. */
-  readonly scopeLabel: string;
   readonly request: SeoRequest<SerpCompetitorsRequest, SerpCompetitorsResponse>;
 }
 
@@ -60,7 +57,7 @@ const COLUMNS: ReadonlyArray<DataColumn<SerpCompetitorRow>> = [
 
 /** The domains ranking on the keywords on screen; one paid call per click. */
 export function DomainCompetitorsPanel({
-  keywords, marketId, scopeLabel, request
+  keywords, marketId, request
 }: Props) {
   const find = () => {
     void request.run({
@@ -79,9 +76,10 @@ export function DomainCompetitorsPanel({
       <DomainTableStatus state={request.state} loadingLabel="Loading SERP competitors" columns={COLUMNS.length}>
         {(response) => (
           <>
-            <DomainExportButton columns={COMPETITOR_EXCEL_COLUMNS} rows={response.items} sheetName="SERP competitors"
-              filePrefix="domain-competitors" scopeLabel={scopeLabel}
-              title={`The SERP competitors of the ${response.keywords_count} keywords searched`} />
+            <DomainExportButton table="SERP competitors" params={response.items.length === 0 ? null : {
+              keywords: JSON.stringify([...keywords]),
+              market_id: response.market_id,
+            }} />
             <DataTable rows={response.items} columns={COLUMNS} rowKey={(row) => row.domain} caption="SERP competitors" />
             {response.cached && <p className="text-xs text-gray-500">{CACHED_NOTE}</p>}
           </>

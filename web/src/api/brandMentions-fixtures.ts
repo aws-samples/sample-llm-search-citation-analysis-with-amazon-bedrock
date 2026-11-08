@@ -34,13 +34,3 @@ export const APPEARANCE_PAGE_1: BrandAppearancesPage = {
   total_appearances: 3,
   next_token: 'eyJvZmZzZXQiOjJ9',
 };
-
-export const APPEARANCE_PAGE_2: BrandAppearancesPage = {
-  ...APPEARANCE_PAGE_1,
-  appearances: [buildAppearanceRow({
-    brand: 'Rival Inn',
-    classification: 'competitor',
-    overall_rank: 2,
-  })],
-  next_token: null,
-};

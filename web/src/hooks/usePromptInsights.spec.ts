@@ -6,7 +6,7 @@ import { usePromptInsights } from './usePromptInsights';
 import { mockPromptInsightsResponse } from './usePromptInsights-fixtures';
 import { describeScopedRequests } from './useRecommendations-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -20,10 +20,11 @@ describe('usePromptInsights', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => usePromptInsights(ALL_SCOPE));
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchPromptInsights'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchPromptInsights'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'prompt insights',
     useHook: () => usePromptInsights(ALL_SCOPE),
     fetchName: 'fetchPromptInsights',

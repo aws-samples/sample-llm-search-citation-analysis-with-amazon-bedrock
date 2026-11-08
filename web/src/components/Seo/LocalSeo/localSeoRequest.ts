@@ -93,19 +93,22 @@ export function rankBand(rank: number | null): 'top3' | 'top10' | 'low' | 'missi
   return rank <= 10 ? 'top10' : 'low';
 }
 
-/** Rows by `field`, highest first, rows without a value last (the provider's own order breaks ties). */
-export function sortedByDescending<TRow>(rows: readonly TRow[], value: (row: TRow) => number | null): TRow[] {
-  return rows
-    .map((row, position) => ({
-      row,
-      position,
-      key: value(row) 
-    }))
-    .sort((left, right) => {
-      if (left.key === null || right.key === null) {
-        return (left.key === null ? 1 : 0) - (right.key === null ? 1 : 0) || left.position - right.position;
-      }
-      return right.key - left.key || left.position - right.position;
-    })
-    .map((entry) => entry.row);
+/** The tables of the `seo-local` export (its `table` parameter: the sheet the server writes). */
+type LocalExportTable = 'Businesses' | 'Local results';
+
+function paramValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) return value.map(String).join(',');
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : undefined;
+}
+
+/**
+ * The `seo-local` export params of a paid search the tab sent: the same fields, `limit` as `count` (exports
+ * drop paging names) and lists comma separated, so the server reads that search's cached answer and never pays.
+ */
+export function localExportParams(table: LocalExportTable, request: object): Record<string, string | undefined> {
+  const entries = Object.entries(request).map(([name, value]: [string, unknown]) => [name === 'limit' ? 'count' : name, paramValue(value)] as const);
+  return {
+    ...Object.fromEntries<string | undefined>(entries),
+    table,
+  };
 }

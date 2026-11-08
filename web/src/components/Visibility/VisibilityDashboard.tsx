@@ -18,6 +18,7 @@ import { BrandedFilterSelect } from './BrandedFilterSelect';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { ComputingState } from '../ui/ComputingState';
 import {
   ALL_SCOPE, decodeReportScope, describeReportScope, encodeReportScope, isReportScopeAvailable
 } from '../ui/reportScope';
@@ -40,10 +41,10 @@ export function VisibilityDashboard({ keywords }: Props) {
     activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
   const {
-    data: visibility, loading: visLoading, error: visError, fetchVisibilityMetrics
+    data: visibility, loading: visLoading, error: visError, computing: visComputing, request: visRequest, fetchVisibilityMetrics
   } = useVisibilityMetrics();
   const {
-    data: trends, loading: trendsLoading, error: trendsError, fetchHistoricalTrends
+    data: trends, loading: trendsLoading, error: trendsError, request: trendsRequest, fetchHistoricalTrends
   } = useHistoricalTrends();
   const {
     data: personaRankings, fetchPersonaRankings
@@ -101,13 +102,15 @@ export function VisibilityDashboard({ keywords }: Props) {
       {/* First load: an overview-shaped placeholder where the overview will be.
           Later requests (scope, persona, range) keep the overview on screen,
           dimmed and marked busy, instead of inserting a notice above it. */}
-      {!visibility && visLoading && <VisibilityOverviewSkeleton />}
+      {!visibility && visLoading && (visComputing === null ? <VisibilityOverviewSkeleton /> : <ComputingState subject="visibility figures" />)}
 
       {visibility && (
         <div aria-busy={visLoading} className={visLoading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
           <VisibilityOverview
             visibility={visibility}
+            request={visRequest}
             trends={trends}
+            trendsRequest={trendsRequest}
             trendsError={trendsError}
             trendsLoading={trendsLoading}
             scopeLabel={describeReportScope(scope, groups)}

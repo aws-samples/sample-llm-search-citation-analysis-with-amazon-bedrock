@@ -48,3 +48,26 @@ def test_refuses_to_build_without_a_bucket(action_module):
         pytest.raises(action_module.RollupConfigurationError, match='CITATION_ROLLUP_BUCKET or SUMMARY_BUCKET'),
     ):
         action_module.rollup_sources()
+
+
+def test_a_tenant_the_distributed_build_serves_starts_it_instead_of_building(action_module):
+    started = {'status': 'started', 'execution': 'build-1'}
+    with (
+        patch.dict(os.environ, {'SCOPE_SNAPSHOT_BUILD_STATE_MACHINE_ARN': 'arn:sm'}),
+        patch.object(action_module, 'snapshot_sources', return_value=MagicMock()),
+        patch.object(action_module, 'start_distributed_build', return_value=started),
+        patch.object(action_module, 'build_rollup') as build,
+    ):
+        result = action_module.build_citation_rollup({'action': 'build_citation_rollup'}, lambda_context(900_000))
+    assert (result, build.call_count) == (started, 0)
+
+
+def test_without_the_state_machine_the_rollup_builds_in_process(action_module):
+    with (
+        patch.dict(os.environ, {'SCOPE_SNAPSHOT_BUILD_STATE_MACHINE_ARN': ''}),
+        patch.object(action_module, 'start_distributed_build') as start,
+        patch.object(action_module, 'rollup_sources', return_value=MagicMock()),
+        patch.object(action_module, 'build_rollup', return_value={'status': 'built'}),
+    ):
+        result = action_module.build_citation_rollup({'action': 'build_citation_rollup'}, lambda_context(900_000))
+    assert (result, start.call_count) == ({'status': 'built'}, 0)

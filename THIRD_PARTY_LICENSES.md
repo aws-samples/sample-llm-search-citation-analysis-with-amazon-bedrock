@@ -23,7 +23,6 @@ tooling that is not bundled into the dashboard or the Lambda layers is not liste
 | [remark-parse](https://github.com/remarkjs/remark/tree/main/packages/remark-parse) | 11.0.0 | MIT | Markdown parsing for the Word export |
 | [unified](https://github.com/unifiedjs/unified) | 11.0.5 | MIT | Markdown processing pipeline of the Word export |
 | [DOMPurify](https://github.com/cure53/DOMPurify) | 3.4.17 | MPL-2.0 OR Apache-2.0 | HTML sanitization |
-| [xlsx-js-style](https://github.com/gitbrent/xlsx-js-style) | 1.2.0 | Apache-2.0 | Excel export |
 | [docx](https://github.com/dolanmiu/docx) | 9.15.2 | MIT | Word export |
 | [FileSaver.js](https://github.com/eligrey/FileSaver.js) (`file-saver`) | 2.0.5 | MIT | Saving exported files in the browser |
 

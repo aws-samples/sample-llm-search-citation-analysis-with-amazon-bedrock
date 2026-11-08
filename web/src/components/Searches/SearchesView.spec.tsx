@@ -6,14 +6,16 @@ import {
 } from '@testing-library/react';
 import { SearchesView } from './SearchesView';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
-import { lastExportedColumn } from '../../test/excelExportMock';
 import {
-  answerSearchPages, NEWER_RUN, OLDER_RUN, TWO_SEARCH_PAGES
+  chooseExportFormat, mockStartExport
+} from '../../test/exportsApiMock';
+import {
+  answerSearchPages, NEWER_RUN, OLDER_RUN
 } from '../../api/searchPages-fixtures';
 import { queryLoadOlderSearchesElement } from './SearchesView-fixtures';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
-vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
 const mockSearches = [
   {
@@ -123,14 +125,32 @@ describe('SearchesView', () => {
     await waitFor(() => expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument());
   });
 
-  it('exports the runs of every page', async () => {
-    answerSearchPages(TWO_SEARCH_PAGES);
-    render(<SearchesView searches={[NEWER_RUN]} />);
+  it('exports every run with the keyword text, provider and prompt filters', async () => {
+    render(<SearchesView searches={mockSearches} />);
+    fireEvent.change(screen.getByLabelText('Search Keyword'), { target: { value: ' hot ' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'openai' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }));
+    await chooseExportFormat('xlsx');
 
-    await waitFor(() => expect(lastExportedColumn('Provider')).toStrictEqual([
-      'openai', 'gemini',
-    ]));
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'searches',
+      params: {
+        keyword_contains: 'hot',
+        provider: 'openai',
+      },
+      format: 'xlsx',
+    });
+  });
+
+  it('exports every run when no filter is set', async () => {
+    render(<SearchesView searches={mockSearches} />);
+
+    await chooseExportFormat('csv');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'searches',
+      params: {},
+      format: 'csv',
+    });
   });
 });

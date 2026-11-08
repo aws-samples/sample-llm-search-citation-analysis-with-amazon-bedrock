@@ -1,5 +1,6 @@
 import type { BrandClassification } from './brands';
 import type { ReportScopeInfo } from './baseTypes';
+import type { ScopedResponseFields } from './scopeCoverage';
 import type {
   BrandKpis, KpiDeltas, KpiTrend, TrendedKpiId
 } from './groupKpiHistory';
@@ -38,7 +39,7 @@ export interface KeywordVisibilityRow {
  * every KPI over each keyword's latest run, pooled
  * (`lambda/shared/visibility_views.py`).
  */
-export interface VisibilityResponse {
+export interface VisibilityResponse extends ScopedResponseFields {
   scope: ReportScopeInfo;
   /** The newest run among the keywords. */
   timestamp: string | null;
@@ -54,13 +55,22 @@ export interface VisibilityResponse {
   brands: BrandLeaderboardRow[];
   /** How many distinct brands the answers name (after the `brand` filter). */
   brands_total: number;
+  /** The next leaderboard page (`view=brands&next_token=`, 2.45.0); `null`/absent on the last. */
+  brands_next_token?: string | null;
   /** Every KPI per AI engine, engines in name order. */
   engines: EngineKpis[];
-  /** The most cited domains (at most 25), most cited first. */
+  /** The most cited domains, first page, most cited first. */
   sources: SourceRow[];
   /** How many distinct domains the answers cite. */
   sources_total: number;
+  /** The next domains page (`view=sources&next_token=`, 2.45.0); `null`/absent on the last. */
+  sources_next_token?: string | null;
+  /** The first page of keyword rows (all of them before 2.45.0). */
   keywords: KeywordVisibilityRow[];
+  /** The next page (`view=keywords&next_token=`); `null`/absent on the last. */
+  keywords_next_token?: string | null;
+  /** Keyword rows of the scope. */
+  keywords_total?: number;
 }
 
 /** Every KPI of the tracked brand over one AI engine's answers. */
@@ -119,11 +129,15 @@ export interface PromptInsight {
   opportunity_score?: number;
 }
 
-export interface PromptInsightsResponse {
+export interface PromptInsightsResponse extends ScopedResponseFields {
   total_prompts_analyzed: number;
   winning_prompts: PromptInsight[];
   losing_prompts: PromptInsight[];
   opportunity_prompts: PromptInsight[];
+  /** Each list's next page (`type=<tab>&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  winning_prompts_next_token?: string | null;
+  losing_prompts_next_token?: string | null;
+  opportunity_prompts_next_token?: string | null;
   summary: {
     winning_count: number;
     losing_count: number;
@@ -156,7 +170,7 @@ interface DomainGapSummary {
   total_citations: number;
 }
 
-export interface CitationGapsResponse {
+export interface CitationGapsResponse extends ScopedResponseFields {
   keyword?: string;
   scope?: ReportScopeInfo;
   timestamp?: string;
@@ -178,9 +192,16 @@ export interface CitationGapsResponse {
     high_priority_gaps: number;
     coverage_rate: number;
   }>;
+  /** The next page of `keyword_summaries` (`next_token=`); `null`/absent on the last. */
+  keyword_summaries_next_token?: string | null;
+  keyword_summaries_total?: number;
   top_gaps?: CitationGap[];
   total_gaps?: number;
   total_high_priority?: number;
+  /** The next page of every gap of the scope (`view=gaps&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  gaps_next_token?: string | null;
+  /** How many gaps the scope has in all. */
+  gaps_total?: number;
 }
 
 /** Where a recommendation stands in the Action Center; stored by `POST /api/recommendations/{id}/status`. */
@@ -203,13 +224,17 @@ export interface Recommendation {
   related_content_id?: string;
 }
 
-export interface RecommendationsResponse {
+export interface RecommendationsResponse extends ScopedResponseFields {
   generated_at: string;
   recommendations: Recommendation[];
   llm_enhanced?: Recommendation[];
   /** How the `use_llm=true` pass went; `timed_out` when the model did not answer within the request (null when not asked). */
   llm?: 'ok' | 'timed_out' | 'failed' | null;
   total_count: number;
+  /** The next page (`next_token=`); `null`/absent on the last. */
+  next_token?: string | null;
+  /** Recommendations of the scope over every page. */
+  total?: number;
   by_priority: {
     high: number;
     medium: number;
@@ -252,7 +277,15 @@ export interface KeywordTrend {
  * `trend_view`): the KPIs per period, the latest standing and its change,
  * and each keyword's move.
  */
-export interface HistoricalTrendsResponse {
+/** A keyword whose visibility score moved since its previous period (`top_movers`). */
+export interface TrendMover {
+  keyword: string;
+  visibility_score: number | null;
+  /** Points of visibility score since the keyword's previous period. */
+  change: number;
+}
+
+export interface HistoricalTrendsResponse extends ScopedResponseFields {
   scope: ReportScopeInfo;
   period_type: PeriodType;
   days_analyzed: number;
@@ -264,12 +297,23 @@ export interface HistoricalTrendsResponse {
   trend_data: TrendDataPoint[];
   /** Every KPI over each keyword's latest period, pooled. */
   latest: BrandKpis;
-  /** The brand leaderboard of those latest periods (at most 10). */
+  /** The first page of the brand leaderboard of those latest periods (the leading 10). */
   latest_brands: BrandLeaderboardRow[];
+  /** The next page of that leaderboard (`view=latest_brands&next_token=`, 2.45.0 wave 5); `null`/absent on the last. */
+  latest_brands_next_token?: string | null;
+  latest_brands_total?: number;
+  /** The keywords whose visibility score moved most each way, ranked over every keyword of the scope (2.45.0 wave 5). */
+  top_movers?: {
+    improving: TrendMover[];
+    declining: TrendMover[];
+  };
   /** Latest against previous period over the keywords measured in both; `null` before a second period. */
   change: ScopeChange | null;
   /** Best visibility score first. */
   keyword_trends: KeywordTrend[];
+  /** The next page (`view=keyword_trends&next_token=`); `null`/absent on the last. */
+  keyword_trends_next_token?: string | null;
+  keyword_trends_total?: number;
   /** Keywords by the trend of their visibility score. */
   overall: {
     improving_count: number;

@@ -4,7 +4,8 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import type * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
-import { SEO_JOBS_FUNCTION_NAME, SeoFeatureConstruct, stringKey } from './seo-feature';
+import { SEO_JOBS_FUNCTION_NAME, SeoFeatureConstruct } from './seo-feature';
+import { stringKey } from './tables';
 
 /** The rank check state machine's name; its ARN is built from it so the functions can start it without a cycle. */
 export const RANK_CHECK_STATE_MACHINE_NAME = 'CitationAnalysis-SeoRankCheck';

@@ -35,4 +35,5 @@ export type TabType =
   | 'reports'
   | 'settings'
   | 'searches'
-  | 'raw-responses';
+  | 'raw-responses'
+  | 'exports';

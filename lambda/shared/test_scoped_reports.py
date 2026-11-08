@@ -3,7 +3,7 @@ Tests for shared.scoped_reports.
 
 ``required_report_scope`` turns the injected scope parameters into the
 handler's ``ReportScope`` argument or answers 400 without calling it;
-``capped_scope`` keeps the first ``cap`` keywords and describes the cut.
+``scope_decorator`` hands any resolver's value to the handler.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from shared.request_deadline import Deadline, current_deadline
-from shared.scope_params import SCOPE_KEYWORDS_CAP, ReportScope
+from shared.scope_params import ReportScope
 from shared.scoped_reports import (
     BASELINE_MEMORY_MB,
     DEFAULT_MEMORY_MB,
@@ -26,14 +26,12 @@ from shared.scoped_reports import (
     WINDOW_READ_SHARE,
     WINDOW_ROWS_CAP,
     WindowRuns,
-    capped_scope,
     load_window_histories,
     load_window_runs,
-    optional_scope_keywords,
     read_scope_keywords,
     required_report_scope,
     rows_per_keyword,
-    scope_read_fields,
+    scope_decorator,
     window_read_deadline,
     window_rows_cap,
 )
@@ -49,11 +47,6 @@ from testing.window_budget_fixtures import (
 from testing.window_rows_fixtures import group_window_rows, paged_search_results_table, run_timestamp, volume_keyword
 
 _EVENT: dict[str, Any] = {'httpMethod': 'GET', 'path': '/api/x', 'headers': {}}
-
-
-def _scope(count: int) -> ReportScope:
-    keywords = tuple(f'kw {index:03}' for index in range(count))
-    return ReportScope(kind='all', keywords=keywords, scope={'mode': 'all'}, label='All keywords')
 
 
 def stub_handler(event: dict[str, Any], context: Any, report_scope: ReportScope, **params: Any) -> dict[str, Any]:
@@ -114,50 +107,25 @@ def stub_keywords_handler(event: dict[str, Any], context: Any, keywords: list[st
     return {'keywords': keywords, 'params': params}
 
 
-def _optional(**query: Any) -> dict[str, Any] | None:
-    """Call a handler under ``optional_scope_keywords`` with the given query parameters."""
-    return optional_scope_keywords(MagicMock)(stub_keywords_handler)(_EVENT, None, **query)
+def stub_resolver(event: dict[str, Any], scope_params: dict[str, Any], table: Any) -> tuple[Any, dict[str, Any] | None]:
+    keyword = scope_params.get('keyword')
+    return ([keyword] if keyword else None), None
 
 
-def _rejection_field(response: dict[str, Any] | None) -> tuple[int, str]:
-    return present(response)['statusCode'], json.loads(present(response)['body'])['field']
+class TestScopeDecorator:
+    """Any resolver: the scope parameters leave the handler's params, the resolved value becomes its third argument."""
 
+    def test_hands_the_resolved_value_and_the_other_params_to_the_handler(self) -> None:
+        handler = scope_decorator(MagicMock, stub_resolver)(stub_keywords_handler)
 
-class TestOptionalScopeKeywords:
-    """Action Center and Prompt Insights: a scope narrows the keywords, no scope keeps the handler's default."""
-
-    def test_hands_the_scopes_keyword_texts_and_the_other_params_to_the_handler(self) -> None:
-        assert _optional(keyword='hotel coruna', group_id=None, use_llm=False) == {
-            'keywords': ['hotel coruna'], 'params': {'use_llm': False},
+        assert handler(_EVENT, None, keyword='hotel coruna', group_id=None, limit=20) == {
+            'keywords': ['hotel coruna'], 'params': {'limit': 20},
         }
 
-    def test_hands_none_without_a_scope_so_the_handler_applies_its_default(self) -> None:
-        assert _optional(keyword=None, group_id=None, limit=20) == {'keywords': None, 'params': {'limit': 20}}
+    def test_answers_the_resolvers_rejection_without_calling_the_handler(self) -> None:
+        handler = scope_decorator(MagicMock, lambda *_args: (None, {'statusCode': 400}))(stub_keywords_handler)
 
-    def test_answers_400_on_the_scope_field_for_contradictory_scopes_without_calling_the_handler(self) -> None:
-        assert _rejection_field(_optional(keyword='a', group_id='coruna')) == (400, 'scope')
-
-
-class TestCappedScope:
-    def test_keeps_every_keyword_under_the_cap(self) -> None:
-        keywords, fields = capped_scope(_scope(2))
-
-        assert (keywords, fields['keywords_truncated']) == (['kw 000', 'kw 001'], False)
-
-    def test_cuts_the_keywords_at_the_default_cap(self) -> None:
-        keywords, fields = capped_scope(_scope(SCOPE_KEYWORDS_CAP + 1))
-
-        assert (len(keywords), fields['keywords_truncated']) == (SCOPE_KEYWORDS_CAP, True)
-
-    def test_cuts_the_keywords_at_a_given_cap(self) -> None:
-        keywords, _fields = capped_scope(_scope(3), cap=2)
-
-        assert keywords == ['kw 000', 'kw 001']
-
-    def test_describes_the_whole_scope(self) -> None:
-        _keywords, fields = capped_scope(_scope(3), cap=2)
-
-        assert fields['scope'] == {'mode': 'all', 'kind': 'all', 'label': 'All keywords', 'keyword_count': 3}
+        assert handler(_EVENT, None, keyword='a') == {'statusCode': 400}
 
 
 class TestRowsPerKeyword:
@@ -175,11 +143,16 @@ class TestRowsPerKeyword:
 
 
 class TestWindowRowsCap:
-    def test_holds_the_worst_shaped_rows_in_three_quarters_of_a_512_mb_container(self) -> None:
-        assert window_rows_cap(512) == int((512 - BASELINE_MEMORY_MB) * 1024 * 0.75 // ROW_HEAP_KIB)
+    def test_holds_the_worst_shaped_rows_in_half_of_a_512_mb_container(self) -> None:
+        assert window_rows_cap(512) == int((512 - BASELINE_MEMORY_MB) * 1024 * 0.5 // ROW_HEAP_KIB)
 
     def test_grows_with_the_function_memory(self) -> None:
-        assert (window_rows_cap(512), window_rows_cap(1769)) == (15_902, 72_688)
+        assert (window_rows_cap(512), window_rows_cap(1280)) == (10_601, 33_731)
+
+    @pytest.mark.parametrize('memory_mb', [1024, 1280, 3008])
+    def test_a_full_window_peaks_under_60_percent_of_the_function_memory(self, memory_mb: int) -> None:
+        peak_mb = window_rows_cap(memory_mb) * 16.7 / 1024 + BASELINE_MEMORY_MB
+        assert peak_mb <= 0.6 * memory_mb
 
     def test_never_drops_below_the_minimum_in_a_small_container(self) -> None:
         assert window_rows_cap(128) == MIN_WINDOW_ROWS
@@ -344,17 +317,6 @@ class TestReadScopeKeywords:
             read = read_scope_keywords(['a', 'b'], str.upper, lambda _keyword: '')
 
         assert (read.keywords, read.skipped) == expected
-
-
-class TestScopeReadFields:
-    def test_flags_keywords_truncated_when_the_budget_left_keywords_unread(self) -> None:
-        assert scope_read_fields({'scope': {}, 'keywords_truncated': False}, ['a']) == {'scope': {}, 'keywords_truncated': True}
-
-    def test_keeps_the_caps_flag_when_every_keyword_was_read(self) -> None:
-        assert scope_read_fields({'scope': {}, 'keywords_truncated': True}, []) == {'scope': {}, 'keywords_truncated': True}
-
-    def test_leaves_keywords_truncated_false_when_nothing_was_cut(self) -> None:
-        assert scope_read_fields({'keywords_truncated': False}, ())['keywords_truncated'] is False
 
 
 def test_current_deadline_outside_a_request_is_never_cut_by_a_window_read() -> None:

@@ -10,12 +10,11 @@ import {
 import type { UsePromoteKeywords } from '../../../hooks/usePromoteKeywords';
 import { keywordSelectionKey } from '../../../hooks/keywordIdentity';
 import { Button } from '../../ui';
-import { useExportAction } from '../../ui/useExportAction';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import { Spinner } from '../../ui/Spinner';
 import {
   OTHER_DIMENSION_ID, dimensionLabel, orderedDimensionIds, runCatalog
 } from './agentBrief';
-import { exportAgentRun } from './agentExport';
 import { PromotionMarketSelect } from '../PromotionMarketSelect';
 
 interface AgentProposalProps {
@@ -97,19 +96,12 @@ export function AgentProposal({
     }
   };
 
-  const {
-    exporting, handleExport 
-  } = useExportAction(
-    () => exportAgentRun(job, keywords),
-    '[research-agent] Error exporting run:',
-  );
-
   if (keywords.length === 0) return null;
 
   return (
     <section className="bg-white rounded-lg border border-gray-200" aria-label="Proposed keywords">
       <div className="p-4 border-b border-gray-100 space-y-3">
-        <ProposalHeader job={job} keywordCount={keywords.length} exporting={exporting} onExport={() => void handleExport()} />
+        <ProposalHeader job={job} keywordCount={keywords.length} />
         <DestinationGroupRow
           jobId={job.id}
           groups={groups}
@@ -142,13 +134,11 @@ export function AgentProposal({
 interface ProposalHeaderProps {
   readonly job: KeywordResearchItem;
   readonly keywordCount: number;
-  readonly exporting: boolean;
-  readonly onExport: () => void;
 }
 
 /** How many keywords the agent proposes, out of how many candidates, and how it chose and scored them. */
 const ProposalHeader = ({
-  job, keywordCount, exporting, onExport
+  job, keywordCount
 }: ProposalHeaderProps) => (
   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
     <div>
@@ -167,9 +157,7 @@ const ProposalHeader = ({
         Tracking recommendations are a demand proxy based on relevance, intent, provider agreement and Google signals—not measured search volume.
       </p>
     </div>
-    <Button type="button" variant="secondary" size="sm" disabled={exporting} onClick={onExport}>
-      {exporting ? 'Exporting…' : 'Export to Excel'}
-    </Button>
+    <ExportAllButton view="keyword-research" params={{ id: job.id }} />
   </div>
 );
 

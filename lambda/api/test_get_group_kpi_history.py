@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.cursors import encode_offset_cursor
+from testing.kpi_scope_fixtures import snapshot_store
 from testing.search_results_fixtures import (
     PartitionReadFailure,
     active_keywords_table,
@@ -122,7 +123,7 @@ class TestGroupKpiHistoryRoute:
         assert _call({'group_id': 'sol', 'days': days})[1]['days'] == int(days)
 
     def test_answers_an_unexpected_failure_with_a_500(self):
-        with patch.object(_mod, 'group_kpi_history_from_runs', side_effect=PartitionReadFailure('boom')):
+        with patch.object(_mod, 'window_summary', side_effect=PartitionReadFailure('boom')):
             status, _ = _call({'group_id': 'sol'})
 
         assert status == 500
@@ -152,12 +153,20 @@ class TestSummaryRead:
         ]
         assert windows == [(('>=', '2026-09-01T00:00:00.000000Z'), False)] * 2
 
-    def test_caps_the_report_at_one_hundred_keywords(self):
-        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active', 'group_ids': {'big'}} for i in range(101)]
+    def test_reads_every_keyword_of_a_group_within_the_live_budget(self):
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active', 'group_ids': {'big'}} for i in range(100)]
 
         _, body = _call({'group_id': 'big'}, active=many)
 
-        assert (len(body['keywords']), body['keywords_truncated']) == (100, True)
+        assert (len(body['keywords']), body['keywords_truncated'], body['coverage']['complete']) == (100, False, True)
+
+    def test_serves_a_group_over_the_live_budget_from_its_snapshot(self):
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active', 'group_ids': {'big'}} for i in range(101)]
+
+        with snapshot_store(None) as job:
+            status, _body = _call({'group_id': 'big'}, active=many)
+
+        assert (status, job.call_args.args[0], job.call_args.args[1]['days']) == (202, 'group-kpis', 90)
 
 
 RUN_2 = '2026-09-27T06:00:00.000000Z'

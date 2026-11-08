@@ -6,20 +6,18 @@ import { useState } from 'react';
 import { integerText } from '../../ui/numberFormat';
 import { fetchLocalSerp } from '../../../api/seoLocal';
 import { useSeoRequest } from '../../../hooks/useKeywordExplorerRequest';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import type {
-  LocalDevice, LocalResultItem, LocalSearchType, LocalSerpResponse
+  LocalDevice, LocalResultItem, LocalSearchType, LocalSerpRequest, LocalSerpResponse
 } from '../../../types/api/seoLocal';
 import {
   IdentityFields, PointFields, SelectField, TextField
 } from './LocalSeoFields';
 import {
-  LocalForm, LocalCard, LocalExcelButton, LocalTable, RequestOutcome
+  LocalForm, LocalCard, LocalTable, RequestOutcome
 } from './LocalSeoLayout';
 import {
-  localResultsExport, localScopeLabel
-} from './localSeoExcel';
-import {
-  EMPTY_POINT, hasSearchPoint, pointFields, targetFields, type IdentityInput
+  EMPTY_POINT, hasSearchPoint, localExportParams, pointFields, targetFields, type IdentityInput
 } from './localSeoRequest';
 import {
   TargetTabHints, marketHasPoint, targetLabel, type LocalTabProps
@@ -108,12 +106,11 @@ export function LocalResultsTab({
     kind: 'name',
     value: '' 
   });
-  const [searched, setSearched] = useState('');
+  const [searched, setSearched] = useState<LocalSerpRequest | null>(null);
   const ready = keyword.trim() !== '' && hasSearchPoint(point, marketHasPoint(market));
 
   const search = () => {
-    setSearched(localScopeLabel([keyword], point, market.city));
-    void request.run({
+    const body: LocalSerpRequest = {
       keyword: keyword.trim(),
       search_type: searchType,
       device,
@@ -121,7 +118,9 @@ export function LocalResultsTab({
       ...market.marketField,
       ...pointFields(point),
       ...targetFields(target),
-    });
+    };
+    setSearched(body);
+    void request.run(body);
   };
 
   return (
@@ -144,7 +143,7 @@ export function LocalResultsTab({
           <LocalCard
             title={`Results for “${response.keyword}”`}
             cached={response.cached}
-            actions={<LocalExcelButton table={localResultsExport(response, searched)} />}
+            actions={<ExportAllButton view="seo-local" params={response.items.length > 0 && searched !== null ? localExportParams('Local results', searched) : null} />}
           >
             <MatchLine response={response} />
             <ResultsTable response={response} />

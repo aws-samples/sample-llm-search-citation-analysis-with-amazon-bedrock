@@ -15,12 +15,15 @@ import { renderWithMarketSelection } from '../Markets/markets-fixtures';
 
 vi.mock('../../hooks/useAlerts', () => ({ useOpenAlerts: vi.fn() }));
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
+vi.mock('../../hooks/useAlertList', () => ({ useAlertList: vi.fn() }));
 
 import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
+import { useAlertList } from '../../hooks/useAlertList';
 
 const mockUseOpenAlerts = vi.mocked(useOpenAlerts);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
+const mockUseAlertList = vi.mocked(useAlertList);
 
 beforeEach(() => {
   mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult());
@@ -197,9 +200,18 @@ describe('AlertsPanel preview', () => {
   });
 
   it.each([
-    ['lists every open alert after "Show all" is pressed', ['Show all 20 alerts'], 20],
-    ['goes back to the newest five when the list is collapsed again', ['Show all 20 alerts', 'Show the newest 5'], 5],
+    ['lists the full alerts list after "See all alerts" is pressed', ['See all alerts'], 120],
+    ['goes back to the newest five when the list is collapsed again', ['See all alerts', 'Show the newest 5'], 5],
   ])('%s', async (_name, buttons, rows) => {
+    mockUseAlertList.mockReturnValue({
+      items: buildOpenAlertsOfRuns(120).items,
+      total: 340,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      markAcknowledged: vi.fn(),
+    });
     renderOpenAlerts(20);
 
     for (const name of buttons) {
@@ -209,9 +221,26 @@ describe('AlertsPanel preview', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(rows);
   });
 
-  it('offers no "Show all" when five or fewer alerts are open', () => {
+  it('says how many alerts of the status the full list shows', async () => {
+    mockUseAlertList.mockReturnValue({
+      items: buildOpenAlertsOfRuns(100).items,
+      total: 340,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      markAcknowledged: vi.fn(),
+    });
+    renderOpenAlerts(20);
+
+    await userEvent.click(screen.getByRole('button', { name: 'See all alerts' }));
+
+    expect(screen.getByText('Showing 100 of 340 alerts')).toBeInTheDocument();
+  });
+
+  it('offers no "See all alerts" when five or fewer alerts are open', () => {
     renderOpenAlerts(5);
 
-    expect(screen.queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'See all alerts' })).not.toBeInTheDocument();
   });
 });

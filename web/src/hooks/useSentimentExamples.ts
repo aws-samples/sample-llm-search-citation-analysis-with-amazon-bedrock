@@ -36,11 +36,13 @@ const sentimentExamplesEndpoint = {
  */
 export function useSentimentExamples() {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(sentimentExamplesEndpoint);
   const fetchSentimentExamples = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

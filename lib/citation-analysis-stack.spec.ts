@@ -138,12 +138,15 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   healthCheckMemorySize: number;
   statsInsightsMemorySize: number;
   citationsContentMemorySize: number;
+  manageBrandConfigMemorySize: number;
+  /** MemorySize of the API functions resized in 2.45.0 (beyond the ones above), by function name. */
+  resizedApiMemorySizes: Record<string, number>;
   bucketDeploymentMemorySizes: number[];
   gatewayResponses: GatewayResponseSnapshot[];
   schedulesMethods: ApiGatewayMethodSnapshot[];
   scheduleIdMethods: ApiGatewayMethodSnapshot[];
   scheduleRunMethods: ApiGatewayMethodSnapshot[];
-  configMgmtFunctionId: string;
+  configMgmtFunctionName: string;
   configMgmtEnvVars: Record<string, unknown>;
   configMgmtStateMachineActions: string[];
   scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
@@ -151,7 +154,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   nonCanonicalTableEnvNames: string[];
   keywordMgmtEnvVars: Record<string, unknown>;
   executionMgmtEnvVars: Record<string, unknown>;
-  keywordMgmtFunctionId: string;
+  keywordMgmtFunctionName: string;
   promoteMethods: ApiGatewayMethodSnapshot[];
   keywordIdMethods: ApiGatewayMethodSnapshot[];
   keywordGroupsMethods: ApiGatewayMethodSnapshot[];
@@ -181,7 +184,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   accessLogsLifecycle: BucketLifecycleSnapshot;
   searchRoleProviderConfigActions: string[];
   sentimentExamplesMethods: ApiGatewayMethodSnapshot[];
-  statsInsightsFunctionId: string;
+  statsInsightsFunctionName: string;
   workflowScale: WorkflowScaleSnapshot;
   providerSearch: ProviderSearchSnapshot;
   customReports: CustomReportsSnapshot;
@@ -208,12 +211,14 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   healthCheckMemorySize: Number.NaN,
   statsInsightsMemorySize: Number.NaN,
   citationsContentMemorySize: Number.NaN,
+  manageBrandConfigMemorySize: Number.NaN,
+  resizedApiMemorySizes: {},
   bucketDeploymentMemorySizes: [],
   gatewayResponses: [],
   schedulesMethods: [],
   scheduleIdMethods: [],
   scheduleRunMethods: [],
-  configMgmtFunctionId: '',
+  configMgmtFunctionName: '',
   configMgmtEnvVars: {},
   configMgmtStateMachineActions: [],
   scopedReadFunctionEnvVars: {},
@@ -227,7 +232,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   nonCanonicalTableEnvNames: [],
   keywordMgmtEnvVars: {},
   executionMgmtEnvVars: {},
-  keywordMgmtFunctionId: '',
+  keywordMgmtFunctionName: '',
   promoteMethods: [],
   keywordIdMethods: [],
   keywordGroupsMethods: [],
@@ -260,7 +265,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   accessLogsLifecycle: { transitions: [], expirationDays: [] },
   searchRoleProviderConfigActions: [],
   sentimentExamplesMethods: [],
-  statsInsightsFunctionId: '',
+  statsInsightsFunctionName: '',
   workflowScale: EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   providerSearch: EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   customReports: EMPTY_CUSTOM_REPORTS_SNAPSHOT,
@@ -282,6 +287,7 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-ReportInsights',
   '/aws/lambda/CitationAnalysis-ResearchWorker',
   '/aws/lambda/CitationAnalysis-ContentStudioWorker',
+  '/aws/lambda/CitationAnalysis-ExportWorker',
 ];
 
 const WORKFLOW_STATE_MACHINE = 'CitationAnalysis-Workflow';
@@ -336,7 +342,7 @@ beforeAll(() => {
   synthesized.nonCanonicalTableEnvNames = nonCanonicalTableEnvNames(template);
   synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
-  synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
+  synthesized.keywordMgmtFunctionName = KEYWORD_MGMT_FUNCTION_NAME;
 
   const keywordsId = findApiResourceId(apiTemplate, 'keywords');
   const promoteId = findApiResourceId(apiTemplate, 'promote', keywordsId);
@@ -369,6 +375,13 @@ beforeAll(() => {
   synthesized.healthCheckMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-Health');
   synthesized.statsInsightsMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-StatsInsights');
   synthesized.citationsContentMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-CitationsContent');
+  synthesized.manageBrandConfigMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-ManageBrandConfig');
+  synthesized.resizedApiMemorySizes = Object.fromEntries([
+    'CitationAnalysis-API-GetBrandMentions',
+    'CitationAnalysis-API-ConfigMgmt',
+    'CitationAnalysis-API-ExecutionMgmt',
+    'CitationAnalysis-API-GetPersonaRankings',
+  ].map((name) => [name, extractFunctionMemorySize(template, name)]));
   synthesized.bucketDeploymentMemorySizes = extractMemorySizesByLogicalIdPrefix(template, 'CustomCDKBucketDeployment');
   synthesized.gatewayResponses = Object.values(
     apiTemplate.findResources('AWS::ApiGateway::GatewayResponse')
@@ -384,7 +397,7 @@ beforeAll(() => {
   synthesized.schedulesMethods = extractApiMethods(apiTemplate, schedulesId);
   synthesized.scheduleIdMethods = extractApiMethods(apiTemplate, scheduleId);
   synthesized.scheduleRunMethods = extractApiMethods(apiTemplate, scheduleRunId);
-  synthesized.configMgmtFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+  synthesized.configMgmtFunctionName = CONFIG_MGMT_FUNCTION_NAME;
   synthesized.configMgmtEnvVars = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
   synthesized.configMgmtStateMachineActions = extractFunctionRoleActionsOn(
     template, CONFIG_MGMT_FUNCTION_NAME, findStateMachineLogicalId(template, WORKFLOW_STATE_MACHINE)
@@ -449,7 +462,7 @@ beforeAll(() => {
   synthesized.sentimentExamplesMethods = extractApiMethods(
     apiTemplate, findApiResourceId(apiTemplate, 'sentiment-examples', visibilityId)
   );
-  synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
+  synthesized.statsInsightsFunctionName = 'CitationAnalysis-API-StatsInsights';
   synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
   synthesized.providerSearch = extractProviderSearchSnapshot(template);
   synthesized.customReports = extractCustomReportsSnapshot(template, apiTemplate);
@@ -819,14 +832,14 @@ describe('Keyword-scale analysis workflow', () => {
     expect(extractDefinitionTimeoutSeconds(synthesized.definitionRaw)).toBe(SEVEN_DAYS_IN_MINUTES * 60);
   });
 
-  it('sizes GenerateSummary for thousands of keyword results and the citation rollup build', () => {
+  it('sizes GenerateSummary at 1769 MB and 900 s for thousands of keyword results, larger builds going to the build worker', () => {
     expect([synthesized.workflowScale.generateSummaryMemorySize, synthesized.workflowScale.generateSummaryTimeoutSeconds])
-      .toStrictEqual([3008, 900]);
+      .toStrictEqual([1769, 900]);
   });
 });
 
 describe('Keywords bucket run-scratch lifecycle', () => {
-  it('expires runs/ objects and abandoned uploads under runs/, and spilled API responses after a day', () => {
+  it('expires runs/ objects and abandoned uploads under runs/, spilled API responses after a day, view jobs and exports after a week', () => {
     expect(synthesized.workflowScale.keywordsBucketRules).toStrictEqual([{
       Id: 'ExpireRunScratch',
       Status: 'Enabled',
@@ -838,6 +851,18 @@ describe('Keywords bucket run-scratch lifecycle', () => {
       Status: 'Enabled',
       Prefix: 'api-responses/',
       ExpirationInDays: 1,
+    }, {
+      Id: 'ExpireScopeSnapshotJobs',
+      Status: 'Enabled',
+      Prefix: 'scope-snapshots/jobs/',
+      ExpirationInDays: 7,
+      AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+    }, {
+      Id: 'ExpireExports',
+      Status: 'Enabled',
+      Prefix: 'exports/',
+      ExpirationInDays: 7,
+      AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
     }]);
   });
 });
@@ -1263,8 +1288,9 @@ describe('Lambda memory headroom (2.5.0 audit)', () => {
    * 14-day CloudWatch REPORT peaks on 2026-09-18: every function sat below
    * 60% of its memory except these two, which are raised here.
    */
-  it('gives the health check the same 256 MB as the other API functions', () => {
-    expect(synthesized.healthCheckMemorySize).toBe(256);
+  /** 2.45.0 owner decision (2026-11-07): 512 MB, the floor of every API function. */
+  it('gives the health check 512 MB', () => {
+    expect(synthesized.healthCheckMemorySize).toBe(512);
   });
 
   it('gives the dashboard bucket deployment handler 512 MB', () => {
@@ -1272,12 +1298,37 @@ describe('Lambda memory headroom (2.5.0 audit)', () => {
   });
 
   /**
-   * 2.42.0: sized for CPU, not peak memory. An unscoped /citations read on a
-   * customer's 71k-row table used 224 MB of 512 MB and still timed out at
-   * 29 s; CPU is allocated in proportion to memory, 1769 MB = one vCPU.
+   * 2.42.0: sized for CPU, not peak memory (an unscoped /citations read used
+   * 224 MB of 512 MB and still timed out at 29 s). 2.45.0: Power Tuning chose
+   * 1280 MB; the owner kept one vCPU (1769 MB, 2026-11-07) for headroom.
    */
-  it('gives CitationsContent one vCPU because its reads are CPU-bound', () => {
+  it('gives CitationsContent one vCPU (1769 MB) for its CPU-bound reads', () => {
     expect(synthesized.citationsContentMemorySize).toBe(1769);
+  });
+
+  /** 2.45.0: /brand-mentions reads up to 100 keywords' latest runs per request; owner decision (2026-11-07): one vCPU. */
+  it('gives GetBrandMentions one vCPU (1769 MB)', () => {
+    expect(synthesized.resizedApiMemorySizes['CitationAnalysis-API-GetBrandMentions']).toBe(1769);
+  });
+
+  /** 2.45.0: the 30-day audit peaked at 48% of 256 MB; owner decision (2026-11-07): 1024 MB for short cold starts and model checks. */
+  it('gives ConfigMgmt 1024 MB', () => {
+    expect(synthesized.resizedApiMemorySizes['CitationAnalysis-API-ConfigMgmt']).toBe(1024);
+  });
+
+  /** 2.45.0 30-day CloudWatch REPORT audit: 41% of memory at 256 MB; owner decision (2026-11-07): 1024 MB. */
+  it('gives ExecutionMgmt 1024 MB', () => {
+    expect(synthesized.resizedApiMemorySizes['CitationAnalysis-API-ExecutionMgmt']).toBe(1024);
+  });
+
+  /** 2.45.0: Power Tuning chose 512 MB; owner decision (2026-11-07): 1024 MB. */
+  it('gives GetPersonaRankings 1024 MB', () => {
+    expect(synthesized.resizedApiMemorySizes['CitationAnalysis-API-GetPersonaRankings']).toBe(1024);
+  });
+
+  /** 2.45.0 performance review: a 26.4 s invocation at 256 MB (0.14 vCPU) came 3 s from the gateway's 29 s; owner decision: 1024 MB. */
+  it('gives ManageBrandConfig 1024 MB so its slowest request keeps clear of the gateway timeout', () => {
+    expect(synthesized.manageBrandConfigMemorySize).toBe(1024);
   });
 });
 
@@ -1288,7 +1339,7 @@ describe('Schedule routes (Schedules v2)', () => {
    */
   it('exposes GET and POST on the collection through the ConfigMgmt function', () => {
     expect(sortedHttpMethods(synthesized.schedulesMethods)).toStrictEqual(['GET', 'POST']);
-    expect(synthesized.schedulesMethods.every((method) => method.integrationUri.includes(synthesized.configMgmtFunctionId))).toBe(true);
+    expect(synthesized.schedulesMethods.every((method) => method.integrationUri.includes(synthesized.configMgmtFunctionName))).toBe(true);
   });
 
   it('exposes GET, PUT and DELETE on the schedule id resource', () => {
@@ -1347,7 +1398,7 @@ describe('Keyword promotion route', () => {
     expect(synthesized.promoteMethods).toHaveLength(1);
     expect(synthesized.promoteMethods[0]?.httpMethod).toBe('POST');
     expect(synthesized.promoteMethods[0]?.integrationType).toBe('AWS_PROXY');
-    expect(synthesized.promoteMethods[0]?.integrationUri).toContain(synthesized.keywordMgmtFunctionId);
+    expect(synthesized.promoteMethods[0]?.integrationUri).toContain(synthesized.keywordMgmtFunctionName);
   });
 
   it('requires the shared Cognito authorizer', () => {
@@ -1378,7 +1429,7 @@ describe('Keyword groups', () => {
 
   it('exposes GET and POST on the collection through the KeywordMgmt function', () => {
     expect(sortedHttpMethods(synthesized.keywordGroupsMethods)).toStrictEqual(['GET', 'POST']);
-    expect(synthesized.keywordGroupsMethods.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+    expect(synthesized.keywordGroupsMethods.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionName))).toBe(true);
   });
 
   it('exposes PUT and DELETE on the group id resource', () => {
@@ -1449,7 +1500,7 @@ describe('Cognito-guarded route families', () => {
       family: 'keyword research job',
       routes: () => [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods],
       verbCount: 3,
-      functionId: () => synthesized.keywordMgmtFunctionId,
+      functionId: () => synthesized.keywordMgmtFunctionName,
     },
     {
       family: 'research agent',
@@ -1459,13 +1510,13 @@ describe('Cognito-guarded route families', () => {
         ...synthesized.researchTemplateIdMethods,
       ],
       verbCount: 5,
-      functionId: () => synthesized.keywordMgmtFunctionId,
+      functionId: () => synthesized.keywordMgmtFunctionName,
     },
     {
       family: 'schedule',
       routes: () => [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods],
       verbCount: 6,
-      functionId: () => synthesized.configMgmtFunctionId,
+      functionId: () => synthesized.configMgmtFunctionName,
     },
     {
       family: 'keyword-group',
@@ -1475,19 +1526,19 @@ describe('Cognito-guarded route families', () => {
         ...synthesized.keywordGroupMembersMethods,
       ],
       verbCount: 5,
-      functionId: () => synthesized.keywordMgmtFunctionId,
+      functionId: () => synthesized.keywordMgmtFunctionName,
     },
     {
       family: 'custom report',
       routes: () => [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods],
       verbCount: 4,
-      functionId: () => synthesized.customReports.configMgmtFunctionLogicalId,
+      functionId: () => synthesized.customReports.configMgmtFunctionName,
     },
     {
       family: 'sentiment examples',
       routes: () => synthesized.sentimentExamplesMethods,
       verbCount: 1,
-      functionId: () => synthesized.statsInsightsFunctionId,
+      functionId: () => synthesized.statsInsightsFunctionName,
     },
   ])('puts every $family verb behind the Cognito authorizer on its API function', ({ routes, verbCount, functionId }) => {
     expect(routes()).toHaveLength(verbCount);
@@ -1911,10 +1962,24 @@ describe('KPI alert backend infrastructure', () => {
       .toContain('alias/aws/sns');
   });
 
+  /** 2.45.0 review F3; the alarm itself is specified in `constructs/kpi-write-failure-alarm.spec.ts`. */
+  it('relays the KPI write-failure alarm to this topic', () => {
+    expect(Object.keys(template.findResources('AWS::CloudWatch::Alarm', {
+      Properties: { AlarmName: 'CitationAnalysis-KeywordRunKpisWriteFailure' },
+    }))).toHaveLength(1);
+    expect(extractLambdaEnvVars(template, 'CitationAnalysis-KpiWriteFailureRelay'))
+      .toStrictEqual({ KPI_ALERTS_TOPIC_ARN: { Ref: alertTopicId } });
+  });
+
   it('configures the KPI worker for Python with the shared layer and bounded runtime', () => {
     expect(extractFunctionTimeout(template, 'CitationAnalysis-KpiAlerts')).toBe(300);
-    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(1769);
     expect(extractLambdaLayerRefs(template, 'CitationAnalysis-KpiAlerts')).toHaveLength(1);
+  });
+
+  /** 2.45.0: KeywordRunKpis rows (BatchGetItem) replace most raw-answer deserialization; 30-day audit below 60% of peak memory. */
+  /** Owner decision (2026-11-07): one vCPU; it reads per-keyword KPI rows, and both runs' answers for the comparison. */
+  it('gives the KPI worker one vCPU (1769 MB)', () => {
+    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(1769);
   });
 
   it('hands every source and durable resource identifier to the KPI worker', () => {
@@ -1925,6 +1990,7 @@ describe('KPI alert backend infrastructure', () => {
       'DYNAMODB_TABLE_BRAND_CONFIG',
       'DYNAMODB_TABLE_CONTENT_CHANGES',
       'DYNAMODB_TABLE_KEYWORD_GROUPS',
+      'DYNAMODB_TABLE_KEYWORD_RUN_KPIS',
       'DYNAMODB_TABLE_KEYWORDS',
       'DYNAMODB_TABLE_KPI_ALERTS',
       'DYNAMODB_TABLE_KPI_SNAPSHOTS',
@@ -2064,10 +2130,9 @@ describe('KPI alert backend infrastructure', () => {
       findApiResourceId(apiTemplate, 'content-changes', alertsId),
     ];
     const methods = routeIds.flatMap((resourceId) => extractApiMethods(apiTemplate, resourceId));
-    const configFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
 
     expect(methods).toHaveLength(7);
-    expect(methods.every((method) => method.integrationUri.includes(configFunctionId))).toBe(true);
+    expect(methods.every((method) => method.integrationUri.includes(CONFIG_MGMT_FUNCTION_NAME))).toBe(true);
   });
 
   it('passes execution id whole input and generated report to the alert task', () => {
@@ -2127,7 +2192,8 @@ describe('Citation Gaps gateway failure visibility', () => {
     expect(JSON.stringify(failureHeaders)).not.toContain("'*'");
   });
 
-  it('gives StatsInsights one vCPU because its KPI views are CPU-bound', () => {
+  /** 2.45.0: Power Tuning chose 1024 MB for /visibility and 768 MB for /trends; large scopes come from snapshots, 1280 MB keeps margin for live ones. */
+  it('gives StatsInsights one vCPU (1769 MB, owner decision 2026-11-07) for live scopes up to the live row budget', () => {
     expect(synthesized.statsInsightsMemorySize).toBe(1769);
   });
 });
@@ -2220,7 +2286,7 @@ describe('Content Studio scopes batches and saved templates', () => {
   it('authenticates every route and integrates the existing Content Studio Lambda', () => {
     expect(snapshot.routes.every((route) => route.authorizationType === COGNITO_AUTH)).toBe(true);
     expect(snapshot.routes.every((route) => route.authorizerId !== '')).toBe(true);
-    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
+    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionName))).toBe(true);
   });
 
   it('caps the API at the gateway integration timeout', () => {
@@ -2300,8 +2366,12 @@ describe('Content Studio scopes batches and saved templates', () => {
   it('gives worker and API the same Content Studio environment contract', () => {
     const expectedWorkerEnvironment = { ...snapshot.environment };
     delete expectedWorkerEnvironment.CORS_ORIGIN_PARAM;
-    // The worker answers no HTTP request, so it never spills a response.
+    // The worker answers no HTTP request, so it never spills a response
+    // nor serves a scoped view from the scope snapshots.
     delete expectedWorkerEnvironment.API_RESPONSE_BUCKET;
+    delete expectedWorkerEnvironment.SCOPE_SNAPSHOT_BUCKET;
+    delete expectedWorkerEnvironment.SCOPE_SNAPSHOT_FUNCTION_NAME;
+    delete expectedWorkerEnvironment.DYNAMODB_TABLE_QUERY_PROMPTS;
 
     expect(snapshot.workerEnvironment).toStrictEqual(expectedWorkerEnvironment);
     expect(snapshot.environment.CONTENT_STUDIO_WORKER_FUNCTION_NAME).toBe(
@@ -2377,14 +2447,15 @@ describe('Content Studio scopes batches and saved templates', () => {
     expect(snapshot.apiRoleActions).not.toContain('bedrock:InvokeModel');
   });
 
-  it('lets only the worker invoke a Lambda, and only itself', () => {
+  it('lets the API invoke only the scope snapshot builder, and the worker only itself', () => {
     const workerArn = regionalArnJoin('lambda', 'function:CitationAnalysis-ContentStudioWorker');
+    const builderId = findLambdaLogicalId(contentStudioStacks.mainTemplate, 'CitationAnalysis-GenerateSummary');
 
     expect({
       api: snapshot.apiInvokeStatements,
       worker: snapshot.workerInvokeStatements,
     }).toStrictEqual({
-      api: [],
+      api: [{ actions: ['lambda:InvokeFunction'], resources: [{ 'Fn::GetAtt': [builderId, 'Arn'] }] }],
       worker: [{
         actions: ['lambda:InvokeFunction'],
         resources: [workerArn],
@@ -2393,8 +2464,8 @@ describe('Content Studio scopes batches and saved templates', () => {
   });
 
   it('keeps every Cognito route integrated with the API function only', () => {
-    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
-    expect(snapshot.routes.every((route) => !route.integrationUri.includes(snapshot.workerFunctionLogicalId))).toBe(true);
+    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionName))).toBe(true);
+    expect(snapshot.routes.every((route) => !route.integrationUri.includes(snapshot.workerFunctionName))).toBe(true);
   });
 });
 
@@ -2563,9 +2634,29 @@ describe('Report insights narrative', () => {
   const snapshot = extractReportInsightsSnapshot(reportStacks.mainTemplate, reportStacks.apiTemplate);
   const state = (name: string): unknown => resolvePath(snapshot.states, [name]);
 
-  it('decides on GenerateInsights after KpiAlerts on both of its branches', () => {
-    expect(resolvePath(state('KpiAlerts'), ['Next'])).toBe('HasCompleteGroups');
-    expect(resolvePath(state('KpiAlertsFailed'), ['Next'])).toBe('HasCompleteGroups');
+  it('builds the scope snapshots after KpiAlerts on both of its branches', () => {
+    expect([resolvePath(state('KpiAlerts'), ['Next']), resolvePath(state('KpiAlertsFailed'), ['Next'])])
+      .toStrictEqual(['BuildScopeSnapshots', 'BuildScopeSnapshots']);
+  });
+
+  it('decides on GenerateInsights after the scope snapshot build, built or failed', () => {
+    expect([resolvePath(state('BuildScopeSnapshots'), ['Next']), resolvePath(state('BuildScopeSnapshotsFailed'), ['Next'])])
+      .toStrictEqual(['HasCompleteGroups', 'HasCompleteGroups']);
+  });
+
+  it('asks GenerateSummary for the scope snapshot build and keeps its result under scope_snapshots', () => {
+    expect(resolvePath(state('BuildScopeSnapshots'), ['Parameters'])).toStrictEqual({
+      action: 'build_scope_snapshots',
+      'execution_id.$': '$$.Execution.Name',
+    });
+    expect(resolvePath(state('BuildScopeSnapshots'), ['ResultPath'])).toBe('$.scope_snapshots');
+  });
+
+  it('keeps the report when the scope snapshot build fails', () => {
+    expect(resolvePath(state('BuildScopeSnapshots'), ['Catch'])).toStrictEqual([
+      { ErrorEquals: ['States.ALL'], ResultPath: null, Next: 'BuildScopeSnapshotsFailed' },
+    ]);
+    expect(resolvePath(state('BuildScopeSnapshotsFailed'), ['ResultPath'])).toBe('$.scope_snapshots');
   });
 
   it('runs GenerateInsights only when KpiAlerts named the groups it snapshotted', () => {
@@ -2640,7 +2731,8 @@ describe('Report insights narrative', () => {
     expect(snapshot.table.timeToLive).toStrictEqual({ AttributeName: 'ttl', Enabled: true });
   });
 
-  it('gives the worker 300 seconds and one vCPU per group on the shared layer', () => {
+  /** 2.45.0: one group per invocation with its window read from rollups, so 1280 MB instead of one vCPU's 1769. */
+  it('gives the worker 300 seconds and one vCPU (1769 MB) per group, on the shared layer', () => {
     expect([snapshot.workerTimeoutSeconds, snapshot.workerMemorySize]).toStrictEqual([300, 1769]);
     expect(snapshot.workerLayerCount).toBe(1);
   });
@@ -2651,6 +2743,7 @@ describe('Report insights narrative', () => {
       'DYNAMODB_TABLE_KEYWORD_RUN_KPIS',
       'DYNAMODB_TABLE_KEYWORDS',
       'DYNAMODB_TABLE_PROVIDER_CONFIG',
+      'DYNAMODB_TABLE_QUERY_PROMPTS',
       'DYNAMODB_TABLE_REPORT_INSIGHTS',
       'DYNAMODB_TABLE_SEARCH_RESULTS',
     ]);
@@ -2667,6 +2760,7 @@ describe('Report insights narrative', () => {
       'CitationAnalysis-BrandConfig': read,
       'CitationAnalysis-ReportInsights': ['dynamodb:PutItem'],
       'CitationAnalysis-KeywordRunKpis': ['dynamodb:Query'],
+      'CitationAnalysis-QueryPrompts': ['dynamodb:Query'],
     });
   });
 
@@ -2674,8 +2768,10 @@ describe('Report insights narrative', () => {
     expect(snapshot.deduplicationKeywordRunKpisActions).toStrictEqual(['dynamodb:PutItem', 'dynamodb:Query']);
   });
 
-  it('lets the worker invoke Bedrock models and nothing outside DynamoDB and Bedrock', () => {
-    expect(snapshot.workerActions.filter((action) => !action.startsWith('dynamodb:'))).toStrictEqual(['bedrock:InvokeModel']);
+  it('lets the worker invoke Bedrock models and, outside DynamoDB, only read the scope snapshots, request a rebuild and start view jobs', () => {
+    expect(snapshot.workerActions.filter((action) => !action.startsWith('dynamodb:'))).toStrictEqual([
+      'bedrock:InvokeModel', 'lambda:InvokeFunction', 's3:DeleteObject', 's3:GetObject', 's3:PutObject',
+    ]);
   });
 
   it('lets StatsInsights read stored narratives without writing them', () => {
@@ -2690,7 +2786,7 @@ describe('Report insights narrative', () => {
 
   it('routes POST regenerate to StatsInsights behind the Cognito authorizer', () => {
     expect(sortedHttpMethods(snapshot.regenerateMethods)).toStrictEqual(['POST']);
-    expect(unguardedVerbs(snapshot.regenerateMethods, snapshot.statsInsightsFunctionLogicalId)).toStrictEqual(FULLY_GUARDED);
+    expect(unguardedVerbs(snapshot.regenerateMethods, snapshot.statsInsightsFunctionName)).toStrictEqual(FULLY_GUARDED);
   });
 });
 

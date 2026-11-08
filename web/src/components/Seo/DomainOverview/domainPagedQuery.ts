@@ -1,9 +1,9 @@
 /**
  * The query of a paged Domain Overview list (ranked keywords, top pages):
  * the page, its size, the sort and the filter form, and the request it makes
- * (a page, or an export chunk of the same sorted, filtered list).
+ * (a page), and the export params of the same sorted, filtered list.
  */
-import type { ExportChunk } from '../../../exporters/paidExport';
+import type { ViewParams } from '../../../api/exports';
 import type {
   DomainPageSize, DomainTargetRequest, SortOrder
 } from '../../../types/api/seoDomains';
@@ -43,9 +43,6 @@ export interface PagedRequest<TSort extends string, TFilters> extends ListReques
   page_size: DomainPageSize;
 }
 
-/** An export chunk of the list: `limit` rows from `offset` instead of a page. */
-export interface PagedExportRequest<TSort extends string, TFilters> extends ListRequest<TSort, TFilters>, ExportChunk {}
-
 function listRequest<TSort extends string, TFilters>(
   target: DomainTargetRequest, query: PagedQuery<TSort>, toFilters: (form: FilterForm) => TFilters,
 ): ListRequest<TSort, TFilters> {
@@ -70,14 +67,14 @@ export function pagedRequest<TSort extends string, TFilters>(
   };
 }
 
-/** The request of `chunk` of the list `query` shows on `target` (same sort, filters and search). */
-export function exportChunkRequest<TSort extends string, TFilters>(
-  target: DomainTargetRequest, query: PagedQuery<TSort>, toFilters: (form: FilterForm) => TFilters, chunk: ExportChunk,
-): PagedExportRequest<TSort, TFilters> {
+/** The server export params of the list `query` shows on `target`: same sort, search and filters (as JSON), no page. */
+export function exportListParams<TSort extends string, TFilters>(
+  target: DomainTargetRequest, query: PagedQuery<TSort>, toFilters: (form: FilterForm) => TFilters,
+): ViewParams {
+  const request = listRequest(target, query, toFilters);
   return {
-    ...listRequest(target, query, toFilters),
-    offset: chunk.offset,
-    limit: chunk.limit,
+    ...request,
+    filters: JSON.stringify(request.filters),
   };
 }
 

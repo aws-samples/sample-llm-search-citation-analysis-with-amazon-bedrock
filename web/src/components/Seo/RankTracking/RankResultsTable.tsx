@@ -3,7 +3,7 @@ import type {
 } from '../../../types/api/seoRankTracking';
 import { Button } from '../../ui/Button';
 import {
-  featureLabels, positionDisplay, sortByPosition, type PositionTone
+  featureLabels, positionDisplay, type PositionTone
 } from './rankTrackingFormat';
 
 const TONE_CLASSES: Readonly<Record<PositionTone, string>> = {
@@ -79,11 +79,10 @@ interface Props {
   readonly onRemoveKeyword?: (row: RankResultRow) => void;
 }
 
-/** Latest position per device with its change since the comparison check; misses sort last. */
+/** Latest position per device with its change since the comparison check, in the route's order (misses last). */
 export function RankResultsTable({
   rows, devices, selectedKeywordId, onSelectKeyword, onRemoveKeyword
 }: Props) {
-  const sorted = sortByPosition(rows, devices[0] ?? 'desktop');
   return (
     <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -98,7 +97,7 @@ export function RankResultsTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-          {sorted.map((row) => {
+          {rows.map((row) => {
             const newest = newestCell(row, devices);
             return (
               <tr key={row.keyword_id} className={row.keyword_id === selectedKeywordId ? 'bg-gray-50 dark:bg-gray-700/40' : ''}>

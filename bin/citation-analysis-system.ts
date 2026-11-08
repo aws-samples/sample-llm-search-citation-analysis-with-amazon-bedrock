@@ -39,13 +39,14 @@ const seoStack = new CitationAnalysisSeoStack(app, 'CitationAnalysisSeoStack', {
 seoStack.node.addDependency(stack);
 
 // The dashboard REST API has its own stack: its ~300 API Gateway resources
-// took the main stack to CloudFormation's 500-resource limit. It imports the
-// main stack's API Lambdas, user pool, web bucket and distribution, so it is
-// deployed after it; `cdk deploy --all` deploys all stacks in that order.
+// took the main stack to CloudFormation's 500-resource limit. It takes no
+// cross-stack reference from the main stack (function ARNs from fixed names,
+// the user pool, distribution and origin from SSM parameters the main stack
+// writes), so this dependency is what makes `cdk deploy --all` deploy the
+// main stack first. lib/api-stack.spec.ts checks it is here.
 const apiStack = new CitationAnalysisApiStack(app, 'CitationAnalysisApiStack', {
   env,
   description: 'Citation Analysis System - dashboard REST API',
-  inputs: stack.apiInputs,
 });
 apiStack.node.addDependency(stack);
 

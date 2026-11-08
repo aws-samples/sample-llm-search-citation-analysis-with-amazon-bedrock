@@ -101,6 +101,17 @@ class TestQueryStoredRuns:
 
         assert ([run.timestamp for run in stored.runs], stored.cut) == ([run_timestamp(3)], run_timestamp(2))
 
+    def test_keeps_only_the_newest_runs_up_to_the_limit(self):
+        stored = query_stored_runs(rollup_table(rollup_items(_ROWS), page_size=3), _KEYWORD, '', limit=2, deadline=Deadline(60))
+
+        assert [run.timestamp for run in stored.runs] == [run_timestamp(2), run_timestamp(3)]
+
+    def test_stops_querying_once_the_limit_is_read(self):
+        table = rollup_table(rollup_items(_ROWS), page_size=1)
+        query_stored_runs(table, _KEYWORD, '', limit=2, deadline=Deadline(60))
+
+        assert table.query.call_count == 2
+
     def test_leaves_the_brand_counts_unread_when_asked(self):
         stored = query_stored_runs(rollup_table(rollup_items(_ROWS)), _KEYWORD, _START, brands=False, deadline=Deadline(60))
 

@@ -32,6 +32,7 @@ import { RankTrackerScheduleList } from './RankTrackerScheduleList';
 import {
   PaidScheduleConfirm, type PaidConfirmation
 } from './PaidScheduleConfirm';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 interface ScheduleManagerProps {
   schedules: Schedule[];
@@ -219,6 +220,7 @@ export const ScheduleManager = ({
   return (
     <div className="bg-white rounded-lg border border-gray-200">
       <ScheduleHeader showForm={editor !== null} onNew={openCreate} onCancel={closeEditor} isAdmin={isAdmin} adminLoading={adminLoading} />
+      <div className="flex justify-end px-6 pt-4"><ConfigListExport list="schedules" /></div>
 
       {isAdmin && editor !== null && (
         <ScheduleForm

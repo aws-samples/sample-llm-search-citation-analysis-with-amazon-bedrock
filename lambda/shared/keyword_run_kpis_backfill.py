@@ -15,33 +15,60 @@ domains are skipped, so a rerun after the owned domains change rebuilds only
 what it must; ``rebuild`` rewrites every row. A row that fails to write is
 logged, counted (``write_failures`` and the ``KeywordRunKpisWriteFailure``
 metric) and left to the next run of the backfill.
+
+``latest`` mode (``KeywordLatestBackfill``) rebuilds every keyword's
+KeywordLatest object (``shared.keyword_latest``) instead: the newest two runs
+are read raw (every attribute, the partials' input), the history blocks come
+from the keyword's KeywordRunKpis rows of the last ``HISTORY_DAYS``, and a
+keyword whose object already holds those two runs for the current
+configuration is skipped (``rebuild`` rewrites it anyway). It runs after a
+brand-config or persona change, which makes every object's ``config`` stale.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal, Protocol
 
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from shared.answer_queries import latest_run_timestamp, previous_run_timestamp
+from shared.keyword_counts import KeywordCounter
+from shared.keyword_latest import (
+    KeywordLatestConflict,
+    config_fingerprint,
+    is_current,
+    read_full_run_rows,
+    read_keyword_latest,
+    rebuild_keyword_latest,
+)
 from shared.keyword_run_kpis import (
     BRANDS_PER_RUN,
     emit_write_failure_metric,
     put_run_tally,
+    query_stored_runs,
+    run_tally_pair,
     stored_timestamps,
     tracked_brand_names,
 )
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION, answers_from_rows, owned_domains_from
-from shared.kpi_tally import owned_fingerprint, run_tally
+from shared.kpi_tally import RunTally, owned_fingerprint, run_tally
+from shared.partial_contract import PartialConfig
 from shared.request_deadline import Deadline
 
 logger = logging.getLogger(__name__)
 
 BACKFILL_ACTION = 'backfill_keyword_run_kpis'
 """The event ``action`` the Deduplication Lambda runs the backfill for."""
+
+#: Days of KeywordRunKpis history a rebuilt KeywordLatest object's ``recent`` and ``series`` blocks read.
+HISTORY_DAYS = 366
+
+BackfillMode = Literal['kpis', 'latest']
 
 
 class RollupNotDeployedError(RuntimeError):
@@ -100,6 +127,7 @@ class KeywordRunKpisBackfill:
     deadline: Deadline
     rebuild: bool = False
     stats: BackfillStats = field(default_factory=BackfillStats)
+    mode: BackfillMode = 'kpis'
 
     def __post_init__(self) -> None:
         self.owned_domains = owned_domains_from(self.brand_config)
@@ -161,25 +189,121 @@ class KeywordRunKpisBackfill:
         return None
 
 
-def keyword_pages(keywords_table: Any, explicit: Sequence[str] | None, scan_key: Mapping[str, Any] | None) -> Iterator[tuple[Mapping[str, Any] | None, list[str]]]:
-    """``(start key, keywords)`` of each page to walk: ``explicit`` as one page, else the Keywords table's pages from ``scan_key``."""
+def _history_since(latest: str) -> str:
+    """The first run timestamp of the ``HISTORY_DAYS`` up to ``latest`` (same layout, so it compares as text)."""
+    try:
+        moment = datetime.fromisoformat(latest)
+    except ValueError:
+        return ''
+    return (moment - timedelta(days=HISTORY_DAYS)).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+@dataclass
+class KeywordLatestBackfill:
+    """One ``latest`` backfill invocation: every keyword's KeywordLatest object rebuilt from its newest two runs."""
+
+    search_table: Any
+    rollups: Any | None
+    s3: Any
+    bucket: str
+    config: PartialConfig
+    deadline: Deadline
+    rebuild: bool = False
+    keyword_ids: Mapping[str, str] = field(default_factory=dict)
+    stats: BackfillStats = field(default_factory=BackfillStats)
+    mode: BackfillMode = 'latest'
+    counter: KeywordCounter | None = None
+    """Counts each keyword's rows into its object's ``counts`` block (``None``: no block)."""
+
+    def __post_init__(self) -> None:
+        self.fingerprint = config_fingerprint(self.config)
+
+    def _history(self, keyword: str, latest: str) -> list[RunTally] | None:
+        """The keyword's stored per-run tallies of ``HISTORY_DAYS`` (none without the table); ``None`` when the deadline cut the read."""
+        if self.rollups is None:
+            return []
+        stored = query_stored_runs(self.rollups, keyword, _history_since(latest), brands=False, deadline=self.deadline)
+        return None if stored.cut else stored.runs
+
+    def backfill_keyword(self, keyword: str, _after: str | None) -> str | None:
+        """Rebuild ``keyword``'s object; ``None`` when done, ``''`` when the deadline stopped its history read (resume at it)."""
+        latest = latest_run_timestamp(self.search_table, keyword)
+        previous = None if latest is None else previous_run_timestamp(self.search_table, keyword, latest)
+        runs = [stamp for stamp in (latest, previous) if stamp]
+        if latest is None or (not self.rebuild and is_current(read_keyword_latest(self.s3, self.bucket, keyword)[0], self.fingerprint, runs)):
+            self.stats.runs_skipped += len(runs)
+            self.stats.keywords_done += 1
+            return None
+        history = self._history(keyword, latest)
+        if history is None:
+            return ''
+        pairs = []
+        for stamp in reversed(runs):
+            rows = read_full_run_rows(self.search_table, keyword, stamp)
+            pairs.append((rows, run_tally_pair(keyword, stamp, answers_from_rows(rows), self.config.brand_config).full))
+        try:
+            rebuild_keyword_latest(
+                self.s3, self.bucket, pairs, history, self.config,
+                keyword=keyword, keyword_id=self.keyword_ids.get(keyword, ''), counter=self.counter,
+            )
+        except (ClientError, BotoCoreError, KeywordLatestConflict):
+            logger.exception('KeywordLatest backfill: object of %r not written', keyword)
+            emit_write_failure_metric('keyword_latest_backfill')
+            self.stats.write_failures += 1
+        else:
+            self.stats.runs_written += len(pairs)
+        self.stats.keywords_done += 1
+        return None
+
+
+class BackfillJob(Protocol):
+    """What ``run_backfill`` drives: either backfill mode."""
+
+    @property
+    def deadline(self) -> Deadline:
+        """The invocation's time budget."""
+        raise NotImplementedError
+
+    @property
+    def stats(self) -> BackfillStats:
+        """What the pass did so far."""
+        raise NotImplementedError
+
+    @property
+    def mode(self) -> BackfillMode:
+        """Which backfill this is."""
+        raise NotImplementedError
+
+    def backfill_keyword(self, keyword: str, after: str | None, /) -> str | None:
+        """Backfill one keyword from ``after``; ``None`` when done, else where to resume."""
+
+
+def keyword_pages(
+    keywords_table: Any, explicit: Sequence[str] | None, scan_key: Mapping[str, Any] | None, ids: MutableMapping[str, str] | None = None,
+) -> Iterator[tuple[Mapping[str, Any] | None, list[str]]]:
+    """``(start key, keywords)`` of each page to walk: ``explicit`` as one page, else the Keywords table's pages from ``scan_key``.
+
+    ``ids`` collects the id of every keyword read from the table.
+    """
     if explicit is not None:
         yield None, list(explicit)
         return
     start = scan_key
     while True:
-        params: dict[str, Any] = {'ProjectionExpression': '#kw', 'ExpressionAttributeNames': {'#kw': 'keyword'}}
+        params: dict[str, Any] = {'ProjectionExpression': '#kw, #id', 'ExpressionAttributeNames': {'#kw': 'keyword', '#id': 'id'}}
         if start:
             params['ExclusiveStartKey'] = dict(start)
         response = keywords_table.scan(**params)
-        texts = [item['keyword'] for item in response.get('Items') or [] if isinstance(item.get('keyword'), str) and item['keyword']]
-        yield start, texts
+        items = [item for item in response.get('Items') or [] if isinstance(item.get('keyword'), str) and item['keyword']]
+        if ids is not None:
+            ids.update({item['keyword']: str(item.get('id') or '') for item in items})
+        yield start, [item['keyword'] for item in items]
         start = response.get('LastEvaluatedKey')
         if not start:
             return
 
 
-def run_backfill(job: KeywordRunKpisBackfill, pages: Iterator[tuple[Mapping[str, Any] | None, list[str]]], cursor: Cursor) -> dict[str, Any]:
+def run_backfill(job: BackfillJob, pages: Iterator[tuple[Mapping[str, Any] | None, list[str]]], cursor: Cursor) -> dict[str, Any]:
     """Walk ``pages`` from ``cursor`` until done or the deadline; the response names the cursor to resume from."""
     resume = cursor
     for start, keywords in pages:
@@ -194,13 +318,24 @@ def run_backfill(job: KeywordRunKpisBackfill, pages: Iterator[tuple[Mapping[str,
     return _response(job, None)
 
 
-def _response(job: KeywordRunKpisBackfill, cursor: Cursor | None) -> dict[str, Any]:
+def _response(job: BackfillJob, cursor: Cursor | None) -> dict[str, Any]:
     return {
         'action': BACKFILL_ACTION,
+        'mode': job.mode,
         'done': cursor is None,
         'cursor': None if cursor is None else cursor.as_dict(),
         **job.stats.as_dict(),
     }
 
 
-__all__ = ['BACKFILL_ACTION', 'Cursor', 'KeywordRunKpisBackfill', 'RollupNotDeployedError', 'keyword_pages', 'run_backfill']
+__all__ = [
+    'BACKFILL_ACTION',
+    'HISTORY_DAYS',
+    'BackfillJob',
+    'Cursor',
+    'KeywordLatestBackfill',
+    'KeywordRunKpisBackfill',
+    'RollupNotDeployedError',
+    'keyword_pages',
+    'run_backfill',
+]

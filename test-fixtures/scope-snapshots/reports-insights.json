@@ -1,0 +1,1218 @@
+{
+  "route": "GET /api/reports/insights",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "timestamp": "2026-10-07T06:50:33.235274Z",
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "facts": {
+          "engines": [
+            {
+              "engine": "openai",
+              "play": "get_ranked_first",
+              "kpis": {
+                "answers": 10,
+                "mentions": 7,
+                "mention_rate": 70.0,
+                "share_of_voice": 41.2,
+                "average_position": 2.14,
+                "top_1_share": 30.0,
+                "top_3_share": 60.0,
+                "visibility_score": 48.6,
+                "citations": 6,
+                "citation_rate": 60.0,
+                "citation_share": 18.2,
+                "net_sentiment": 42.9,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 2,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            },
+            {
+              "engine": "gemini",
+              "play": "get_cited",
+              "kpis": {
+                "answers": 8,
+                "mentions": 6,
+                "mention_rate": 75.0,
+                "share_of_voice": 46.2,
+                "average_position": 1.33,
+                "top_1_share": 62.5,
+                "top_3_share": 75.0,
+                "visibility_score": 66.9,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 4.0,
+                "net_sentiment": 50.0,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 1,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            }
+          ],
+          "prompt_engine": {
+            "engines": [
+              "openai",
+              "gemini"
+            ],
+            "keywords": [
+              {
+                "keyword": "hotel con spa en galicia",
+                "visibility_score": 31.2,
+                "positions": {
+                  "openai": 4,
+                  "gemini": null
+                },
+                "lost_engines": [
+                  "openai",
+                  "gemini"
+                ]
+              },
+              {
+                "keyword": "hotel en a coruña",
+                "visibility_score": 58.3,
+                "positions": {
+                  "openai": 1,
+                  "gemini": 1
+                },
+                "lost_engines": []
+              }
+            ],
+            "omitted": 0,
+            "keywords_total": 2,
+            "keywords_next_token": null
+          },
+          "citation_ownership": {
+            "owned_configured": true,
+            "competitors_configured": true,
+            "engines": [
+              {
+                "engine": "openai",
+                "answers": 10,
+                "citations": 22,
+                "owned": 6,
+                "competitors": {
+                  "Meliá Galicia": 4
+                },
+                "third_party": 12
+              },
+              {
+                "engine": "gemini",
+                "answers": 8,
+                "citations": 25,
+                "owned": 1,
+                "competitors": {
+                  "Meliá Galicia": 5
+                },
+                "third_party": 19
+              }
+            ]
+          },
+          "owned_pages": {
+            "pages": [
+              {
+                "url": "hotelcorunamar.com/es/habitaciones",
+                "section": "hotelcorunamar.com/es",
+                "is_document": false,
+                "citations": 5,
+                "engines": [
+                  "gemini",
+                  "openai"
+                ]
+              },
+              {
+                "url": "hotelcorunamar.com/docs/tarifas-2026.pdf",
+                "section": "hotelcorunamar.com/docs",
+                "is_document": true,
+                "citations": 2,
+                "engines": [
+                  "openai"
+                ]
+              }
+            ],
+            "pages_omitted": 0,
+            "sections": [
+              {
+                "section": "hotelcorunamar.com/es",
+                "citations": 5,
+                "document_citations": 0,
+                "pages": 1
+              },
+              {
+                "section": "hotelcorunamar.com/docs",
+                "citations": 2,
+                "document_citations": 2,
+                "pages": 1
+              }
+            ],
+            "engines": [
+              {
+                "engine": "openai",
+                "document_citations": 2,
+                "page_citations": 4
+              },
+              {
+                "engine": "gemini",
+                "document_citations": 0,
+                "page_citations": 1
+              }
+            ],
+            "document_citations": 2,
+            "page_citations": 5,
+            "pages_total": 2,
+            "pages_next_token": null
+          },
+          "competitor_caveats": [
+            {
+              "name": "Meliá Galicia",
+              "mentions": 9,
+              "mixed": 2,
+              "negative": 1,
+              "caveat_share": 33.3,
+              "reasons": [
+                "precio alto en verano",
+                "parking limitado"
+              ],
+              "reasons_total": 2
+            }
+          ],
+          "caveat_reasons": {
+            "reasons": [],
+            "reasons_omitted": 2,
+            "reasons_total": 2,
+            "reasons_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjB9"
+          },
+          "portfolio": [],
+          "stability": [
+            {
+              "keyword": "hotel en a coruña",
+              "runs": 4,
+              "position_min": 1.0,
+              "position_max": 2.5,
+              "position_range": 1.5,
+              "flips": 0,
+              "unstable": false
+            },
+            {
+              "keyword": "hotel con spa en galicia",
+              "runs": 4,
+              "position_min": 2.0,
+              "position_max": 5.5,
+              "position_range": 3.5,
+              "flips": 1,
+              "unstable": true
+            }
+          ]
+        },
+        "insights": [
+          {
+            "id": "engine_play:openai",
+            "kind": "engine_play",
+            "severity": "high",
+            "subject": "openai",
+            "evidence": {
+              "top_1_share": 30.0,
+              "citation_rate": 60.0,
+              "answers": 10,
+              "play": "get_ranked_first"
+            },
+            "block": "insights_engine_playbook"
+          },
+          {
+            "id": "engine_play:gemini",
+            "kind": "engine_play",
+            "severity": "medium",
+            "subject": "gemini",
+            "evidence": {
+              "top_1_share": 62.5,
+              "citation_rate": 12.5,
+              "answers": 8,
+              "play": "get_cited"
+            },
+            "block": "insights_engine_playbook"
+          }
+        ],
+        "history_truncated_before": null,
+        "narrative": {
+          "run_timestamp": "2026-10-07T06:50:33.235274Z",
+          "model": "global.anthropic.claude-sonnet-5-5",
+          "generated_at": "2026-10-07T07:02:11Z",
+          "language": "es",
+          "insights": [
+            {
+              "text": "OpenAI cita el hotel en el 60% de sus respuestas, pero solo lo pone primero en el 30%.",
+              "insight_ids": [
+                "engine_play:openai"
+              ]
+            }
+          ],
+          "recommendations": [
+            {
+              "title": "Conseguir citas en Gemini",
+              "text": "Gemini cita el sitio en el 12.5% de sus respuestas: publicar páginas de habitaciones claras.",
+              "insight_ids": [
+                "engine_play:gemini"
+              ]
+            }
+          ],
+          "dropped": 0
+        },
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "keywords_truncated": false,
+        "timestamp": "2026-10-07T06:50:33.235274Z",
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "facts": {
+          "engines": [
+            {
+              "engine": "openai",
+              "play": "get_ranked_first",
+              "kpis": {
+                "answers": 10,
+                "mentions": 7,
+                "mention_rate": 70.0,
+                "share_of_voice": 41.2,
+                "average_position": 2.14,
+                "top_1_share": 30.0,
+                "top_3_share": 60.0,
+                "visibility_score": 48.6,
+                "citations": 6,
+                "citation_rate": 60.0,
+                "citation_share": 18.2,
+                "net_sentiment": 42.9,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 2,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            },
+            {
+              "engine": "gemini",
+              "play": "get_cited",
+              "kpis": {
+                "answers": 8,
+                "mentions": 6,
+                "mention_rate": 75.0,
+                "share_of_voice": 46.2,
+                "average_position": 1.33,
+                "top_1_share": 62.5,
+                "top_3_share": 75.0,
+                "visibility_score": 66.9,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 4.0,
+                "net_sentiment": 50.0,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 1,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            }
+          ],
+          "prompt_engine": {
+            "engines": [
+              "openai",
+              "gemini"
+            ],
+            "keywords": [
+              {
+                "keyword": "hotel con spa en galicia",
+                "visibility_score": 31.2,
+                "positions": {
+                  "openai": 4,
+                  "gemini": null
+                },
+                "lost_engines": [
+                  "openai",
+                  "gemini"
+                ]
+              },
+              {
+                "keyword": "hotel en a coruña",
+                "visibility_score": 58.3,
+                "positions": {
+                  "openai": 1,
+                  "gemini": 1
+                },
+                "lost_engines": []
+              }
+            ],
+            "omitted": 0,
+            "keywords_total": 2,
+            "keywords_next_token": null
+          },
+          "citation_ownership": {
+            "owned_configured": true,
+            "competitors_configured": true,
+            "engines": [
+              {
+                "engine": "openai",
+                "answers": 10,
+                "citations": 22,
+                "owned": 6,
+                "competitors": {
+                  "Meliá Galicia": 4
+                },
+                "third_party": 12
+              },
+              {
+                "engine": "gemini",
+                "answers": 8,
+                "citations": 25,
+                "owned": 1,
+                "competitors": {
+                  "Meliá Galicia": 5
+                },
+                "third_party": 19
+              }
+            ]
+          },
+          "owned_pages": {
+            "pages": [
+              {
+                "url": "hotelcorunamar.com/es/habitaciones",
+                "section": "hotelcorunamar.com/es",
+                "is_document": false,
+                "citations": 5,
+                "engines": [
+                  "gemini",
+                  "openai"
+                ]
+              },
+              {
+                "url": "hotelcorunamar.com/docs/tarifas-2026.pdf",
+                "section": "hotelcorunamar.com/docs",
+                "is_document": true,
+                "citations": 2,
+                "engines": [
+                  "openai"
+                ]
+              }
+            ],
+            "pages_omitted": 0,
+            "sections": [
+              {
+                "section": "hotelcorunamar.com/es",
+                "citations": 5,
+                "document_citations": 0,
+                "pages": 1
+              },
+              {
+                "section": "hotelcorunamar.com/docs",
+                "citations": 2,
+                "document_citations": 2,
+                "pages": 1
+              }
+            ],
+            "engines": [
+              {
+                "engine": "openai",
+                "document_citations": 2,
+                "page_citations": 4
+              },
+              {
+                "engine": "gemini",
+                "document_citations": 0,
+                "page_citations": 1
+              }
+            ],
+            "document_citations": 2,
+            "page_citations": 5,
+            "pages_total": 2,
+            "pages_next_token": null
+          },
+          "competitor_caveats": [
+            {
+              "name": "Meliá Galicia",
+              "mentions": 9,
+              "mixed": 2,
+              "negative": 1,
+              "caveat_share": 33.3,
+              "reasons": [
+                "precio alto en verano",
+                "parking limitado"
+              ],
+              "reasons_total": 2
+            }
+          ],
+          "caveat_reasons": {
+            "reasons": [],
+            "reasons_omitted": 2,
+            "reasons_total": 2,
+            "reasons_next_token": "eyJiIjoibGl2ZS0xMDczMGMxOWZhY2IwZDQzIiwibyI6MH0"
+          },
+          "portfolio": [],
+          "stability": [
+            {
+              "keyword": "hotel en a coruña",
+              "runs": 4,
+              "position_min": 1.0,
+              "position_max": 2.5,
+              "position_range": 1.5,
+              "flips": 0,
+              "unstable": false
+            },
+            {
+              "keyword": "hotel con spa en galicia",
+              "runs": 4,
+              "position_min": 2.0,
+              "position_max": 5.5,
+              "position_range": 3.5,
+              "flips": 1,
+              "unstable": true
+            }
+          ]
+        },
+        "insights": [
+          {
+            "id": "engine_play:openai",
+            "kind": "engine_play",
+            "severity": "high",
+            "subject": "openai",
+            "evidence": {
+              "top_1_share": 30.0,
+              "citation_rate": 60.0,
+              "answers": 10,
+              "play": "get_ranked_first"
+            },
+            "block": "insights_engine_playbook"
+          },
+          {
+            "id": "engine_play:gemini",
+            "kind": "engine_play",
+            "severity": "medium",
+            "subject": "gemini",
+            "evidence": {
+              "top_1_share": 62.5,
+              "citation_rate": 12.5,
+              "answers": 8,
+              "play": "get_cited"
+            },
+            "block": "insights_engine_playbook"
+          }
+        ],
+        "history_truncated_before": null,
+        "narrative": {
+          "run_timestamp": "2026-10-07T06:50:33.235274Z",
+          "model": "global.anthropic.claude-sonnet-5-5",
+          "generated_at": "2026-10-07T07:02:11Z",
+          "language": "es",
+          "insights": [
+            {
+              "text": "OpenAI cita el hotel en el 60% de sus respuestas, pero solo lo pone primero en el 30%.",
+              "insight_ids": [
+                "engine_play:openai"
+              ]
+            }
+          ],
+          "recommendations": [
+            {
+              "title": "Conseguir citas en Gemini",
+              "text": "Gemini cita el sitio en el 12.5% de sus respuestas: publicar páginas de habitaciones claras.",
+              "insight_ids": [
+                "engine_play:gemini"
+              ]
+            }
+          ],
+          "dropped": 0
+        },
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "keywords_truncated": false,
+        "timestamp": "2026-10-07T06:50:33.235274Z",
+        "keywords_analyzed": 5000,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "facts": {
+          "engines": [
+            {
+              "engine": "openai",
+              "play": "get_ranked_first",
+              "kpis": {
+                "answers": 10,
+                "mentions": 7,
+                "mention_rate": 70.0,
+                "share_of_voice": 41.2,
+                "average_position": 2.14,
+                "top_1_share": 30.0,
+                "top_3_share": 60.0,
+                "visibility_score": 48.6,
+                "citations": 6,
+                "citation_rate": 60.0,
+                "citation_share": 18.2,
+                "net_sentiment": 42.9,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 2,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            },
+            {
+              "engine": "gemini",
+              "play": "get_cited",
+              "kpis": {
+                "answers": 8,
+                "mentions": 6,
+                "mention_rate": 75.0,
+                "share_of_voice": 46.2,
+                "average_position": 1.33,
+                "top_1_share": 62.5,
+                "top_3_share": 75.0,
+                "visibility_score": 66.9,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 4.0,
+                "net_sentiment": 50.0,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 1,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            }
+          ],
+          "prompt_engine": {
+            "engines": [
+              "openai",
+              "gemini"
+            ],
+            "keywords": [
+              {
+                "keyword": "hotel con spa en galicia",
+                "visibility_score": 31.2,
+                "positions": {
+                  "openai": 4,
+                  "gemini": null
+                },
+                "lost_engines": [
+                  "openai",
+                  "gemini"
+                ]
+              },
+              {
+                "keyword": "hotel en a coruña",
+                "visibility_score": 58.3,
+                "positions": {
+                  "openai": 1,
+                  "gemini": 1
+                },
+                "lost_engines": []
+              }
+            ],
+            "omitted": 0,
+            "keywords_total": 2,
+            "keywords_next_token": null
+          },
+          "citation_ownership": {
+            "owned_configured": true,
+            "competitors_configured": true,
+            "engines": [
+              {
+                "engine": "openai",
+                "answers": 10,
+                "citations": 22,
+                "owned": 6,
+                "competitors": {
+                  "Meliá Galicia": 4
+                },
+                "third_party": 12
+              },
+              {
+                "engine": "gemini",
+                "answers": 8,
+                "citations": 25,
+                "owned": 1,
+                "competitors": {
+                  "Meliá Galicia": 5
+                },
+                "third_party": 19
+              }
+            ]
+          },
+          "owned_pages": {
+            "pages": [
+              {
+                "url": "hotelcorunamar.com/es/habitaciones",
+                "section": "hotelcorunamar.com/es",
+                "is_document": false,
+                "citations": 5,
+                "engines": [
+                  "gemini",
+                  "openai"
+                ]
+              },
+              {
+                "url": "hotelcorunamar.com/docs/tarifas-2026.pdf",
+                "section": "hotelcorunamar.com/docs",
+                "is_document": true,
+                "citations": 2,
+                "engines": [
+                  "openai"
+                ]
+              }
+            ],
+            "pages_omitted": 0,
+            "sections": [
+              {
+                "section": "hotelcorunamar.com/es",
+                "citations": 5,
+                "document_citations": 0,
+                "pages": 1
+              },
+              {
+                "section": "hotelcorunamar.com/docs",
+                "citations": 2,
+                "document_citations": 2,
+                "pages": 1
+              }
+            ],
+            "engines": [
+              {
+                "engine": "openai",
+                "document_citations": 2,
+                "page_citations": 4
+              },
+              {
+                "engine": "gemini",
+                "document_citations": 0,
+                "page_citations": 1
+              }
+            ],
+            "document_citations": 2,
+            "page_citations": 5,
+            "pages_total": 2,
+            "pages_next_token": null
+          },
+          "competitor_caveats": [
+            {
+              "name": "Meliá Galicia",
+              "mentions": 9,
+              "mixed": 2,
+              "negative": 1,
+              "caveat_share": 33.3,
+              "reasons": [
+                "precio alto en verano",
+                "parking limitado"
+              ],
+              "reasons_total": 2
+            }
+          ],
+          "caveat_reasons": {
+            "reasons": [],
+            "reasons_omitted": 2,
+            "reasons_total": 2,
+            "reasons_next_token": "eyJiIjoiYjIwMjYxMDEyVDA3MTQwNVotM2Y5YyIsIm8iOjB9"
+          },
+          "portfolio": [],
+          "stability": [
+            {
+              "keyword": "hotel en a coruña",
+              "runs": 4,
+              "position_min": 1.0,
+              "position_max": 2.5,
+              "position_range": 1.5,
+              "flips": 0,
+              "unstable": false
+            },
+            {
+              "keyword": "hotel con spa en galicia",
+              "runs": 4,
+              "position_min": 2.0,
+              "position_max": 5.5,
+              "position_range": 3.5,
+              "flips": 1,
+              "unstable": true
+            }
+          ]
+        },
+        "insights": [
+          {
+            "id": "engine_play:openai",
+            "kind": "engine_play",
+            "severity": "high",
+            "subject": "openai",
+            "evidence": {
+              "top_1_share": 30.0,
+              "citation_rate": 60.0,
+              "answers": 10,
+              "play": "get_ranked_first"
+            },
+            "block": "insights_engine_playbook"
+          },
+          {
+            "id": "engine_play:gemini",
+            "kind": "engine_play",
+            "severity": "medium",
+            "subject": "gemini",
+            "evidence": {
+              "top_1_share": 62.5,
+              "citation_rate": 12.5,
+              "answers": 8,
+              "play": "get_cited"
+            },
+            "block": "insights_engine_playbook"
+          }
+        ],
+        "history_truncated_before": null,
+        "narrative": {
+          "run_timestamp": "2026-10-07T06:50:33.235274Z",
+          "model": "global.anthropic.claude-sonnet-5-5",
+          "generated_at": "2026-10-07T07:02:11Z",
+          "language": "es",
+          "insights": [
+            {
+              "text": "OpenAI cita el hotel en el 60% de sus respuestas, pero solo lo pone primero en el 30%.",
+              "insight_ids": [
+                "engine_play:openai"
+              ]
+            }
+          ],
+          "recommendations": [
+            {
+              "title": "Conseguir citas en Gemini",
+              "text": "Gemini cita el sitio en el 12.5% de sus respuestas: publicar páginas de habitaciones claras.",
+              "insight_ids": [
+                "engine_play:gemini"
+              ]
+            }
+          ],
+          "dropped": 0
+        },
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-reports-insights-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    },
+    "partial": {
+      "description": "Live read cut by the time budget (safety net): honest coverage, keywords_truncated kept for one release.",
+      "query": {
+        "group_id": "group-galicia"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 928
+        },
+        "keywords_truncated": true,
+        "timestamp": "2026-10-07T06:50:33.235274Z",
+        "keywords_analyzed": 2,
+        "keywords_with_data": 2,
+        "citations_configured": true,
+        "facts": {
+          "engines": [
+            {
+              "engine": "openai",
+              "play": "get_ranked_first",
+              "kpis": {
+                "answers": 10,
+                "mentions": 7,
+                "mention_rate": 70.0,
+                "share_of_voice": 41.2,
+                "average_position": 2.14,
+                "top_1_share": 30.0,
+                "top_3_share": 60.0,
+                "visibility_score": 48.6,
+                "citations": 6,
+                "citation_rate": 60.0,
+                "citation_share": 18.2,
+                "net_sentiment": 42.9,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 2,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            },
+            {
+              "engine": "gemini",
+              "play": "get_cited",
+              "kpis": {
+                "answers": 8,
+                "mentions": 6,
+                "mention_rate": 75.0,
+                "share_of_voice": 46.2,
+                "average_position": 1.33,
+                "top_1_share": 62.5,
+                "top_3_share": 75.0,
+                "visibility_score": 66.9,
+                "citations": 1,
+                "citation_rate": 12.5,
+                "citation_share": 4.0,
+                "net_sentiment": 50.0,
+                "engine_coverage": 100.0,
+                "keyword_coverage": 100.0,
+                "engines": 1,
+                "keywords": 2,
+                "sentiment_split": {
+                  "positive": 4,
+                  "neutral": 1,
+                  "negative": 1,
+                  "mixed": 0
+                }
+              }
+            }
+          ],
+          "prompt_engine": {
+            "engines": [
+              "openai",
+              "gemini"
+            ],
+            "keywords": [
+              {
+                "keyword": "hotel con spa en galicia",
+                "visibility_score": 31.2,
+                "positions": {
+                  "openai": 4,
+                  "gemini": null
+                },
+                "lost_engines": [
+                  "openai",
+                  "gemini"
+                ]
+              },
+              {
+                "keyword": "hotel en a coruña",
+                "visibility_score": 58.3,
+                "positions": {
+                  "openai": 1,
+                  "gemini": 1
+                },
+                "lost_engines": []
+              }
+            ],
+            "omitted": 0,
+            "keywords_total": 2,
+            "keywords_next_token": null
+          },
+          "citation_ownership": {
+            "owned_configured": true,
+            "competitors_configured": true,
+            "engines": [
+              {
+                "engine": "openai",
+                "answers": 10,
+                "citations": 22,
+                "owned": 6,
+                "competitors": {
+                  "Meliá Galicia": 4
+                },
+                "third_party": 12
+              },
+              {
+                "engine": "gemini",
+                "answers": 8,
+                "citations": 25,
+                "owned": 1,
+                "competitors": {
+                  "Meliá Galicia": 5
+                },
+                "third_party": 19
+              }
+            ]
+          },
+          "owned_pages": {
+            "pages": [
+              {
+                "url": "hotelcorunamar.com/es/habitaciones",
+                "section": "hotelcorunamar.com/es",
+                "is_document": false,
+                "citations": 5,
+                "engines": [
+                  "gemini",
+                  "openai"
+                ]
+              },
+              {
+                "url": "hotelcorunamar.com/docs/tarifas-2026.pdf",
+                "section": "hotelcorunamar.com/docs",
+                "is_document": true,
+                "citations": 2,
+                "engines": [
+                  "openai"
+                ]
+              }
+            ],
+            "pages_omitted": 0,
+            "sections": [
+              {
+                "section": "hotelcorunamar.com/es",
+                "citations": 5,
+                "document_citations": 0,
+                "pages": 1
+              },
+              {
+                "section": "hotelcorunamar.com/docs",
+                "citations": 2,
+                "document_citations": 2,
+                "pages": 1
+              }
+            ],
+            "engines": [
+              {
+                "engine": "openai",
+                "document_citations": 2,
+                "page_citations": 4
+              },
+              {
+                "engine": "gemini",
+                "document_citations": 0,
+                "page_citations": 1
+              }
+            ],
+            "document_citations": 2,
+            "page_citations": 5,
+            "pages_total": 2,
+            "pages_next_token": null
+          },
+          "competitor_caveats": [
+            {
+              "name": "Meliá Galicia",
+              "mentions": 9,
+              "mixed": 2,
+              "negative": 1,
+              "caveat_share": 33.3,
+              "reasons": [
+                "precio alto en verano",
+                "parking limitado"
+              ],
+              "reasons_total": 2
+            }
+          ],
+          "caveat_reasons": {
+            "reasons": [],
+            "reasons_omitted": 2,
+            "reasons_total": 2,
+            "reasons_next_token": "eyJiIjoibGl2ZS0xMDczMGMxOWZhY2IwZDQzIiwibyI6MH0"
+          },
+          "portfolio": [],
+          "stability": [
+            {
+              "keyword": "hotel en a coruña",
+              "runs": 4,
+              "position_min": 1.0,
+              "position_max": 2.5,
+              "position_range": 1.5,
+              "flips": 0,
+              "unstable": false
+            },
+            {
+              "keyword": "hotel con spa en galicia",
+              "runs": 4,
+              "position_min": 2.0,
+              "position_max": 5.5,
+              "position_range": 3.5,
+              "flips": 1,
+              "unstable": true
+            }
+          ]
+        },
+        "insights": [
+          {
+            "id": "engine_play:openai",
+            "kind": "engine_play",
+            "severity": "high",
+            "subject": "openai",
+            "evidence": {
+              "top_1_share": 30.0,
+              "citation_rate": 60.0,
+              "answers": 10,
+              "play": "get_ranked_first"
+            },
+            "block": "insights_engine_playbook"
+          },
+          {
+            "id": "engine_play:gemini",
+            "kind": "engine_play",
+            "severity": "medium",
+            "subject": "gemini",
+            "evidence": {
+              "top_1_share": 62.5,
+              "citation_rate": 12.5,
+              "answers": 8,
+              "play": "get_cited"
+            },
+            "block": "insights_engine_playbook"
+          }
+        ],
+        "history_truncated_before": null,
+        "narrative": {
+          "run_timestamp": "2026-10-07T06:50:33.235274Z",
+          "model": "global.anthropic.claude-sonnet-5-5",
+          "generated_at": "2026-10-07T07:02:11Z",
+          "language": "es",
+          "insights": [
+            {
+              "text": "OpenAI cita el hotel en el 60% de sus respuestas, pero solo lo pone primero en el 30%.",
+              "insight_ids": [
+                "engine_play:openai"
+              ]
+            }
+          ],
+          "recommendations": [
+            {
+              "title": "Conseguir citas en Gemini",
+              "text": "Gemini cita el sitio en el 12.5% de sus respuestas: publicar páginas de habitaciones claras.",
+              "insight_ids": [
+                "engine_play:gemini"
+              ]
+            }
+          ],
+          "dropped": 0
+        },
+        "coverage": {
+          "keywords_total": 928,
+          "keywords_analyzed": 100,
+          "complete": false
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    }
+  }
+}

@@ -20,17 +20,27 @@ as the snapshot key, so its history continues; any other market's key is
 (``{"group_id", "market_id"}``), ``snapshot_group_ids`` their distinct groups.
 A scope with ``market_ids`` evaluates only those markets.
 
-Time budget (2.42.0): the run's answers are read pair by pair, the pairs with
-the fewest keywords first, and no new pair is started once the Lambda's
+Reads (2.45.0): every keyword of the run's complete pairs is read once from
+KeywordRunKpis (``shared.keyword_run_kpis``, one BatchGet per 100 keywords:
+50 calls at 5,000 keywords) and the pairs' snapshots are pooled from those
+tallies with ``shared.kpi_alerts.snapshot_metrics_from_tallies``. A keyword is
+read from its answers instead (SearchResults) only when its row is missing,
+counted against other owned domains, or dropped brands the pair's competitor
+rule may need (more than ``BRANDS_PER_RUN`` brands and a market tracking a
+competitor the row does not always keep).
+
+Time budget (2.42.0): the raw reads go pair by pair, the pairs with the
+fewest keywords first, and no new pair is started once the Lambda's
 remaining time falls under ``KPI_ALERTS_RESERVE_SECONDS``. The pairs left are
 named in ``time_budget_scopes`` (counted in ``skipped_time_budget``) instead
 of the whole step timing out with nothing recorded.
 
-Alerts compare like for like (``shared.kpi_comparison``): the previous
-snapshot's run rows are read back for the group's current keywords, only the
-(keyword, persona, engine, market) cells answered in both runs are compared,
-on neutral (non-branded) answers, and only when the comparison is
-``comparable``. Each snapshot stores that ``comparison``.
+Alerts compare like for like (``shared.kpi_comparison``): when the pair has a
+previous snapshot of the same ``KPI_VERSION``, both runs' rows are read for
+the group's current keywords, only the (keyword, persona, engine, market)
+cells answered in both runs are compared, on neutral (non-branded) answers,
+and only when the comparison is ``comparable``. Each snapshot stores that
+``comparison``. These are the only reads a pair's first snapshot never needs.
 """
 
 from __future__ import annotations
@@ -38,7 +48,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -49,20 +59,23 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.answer_queries import query_keyword_run_rows
+from shared.brand_names import normalize_brand_key
 from shared.dynamo_decimal import convert_floats_to_decimal
-from shared.dynamodb_batch import collect_all_items
+from shared.dynamodb_batch import BatchGetUnprocessedError, batch_get_items, collect_all_items
 from shared.dynamodb_conditions import applied_conditionally
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
+from shared.keyword_run_kpis import keyword_run_kpis_table_name, tally_from_item, tracked_brand_names
 from shared.kpi_alerts import (
     KPI_VERSION,
     build_alert_item,
     comparison_alerts,
     resolve_settings,
-    snapshot_metrics,
+    snapshot_metrics_from_tallies,
     ttl_for_timestamp,
 )
-from shared.kpi_comparison import COMPARABLE, compare_runs
-from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.kpi_comparison import COMPARABLE, PeriodComparison, compare_runs
+from shared.kpi_engine import answers_from_rows, owned_domains_from
+from shared.kpi_tally import RunTally, owned_fingerprint, run_tally
 from shared.markets import (
     GLOBAL_MARKET_ID,
     Market,
@@ -80,6 +93,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _MAX_WORKERS = 10
+#: Keys one BatchGetItem call takes at most (DynamoDB's limit).
+_BATCH_GET_KEYS = 100
 #: Seconds kept back from the Lambda's remaining time for the last snapshot writes, the SNS publish and the return.
 KPI_ALERTS_RESERVE_SECONDS = 30.0
 #: Pairs named in ``time_budget_scopes`` at most (the count is always exact); keeps the state small.
@@ -316,6 +331,31 @@ def _load_run_rows(
         return dict(pool.map(load, keywords))
 
 
+def _load_run_tallies(keywords: list[str], timestamp: str) -> dict[str, RunTally]:
+    """Each keyword's KeywordRunKpis tally of the run stamped ``timestamp``, one BatchGet per 100 keywords.
+
+    A keyword without a current-format row, or whose batch could not be read
+    (logged), is absent: the caller reads its answers instead. ``{}`` where
+    the table is not deployed.
+    """
+    table_name = keyword_run_kpis_table_name()
+    if table_name is None or not keywords:
+        return {}
+
+    def load(chunk: list[str]) -> list[dict[str, Any]]:
+        keys = [{'keyword': keyword, 'run_timestamp': timestamp} for keyword in chunk]
+        try:
+            return batch_get_items(dynamodb, table_name, keys)
+        except (BatchGetUnprocessedError, BotoCoreError, ClientError):
+            logger.exception('KeywordRunKpis BatchGet failed for %d keyword(s)', len(chunk))
+            return []
+
+    chunks = [keywords[start:start + _BATCH_GET_KEYS] for start in range(0, len(keywords), _BATCH_GET_KEYS)]
+    with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(chunks))) as pool:
+        tallies = [tally_from_item(item) for page in pool.map(load, chunks) for item in page]
+    return {tally.keyword: tally for tally in tallies if tally is not None and tally.timestamp == timestamp}
+
+
 def _execution_metadata(
     execution_id: str,
     execution_input: dict[str, Any],
@@ -501,10 +541,12 @@ def handler(event: object, context: Any) -> dict[str, Any]:
     brand_config = get_brand_config(BRAND_CONFIG_TABLE)
     # The markets, read once: each (group, market) pair tracks the market's extra competitors.
     markets = markets_by_id(load_markets(dynamodb.Table(BRAND_CONFIG_TABLE)))
+    run_keywords = sorted({str(item['keyword']) for pair in complete for item in members[pair] if item.get('keyword')}, key=str.casefold)
     evaluation = _Evaluation(
         run_timestamp=run_timestamp, execution_id=execution_id, execution_input=execution_input, report=report,
         settings=settings, brand_config=brand_config, markets=markets, groups_by_id=groups_by_id,
         deadline=Deadline(budget_from_context(context, KPI_ALERTS_RESERVE_SECONDS)),
+        stored=_load_run_tallies(run_keywords, run_timestamp),
     )
     for pair in sorted(complete, key=lambda pair: len(members[pair])):
         evaluation.evaluate(pair, [str(item['keyword']) for item in members[pair] if item.get('keyword')])
@@ -547,23 +589,81 @@ class _Evaluation:
     markets: dict[str, Market]
     groups_by_id: dict[str, dict[str, Any]]
     deadline: Deadline
+    stored: dict[str, RunTally] = field(default_factory=dict)
+    """The run's KeywordRunKpis tallies (``_load_run_tallies``)."""
     rows: dict[str, list[dict[str, Any]] | None] = field(default_factory=dict)
+    """The run's SearchResults rows read so far; ``None`` for a keyword that could not be read."""
+    read: dict[str, RunTally | None] = field(default_factory=dict)
+    """The tallies built from those rows (every brand kept)."""
     snapshotted: set[GroupMarket] = field(default_factory=set)
     new_alerts: list[dict[str, Any]] = field(default_factory=list)
     out_of_time: list[GroupMarket] = field(default_factory=list)
     skipped_partial: int = 0
 
-    def evaluate(self, pair: GroupMarket, keywords: list[str]) -> None:
-        """Snapshot ``pair`` when every keyword of it answered; reads only the keywords no earlier pair read."""
-        if self.deadline.expired():
-            self.out_of_time.append(pair)
-            return
+    @property
+    def owned_domains(self) -> list[str]:
+        return owned_domains_from(self.brand_config)
+
+    def _covers(self, tally: RunTally, tracked: frozenset[str]) -> bool:
+        """Whether a stored tally answers a pair tracking ``tracked`` (brand keys) exactly as the run's answers would."""
+        if not tally.answers or not tally.matches_owned(owned_fingerprint(self.owned_domains)):
+            return False
+        if tally.brands_total <= len(tally.brands):
+            return True
+        # Brands were dropped: only tracked competitors the row always keeps can be relied on.
+        return bool(tracked) and tracked <= frozenset(map(normalize_brand_key, tracked_brand_names(self.brand_config)))
+
+    def _read_rows(self, keywords: Iterable[str]) -> None:
+        """Read the run's rows of the ``keywords`` no earlier pair read."""
         unread = sorted({keyword for keyword in keywords if keyword not in self.rows}, key=str.casefold)
         if unread:
             self.rows.update(_load_run_rows(unread, self.run_timestamp, self.deadline))
-        group_answers = {keyword: answers for keyword in keywords if (answers := self._answers(keyword))}
+
+    def _tally(self, keyword: str) -> RunTally | None:
+        if keyword not in self.read:
+            rows = self.rows.get(keyword)
+            answers = None if rows is None else answers_from_rows(rows)
+            self.read[keyword] = None if answers is None else run_tally(keyword, self.run_timestamp, answers, self.owned_domains)
+        return self.read[keyword]
+
+    def _tallies(self, keywords: list[str], competitors: list[str]) -> dict[str, RunTally]:
+        """The answered keywords' tallies, stored where they cover the pair, else built from the run's rows."""
+        tracked = frozenset(key for key in map(normalize_brand_key, competitors) if key)
+        usable = {keyword for keyword in keywords if (tally := self.stored.get(keyword)) is not None and self._covers(tally, tracked)}
+        self._read_rows(keyword for keyword in keywords if keyword not in usable)
+        chosen = {keyword: self.stored[keyword] if keyword in usable else self._tally(keyword) for keyword in keywords}
+        return {keyword: tally for keyword, tally in chosen.items() if tally is not None and tally.answers}
+
+    def _comparison(self, group: _GroupRun, previous: dict[str, Any] | None) -> PeriodComparison | None:
+        """``compare_runs`` of the pair's rows in the previous snapshot's run and in this one; ``None`` when any read failed.
+
+        Only a comparison needs the rows of keywords a stored tally covered,
+        and only when there is a previous snapshot to compare with. A keyword
+        whose rows could not be read (the deadline ran out, or its read
+        failed) leaves the pair unevaluated, never compared with part of a run.
+        """
+        if previous is None:
+            return compare_runs(None, [])
+        self._read_rows(group.keywords)
+        before = _load_run_rows(group.keywords, str(previous['snapshot_at']), self.deadline)
+        if any(
+            rows is None for rows in [*before.values(), *(self.rows.get(keyword) for keyword in group.keywords)]
+        ):
+            return None
+        return compare_runs(
+            [row for keyword in group.keywords for row in before.get(keyword) or []],
+            [row for keyword in group.keywords for row in self.rows.get(keyword) or []],
+        )
+
+    def evaluate(self, pair: GroupMarket, keywords: list[str]) -> None:
+        """Snapshot ``pair`` when every keyword of it answered, with its comparison to the previous snapshot."""
+        if self.deadline.expired():
+            self.out_of_time.append(pair)
+            return
+        competitors = _tracked_competitors(self.brand_config, self.markets, pair.market_id)
+        tallies = self._tallies(keywords, competitors)
         # A keyword that could not be read, or that no engine answered, leaves the run incomplete.
-        if len(group_answers) < len(keywords):
+        if len(tallies) < len(keywords):
             if self.deadline.expired():
                 self.out_of_time.append(pair)
             else:
@@ -573,54 +673,43 @@ class _Evaluation:
             pair=pair,
             name=str(self.groups_by_id[pair.group_id].get('name') or pair.group_id),
             keywords=keywords,
-            rows=[row for keyword in keywords for row in self.rows.get(keyword) or []],
-            tracked_competitors=_tracked_competitors(self.brand_config, self.markets, pair.market_id),
+            tracked_competitors=competitors,
         )
-        metrics = snapshot_metrics(group_answers, self.owned_domains, group.tracked_competitors)
+        previous = _comparable_previous(pair, self.run_timestamp)
+        comparison = self._comparison(group, previous)
+        if comparison is None:
+            self.out_of_time.append(pair)
+            return
+        metrics = snapshot_metrics_from_tallies(tallies, self.owned_domains, competitors)
         snapshot = _snapshot(
             pair, group.name, self.execution_id, self.execution_input, self.report, self.run_timestamp, metrics,
         )
-        alerts = _record_snapshot(group, snapshot, self)
-        if alerts is None:
-            # The previous run's rows could not be read before the deadline: a like-for-like comparison is
-            # impossible, so the pair is left for the time budget rather than compared with part of its past.
-            self.out_of_time.append(pair)
-            return
-        self.new_alerts.extend(alerts)
+        self.new_alerts.extend(_record_snapshot(group, snapshot, previous, comparison, self))
         self.snapshotted.add(pair)
-
-    @property
-    def owned_domains(self) -> list[str]:
-        return owned_domains_from(self.brand_config)
-
-    def _answers(self, keyword: str) -> list[Answer] | None:
-        rows = self.rows.get(keyword)
-        return None if rows is None else answers_from_rows(rows)
 
 
 class _GroupRun(NamedTuple):
-    """One (group, market) pair fully covered by the run: its keywords, their run rows and tracked competitors."""
+    """One (group, market) pair fully covered by the run: its keywords and tracked competitors."""
 
     pair: GroupMarket
     name: str
     keywords: list[str]
-    rows: list[dict[str, Any]]
     tracked_competitors: list[str]
 
 
-def _previous_run_rows(group: _GroupRun, previous: dict[str, Any], deadline: Deadline) -> list[dict[str, Any]] | None:
-    """The rows of the group's current keywords in the previous snapshot's run, read within ``deadline``.
-
-    ``None`` when any keyword could not be read (the deadline ran out, or its read failed): the caller then leaves
-    the pair unevaluated instead of comparing against part of the previous run.
-    """
-    rows_by_keyword = _load_run_rows(group.keywords, str(previous['snapshot_at']), deadline)
-    if any(rows_by_keyword.get(keyword) is None for keyword in group.keywords):
-        return None
-    return [row for keyword in group.keywords for row in rows_by_keyword.get(keyword) or []]
+def _comparable_previous(pair: GroupMarket, run_timestamp: str) -> dict[str, Any] | None:
+    """The pair's previous snapshot when it was measured with the current KPI definitions (``KPI_VERSION``)."""
+    previous = _previous_snapshot(pair.snapshot_key, run_timestamp)
+    return previous if previous is not None and previous.get('kpi_version') == KPI_VERSION else None
 
 
-def _record_snapshot(group: _GroupRun, snapshot: dict[str, Any], evaluation: _Evaluation) -> list[dict[str, Any]] | None:
+def _record_snapshot(
+    group: _GroupRun,
+    snapshot: dict[str, Any],
+    previous: dict[str, Any] | None,
+    comparison: PeriodComparison,
+    evaluation: _Evaluation,
+) -> list[dict[str, Any]]:
     """Store one (group, market) snapshot and the alerts it raises against the previous one; the new alerts.
 
     ``None`` (nothing stored) when the previous run's rows could not be read within the time budget.
@@ -633,15 +722,6 @@ def _record_snapshot(group: _GroupRun, snapshot: dict[str, Any], evaluation: _Ev
     cells.
     """
     pair = group.pair
-    previous = _previous_snapshot(pair.snapshot_key, evaluation.run_timestamp)
-    if previous is not None and previous.get('kpi_version') != KPI_VERSION:
-        previous = None
-    previous_rows = None
-    if previous is not None:
-        previous_rows = _previous_run_rows(group, previous, evaluation.deadline)
-        if previous_rows is None:
-            return None
-    comparison = compare_runs(previous_rows, group.rows)
     snapshot['comparison'] = {
         **comparison.to_json(),
         'previous_snapshot_at': None if previous is None else previous.get('snapshot_at'),

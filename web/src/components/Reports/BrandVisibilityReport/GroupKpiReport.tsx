@@ -1,8 +1,8 @@
 import {
   useId, useState
 } from 'react';
-import type {
-  GroupKpiHistoryResponse, GroupRun, KeywordRunSummary
+import {
+  isKeywordRunSummary, type GroupKpiHistoryResponse, type GroupRun, type KeywordRunSummary
 } from '../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../types';
 import {
@@ -14,12 +14,22 @@ import { GroupKpiHeadlineSection } from './sections/GroupKpiHeadlineSection';
 import { GroupKpiTrendSection } from './sections/GroupKpiTrendSection';
 import { GroupKpiDriversSection } from './sections/GroupKpiDriversSection';
 import { KeywordRunsSection } from './sections/KeywordRunsSection';
-import { GroupKpiExportButton } from './GroupKpiExportButton';
+import { ExportAllButton } from '../../ui/ExportAllButton';
+import { reportScopeParams } from '../../ui/reportScope';
+import { useSelectedMarketId } from '../../Markets/marketSelectionContext';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { formatDate } from '../../../formatting/dateFormatter';
 import {
   ReportCutNote, runsAfter
 } from '../layout/HistoryCutNote';
+import { ScopeCoverageNote } from '../../ui/ScopeCoverageNote';
+import { ScopedListFooter } from '../../ui/ScopedListFooter';
+import { useScopedList } from '../../../hooks/useScopedList';
+import { GROUP_KPI_KEYWORDS_PAGING } from '../../../api/scopedListPagings';
+import type { ListRequest } from '../../../api/scopedListPages';
+import {
+  useEveryGroupRun, type EveryGroupRun
+} from '../../../hooks/useEveryGroupRun';
 
 /** The periods the report offers, in days. */
 const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
@@ -31,10 +41,11 @@ interface HistoryGateOptions extends SectionFetchState {
 }
 
 interface Props extends Omit<HistoryGateOptions, 'title'> {
-  /** The keyword group the report covers, and its name for the export. */
+  /** The keyword group the report covers. */
   readonly scope: ReportScope;
-  readonly scopeLabel: string;
   readonly onDaysChange: (days: number) => void;
+  /** The request `history` answered: the keyword list loads its next pages with it (2.45.0). */
+  readonly request?: ListRequest | null;
 }
 
 /** The chosen run if it is still in the window, else the latest group run, else the latest run. */
@@ -64,13 +75,39 @@ export function HistoryCutNote({ history }: { readonly history: GroupKpiHistoryR
   return <ReportCutNote covers={covers} />;
 }
 
+/** The summary with every run of the window once `view=runs` read them all (2.45.0 wave 5). */
+function withEveryRun(history: GroupKpiHistoryResponse, everyRun: EveryGroupRun): GroupKpiHistoryResponse {
+  if (everyRun.runs === null) return history;
+  return {
+    ...history,
+    runs: [...everyRun.runs],
+    runs_truncated: false,
+  };
+}
+
+/** While the older runs of a cut summary load, or why they could not. */
+function EveryRunNote({
+  history, everyRun
+}: {
+  readonly history: GroupKpiHistoryResponse;
+  readonly everyRun: EveryGroupRun 
+}) {
+  if (everyRun.error !== null) {
+    return <p role="alert" className="mb-4 text-xs text-red-700">{`The older runs could not be loaded: ${everyRun.error}`}</p>;
+  }
+  if (!everyRun.loading) return null;
+  const total = history.runs_total ?? history.runs.length;
+  return <output className="print-hidden mb-4 block text-xs text-gray-500">{`Loading all ${total} runs of the period…`}</output>;
+}
+
 /** A group section's loading, error and "no run in the period" states; ready once the group has a run. */
 export function gateGroupHistory({
-  title, history, loading, error, days
+  title, history, loading, error, days, computing
 }: HistoryGateOptions): SectionGate<GroupKpiHistoryResponse> {
   return gateSection({
     title,
     loading,
+    computing,
     loadingMessage: 'Loading the group KPI history…',
     error,
     value: history !== null && history.runs.length > 0 ? history : null,
@@ -83,18 +120,22 @@ export function gateGroupHistory({
  * drove the latest change, and every keyword's runs, over a chosen period.
  */
 export function GroupKpiReport({
-  scope, scopeLabel, history, loading, error, days, onDaysChange
+  scope, history, request = null, loading, error, computing, days, onDaysChange
 }: Props) {
   const periodId = useId();
+  const marketId = useSelectedMarketId();
   const [runTimestamp, setRunTimestamp] = useState<string | null>(null);
   const [keyword, setKeyword] = useState<string | null>(null);
   const [includePartial, setIncludePartial] = useState(false);
+  const keywordList = useScopedList(history, request, GROUP_KPI_KEYWORDS_PAGING, isKeywordRunSummary);
+  const everyRun = useEveryGroupRun(history, request);
 
   const gate = gateGroupHistory({
     title: 'Headline',
     history,
     loading,
     error,
+    computing,
     days,
   });
 
@@ -122,10 +163,11 @@ export function GroupKpiReport({
     );
   }
 
+  const shown = withEveryRun(gate.value, everyRun);
   const {
-    runs, keywords, keywords_truncated: truncated, group_run_min_coverage: minCoverage,
-    citations_configured: citationsConfigured
-  } = gate.value;
+    runs, group_run_min_coverage: minCoverage, citations_configured: citationsConfigured
+  } = shown;
+  const keywords = keywordList.items;
   const run = resolveRun(runs, runTimestamp);
   const selectedKeyword = resolveKeyword(keywords, keyword);
 
@@ -133,14 +175,14 @@ export function GroupKpiReport({
     <>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         {periodPicker}
-        <GroupKpiExportButton scope={scope} scopeLabel={scopeLabel} history={gate.value} run={run} />
+        <ExportAllButton view="group-kpis" params={{
+          ...reportScopeParams(scope, marketId),
+          days,
+        }} />
       </div>
-      {truncated && (
-        <p role="note" className="mb-4 text-xs text-amber-700 dark:text-amber-400">
-          {`This group has more keywords than one report covers; only the first ${keywords.length} are included.`}
-        </p>
-      )}
-      <HistoryCutNote history={gate.value} />
+      <ScopeCoverageNote response={shown} className="mb-4" />
+      <EveryRunNote history={gate.value} everyRun={everyRun} />
+      <HistoryCutNote history={shown} />
       <GroupKpiHeadlineSection runs={runs} selected={run} onSelect={setRunTimestamp} citationsConfigured={citationsConfigured} />
       <GroupKpiTrendSection
         runs={runs}
@@ -152,6 +194,7 @@ export function GroupKpiReport({
       {selectedKeyword !== null && (
         <KeywordRunsSection scope={scope} days={days} keywords={keywords} selected={selectedKeyword} onSelect={setKeyword} />
       )}
+      <ScopedListFooter list={keywordList} noun="keywords" />
       <KpiDefinitionsSection definitions={GROUP_REPORT_DEFINITIONS} />
     </>
   );

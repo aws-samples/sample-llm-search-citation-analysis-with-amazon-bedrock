@@ -460,23 +460,45 @@ def source_table(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -
     applied to one domain. ``owned`` marks the brand's own domains.
     """
     pool = list(answers)
-    domains = [domain for domain in owned_domains if normalize_domain(domain)]
     citing: dict[str, list[Answer]] = defaultdict(list)
     for answer in pool:
         for domain in answer.cited_domains:
             citing[domain].append(answer)
-    all_pairs = sum(len(answers_citing) for answers_citing in citing.values())
+    counted = {
+        domain: DomainCount(
+            citations=len(answers_citing),
+            engines=frozenset(answer.provider for answer in answers_citing),
+            keywords=len({answer.keyword for answer in answers_citing}),
+        )
+        for domain, answers_citing in citing.items()
+    }
+    return source_rows(counted, len(pool), owned_domains)
+
+
+@dataclass(frozen=True)
+class DomainCount:
+    """How some answers cite one domain: the answers citing it, their engines and their keywords."""
+
+    citations: int
+    engines: frozenset[str]
+    keywords: int
+
+
+def source_rows(citing: Mapping[str, DomainCount], answers: int, owned_domains: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """``source_table``'s rows from per-domain counts over ``answers`` answers, most cited first."""
+    domains = [domain for domain in owned_domains if normalize_domain(domain)]
+    all_pairs = sum(count.citations for count in citing.values())
     rows = [
         {
             'domain': domain,
             'owned': is_owned_domain(domain, domains),
-            'citations': len(answers_citing),
-            'citation_rate': percent(len(answers_citing), len(pool)),
-            'citation_share': percent(len(answers_citing), all_pairs),
-            'engines': sorted({answer.provider for answer in answers_citing}),
-            'keywords': len({answer.keyword for answer in answers_citing}),
+            'citations': count.citations,
+            'citation_rate': percent(count.citations, answers),
+            'citation_share': percent(count.citations, all_pairs),
+            'engines': sorted(count.engines),
+            'keywords': count.keywords,
         }
-        for domain, answers_citing in citing.items()
+        for domain, count in citing.items()
     ]
     rows.sort(key=lambda row: (-row['citations'], row['domain']))
     return rows
@@ -533,6 +555,7 @@ __all__ = [
     'SPLIT_LABELS',
     'TRENDED_KPIS',
     'Answer',
+    'DomainCount',
     'Sighting',
     'answer_from_row',
     'answers_from_rows',
@@ -552,6 +575,7 @@ __all__ = [
     'position_points',
     'sentiment_fields',
     'sighting_from_brand',
+    'source_rows',
     'source_table',
     'trend_direction',
     'visibility_percent',

@@ -23,6 +23,7 @@ the size of the page.
 The tables also serve the paid Excel export (``seo_export``): ``limit`` (1..1000) and ``offset`` (0..9999,
 ``offset + limit`` <= 10,000) replace the page, are cached under their own key and priced ``backlinks_usd(limit)``.
 Every table answer echoes ``offset``/``limit`` (``null`` on a page) and carries the ``export`` prices.
+With ``cached_only: true`` (a resumed server export) a cache miss is 409 ``NOT_CACHED`` instead of a paid call.
 
 The history is one ``history/live`` call and exists for the domain and subdomain scopes only: it always includes
 subdomains (``history_includes_subdomains``), and an exact page or a subfolder has none.
@@ -41,7 +42,7 @@ from typing import Any
 sys.path.insert(0, '/opt/python')
 
 import boto3
-from seo_export import EXPORT_SCHEMA, ExportWindowError, export_pricing, row_window
+from seo_export import EXPORT_SCHEMA, ExportWindowError, export_pricing, not_cached_response, row_window
 from seo_http import CachePolicy, brand_config, seo_error, seo_route, validation_errors
 
 from shared.api_response import success_response
@@ -104,7 +105,7 @@ TABLE_SCHEMA: dict[str, dict[str, Any]] = {
     'mode': {'type': str, 'choices': list(MODES), 'default': 'one_per_domain'},
     **EXPORT_SCHEMA,
 }
-BACKLINKS_EXPORT = export_pricing(BACKLINKS_TASK_USD, BACKLINKS_ROW_USD)
+BACKLINKS_EXPORT = export_pricing(BACKLINKS_TASK_USD, BACKLINKS_ROW_USD, TABLE_CACHE.ttl_seconds)
 Handler = Callable[..., dict[str, Any]]
 
 
@@ -222,7 +223,8 @@ def table_handler(tab: Tab) -> Handler:
     @backlinks_errors
     def handle_table(event: dict[str, Any], _context: Any, *, body: dict[str, Any], target: str, scope: str | None,
                      page: int, page_size: int, sort_field: str | None, sort_order: str, include_spam: bool,
-                     mode: str, offset: int | None, limit: int | None, **_request: Any) -> dict[str, Any]:
+                     mode: str, offset: int | None, limit: int | None, cached_only: bool,
+                     **_request: Any) -> dict[str, Any]:
         window = row_window(body, page=page, page_size=page_size, offset=offset, limit=limit)
         resolved = backlinks_target(target, scope)
         if tab == 'referring_domains' and resolved.scope == 'subfolder':
@@ -238,6 +240,8 @@ def table_handler(tab: Tab) -> Handler:
             'filters': filters, 'mode': query.mode, 'hide_spam': not include_spam,
         }
         cached = usable_payload(TABLE_CACHE.get(params), 'rows')
+        if cached is None and cached_only:
+            return not_cached_response(event)
         payload = cached if cached is not None else fresh_table(resolved, query, params)
         return success_response({
             **target_json(resolved),

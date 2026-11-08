@@ -2,30 +2,22 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import {
-  fireEvent, render, screen, waitFor
+  render, screen, waitFor
 } from '@testing-library/react';
 import { CitationsView } from './CitationsView';
 import {
   mockAuthenticatedFetch, stallAuthenticatedFetch
 } from '../../test/infrastructureMock';
-import { lastExportedColumn } from '../../test/excelExportMock';
 import {
-  answerTwoCitationPages, buildCitationsPage, FIRST_OF_TWO, SECOND_OF_TWO
-} from '../../hooks/useMarketCitations-fixtures';
+  chooseExportFormat, mockStartExport
+} from '../../test/exportsApiMock';
+import { buildCitationsPage } from '../../hooks/useMarketCitations-fixtures';
 import {
-  ARTICLE_PAGE, renderCitationsView, setupVideoFilter
+  renderCitationsView, setupVideoFilter
 } from './CitationsView-fixtures';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
-vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
-
-/** The article page on screen, two citation pages answered, and Export clicked. */
-async function setupTwoPageExport() {
-  renderCitationsView(ARTICLE_PAGE);
-  await screen.findByText('example.com');
-  answerTwoCitationPages();
-  fireEvent.click(screen.getByRole('button', { name: /export/i }));
-}
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
 describe('CitationsView', () => {
   it('shows the empty state when the API has no citations', async () => {
@@ -40,7 +32,7 @@ describe('CitationsView', () => {
 
   it('renders export button', () => {
     renderCitationsView();
-    expect(screen.getByRole('button', { name: /export/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeInTheDocument();
   });
 
   it('summarises the scope URL count, citation total and citations per URL from the API totals', async () => {
@@ -88,25 +80,23 @@ describe('CitationsView', () => {
     expect(await screen.findByText('No citations match your filters')).toBeInTheDocument();
   });
 
-  it('exports every page of the list with its keyword texts', async () => {
-    await setupTwoPageExport();
+  it('exports every citation of the list with its filters', async () => {
+    renderCitationsView();
+    await screen.findByText('example.com');
+    setupVideoFilter();
 
-    await waitFor(() => expect(lastExportedColumn('URL')).toStrictEqual([
-      FIRST_OF_TWO.url, SECOND_OF_TWO.url,
-    ]));
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'citations',
+      params: { content_type: 'video' },
+      format: 'xlsx',
+    });
   });
 
   it('says the figures cover part of the scope when the API hit its read cap', async () => {
     renderCitationsView(buildCitationsPage({ truncated: true }));
 
     expect(await screen.findByRole('status')).toHaveTextContent(/cover part of it/);
-  });
-
-  it('asks for the keyword texts when exporting', async () => {
-    await setupTwoPageExport();
-
-    await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/citations?limit=1000&include_keywords=true', expect.anything(),
-    ));
   });
 });

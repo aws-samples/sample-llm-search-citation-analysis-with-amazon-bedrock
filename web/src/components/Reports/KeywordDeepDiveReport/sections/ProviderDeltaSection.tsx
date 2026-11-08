@@ -10,6 +10,8 @@ import {
   type SectionFetchState,
   gateSection,
 } from '../../layout';
+import { ExportAllButton } from '../../../ui/ExportAllButton';
+
 
 interface Props extends SectionFetchState {readonly mentions: BrandMentionsResponse | null;}
 
@@ -54,6 +56,11 @@ export function ProviderDeltaSection({
       title="Provider differences"
       subtitle="Where each AI engine ranks your first-party brands."
     >
+      {gate.value.keyword !== null && (
+        <div className="mb-2 flex justify-end">
+          <ExportAllButton view="brand-mention-summary" params={{ keyword: gate.value.keyword }} />
+        </div>
+      )}
       <ReportTable
         columns={providerColumns(providers)}
         rows={firstParty}

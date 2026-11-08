@@ -51,6 +51,7 @@ export const API_FUNCTION_NAMES = [
   'CitationAnalysis-API-ManageUsers',
   'CitationAnalysis-API-GetPersonaRankings',
   'CitationAnalysis-API-SelfReflection',
+  'CitationAnalysis-API-Exports',
 ];
 
 const POLICIES_FILE = path.join(__dirname, '..', 'test-fixtures', 'route-size-policies.json');

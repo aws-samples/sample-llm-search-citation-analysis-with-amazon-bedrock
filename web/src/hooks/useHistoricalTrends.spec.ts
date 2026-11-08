@@ -10,7 +10,7 @@ import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   FAILED_TO_LOAD_ON_NON_OK_STATUS, INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, failedToLoadOnBackendError
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -26,10 +26,11 @@ describe('useHistoricalTrends', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useHistoricalTrends());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchHistoricalTrends'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchHistoricalTrends'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'trends',
     useHook: useHistoricalTrends,
     fetchName: 'fetchHistoricalTrends',

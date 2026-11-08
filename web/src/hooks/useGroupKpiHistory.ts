@@ -38,11 +38,13 @@ const groupKpiHistoryEndpoint = {
  */
 export function useGroupKpiHistory() {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(groupKpiHistoryEndpoint);
   const fetchGroupKpiHistory = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

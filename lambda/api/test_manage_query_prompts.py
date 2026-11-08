@@ -159,6 +159,21 @@ class TestListPrompts:
         assert [prompt['id'] for prompt in body] == expected_ids
 
 
+    def test_list_follows_every_scan_page(self, handler_module):
+        pages = [
+            {'Items': [{'id': '1', 'created_at': '2026-01-01T00:00:00Z'}], 'LastEvaluatedKey': {'id': '1'}},
+            {'Items': [{'id': '2', 'created_at': '2026-01-02T00:00:00Z'}]},
+        ]
+        mock_table.scan.side_effect = pages
+
+        try:
+            _status, body = invoke(handler_module, make_event('GET'))
+        finally:
+            mock_table.scan.side_effect = None
+
+        assert [prompt['id'] for prompt in body] == ['2', '1']
+
+
 class TestTogglePrompt:
     """Tests for PATCH /api/query-prompts/{id}."""
 

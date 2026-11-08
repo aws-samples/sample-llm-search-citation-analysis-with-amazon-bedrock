@@ -11,7 +11,7 @@ nested keyword-by-URL query fan-out.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from shared.search_results import LATEST_RUN_ITEM_LIMIT
 from testing.citation_gaps_fixtures import load_citation_gaps
@@ -55,31 +55,6 @@ def _analyze(monkeypatch, search_items: list[dict], crawled_items: list[dict] | 
     fake, _ = _fake_dynamodb(search_items, crawled_items)
     monkeypatch.setattr(_mod, 'dynamodb', fake)
     return _mod.analyze_citation_gaps('kw', CONFIG)
-
-
-def _gap(url: str, *, citation_count: int = 1) -> dict[str, Any]:
-    return {
-        'url': url,
-        'domain': 'shared.example',
-        'citation_count': citation_count,
-        'providers': ['openai'],
-        'provider_count': 1,
-        'first_party_brands': [],
-        'competitor_brands': ['Rival Hotel'],
-        'priority': 'medium',
-    }
-
-
-def _keyword_result(gaps: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        'gaps': gaps,
-        'summary': {
-            'gap_count': len(gaps),
-            'covered_count': 0,
-            'high_priority_gaps': 0,
-            'coverage_rate': 0,
-        },
-    }
 
 
 def _oversized_search_fixture() -> tuple[list[str], list[str], MagicMock]:
@@ -324,85 +299,3 @@ class TestFinalResponseEnrichment:
         assert result['domain_summary'] == [
             {'domain': 'gap.example', 'gap_count': 51, 'total_citations': 51},
         ]
-
-
-class TestAllKeywordsOrchestration:
-    @staticmethod
-    def _fake_keywords_dynamodb(keywords: list[str]) -> MagicMock:
-        return fake_dynamodb_resource(
-            fake_table(query={'Items': [{'id': keyword, 'keyword': keyword, 'status': 'active'} for keyword in keywords]})
-        )
-
-    def test_analyzes_keywords_in_sorted_order_when_more_exist_than_limit(self, monkeypatch) -> None:
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
-        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['zeta', 'alpha', 'mid']))
-        analyzed: list[str] = []
-
-        def record(keyword: str, _config: dict) -> dict:
-            analyzed.append(keyword)
-            return _keyword_result([])
-
-        monkeypatch.setattr(_mod, '_build_citation_gap_result', record)
-
-        _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
-
-        assert sorted(analyzed) == ['alpha', 'mid']
-
-    def test_associates_each_summary_with_its_own_keyword(self, monkeypatch) -> None:
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
-        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['kw-a', 'kw-b']))
-        gap_counts = {'kw-a': 3, 'kw-b': 7}
-
-        def per_keyword(keyword: str, _config: dict) -> dict:
-            result = _keyword_result([])
-            result['summary']['gap_count'] = gap_counts[keyword]
-            return result
-
-        monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
-
-        result = _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
-
-        by_keyword = {summary['keyword']: summary['gap_count'] for summary in result['keyword_summaries']}
-        assert by_keyword == {'kw-a': 3, 'kw-b': 7}
-
-    def test_enriches_only_globally_returned_urls_when_more_than_thirty_qualify(self, monkeypatch) -> None:
-        keywords = [f'kw-{index}' for index in range(7)]
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
-        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(keywords))
-
-        def per_keyword(keyword: str, _config: dict) -> dict:
-            return _keyword_result([
-                _gap(f'https://{keyword}.example/{index}') for index in range(5)
-            ])
-
-        crawled_info = MagicMock(return_value={})
-        monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
-        monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
-
-        result = _mod.analyze_all_keywords_gaps(CONFIG, 7, None)
-
-        expected_urls = [
-            f'https://kw-{keyword_index}.example/{gap_index}'
-            for keyword_index in range(6)
-            for gap_index in range(5)
-        ]
-        crawled_info.assert_called_once_with(expected_urls)
-        assert [gap['url'] for gap in result['top_gaps']] == expected_urls
-
-    def test_reuses_one_crawl_lookup_for_every_returned_occurrence_when_keywords_share_a_url(self, monkeypatch) -> None:
-        shared_url = 'https://shared.example/article'
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
-        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['beta', 'alpha']))
-        monkeypatch.setattr(
-            _mod,
-            '_build_citation_gap_result',
-            lambda _keyword, _config: _keyword_result([_gap(shared_url)]),
-        )
-        crawled_info = MagicMock(return_value={shared_url: {'title': 'Shared article'}})
-        monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
-
-        result = _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
-
-        assert crawled_info.mock_calls == [call([shared_url])]
-        assert [gap['keyword'] for gap in result['top_gaps']] == ['alpha', 'beta']
-        assert [gap['title'] for gap in result['top_gaps']] == ['Shared article', 'Shared article']

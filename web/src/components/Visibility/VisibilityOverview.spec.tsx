@@ -2,11 +2,9 @@ import {
   describe, it, expect, vi
 } from 'vitest';
 import {
-  screen, within
+  fireEvent, screen, waitFor, within
 } from '@testing-library/react';
-import {
-  clickExportToExcel, renderOverview
-} from './overviewRender-fixtures';
+import { renderOverview } from './overviewRender-fixtures';
 import {
   GROUP_ENGINES_CAPTION, GROUP_SHARE_OF_VOICE_CAPTION, GROUP_SOURCES_CAPTION, GROUP_TREND_CAPTION, buildKeywordRow, buildTrendsResponse,
   buildVisibility
@@ -26,26 +24,21 @@ import { OWNED_DOMAINS_MISSING } from '../Reports/layout/KpiHeadline';
 import { RUN_2 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import { formatDate } from '../../formatting/dateFormatter';
 
-vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
 vi.mock('chart.js', () => import('../Dashboard/chartJs-fixtures'));
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
-import { exportVisibilityOverview } from './visibilityOverviewExport';
+import {
+  chooseExportFormat, mockStartExport
+} from '../../test/exportsApiMock';
 
-const mockExportVisibilityOverview = vi.mocked(exportVisibilityOverview);
-
-class ExportFailure extends Error {
-  constructor() {
-    super('workbook could not be written');
-    this.name = 'ExportFailure';
-  }
-}
-
-/** Renders the default overview, clicks "Export to Excel" and returns the props it rendered. */
-async function renderOverviewThenExport() {
-  const { props } = renderOverview();
-  await clickExportToExcel();
-  return props;
-}
+const REQUEST = {
+  path: '/visibility',
+  params: new URLSearchParams({
+    group_id: 'hotel-sol',
+    market_id: 'es',
+    query_prompt_id: 'familia',
+  }),
+};
 
 describe('VisibilityOverview', () => {
   describe('scope line', () => {
@@ -68,10 +61,10 @@ describe('VisibilityOverview', () => {
       expect(scopeLine().textContent).toBe('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
     });
 
-    it('says how many keywords are included when the scope is truncated', () => {
+    it('never claims only the first keywords are included when the scope is truncated', () => {
       renderOverview({ visibility: buildVisibility({ keywords_truncated: true }) });
 
-      expect(scopeLine()).toHaveTextContent('only the first 2 keywords are included');
+      expect(scopeLine()).not.toHaveTextContent('only the first');
     });
   });
 
@@ -154,7 +147,7 @@ describe('VisibilityOverview', () => {
     it('counts every domain the answers cite under the domains table', () => {
       renderOverview({ visibility: buildVisibility({ sources_total: 40 }) });
 
-      expect(within(panelTitled(SOURCES_TITLE)).getByText('3 of 40 cited domains, most cited first.')).toBeInTheDocument();
+      expect(within(panelTitled(SOURCES_TITLE)).getByText('Showing 3 of 40 cited domains')).toBeInTheDocument();
     });
 
     it('lists one keyword row for a single-keyword scope', () => {
@@ -186,32 +179,74 @@ describe('VisibilityOverview', () => {
   });
 
   describe('export', () => {
-    it('exports exactly the rendered visibility, trends and scope label', async () => {
-      mockExportVisibilityOverview.mockResolvedValue();
+    it('exports every keyword row of the visibility request', async () => {
+      renderOverview({ request: REQUEST });
 
-      const props = await renderOverviewThenExport();
+      await chooseExportFormat('xlsx');
 
-      expect(mockExportVisibilityOverview).toHaveBeenCalledWith(props.visibility, props.trends, 'Hotel Sol');
+      expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'keyword-visibility',
+        params: {
+          group_id: 'hotel-sol',
+          market_id: 'es',
+          query_prompt_id: 'familia',
+        },
+        format: 'xlsx',
+      });
     });
 
-    it('disables the button while the workbook is written', async () => {
-      mockExportVisibilityOverview.mockReturnValue(new Promise(vi.fn()));
+    it.each([
+      ['brand-leaderboard', 'Brand leaderboard'],
+      ['engines', ENGINES_TITLE],
+      ['sources', SOURCES_TITLE],
+    ])('exports the %s of the visibility request from its panel', async (view, panel) => {
+      renderOverview({ request: REQUEST });
 
-      await renderOverviewThenExport();
+      fireEvent.click(within(panelTitled(panel)).getByRole('button', { name: 'Export all' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'CSV (.csv)' }));
 
-      expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
+      await waitFor(() => expect(mockStartExport).toHaveBeenCalledWith({
+        view,
+        params: {
+          group_id: 'hotel-sol',
+          market_id: 'es',
+          query_prompt_id: 'familia',
+        },
+        format: 'csv',
+      }));
     });
 
-    it('logs a failed export and offers the export again', async () => {
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-      const failure = new ExportFailure();
-      mockExportVisibilityOverview.mockRejectedValue(failure);
+    it('exports the KPI history of the trends request', async () => {
+      renderOverview({
+        request: REQUEST,
+        trendsRequest: {
+          path: '/trends',
+          params: new URLSearchParams({
+            group_id: 'hotel-sol',
+            period: 'day',
+            days: '30',
+          }),
+        },
+      });
 
-      await renderOverviewThenExport();
+      fireEvent.click(historyPanel().getByRole('button', { name: 'Export all' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Excel (.xlsx)' }));
 
-      expect(consoleError).toHaveBeenCalledWith('[visibility] Excel export failed:', failure);
-      expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeEnabled();
-      consoleError.mockRestore();
+      await waitFor(() => expect(mockStartExport).toHaveBeenCalledWith({
+        view: 'trend-periods',
+        params: {
+          days: '30',
+          group_id: 'hotel-sol',
+          period: 'day',
+        },
+        format: 'xlsx',
+      }));
+    });
+
+    it('cannot export before the view has its request', () => {
+      renderOverview();
+
+      expect(screen.getAllByRole('button', { name: 'Export all' })[0]).toBeDisabled();
     });
   });
 });

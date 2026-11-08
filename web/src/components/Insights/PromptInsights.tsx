@@ -2,8 +2,17 @@ import {
   useEffect, useId, useState
 } from 'react';
 import { usePromptInsights } from '../../hooks/usePromptInsights';
-import type { Keyword } from '../../types';
+import { ComputingState } from '../ui/ComputingState';
+import { ScopeCoverageNote } from '../ui/ScopeCoverageNote';
+import { ScopedListFooter } from '../ui/ScopedListFooter';
+import { ExportAllButton } from '../ui/ExportAllButton';
+import { requestParams } from '../../api/exports';
+import type { ScopedList } from '../../hooks/useScopedList';
+import type {
+  Keyword, PromptInsight
+} from '../../types';
 import { PromptCard } from './PromptCard';
+import { usePromptTabList } from './usePromptTabList';
 import { InsightsScopeSelector } from './InsightsScopeSelector';
 import { useScopeSelection } from './useScopeSelection';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
@@ -87,26 +96,17 @@ export function PromptInsights({ keywords }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('winning');
   const selection = useScopeSelection();
   const {
-    data, loading, error, fetchPromptInsights 
+    data, loading, error, computing, request, fetchPromptInsights
   } = usePromptInsights(selection.scope);
   const pending = loading || selection.scopePending;
   // Only an answer for the selected scope is shown; while one is in flight, nothing is.
   const insights = pending ? null : data;
+  const list = usePromptTabList(insights, request, activeTab);
 
   useEffect(
     () => selection.trackScopeRequest(fetchPromptInsights('all', 20)),
     [fetchPromptInsights, selection.trackScopeRequest],
   );
-
-  const getPrompts = () => {
-    if (!insights) return [];
-    const map = {
-      winning: insights.winning_prompts,
-      losing: insights.losing_prompts,
-      opportunities: insights.opportunity_prompts 
-    };
-    return map[activeTab] ?? [];
-  };
 
   const getCount = (id: TabId) => {
     if (!insights) return 0;
@@ -118,7 +118,6 @@ export function PromptInsights({ keywords }: Props) {
     return map[id] ?? 0;
   };
 
-  const prompts = getPrompts();
   const panelId = useId();
   const tabs = TABS.map((tab) => ({
     ...tab,
@@ -145,31 +144,56 @@ export function PromptInsights({ keywords }: Props) {
       >
         <InsightsScopeSelector keywords={keywords} selection={selection} label="Analyze" />
         <WinRateBadge insights={insights} pending={pending} />
+        <div>
+          <ExportAllButton view="prompt-insights" params={pending ? null : requestParams(request)} />
+        </div>
       </PageHeaderCard>
 
       <SummaryTiles insights={insights} pending={pending} />
+      <ScopeCoverageNote response={insights} />
 
       <TabBar tabs={tabs} activeId={activeTab} onChange={setActiveTab} label="Prompt outcomes" panelId={panelId} />
 
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       <TabPanel id={panelId} activeId={activeTab}>
-        {pending ? (
-          <SkeletonRegion label="Loading insights">
-            <InsightCardGridSkeleton cardClassName="h-[153px]" />
-          </SkeletonRegion>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {prompts.map(prompt => <PromptCard key={prompt.keyword} prompt={prompt} />)}
-          </div>
-        )}
-
-        {prompts.length === 0 && !pending && (
-          <div className="text-center py-8 text-gray-500">
-            No {activeTab} prompts found. Run more analyses to gather data.
-          </div>
-        )}
+        <PromptTabBody pending={pending} computing={computing !== null} list={list} tab={activeTab} />
       </TabPanel>
     </div>
+  );
+}
+
+/** One tab's prompt cards with their paging footer, or the computing/loading placeholder. */
+function PromptTabBody({
+  pending, computing, list, tab
+}: {
+  readonly pending: boolean;
+  /** A view job computes the answer. */
+  readonly computing: boolean;
+  readonly list: ScopedList<PromptInsight>;
+  readonly tab: TabId;
+}) {
+  if (pending && computing) return <ComputingState subject="prompt insights" />;
+  if (pending) {
+    return (
+      <SkeletonRegion label="Loading insights">
+        <InsightCardGridSkeleton cardClassName="h-[153px]" />
+      </SkeletonRegion>
+    );
+  }
+  if (list.items.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        No {tab} prompts found. Run more analyses to gather data.
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {list.items.map(prompt => <PromptCard key={prompt.keyword} prompt={prompt} />)}
+      </div>
+      <ScopedListFooter list={list} noun={`${tab === 'opportunities' ? 'opportunity' : tab} prompts`} label="Load more prompts" />
+    </>
   );
 }

@@ -5,6 +5,10 @@ import {
   API_BASE_URL, authenticatedFetch, ApiConfigError, ApiRequestError 
 } from '../infrastructure';
 import { isRecord } from '../types/domain/keywordDecoders';
+import type { ComputingResponse } from '../types/domain/scopeCoverage';
+import {
+  abortableWait, awaitViewJob, jsonAnswer, type JsonAnswer
+} from './viewJobs';
 
 interface ApiErrorResponse {
   error: string;
@@ -29,12 +33,11 @@ interface ApiGetOptions extends ApiRequestOptions {
    * already retry on their next tick and count consecutive failures.
    */
   retry?: boolean;
-}
-
-// Type-safe JSON parsing - response.json() returns Promise<unknown> in strict mode
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  const data: unknown = await response.json();
-  return data as T;
+  /**
+   * Called on every `202` while a view job computes the answer (`viewJobs.ts`); the GET keeps
+   * repeating until it answers `200`.
+   */
+  onComputing?: (computing: ComputingResponse) => void;
 }
 
 function decodeApiErrorResponse(data: unknown): ApiErrorResponse | null {
@@ -93,13 +96,13 @@ function acceptsJsonStatus(response: Response, options: ApiRequestOptions): bool
 /**
  * The request pipeline every verb shares: one authenticated fetch carrying the
  * caller's abort signal, an `ApiRequestError` for any unaccepted non-2xx status,
- * and the decoded JSON body otherwise.
+ * and the status with the decoded JSON body otherwise.
  */
-async function requestJson<T>(
+async function requestJsonAnswer(
   url: string,
   init: RequestInit,
   options: ApiRequestOptions
-): Promise<T> {
+): Promise<JsonAnswer> {
   const response = await authenticatedFetch(url, {
     ...init,
     signal: options.signal,
@@ -109,7 +112,12 @@ async function requestJson<T>(
     throw await createApiRequestError(response, options);
   }
 
-  return parseJsonResponse<T>(response);
+  return jsonAnswer(response);
+}
+
+async function requestJson<T>(url: string, init: RequestInit, options: ApiRequestOptions): Promise<T> {
+  const { body } = await requestJsonAnswer(url, init, options);
+  return body as T;
 }
 
 function jsonBodyRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
@@ -165,35 +173,13 @@ function isRetryableGetFailure(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
-}
-
-/** Resolves after `ms`, or rejects with the signal's reason as soon as it aborts. */
-function waitBeforeRetry(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted === true) {
-      reject(abortReason(signal));
-      return;
-    }
-    const onAbort = () => {
-      clearTimeout(timer);
-      if (signal !== undefined) reject(abortReason(signal));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
 /**
  * Makes an authenticated GET request to the API.
  *
  * A GET is idempotent, so a 502, 503, 429 or network failure is retried once
  * after a jittered 300–811 ms wait. A 504 and every other status fail at once,
- * and an aborted request is never retried.
+ * and an aborted request is never retried. A `202` computing answer is repeated
+ * with backoff until the view job's result is stored (`awaitViewJob`).
  * @param endpoint - API endpoint (without base URL)
  * @param options - Optional request options
  * @returns Parsed JSON response
@@ -216,19 +202,27 @@ export async function apiGetFrom<T>(
   options: ApiGetOptions = {}
 ): Promise<T> {
   const {
-    params, retry = true, ...requestOptions
+    params, retry = true, onComputing, ...requestOptions
   } = options;
 
   const endpointUrl = `${baseUrl}${endpoint}`;
   const url = params ? `${endpointUrl}?${new URLSearchParams(params)}` : endpointUrl;
 
-  try {
-    return await requestJson<T>(url, {}, requestOptions);
-  } catch (firstError) {
-    if (!retry || requestOptions.signal?.aborted === true || !isRetryableGetFailure(firstError)) throw firstError;
-    await waitBeforeRetry(retryDelayMs(), requestOptions.signal);
-    return requestJson<T>(url, {}, requestOptions);
-  }
+  const requestOnce = async (): Promise<JsonAnswer> => {
+    try {
+      return await requestJsonAnswer(url, {}, requestOptions);
+    } catch (firstError) {
+      if (!retry || requestOptions.signal?.aborted === true || !isRetryableGetFailure(firstError)) throw firstError;
+      await abortableWait(retryDelayMs(), requestOptions.signal);
+      return requestJsonAnswer(url, {}, requestOptions);
+    }
+  };
+
+  const body = await awaitViewJob(requestOnce, {
+    signal: requestOptions.signal,
+    onComputing,
+  });
+  return body as T;
 }
 
 /** `apiPost` against another API of this deployment (see `apiGetFrom`). */

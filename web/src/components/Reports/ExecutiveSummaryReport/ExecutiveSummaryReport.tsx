@@ -1,4 +1,6 @@
-import { useSearchParams } from 'react-router-dom';
+import {
+  useNavigate, useSearchParams
+} from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import {
@@ -34,6 +36,7 @@ import { NextActionsSection } from './sections/NextActionsSection';
  */
 export function ExecutiveSummaryReport() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   // The summary has no per-keyword form, so only `?group=` can narrow it.
   const scope = scopeFromSearch(searchParams, null);
   const { groups } = useKeywordGroups();
@@ -59,8 +62,8 @@ export function ExecutiveSummaryReport() {
       actions={(
         <GroupScopeSelector
           groups={groups}
-          scope={scope}
-          pathFor={(next) => (next.kind === 'group' ? `/reports/executive-summary?group=${encodeURIComponent(next.groupId)}` : '/reports/executive-summary')}
+          value={scope}
+          onChange={(next) => navigate(next.kind === 'group' ? `/reports/executive-summary?group=${encodeURIComponent(next.groupId)}` : '/reports/executive-summary')}
         />
       )}
     >

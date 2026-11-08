@@ -2,6 +2,7 @@ import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
   MoverColumn, ReportSection, gateSection, type ReportSlice
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 /**
  * The "what worked / what didn't" pair: the keywords whose visibility score
@@ -41,6 +42,7 @@ export function WinsAndGapsSection({
           emptyMessage="No keywords declined in the period. Maintain current investment."
         />
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to="/reports/visibility">See all keywords</SeeAllLink></p>
     </ReportSection>
   );
 }

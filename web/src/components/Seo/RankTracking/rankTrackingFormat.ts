@@ -1,13 +1,13 @@
 /**
- * Display rules of rank tracking: position cells, sorting, schedule labels and SERP feature labels.
+ * Display rules of rank tracking: position cells, schedule labels and SERP feature labels.
  *
  * Position cell: not checked = "–"; a miss = "Not found", or "Not found (unconfirmed)" when the keyword ranked
  * before and the re-checks did not find it; a previous position that is now missing reads "prev → lost";
- * otherwise "prev → pos", green when it rose, amber when it fell. Sorting puts keywords without a position last.
+ * otherwise "prev → pos", green when it rose, amber when it fell. The results route sorts the rows.
  */
 import type { CompetitorDomain } from '../../../api/brandSettings';
 import type {
-  RankCell, RankDevice, RankResultRow, RankSchedule, RankTracker
+  RankCell, RankSchedule, RankTracker
 } from '../../../types/api/seoRankTracking';
 import { NO_MARKET_LABEL } from '../../Markets/marketSelection';
 
@@ -55,12 +55,6 @@ export function positionDisplay(cell: RankCell | null): PositionDisplay {
     text: `${previous} → ${cell.position}`,
     tone: movement(previous, cell.position),
   };
-}
-
-/** Rows by the position on `device`, best first, keywords without a position last (then by keyword). */
-export function sortByPosition(rows: readonly RankResultRow[], device: RankDevice): RankResultRow[] {
-  const rank = (row: RankResultRow): number => row[device]?.position ?? Number.POSITIVE_INFINITY;
-  return [...rows].sort((left, right) => (rank(left) - rank(right)) || left.keyword.localeCompare(right.keyword));
 }
 
 export const SCHEDULE_LABELS: Readonly<Record<RankSchedule, string>> = {

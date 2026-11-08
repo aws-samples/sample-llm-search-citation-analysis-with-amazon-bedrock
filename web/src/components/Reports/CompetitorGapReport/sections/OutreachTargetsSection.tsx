@@ -1,12 +1,33 @@
-import type { CompetitorExclusiveSource } from '../../../../api/reports';
+import { useMemo } from 'react';
+import type {
+  CompetitorExclusiveSource, CompetitorReportResponse
+} from '../../../../api/reports';
 import {
   PriorityBadge, REPORT_CARD_CLASS, ReportCardHeader, ReportSection, ReportSectionNote
 } from '../../layout';
 import {
   gateRollup, type RollupSectionProps
 } from './rollupSection';
+import { useScopedList } from '../../../../hooks/useScopedList';
+import {
+  isOutreachTarget, OUTREACH_TARGETS_PAGING
+} from '../../../../api/scopedListPagings';
+import { ScopedListFooter } from '../../../ui/ScopedListFooter';
 
 const TITLE = 'Top outreach targets';
+
+/** The answer with its outreach total, `exclusive_source_count` when the server sends no `outreach_targets_total`. */
+function withOutreachTotal(response: CompetitorReportResponse | null): CompetitorReportResponse | null {
+  if (response === null) return null;
+  const { rollup } = response;
+  return {
+    ...response,
+    rollup: {
+      ...rollup,
+      outreach_targets_total: rollup.outreach_targets_total ?? rollup.exclusive_source_count,
+    },
+  };
+}
 
 /**
  * Outreach targets — the prioritised list of sources that cite this
@@ -14,12 +35,17 @@ const TITLE = 'Top outreach targets';
  * computed server-side; we just render it. Top targets get their own
  * page because each card is meaty (URL, domain, providers) and
  * pagination across them is what the strategist will pin to a wall.
+ * The first page opens the list; "Load more" pages through every exclusive
+ * source (2.45.0 wave 5, `view=outreach`).
  */
 export function OutreachTargetsSection(props: RollupSectionProps) {
+  const body = useMemo(() => withOutreachTotal(props.response ?? null), [props.response]);
+  const targetList = useScopedList(body, props.request ?? null, OUTREACH_TARGETS_PAGING, isOutreachTarget);
   const gate = gateRollup(TITLE, props);
   if (!gate.ready) return gate.placeholder;
 
-  const targets = gate.value.outreach_targets;
+  // An older answer carries no `response`: the rollup's own list is the whole list.
+  const targets = body === null ? gate.value.outreach_targets : targetList.items;
   if (targets.length === 0) {
     return (
       <ReportSectionNote title={TITLE} subtitle="No outreach targets identified.">
@@ -40,6 +66,7 @@ export function OutreachTargetsSection(props: RollupSectionProps) {
           <TargetCard key={`${target.url}::${target.keyword}`} target={target} />
         ))}
       </div>
+      <ScopedListFooter list={targetList} noun="sources" />
     </ReportSection>
   );
 }

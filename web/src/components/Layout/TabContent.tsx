@@ -8,6 +8,7 @@ import {
 } from '../ui';
 import { AlertsPanel } from '../Dashboard/AlertsPanel';
 import { StatCard } from '../Dashboard/StatCard';
+import { SeeAllLink } from '../ui/SeeAllLink';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
 import { SeoDashboardCards } from '../Dashboard/SeoDashboardCards';
@@ -41,6 +42,7 @@ const CitationGaps = lazy(() => import('../Insights').then(module => ({ default:
 const Recommendations = lazy(() => import('../Insights').then(module => ({ default: module.Recommendations })));
 const ContentStudioView = lazy(() => import('../ContentStudio').then(module => ({ default: module.ContentStudioView })));
 const SeoRouter = lazy(() => import('../Seo/SeoRouter').then(module => ({ default: module.SeoRouter })));
+const ExportsView = lazy(() => import('../Exports').then(module => ({ default: module.ExportsView })));
 
 interface TabContentProps {
   readonly activeTab: TabType;
@@ -109,6 +111,10 @@ function DashboardStats({ stats }: { readonly stats: Stats | null }) {
       <StatCard title="Total Citations" value={stats?.total_citations ?? 0} icon={<LinkIcon className="w-6 h-6" />} tone="violet" approximate={approximate} />
       <StatCard title="Pages Crawled" value={stats?.total_crawled ?? 0} icon={<GlobeIcon className="w-6 h-6" />} tone="emerald" approximate={approximate} />
       <StatCard title="Unique Keywords" value={stats?.unique_keywords ?? 0} icon={<KeyIcon className="w-6 h-6" />} tone="amber" approximate={approximate} />
+      <p className="col-span-2 lg:col-span-4 -mt-2 flex flex-wrap justify-end gap-4">
+        <SeeAllLink to="/searches">See all searches</SeeAllLink>
+        <SeeAllLink to="/citations">See all citations</SeeAllLink>
+      </p>
     </div>
   );
 }
@@ -262,6 +268,7 @@ export function TabContent(props: TabContentProps) {
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
     seo: <SeoRouter />,
+    exports: <ExportsView />,
   };
 
   const component = tabComponents[activeTab];

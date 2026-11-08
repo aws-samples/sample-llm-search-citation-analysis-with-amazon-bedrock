@@ -1,9 +1,8 @@
+import type { ReactNode } from 'react';
 import type { Search } from '../../types';
 import { summarizeSearches } from '../../formatting/searchSummary';
 import { StrokeIcon } from '../ui/StrokeIcon';
-import {
-  CHEVRON_DOWN_PATHS, DOWNLOAD_PATHS 
-} from '../ui/iconPaths';
+import { CHEVRON_DOWN_PATHS } from '../ui/iconPaths';
 
 export interface KeywordGroup {
   keyword: string;
@@ -101,7 +100,8 @@ interface FiltersSectionProps {
     name: string
   }[];
   onClear: () => void;
-  onExport: () => void;
+  /** The view's "Export all" (every run these filters select). */
+  exportButton: ReactNode;
 }
 
 export const FiltersSection = ({
@@ -114,7 +114,7 @@ export const FiltersSection = ({
   providers,
   promptNames,
   onClear,
-  onExport,
+  exportButton,
 }: FiltersSectionProps) => (
   <div className="bg-white rounded-lg border border-gray-200 p-4">
     <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
@@ -169,20 +169,10 @@ export const FiltersSection = ({
         >
           Clear
         </button>
-        <button
-          onClick={onExport}
-          className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2"
-        >
-          <DownloadIcon />
-          <span className="sr-only sm:not-sr-only">Export</span>
-        </button>
+        {exportButton}
       </div>
     </div>
   </div>
-);
-
-const DownloadIcon = () => (
-  <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
 );
 
 interface KeywordRowProps {

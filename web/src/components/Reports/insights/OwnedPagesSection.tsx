@@ -5,8 +5,9 @@ import type {
 } from '../../../types/domain/insights';
 import { MarkedName } from './InsightChip';
 import {
-  InsightsTableSection, type InsightsSectionProps
+  InsightsTableSection, type InsightsListPaging, type InsightsSectionProps
 } from './InsightsTableSection';
+import { isRecord } from '../../../types/domain/keywordDecoders';
 
 export const OWNED_PAGES_TITLE = 'Your most-cited pages';
 
@@ -39,19 +40,36 @@ const OWNED_PAGE_COLUMNS: ReadonlyArray<ReportTableColumn<OwnedPageRow>> = [
   },
 ];
 
-/** " 4 less-cited pages are not shown."; nothing when the 25-row cap left none out. */
+function isOwnedPageRow(value: unknown): value is OwnedPageRow {
+  return isRecord(value) && typeof value.url === 'string' && typeof value.citations === 'number' && Array.isArray(value.engines);
+}
+
+/** Every owned page past the first 25 (2.45.0 wave 5): next pages from `view=owned_pages`. */
+const OWNED_PAGES_PAGES: InsightsListPaging<OwnedPageRow> = {
+  paging: {
+    list: 'facts.owned_pages.pages',
+    token: 'facts.owned_pages.pages_next_token',
+    total: 'facts.owned_pages.pages_total',
+    view: 'owned_pages',
+  },
+  isItem: isOwnedPageRow,
+  noun: 'pages',
+};
+
+/** " 4 less-cited pages are not shown."; nothing when every page is on screen. */
 function omittedClause(omitted: number): string {
   if (omitted === 0) return '';
   return omitted === 1 ? ' 1 less-cited page is not shown.' : ` ${omitted} less-cited pages are not shown.`;
 }
 
-/** The documents against web pages over every owned citation, and how many pages the 25-row cap left out. */
-function splitNote({ facts }: ReportInsightsResponse): string | null {
+/** The documents against web pages over every owned citation, and how many pages are not loaded yet. */
+function splitNote({ facts }: ReportInsightsResponse, shown: number): string | null {
   const {
-    document_citations: documents, page_citations: pages, pages_omitted: omitted
+    document_citations: documents, page_citations: pages, pages_omitted: omitted, pages: firstPage
   } = facts.owned_pages;
   if (documents + pages === 0) return null;
-  return `Documents (PDFs and other downloads): ${documents} citations; web pages: ${pages}.${omittedClause(omitted)}`;
+  const left = Math.max(0, firstPage.length + omitted - shown);
+  return `Documents (PDFs and other downloads): ${documents} citations; web pages: ${pages}.${omittedClause(left)}`;
 }
 
 /** Your pages the AI engines cite most, with their section, the documents marked. */
@@ -68,6 +86,7 @@ export function OwnedPagesSection(slice: InsightsSectionProps) {
       rowKey={(row) => row.url}
       emptyMessage={({ citations_configured: configured }) => (configured ? OWNED_PAGES_EMPTY : OWNED_PAGES_UNCONFIGURED)}
       note={splitNote}
+      pages={OWNED_PAGES_PAGES}
     />
   );
 }

@@ -1,6 +1,6 @@
 /**
  * The issue types a finished audit found, grouped by severity (critical first), each with its explanation and
- * how to fix it, a "View pages" button that opens the affected pages, and an Excel export of the list.
+ * how to fix it, and a "View pages" button that opens the affected pages.
  */
 import { useState } from 'react';
 import { useSiteAuditIssueTypes } from '../../../hooks/useSiteAuditIssues';
@@ -8,13 +8,11 @@ import type {
   IssueTypeEntry, SiteAudit
 } from '../../../types/api/seoAudits';
 import { Button } from '../../ui';
-import { ExportExcelButton } from '../../ui/ExportExcelButton';
 import {
   SkeletonRegion, SkeletonTable
 } from '../../ui/Skeleton';
 import { AffectedPagesDrawer } from './AffectedPagesDrawer';
 import { SiteAuditLoaded } from './SiteAuditLoaded';
-import { exportIssueTypesExcel } from './siteAuditExcel';
 import {
   GROUP_LABELS, SEVERITY_BADGES, SEVERITY_LABELS, SEVERITY_ORDER
 } from './siteAuditFormat';
@@ -52,10 +50,6 @@ function IssueList({
   if (entries.length === 0) return <p className="text-sm text-gray-600">No issues found.</p>;
   return (
     <>
-      <div className="flex justify-end">
-        <ExportExcelButton onExport={() => exportIssueTypesExcel(entries, audit.start_url)}
-          failureLabel="[seo] Site audit issues Excel export failed:" title="Every issue type of this audit" />
-      </div>
       {SEVERITY_ORDER.map((severity) => {
         const ofSeverity = entries.filter((entry) => entry.severity === severity);
         if (ofSeverity.length === 0) return null;
@@ -66,7 +60,7 @@ function IssueList({
           </section>
         );
       })}
-      <AffectedPagesDrawer auditId={audit.audit_id} startUrl={audit.start_url} entry={open} onClose={() => setOpen(null)} />
+      <AffectedPagesDrawer auditId={audit.audit_id} entry={open} onClose={() => setOpen(null)} />
     </>
   );
 }

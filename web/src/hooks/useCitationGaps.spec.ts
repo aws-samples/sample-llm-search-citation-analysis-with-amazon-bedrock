@@ -9,7 +9,7 @@ import {
   setupCitationGapsConsoleErrorMock
 } from './useCitationGaps-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
@@ -28,10 +28,11 @@ describe('useCitationGaps', () => {
   it('returns an idle state when no citation-gap request has started', () => {
     const { result } = renderHook(() => useCitationGaps());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchCitationGaps'));
+    expect(result.current).toStrictEqual(idleScopedEndpointState('fetchCitationGaps'));
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'citation gaps',
     useHook: useCitationGaps,
     fetchName: 'fetchCitationGaps',

@@ -138,11 +138,6 @@ export async function fetchKeywordResearchHistoryPage(
   };
 }
 
-/** The newest page of research jobs (the agent's run list). */
-export async function fetchKeywordResearchHistory(type?: ResearchType): Promise<KeywordResearchItem[]> {
-  return (await fetchKeywordResearchHistoryPage(type)).items;
-}
-
 export async function deleteKeywordResearch(id: string): Promise<void> {
   await apiDelete<unknown>(`/keyword-research/${encodeURIComponent(id)}`);
 }

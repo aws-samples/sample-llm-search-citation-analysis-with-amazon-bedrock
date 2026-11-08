@@ -6,8 +6,7 @@ import {
 import {
   organicPositionText, percentText, quadrantBadgeClass, quadrantLabel, rankedPositionText, trafficText, volumeText, yesNoText
 } from '../seoGeoView';
-import { seoGeoKeywordsExport } from '../seoGeoExcel';
-import { SeoGeoExcelToolbar } from './SeoGeoExcelToolbar';
+import { SeoGeoExportToolbar } from './SeoGeoExportToolbar';
 import {
   SeoGeoSectionFrame, type SeoGeoSectionProps
 } from './seoGeoGate';
@@ -80,13 +79,13 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SeoGeoRow>> = [
 
 /** Every keyword of the scope with its organic and AI figures, in the server's order (largest volume first). */
 export function SeoGeoTableSection({
-  state, scopeLabel
+  state, exportScope
 }: SeoGeoSectionProps) {
   return (
     <SeoGeoSectionFrame title={TITLE} subtitle="Largest search volume first; keywords without metrics last." state={state}>
       {(response) => (
         <>
-          <SeoGeoExcelToolbar table={seoGeoKeywordsExport(response, scopeLabel)} />
+          <SeoGeoExportToolbar scope={exportScope} table="Keywords" />
           <ReportTable columns={COLUMNS} rows={response.rows} rowKey={(row) => row.keyword_id} />
         </>
       )}

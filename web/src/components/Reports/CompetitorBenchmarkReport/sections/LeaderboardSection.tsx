@@ -1,10 +1,8 @@
 import type { BrandLeaderboardRow } from '../../../../types';
 import { providerName } from '../../../../constants/providers';
+import type { ReportTableColumn } from '../../layout/ReportTable';
 import {
-  ReportTable, type ReportTableColumn
-} from '../../layout/ReportTable';
-import {
-  BRAND_COLUMN, brandKpiColumn, brandRowKey, firstPartyRowClass, LatestRunSection, noBrandNamed, type ScopeSectionProps
+  BRAND_COLUMN, brandKpiColumn, firstPartyRowClass, LatestRunSection, noBrandNamed, ScopeBrandTable, type ScopeSectionProps
 } from '../../scopeReport';
 
 const TOP_PLACE_INFO = 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.';
@@ -46,7 +44,7 @@ export function LeaderboardSection({ report }: ScopeSectionProps) {
       emptyMessage={noBrandNamed}
     >
       {(visibility) => (
-        <ReportTable columns={leaderboardColumns()} rows={visibility.brands} rowKey={brandRowKey} rowClassName={firstPartyRowClass} />
+        <ScopeBrandTable report={report} visibility={visibility} columns={leaderboardColumns()} rowClassName={firstPartyRowClass} />
       )}
     </LatestRunSection>
   );

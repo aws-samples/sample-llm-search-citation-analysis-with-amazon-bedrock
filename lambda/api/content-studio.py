@@ -9,9 +9,9 @@ import os
 import re
 import sys
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError
 # Add shared module to path
 sys.path.insert(0, "/opt/python")
 
+from shared.action_scope_serve import action_request, resolve_scope, serve_action_list
 from shared.api_response import (
     api_response,
     not_found_response,
@@ -30,8 +31,8 @@ from shared.api_response import (
     validation_error,
 )
 from shared.auth import get_caller_identity
-from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
-from shared.constants import MAX_KEYWORD_LENGTH, priority_rank
+from shared.brand_visibility import tracked_brand_names
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
     GROUP_BRIEF_MODES,
@@ -51,6 +52,7 @@ from shared.content_brief import (
     single_keyword_brief,
     validate_template_placeholders,
 )
+from shared.content_idea_rules import configuration_idea
 from shared.content_row_size import fit_generation_result
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
 from shared.decorators import (
@@ -65,6 +67,7 @@ from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
     batch_get_items,
+    collect_all_items,
     query_latest_per_key,
 )
 from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure, set_update_expression
@@ -72,7 +75,7 @@ from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.merged_pages import MergedPage, MergeSpec, decode_positions, merged_page, query_reader
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
-from shared.request_deadline import current_deadline
+from shared.scope_params import SCOPE_QUERY_PARAMS
 from shared.search_results import search_results_table_name
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 from shared.stale_jobs import stale_elapsed_seconds
@@ -144,114 +147,6 @@ class _GenerationClaim:
     lease_expires_at: int
 
 
-def _get_seasonal_suggestions(keywords: list[str], config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Generate seasonal and trending content suggestions based on current date and keywords."""
-    ideas = []
-    now = utc_now()
-    month = now.month
-    industry = config.get("industry", "general")
-
-    seasonal_themes = {
-        1: ["new year", "winter", "january deals", "fresh start"],
-        2: ["valentine", "romantic", "couples", "winter getaway"],
-        3: ["spring break", "march", "spring travel", "easter"],
-        4: ["spring", "easter", "april", "outdoor"],
-        5: ["memorial day", "spring", "may", "mother's day"],
-        6: ["summer", "june", "father's day", "graduation"],
-        7: ["summer vacation", "july", "independence day", "beach"],
-        8: ["back to school", "august", "summer", "late summer"],
-        9: ["fall", "september", "labor day", "autumn"],
-        10: ["fall", "october", "halloween", "autumn travel"],
-        11: ["thanksgiving", "november", "black friday", "holiday prep"],
-        12: ["holiday", "christmas", "december", "new year", "winter"],
-    }
-    industry_seasonal = {
-        "hotels": {
-            1: "Winter Escape Packages",
-            2: "Romantic Getaway Guide",
-            3: "Spring Break Destinations",
-            6: "Summer Family Vacation Guide",
-            11: "Holiday Travel Planning",
-            12: "New Year's Eve Celebrations",
-        },
-        "restaurants": {
-            2: "Valentine's Day Dining Guide",
-            5: "Mother's Day Brunch Spots",
-            6: "Father's Day Dinner Ideas",
-            11: "Thanksgiving Dining Options",
-            12: "Holiday Party Venues",
-        },
-        "retail": {
-            8: "Back to School Shopping Guide",
-            11: "Black Friday Deals Preview",
-            12: "Holiday Gift Guide",
-        },
-        "travel": {
-            3: "Spring Break Planning",
-            6: "Summer Vacation Ideas",
-            12: "Holiday Travel Tips",
-        },
-    }
-
-    current_themes = seasonal_themes.get(month, [])
-    industry_content = industry_seasonal.get(industry, {}).get(month)
-    for keyword in keywords[:10]:
-        keyword_lower = keyword.lower()
-        for theme in current_themes:
-            if theme in keyword_lower or any(word in keyword_lower for word in theme.split()):
-                ideas.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "type": "seasonal_content",
-                        "priority": "medium",
-                        "title": f'Seasonal Content: "{keyword}"',
-                        "description": f"This keyword is relevant for {theme} season. Create timely content to capture seasonal traffic.",
-                        "keyword": keyword,
-                        "source": "seasonal_analysis",
-                        "seasonal_theme": theme,
-                        "competitor_urls": [],
-                        "actionable": True,
-                        "content_angle": "seasonal",
-                    }
-                )
-                break
-
-    if industry_content and keywords:
-        ideas.append(
-            {
-                "id": str(uuid.uuid4()),
-                "type": "trending_topic",
-                "priority": "medium",
-                "title": f"Trending: {industry_content}",
-                "description": f"Create content for this trending topic in {industry}. High search volume expected this month.",
-                "keyword": keywords[0] if keywords else industry_content.lower().replace(" ", "-"),
-                "source": "trend_analysis",
-                "trending_topic": industry_content,
-                "competitor_urls": [],
-                "actionable": True,
-                "content_angle": "trending",
-            }
-        )
-
-    if keywords:
-        ideas.append(
-            {
-                "id": str(uuid.uuid4()),
-                "type": "evergreen_content",
-                "priority": "low",
-                "title": f"Evergreen Guide: Ultimate {keywords[0].title()} Resource",
-                "description": "Create comprehensive evergreen content that ranks year-round and establishes authority.",
-                "keyword": keywords[0],
-                "source": "evergreen_analysis",
-                "competitor_urls": [],
-                "actionable": True,
-                "content_angle": "evergreen",
-            }
-        )
-
-    return ideas
-
-
 def get_crawled_content(urls: list[str], limit: int = 5) -> list[dict[str, Any]]:
     """Get the latest crawled content for competitor analysis."""
     table = dynamodb.Table(CRAWLED_CONTENT_TABLE)
@@ -277,275 +172,6 @@ def get_crawled_content(urls: list[str], limit: int = 5) -> list[dict[str, Any]]
             }
         )
     return content_list
-
-
-def _system_idea(idea_type: str, title: str, description: str) -> dict[str, Any]:
-    """A non-actionable placeholder shown while there is nothing to analyse."""
-    return {
-        "id": str(uuid.uuid4()),
-        "type": idea_type,
-        "priority": "high",
-        "title": title,
-        "description": description,
-        "keyword": None,
-        "source": "system",
-        "competitor_urls": [],
-        "actionable": False,
-    }
-
-
-def _citation_opportunity_ideas(keyword_data: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    """Create citation-analysis ideas when brand extraction has not run."""
-    ideas = []
-    for keyword, results in keyword_data.items():
-        if not keyword:
-            continue
-        all_citations = []
-        for result in results:
-            all_citations.extend(result.get("citations", []))
-        if all_citations:
-            ideas.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "type": "citation_opportunity",
-                    "priority": "medium",
-                    "title": f'Analyze Citations for "{keyword}"',
-                    "description": f"Found {len(set(all_citations))} unique citations. Brand extraction not yet run for this data.",
-                    "keyword": keyword,
-                    "source": "citation_analysis",
-                    "competitor_urls": list(set(all_citations))[:10],
-                    "actionable": True,
-                    "content_angle": "comprehensive_guide",
-                }
-            )
-    return ideas[:30]
-
-
-@dataclass
-class _KeywordVisibility:
-    """How tracked brands appeared in one keyword's latest results."""
-
-    fp_found: bool = False
-    fp_best_rank: int = 999
-    fp_providers: set[str] = field(default_factory=set)
-    fp_sentiment: list[str] = field(default_factory=list)
-    comp_mentions: list[dict[str, Any]] = field(default_factory=list)
-    all_providers: set[str] = field(default_factory=set)
-    competitor_citations: list[str] = field(default_factory=list)
-    all_citations: list[str] = field(default_factory=list)
-
-
-def _analyze_keyword_visibility(
-    results: list[dict[str, Any]], first_party: list[str], competitors: list[str]
-) -> _KeywordVisibility:
-    """Aggregate brand mentions in the latest result batch for one keyword."""
-    latest_ts = max(result.get("timestamp", "") for result in results)
-    latest = [result for result in results if result.get("timestamp") == latest_ts]
-
-    visibility = _KeywordVisibility()
-    for result in latest:
-        provider = result.get("provider", "")
-        visibility.all_providers.add(provider)
-        citations = result.get("citations", [])
-        visibility.all_citations.extend(citations)
-        for brand in result.get("brands", []):
-            rank = to_int(brand.get("rank"), 999)
-            classification = classify_brand(brand, first_party, competitors)
-            if classification == "first_party":
-                visibility.fp_found = True
-                visibility.fp_best_rank = min(visibility.fp_best_rank, rank)
-                visibility.fp_providers.add(provider)
-                visibility.fp_sentiment.append(brand.get("sentiment", "neutral"))
-            elif classification == "competitor":
-                visibility.comp_mentions.append(
-                    {
-                        "name": brand.get("name"),
-                        "rank": rank,
-                        "provider": provider,
-                    }
-                )
-                visibility.competitor_citations.extend(citations)
-
-    visibility.competitor_citations = list(set(visibility.competitor_citations))[:10]
-    visibility.all_citations = list(set(visibility.all_citations))[:10]
-    return visibility
-
-
-def _ranked_keyword_idea(
-    keyword: str,
-    visibility: _KeywordVisibility,
-    *,
-    copy: dict[str, str],
-    competitor_urls: list[str],
-) -> dict[str, Any]:
-    """An idea for a keyword where the brand already ranks; ``copy`` carries the per-kind text fields."""
-    return {
-        "id": str(uuid.uuid4()),
-        "type": copy["type"],
-        "priority": copy["priority"],
-        "title": copy["title"],
-        "description": copy["description"],
-        "keyword": keyword,
-        "source": copy["source"],
-        "current_rank": visibility.fp_best_rank,
-        "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
-        "competitor_urls": competitor_urls,
-        "providers_present": list(visibility.fp_providers),
-        "actionable": True,
-        "content_angle": copy["content_angle"],
-    }
-
-
-def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
-    if not visibility.fp_found and visibility.comp_mentions:
-        return {
-            "id": str(uuid.uuid4()),
-            "type": "visibility_gap",
-            "priority": "high",
-            "title": f'Create Content for "{keyword}"',
-            "description": f"Your brand doesn't appear but {len(visibility.comp_mentions)} competitors do.",
-            "keyword": keyword,
-            "source": "visibility_analysis",
-            "competitor_brands": [item["name"] for item in visibility.comp_mentions[:5]],
-            "competitor_urls": visibility.competitor_citations,
-            "providers_missing": list(visibility.all_providers),
-            "actionable": True,
-            "content_angle": "comprehensive_guide",
-        }
-    if visibility.fp_found and visibility.fp_best_rank > 2 and visibility.comp_mentions:
-        return _ranked_keyword_idea(
-            keyword,
-            visibility,
-            copy={
-                "type": "ranking_improvement",
-                "priority": "medium" if visibility.fp_best_rank > 3 else "low",
-                "title": f'Improve Ranking for "{keyword}"',
-                "description": f"Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.",
-                "source": "ranking_analysis",
-                "content_angle": "differentiation",
-            },
-            competitor_urls=visibility.competitor_citations,
-        )
-    if visibility.fp_found and visibility.fp_best_rank <= 2:
-        return _ranked_keyword_idea(
-            keyword,
-            visibility,
-            copy={
-                "type": "leadership_maintenance",
-                "priority": "low",
-                "title": f'Maintain Leadership for "{keyword}"',
-                "description": f"You're #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.",
-                "source": "leadership_analysis",
-                "content_angle": "thought_leadership",
-            },
-            competitor_urls=visibility.all_citations,
-        )
-    return None
-
-
-def _provider_gap_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
-    missing_providers = visibility.all_providers - visibility.fp_providers
-    if not visibility.fp_found or not missing_providers:
-        return None
-    return {
-        "id": str(uuid.uuid4()),
-        "type": "provider_gap",
-        "priority": "medium",
-        "title": f'Target {", ".join(missing_providers).title()} for "{keyword}"',
-        "description": f"Your brand appears on some AI engines but not on {', '.join(missing_providers)}.",
-        "keyword": keyword,
-        "source": "provider_analysis",
-        "providers_missing": list(missing_providers),
-        "providers_present": list(visibility.fp_providers),
-        "competitor_urls": visibility.competitor_citations,
-        "actionable": True,
-        "content_angle": "provider_optimization",
-    }
-
-
-def _sentiment_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
-    negative_count = sum(1 for sentiment in visibility.fp_sentiment if sentiment == "negative")
-    if not visibility.fp_found or negative_count == 0:
-        return None
-    return {
-        "id": str(uuid.uuid4()),
-        "type": "sentiment_improvement",
-        "priority": "high",
-        "title": f'Address Negative Sentiment for "{keyword}"',
-        "description": f"Your brand has negative sentiment in {negative_count} provider(s). Create positive content.",
-        "keyword": keyword,
-        "source": "sentiment_analysis",
-        "current_rank": visibility.fp_best_rank,
-        "competitor_urls": visibility.all_citations,
-        "providers_present": list(visibility.fp_providers),
-        "actionable": True,
-        "content_angle": "reputation_management",
-    }
-
-
-def _keyword_ideas(keyword: str, visibility: _KeywordVisibility) -> list[dict[str, Any]]:
-    """Turn one keyword's visibility picture into up to three content ideas."""
-    return [
-        idea
-        for idea in (
-            _primary_keyword_idea(keyword, visibility),
-            _provider_gap_idea(keyword, visibility),
-            _sentiment_idea(keyword, visibility),
-        )
-        if idea is not None
-    ]
-
-
-# The SearchResults attributes the ideas read: no answer text or search results (10-15 KB a row).
-_IDEA_RESULT_PROJECTION = '#ts, keyword, provider, brands, citations'
-
-
-def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Generate content ideas from recent visibility and citation data."""
-    first_party, competitors = tracked_brand_names(config)
-    if not first_party:
-        return [
-            _system_idea(
-                "configuration",
-                "Configure Your Brands First",
-                "Add your brand names in Settings to enable content recommendations.",
-            )
-        ]
-
-    items = load_recent_search_results(
-        dynamodb, SEARCH_RESULTS_TABLE, max_keywords=30, projection=_IDEA_RESULT_PROJECTION,
-    )
-    if not items:
-        return [
-            _system_idea(
-                "data",
-                "Run Your First Analysis",
-                "No search data found. Run an analysis to generate content ideas.",
-            )
-        ]
-
-    keyword_data: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    has_any_brands = False
-    for item in items:
-        keyword_data[item.get("keyword", "")].append(item)
-        if item.get("brands"):
-            has_any_brands = True
-    if not has_any_brands:
-        return _citation_opportunity_ideas(keyword_data)
-
-    ideas = []
-    for keyword, results in keyword_data.items():
-        if keyword:
-            visibility = _analyze_keyword_visibility(results, first_party, competitors)
-            ideas.extend(_keyword_ideas(keyword, visibility))
-    ideas.extend(_get_seasonal_suggestions(list(keyword_data), config))
-    ideas.sort(
-        key=lambda idea: (
-            priority_rank(idea.get("priority")),
-            idea.get("keyword", ""),
-        )
-    )
-    return ideas[:50]
 
 
 def _competitor_context(competitor_content: list[dict[str, Any]]) -> str:
@@ -1643,18 +1269,46 @@ def _queue_canonical_idea(
     return _QueueResult(pending, "accepted" if created else "existing")
 
 
-def _get_ideas(event: dict[str, Any], context: Any) -> dict[str, Any]:
+#: Ideas a page lists by default, and at most (``limit``).
+IDEAS_DEFAULT_LIMIT = 50
+IDEAS_MAX_LIMIT = 100
+
+
+@validate({**SCOPE_QUERY_PARAMS, **CURSOR_QUERY_PARAM, "limit": optional_limit(default=IDEAS_DEFAULT_LIMIT, max_val=IDEAS_MAX_LIMIT)})
+def _get_ideas(
+    event: dict[str, Any], context: Any, limit: int = IDEAS_DEFAULT_LIMIT, next_token: str | None = None, **scope_params: Any,
+) -> dict[str, Any]:
+    """GET /ideas: content ideas from the latest run of every keyword of the scope (``shared.content_idea_rules``).
+
+    Takes the report scope (``group_id`` | ``keyword_ids`` | ``scope=all`` |
+    ``keyword``, ``market_id``; every active keyword without one) and pages
+    every idea of it: ``limit`` a page, ``ideas_next_token`` for the next
+    (sent back as ``next_token``), ``ideas_total`` (and ``total_count``)
+    counting them all (2.45.0 wave 5). Complete (2.45.0): a
+    scope whose latest runs fit the live budget is read whole for the
+    request; a larger one is served from its snapshot (``content-ideas``
+    artifact), or answers 202 while a view job computes it. ``truncated``
+    says the live read's time budget left keywords unread.
+    """
     config = get_brand_config()
-    ideas = generate_content_ideas(config)
+    if not tracked_brand_names(config)[0]:
+        ideas = [configuration_idea()]
+        return success_response({
+            "ideas": ideas, "ideas_total": 1, "ideas_next_token": None, "total_count": 1, "generated_at": get_timestamp(), "truncated": False,
+        }, event)
+    report_scope, rejected = resolve_scope(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+    if report_scope is None:
+        return rejected or {}
+    industry = {"industry": str(config.get("industry") or "general")}
+    ideas = serve_action_list(
+        action_request("content-studio-ideas", "content-ideas", {**industry, "limit": limit}, report_scope, config, event, next_token, job_params=industry),
+        dynamodb, dynamodb.Table(SEARCH_RESULTS_TABLE), config,
+    )
+    body = ideas.body
+    if body is None:
+        return ideas.response or {}
     return success_response(
-        {
-            "ideas": ideas,
-            "total_count": len(ideas),
-            "generated_at": get_timestamp(),
-            # The keyword reads stop at the request's deadline; the keywords not read have no ideas.
-            "truncated": current_deadline().cut,
-        },
-        event,
+        {"scope": report_scope.describe(), **body, "generated_at": get_timestamp(), "truncated": bool(body.get("keywords_truncated"))}, event,
     )
 
 
@@ -2152,9 +1806,10 @@ def _delete_content(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 def _list_templates(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    response = _templates_table().scan(Limit=MAX_CONTENT_BRIEF_TEMPLATES)
+    """GET /templates: the built-in templates and every saved one (the scan follows every page; at most ``MAX_CONTENT_BRIEF_TEMPLATES`` are saved)."""
+    saved_items = collect_all_items(_templates_table().scan)
     saved = sorted(
-        (_template_view(item) for item in response.get("Items", []) if item.get("id")),
+        (_template_view(item) for item in saved_items if item.get("id")),
         key=lambda item: (item["name"].casefold(), item["id"]),
     )
     items = [*builtin_content_brief_templates(), *saved]

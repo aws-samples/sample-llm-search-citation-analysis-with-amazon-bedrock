@@ -28,9 +28,20 @@ describe('useCompetitorGap', () => {
     mockRollupHook(mockSingleCompetitorRollup);
   });
 
-  it('fetches the rollup with default keyword limit when competitor is set', () => {
+  it('fetches the rollup of every keyword when competitor is set without a scope', () => {
     renderHook(() => useCompetitorGap('Adidas'));
-    expect(fetchCompetitorRollup).toHaveBeenCalledWith('Adidas', 50);
+    expect(fetchCompetitorRollup).toHaveBeenCalledWith('Adidas', { kind: 'all' });
+  });
+
+  it('fetches the rollup of the given keyword group', () => {
+    renderHook(() => useCompetitorGap('Adidas', {
+      kind: 'group',
+      groupId: 'hotel-sol',
+    }));
+    expect(fetchCompetitorRollup).toHaveBeenCalledWith('Adidas', {
+      kind: 'group',
+      groupId: 'hotel-sol',
+    });
   });
 
   it('skips the fetch when competitor is null', () => {

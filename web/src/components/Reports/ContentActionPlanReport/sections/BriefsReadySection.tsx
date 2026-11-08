@@ -10,6 +10,7 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 interface Props extends SectionFetchState {readonly history: ReadonlyArray<ContentStudioHistory>;}
 
@@ -59,6 +60,7 @@ export function BriefsReadySection({
           <BriefCard key={item.id} item={item} />
         ))}
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to="/content-studio">See all generated content</SeeAllLink></p>
     </ReportSection>
   );
 }

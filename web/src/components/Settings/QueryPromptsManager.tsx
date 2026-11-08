@@ -26,6 +26,7 @@ import {
 } from '../ui';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { PersonaListSkeleton } from './PersonaListSkeleton';
+import { ConfigListExport } from '../ui/ConfigListExport';
 
 const SAMPLE_KEYWORD = 'best project management software';
 
@@ -352,6 +353,7 @@ export function QueryPromptsManager({ isAdmin }: QueryPromptsManagerProps) {
             Each persona runs against every keyword during analysis, giving you a keywords × providers × personas matrix.
           </p>
         </div>
+        <ConfigListExport list="personas" />
         {isAdmin && !showCreate && prompts.length < 10 && (
           <Button
             onClick={() => setShowCreate(true)}

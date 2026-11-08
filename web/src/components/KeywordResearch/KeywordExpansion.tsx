@@ -160,6 +160,7 @@ export const KeywordExpansion = ({
           <KeywordPromotionControls promotion={promotion} />
           <KeywordResultsTable
             keywords={result.keywords}
+            jobId={result.id}
             title={`${result.keywords.length} keywords for "${result.seed_keyword}"`}
             subtitle={`Industry: ${result.industry}`}
             selectable

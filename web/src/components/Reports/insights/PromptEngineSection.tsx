@@ -9,8 +9,9 @@ import {
   kpiColumn, type ReportTableColumn
 } from '../layout';
 import {
-  InsightsTableSection, type InsightsSectionProps
+  InsightsTableSection, type InsightsListPaging, type InsightsSectionProps
 } from './InsightsTableSection';
+import { isRecord } from '../../../types/domain/keywordDecoders';
 
 export const PROMPT_ENGINE_TITLE = 'Prompts by engine';
 
@@ -68,9 +69,25 @@ function promptColumns({ facts }: ReportInsightsResponse): ReadonlyArray<ReportT
   ];
 }
 
-/** How many keywords the 50-row cap left out, if any. */
-function omittedNote({ facts }: ReportInsightsResponse): string | null {
-  const { omitted } = facts.prompt_engine;
+function isPromptEngineRow(value: unknown): value is PromptEngineRow {
+  return isRecord(value) && typeof value.keyword === 'string' && isRecord(value.positions) && Array.isArray(value.lost_engines);
+}
+
+/** Every keyword past the first 50 (2.45.0 wave 5): next pages from `view=prompt_engine`. */
+const PROMPT_ENGINE_PAGES: InsightsListPaging<PromptEngineRow> = {
+  paging: {
+    list: 'facts.prompt_engine.keywords',
+    token: 'facts.prompt_engine.keywords_next_token',
+    total: 'facts.prompt_engine.keywords_total',
+    view: 'prompt_engine',
+  },
+  isItem: isPromptEngineRow,
+  noun: 'keywords',
+};
+
+/** How many keywords are not on screen yet, if any. */
+function omittedNote({ facts }: ReportInsightsResponse, shown: number): string | null {
+  const omitted = Math.max(0, facts.prompt_engine.keywords.length + facts.prompt_engine.omitted - shown);
   if (omitted === 0) return null;
   return `${omitted} more keyword${omitted === 1 ? '' : 's'} with a higher visibility score ${omitted === 1 ? 'is' : 'are'} not shown.`;
 }
@@ -89,6 +106,7 @@ export function PromptEngineSection(slice: InsightsSectionProps) {
       rowKey={(row) => row.keyword}
       emptyMessage={PROMPT_ENGINE_EMPTY}
       note={omittedNote}
+      pages={PROMPT_ENGINE_PAGES}
     />
   );
 }

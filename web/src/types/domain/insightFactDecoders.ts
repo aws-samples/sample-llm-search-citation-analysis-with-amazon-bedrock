@@ -6,7 +6,7 @@
  */
 import { isStringArray } from '../../api/contentStudioDecoderPrimitives';
 import type {
-  CitationOwnershipFacts, CitationOwnershipRow, CompetitorCaveatRow, OwnedPageRow, OwnedPagesEngineRow, OwnedPagesFacts, OwnedSectionRow,
+  CaveatReason, CaveatReasonsFacts, CitationOwnershipFacts, CitationOwnershipRow, CompetitorCaveatRow, OwnedPageRow, OwnedPagesEngineRow, OwnedPagesFacts, OwnedSectionRow,
   PromptEngineFacts, PromptEngineRow
 } from './insights';
 import { isRecord } from './keywordDecoders';
@@ -102,5 +102,15 @@ export function isCompetitorCaveatRow(value: unknown): value is CompetitorCaveat
     && isNumber(value.mixed)
     && isNumber(value.negative)
     && isNullableNumber(value.caveat_share)
-    && isStringArray(value.reasons);
+    && isStringArray(value.reasons)
+    && (value.reasons_total === undefined || isNumber(value.reasons_total));
+}
+
+/** One `caveat_reasons.reasons` item (a `view=caveat_reasons` page's too). */
+export function isCaveatReason(value: unknown): value is CaveatReason {
+  return isRecord(value) && typeof value.competitor === 'string' && typeof value.reason === 'string';
+}
+
+export function isCaveatReasonsFacts(value: unknown): value is CaveatReasonsFacts {
+  return isRecord(value) && isListOf(value.reasons, isCaveatReason);
 }

@@ -23,6 +23,7 @@ export const BACKLINKS_EXPORT: SeoExportPricing = {
   rows_per_request: 1000,
   request_usd: 0.024,
   row_usd: 0.000036,
+  cache_hours: 6,
 };
 
 export function buildSummary(overrides: Partial<BacklinksSummary> = {}): BacklinksSummary {

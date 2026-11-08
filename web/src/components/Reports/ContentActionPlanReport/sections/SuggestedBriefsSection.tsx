@@ -7,6 +7,7 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 interface Props extends SectionFetchState {readonly ideas: ReadonlyArray<ContentIdea>;}
 
@@ -62,6 +63,7 @@ export function SuggestedBriefsSection({
           <IdeaCard key={idea.id} idea={idea} />
         ))}
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to="/content-studio">See all content ideas</SeeAllLink></p>
     </ReportSection>
   );
 }

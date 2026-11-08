@@ -12,6 +12,7 @@ sibling-module loader is pre-filled so no DynamoDB or boto3 client is needed.
 
 import json
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -53,7 +54,17 @@ DEFAULT_FAKE_TRENDS = {
         _keyword_trend('f', 40, None),
     ],
     'overall': {'improving_count': 3, 'declining_count': 1, 'stable_count': 2},
+    'coverage': {'keywords_total': 5, 'keywords_analyzed': 5, 'complete': True},
+    'source': 'live',
+    'as_of': None,
+    'stale': False,
+    'refreshing': False,
 }
+
+
+def trends_result(body: dict) -> SimpleNamespace:
+    """What ``trends_for_scope`` answers when the trend body is ready."""
+    return SimpleNamespace(body=body, response=None)
 
 DEFAULT_FAKE_RECS = [
     {'type': 'gap', 'priority': priority, 'title': title, 'description': 'd', 'action': 'a', 'impact': 'i'}
@@ -67,7 +78,7 @@ def _load_overview_module():
 
     # Pre-fill the lazy cache with our fakes so the production
     # _load_sibling code path is never exercised in tests.
-    mod._sibling_cache['trends'] = lambda scope, period, days, owned_domains, tracked_brands=None: DEFAULT_FAKE_TRENDS
+    mod._sibling_cache['trends'] = lambda scope, period, days, owned_domains, **_options: trends_result(DEFAULT_FAKE_TRENDS)
     mod._sibling_cache['recs'] = lambda config, keywords=None: DEFAULT_FAKE_RECS
     return mod
 
@@ -181,15 +192,14 @@ def test_build_overview_propagates_scope_period_and_days(overview_mod):
 def test_build_overview_passes_the_owned_domains_to_the_trends(overview_mod):
     seen = {}
 
-    def trends(scope, period, days, owned_domains, tracked_brands):
-        seen.update(scope=scope, period=period, days=days, owned_domains=owned_domains, tracked_brands=tracked_brands)
-        return DEFAULT_FAKE_TRENDS
+    def trends(scope, period, days, owned_domains, **_options):
+        seen.update(scope=scope, period=period, days=days, owned_domains=owned_domains)
+        return trends_result(DEFAULT_FAKE_TRENDS)
 
     overview_mod._sibling_cache['trends'] = trends
-    overview_mod.build_overview({'first_party_domains': ['www.hotel.com'], 'tracked_brands': {'competitors': ['Rival']}},
-                                period='month', days=90, top=3)
+    overview_mod.build_overview({'first_party_domains': ['www.hotel.com']}, period='month', days=90, top=3)
 
-    assert seen == {'scope': None, 'period': 'month', 'days': 90, 'owned_domains': ['hotel.com'], 'tracked_brands': ['Rival']}
+    assert seen == {'scope': None, 'period': 'month', 'days': 90, 'owned_domains': ['hotel.com']}
 
 
 def test_build_overview_returns_iso_generated_at_with_zulu(default_overview):
@@ -197,9 +207,9 @@ def test_build_overview_returns_iso_generated_at_with_zulu(default_overview):
 
 
 def test_build_overview_has_no_change_before_a_second_period(overview_mod):
-    overview_mod._sibling_cache['trends'] = lambda scope, period, days, owned_domains, tracked_brands=None: {
+    overview_mod._sibling_cache['trends'] = lambda scope, period, days, owned_domains, **_options: trends_result({
         **DEFAULT_FAKE_TRENDS, 'change': None, 'keyword_trends': [],
-    }
+    })
 
     result = overview_mod.build_overview({}, period='day', days=30, top=3)
 

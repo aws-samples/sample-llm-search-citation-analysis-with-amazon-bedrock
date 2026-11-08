@@ -4,6 +4,7 @@ import {
 import {
   render, screen
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { TrendDataPoint } from '../../../types';
 import {
   MAX_TREND_ROWS, TrendPeriodTable
@@ -89,5 +90,19 @@ describe('TrendPeriodTable', () => {
 
     const periods = sectionTable('History').slice(1).map(([period]) => period);
     expect([periods[0], periods[periods.length - 1]]).toStrictEqual(['d-00', 'd-29']);
+  });
+
+  it('lists every period of a long series once Show all periods is pressed', async () => {
+    renderTable(buildTrendPoints(30));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 30 periods' }));
+
+    expect(screen.getAllByRole('row')).toHaveLength(31);
+  });
+
+  it('offers no Show all periods on a short series', () => {
+    renderTable(buildTrendPoints(5));
+
+    expect(screen.queryByRole('button', { name: /Show all/u })).not.toBeInTheDocument();
   });
 });

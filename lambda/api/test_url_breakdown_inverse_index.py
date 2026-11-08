@@ -104,9 +104,9 @@ class TestQueryUrlIndex:
         ]
         table = _fake_table(pages)
         with patch.object(_mod, 'citations_table', table):
-            items = _mod._query_url_index('https://example.com')
+            items, truncated = _mod._query_url_index('https://example.com')
 
-        assert [i['keyword'] for i in items] == ['a', 'b', 'c']
+        assert ([i['keyword'] for i in items], truncated) == (['a', 'b', 'c'], False)
         assert table.query.call_count == 3
 
     def test_stops_at_max_query_pages_when_results_unbounded(self) -> None:
@@ -117,10 +117,10 @@ class TestQueryUrlIndex:
         table = MagicMock()
         table.query.return_value = infinite_page
         with patch.object(_mod, 'citations_table', table):
-            items = _mod._query_url_index('https://example.com')
+            items, truncated = _mod._query_url_index('https://example.com')
 
         assert table.query.call_count == _mod._MAX_QUERY_PAGES
-        assert len(items) == _mod._MAX_QUERY_PAGES
+        assert (len(items), truncated) == (_mod._MAX_QUERY_PAGES, True)
 
 
 class TestExpandToBreakdown:
@@ -134,7 +134,7 @@ class TestExpandToBreakdown:
                 'last_updated': '2026-04-17T12:00:00Z',
             }
         ]
-        breakdown = _mod._expand_to_breakdown(items)
+        breakdown = [entry for _, entry in _mod._keyed_breakdown(items)]
 
         assert breakdown == [
             {'keyword': 'best hotels', 'provider': 'openai',
@@ -154,7 +154,7 @@ class TestExpandToBreakdown:
             {'keyword': 'kw-b', 'citing_providers': ['claude'],
              'last_updated': '2026-01-02T00:00:00Z'},
         ]
-        breakdown = _mod._expand_to_breakdown(items)
+        breakdown = [entry for _, entry in _mod._keyed_breakdown(items)]
 
         keywords = sorted(entry['keyword'] for entry in breakdown)
         assert keywords == ['kw-a', 'kw-b']
@@ -168,7 +168,7 @@ class TestExpandToBreakdown:
                 'first_seen': '2025-12-01T00:00:00Z',
             }
         ]
-        breakdown = _mod._expand_to_breakdown(items)
+        breakdown = [entry for _, entry in _mod._keyed_breakdown(items)]
         assert breakdown[0]['timestamp'] == '2025-12-01T00:00:00Z'
 
     @pytest.mark.parametrize('providers', [
@@ -182,7 +182,7 @@ class TestExpandToBreakdown:
         practice, but if one slips in, surface it (blank provider) rather
         than drop the keyword silently."""
         items = [{'keyword': 'kw', **providers, 'last_updated': '2026-04-17T12:00:00Z'}]
-        breakdown = _mod._expand_to_breakdown(items)
+        breakdown = [entry for _, entry in _mod._keyed_breakdown(items)]
 
         assert breakdown == [
             {'keyword': 'kw', 'provider': '',
@@ -256,3 +256,92 @@ class TestNoLongerScansSearchResults:
     def test_module_targets_url_index_constant(self) -> None:
         """The GSI name is a single source of truth — keep it pinned."""
         assert _mod.URL_INDEX_NAME == 'UrlIndex'
+
+
+def _rows(count: int) -> list[dict]:
+    return [{'keyword': f'kw{index:03}', 'citing_providers': ['openai', 'gemini'], 'last_updated': f'2026-10-{1 + index % 28:02}T{index % 24:02}:00:00Z'} for index in range(count)]
+
+
+def _handle_page(items: list[dict], query: dict) -> dict:
+    event = {'queryStringParameters': {'url': 'https://example.com', **query}, 'headers': {}, 'requestContext': {'http': {'method': 'GET'}}}
+    with patch.object(_mod, 'citations_table', _single_page(items)):
+        return json.loads(_mod.handler(event, None)['body'])
+
+
+class TestFullList:
+    """2.45.0 wave 5: every entry of the URL, paged; the total counts them all."""
+
+    def test_pages_concatenate_to_every_entry_most_recent_first(self) -> None:
+        items = _rows(130)
+        whole = _handle('https://example.com', items)['breakdown']
+        pages, token = [], None
+        while True:
+            body = _handle_page(items, {'limit': '37', **({'next_token': token} if token else {})})
+            pages.extend(body['breakdown'])
+            token = body['next_token']
+            if not token:
+                break
+
+        assert (pages, len(whole)) == (whole, 260)
+
+    def test_the_total_counts_every_entry_not_the_page(self) -> None:
+        body = _handle_page(_rows(130), {'limit': '10'})
+
+        assert (len(body['breakdown']), body['total_citations'], body['truncated']) == (10, 260, False)
+
+    def test_a_market_keeps_the_active_keywords_of_that_market(self) -> None:
+        market_scope = MagicMock(keywords=['kw001', 'kw002'])
+        with patch.object(_mod, 'scope_from_request', return_value=(market_scope, None)), patch.object(_mod, 'dynamodb', MagicMock()):
+            body = _handle_page(_rows(10), {'market_id': 'es-es'})
+
+        assert sorted({entry['keyword'] for entry in body['breakdown']}) == ['kw001', 'kw002']
+
+    def test_a_malformed_token_is_a_400(self) -> None:
+        event = {'queryStringParameters': {'url': 'https://example.com', 'next_token': 'nope'}, 'headers': {}, 'requestContext': {'http': {'method': 'GET'}}}
+        with patch.object(_mod, 'citations_table', _single_page([])):
+            response = _mod.handler(event, None)
+
+        assert (response['statusCode'], json.loads(response['body'])['field']) == (400, 'next_token')
+
+
+def _cited_rows(count: int) -> list[dict]:
+    """``count`` Citations rows, each first cited on its own day and rewritten by a later run."""
+    return [
+        {'keyword': f'kw{index:03}', 'citing_providers': ['openai', 'gemini'],
+         'first_seen': f'2026-09-{1 + index:02}T06:00:00Z', 'last_updated': '2026-10-30T06:00:00Z'}
+        for index in range(count)
+    ]
+
+
+def _keys(entries: list[dict]) -> list[tuple[str, str]]:
+    return [(entry['keyword'], entry['provider']) for entry in entries]
+
+
+class TestStableOrder:
+    """F5: rows cited or rewritten between two pages never duplicate or skip an entry."""
+
+    def test_a_row_first_cited_between_two_pages_neither_repeats_nor_skips_an_entry(self) -> None:
+        rows = _cited_rows(20)
+        first = _handle_page(rows, {'limit': '15'})
+        newer = {'keyword': 'kw-new', 'citing_providers': ['claude'], 'first_seen': '2026-10-31T06:00:00Z', 'last_updated': '2026-10-31T06:00:00Z'}
+        second = _handle_page([*rows, newer], {'limit': '100', 'next_token': first['next_token']})
+        listed = _keys(first['breakdown']) + _keys(second['breakdown'])
+        assert (len(listed), len(set(listed))) == (40, 40)
+
+    def test_a_run_rewriting_last_updated_between_pages_moves_no_entry(self) -> None:
+        rows = _cited_rows(20)
+        first = _handle_page(rows, {'limit': '15'})
+        rewritten = [{**row, 'last_updated': '2026-11-01T06:00:00Z'} if row['keyword'] == 'kw000' else row for row in rows]
+        second = _handle_page(rewritten, {'limit': '100', 'next_token': first['next_token']})
+        assert _keys(first['breakdown']) + _keys(second['breakdown']) == _keys(_handle_page(rows, {'limit': '100'})['breakdown'])
+
+    def test_entries_are_listed_newest_first_cited_then_by_keyword_and_provider(self) -> None:
+        rows = [
+            {'keyword': 'b', 'citing_providers': ['openai'], 'first_seen': '2026-09-01T06:00:00Z'},
+            {'keyword': 'a', 'citing_providers': ['openai', 'gemini'], 'first_seen': '2026-09-01T06:00:00Z'},
+            {'keyword': 'c', 'citing_providers': ['openai'], 'first_seen': '2026-09-02T06:00:00Z'},
+        ]
+        assert _keys(_handle_page(rows, {})['breakdown']) == [('c', 'openai'), ('a', 'gemini'), ('a', 'openai'), ('b', 'openai')]
+
+    def test_the_last_page_has_no_token(self) -> None:
+        assert _handle_page(_cited_rows(5), {'limit': '10'})['next_token'] is None

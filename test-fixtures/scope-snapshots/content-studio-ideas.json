@@ -1,0 +1,236 @@
+{
+  "route": "GET /api/content-studio/ideas",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "ideas": [
+          {
+            "id": "3f2b8c1e-6a4d-4e9b-9c1a-2d7e5f8a0b11",
+            "type": "visibility_gap",
+            "priority": "high",
+            "title": "Create Content for \"hotel boutique en a coruña\"",
+            "description": "Your brand doesn't appear but 3 competitors do.",
+            "keyword": "hotel boutique en a coruña",
+            "source": "visibility_analysis",
+            "competitor_brands": [
+              "Meliá Galicia",
+              "NH Collection A Coruña"
+            ],
+            "competitor_urls": [
+              "https://www.melia.com/es/hoteles/espana/a-coruna"
+            ],
+            "providers_missing": [
+              "openai",
+              "perplexity"
+            ],
+            "actionable": true,
+            "content_angle": "comprehensive_guide"
+          },
+          {
+            "id": "9a7c4d2f-1b3e-4f6a-8d5c-7e0b2a9f4c33",
+            "type": "provider_gap",
+            "priority": "medium",
+            "title": "Target Perplexity for \"hotel en a coruña\"",
+            "description": "Your brand appears on some AI engines but not on perplexity.",
+            "keyword": "hotel en a coruña",
+            "source": "provider_analysis",
+            "providers_missing": [
+              "perplexity"
+            ],
+            "providers_present": [
+              "openai",
+              "gemini"
+            ],
+            "competitor_urls": [
+              "https://www.booking.com/city/es/a-coruna.html"
+            ],
+            "actionable": true,
+            "content_angle": "provider_optimization"
+          }
+        ],
+        "ideas_total": 2,
+        "ideas_next_token": null,
+        "total_count": 2,
+        "generated_at": "2026-09-18T09:05:12.345678Z",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna"
+      },
+      "status": 200,
+      "body": {
+        "ideas": [
+          {
+            "id": "3f2b8c1e-6a4d-4e9b-9c1a-2d7e5f8a0b11",
+            "type": "visibility_gap",
+            "priority": "high",
+            "title": "Create Content for \"hotel boutique en a coruña\"",
+            "description": "Your brand doesn't appear but 3 competitors do.",
+            "keyword": "hotel boutique en a coruña",
+            "source": "visibility_analysis",
+            "competitor_brands": [
+              "Meliá Galicia",
+              "NH Collection A Coruña"
+            ],
+            "competitor_urls": [
+              "https://www.melia.com/es/hoteles/espana/a-coruna"
+            ],
+            "providers_missing": [
+              "openai",
+              "perplexity"
+            ],
+            "actionable": true,
+            "content_angle": "comprehensive_guide"
+          },
+          {
+            "id": "9a7c4d2f-1b3e-4f6a-8d5c-7e0b2a9f4c33",
+            "type": "provider_gap",
+            "priority": "medium",
+            "title": "Target Perplexity for \"hotel en a coruña\"",
+            "description": "Your brand appears on some AI engines but not on perplexity.",
+            "keyword": "hotel en a coruña",
+            "source": "provider_analysis",
+            "providers_missing": [
+              "perplexity"
+            ],
+            "providers_present": [
+              "openai",
+              "gemini"
+            ],
+            "competitor_urls": [
+              "https://www.booking.com/city/es/a-coruna.html"
+            ],
+            "actionable": true,
+            "content_angle": "provider_optimization"
+          }
+        ],
+        "ideas_total": 2,
+        "ideas_next_token": null,
+        "total_count": 2,
+        "generated_at": "2026-09-18T09:05:12.345678Z",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "ideas": [
+          {
+            "id": "3f2b8c1e-6a4d-4e9b-9c1a-2d7e5f8a0b11",
+            "type": "visibility_gap",
+            "priority": "high",
+            "title": "Create Content for \"hotel boutique en a coruña\"",
+            "description": "Your brand doesn't appear but 3 competitors do.",
+            "keyword": "hotel boutique en a coruña",
+            "source": "visibility_analysis",
+            "competitor_brands": [
+              "Meliá Galicia",
+              "NH Collection A Coruña"
+            ],
+            "competitor_urls": [
+              "https://www.melia.com/es/hoteles/espana/a-coruna"
+            ],
+            "providers_missing": [
+              "openai",
+              "perplexity"
+            ],
+            "actionable": true,
+            "content_angle": "comprehensive_guide"
+          },
+          {
+            "id": "9a7c4d2f-1b3e-4f6a-8d5c-7e0b2a9f4c33",
+            "type": "provider_gap",
+            "priority": "medium",
+            "title": "Target Perplexity for \"hotel en a coruña\"",
+            "description": "Your brand appears on some AI engines but not on perplexity.",
+            "keyword": "hotel en a coruña",
+            "source": "provider_analysis",
+            "providers_missing": [
+              "perplexity"
+            ],
+            "providers_present": [
+              "openai",
+              "gemini"
+            ],
+            "competitor_urls": [
+              "https://www.booking.com/city/es/a-coruna.html"
+            ],
+            "actionable": true,
+            "content_angle": "provider_optimization"
+          }
+        ],
+        "ideas_total": 2,
+        "ideas_next_token": null,
+        "total_count": 2,
+        "generated_at": "2026-09-18T09:05:12.345678Z",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-content-studio-ideas-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    }
+  }
+}

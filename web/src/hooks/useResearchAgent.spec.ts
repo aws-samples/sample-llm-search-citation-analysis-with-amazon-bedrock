@@ -44,6 +44,38 @@ describe('useResearchAgent', () => {
     expect(requests()[0]).toBe('GET /keyword-research/history?limit=50&type=agent');
   });
 
+  it('offers no older runs when the first history page is the last', async () => {
+    const result = await renderAgentRuns({ history: [buildAgentJob()] });
+
+    expect(result.current.loadMore).toBeUndefined();
+  });
+
+  it('appends the older runs of the next history page', async () => {
+    const result = await renderAgentRuns({
+      history: [buildAgentJob()],
+      olderHistory: [buildAgentJob({ id: 'job-old' })],
+    });
+
+    await act(async () => {
+      await result.current.loadMore?.();
+    });
+
+    expect(result.current.jobs.map((job) => job.id)).toStrictEqual(['job-a', 'job-old']);
+  });
+
+  it('asks the next history page with the agent type and the token', async () => {
+    const result = await renderAgentRuns({
+      history: [buildAgentJob()],
+      olderHistory: [buildAgentJob({ id: 'job-old' })],
+    });
+
+    await act(async () => {
+      await result.current.loadMore?.();
+    });
+
+    expect(requests()).toContain('GET /keyword-research/history?limit=50&type=agent&next_token=older');
+  });
+
   it('starting a run prepends it to the list without opening it', async () => {
     const result = await renderAgentRuns({
       history: [buildAgentJob()],

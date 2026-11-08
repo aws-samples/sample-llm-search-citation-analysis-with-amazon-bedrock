@@ -1,6 +1,9 @@
 /**
  * One audit: its progress while queued or running (polled), its failure, or its summary, AI-readiness panel and
  * issues once completed. A cancelled audit shows what it had found before it stopped, if anything.
+ *
+ * "Export all" (once summarized) writes the issue types, the pages of every issue type and the robots.txt AI
+ * crawler access on the server (`seo-site-audit`, stored data).
  */
 import {
   useEffect, useRef, useState
@@ -12,6 +15,7 @@ import {
 } from '../../../hooks/useSiteAuditDetail';
 import type { SiteAuditDetail } from '../../../types/api/seoAudits';
 import { ErrorAlert } from '../../ui/ErrorAlert';
+import { ExportAllButton } from '../../ui/ExportAllButton';
 import {
   SkeletonCards, SkeletonRegion
 } from '../../ui/Skeleton';
@@ -37,6 +41,9 @@ function FinishedAudit({ audit }: { readonly audit: SiteAuditDetail }) {
   }
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <ExportAllButton view="seo-site-audit" params={{ audit_id: audit.audit_id }} />
+      </div>
       <SiteAuditSummary audit={audit} summary={audit.summary} readiness={audit.ai_readiness} />
       <SiteAuditIssues audit={audit} />
     </div>

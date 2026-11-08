@@ -6,7 +6,8 @@ Site audit API (response shapes in ``web/src/types/api/seoAudits.ts``):
 - GET  /api/seo/audits/{auditId}              status, progress and (once finished) summary and AI readiness;
                                               cheap enough to poll every few seconds
 - GET  /api/seo/audits/{auditId}/issues       without ``issue_type``: the issue types found with their registry
-                                              text; with it: the affected pages, paged (``limit``, ``next_token``)
+                                              text; with it: the affected pages, paged (``limit``, ``next_token``);
+                                              ``audit_running`` says the audit is still adding issues
 - GET  /api/seo/audits/{auditId}/pages        without ``url``: the crawled pages, paged; with it: one page and its issues
 - POST /api/seo/audits/{auditId}/cancel       (Admin) stop a queued or running audit
 
@@ -201,11 +202,13 @@ def _issue_types(audit: dict[str, Any]) -> list[dict[str, Any]]:
 def get_issues(event: dict[str, Any], _context: Any, *, found: FoundAudit, **params: Any) -> dict[str, Any]:
     """Without ``issue_type``: the types found; with it: one page of the affected pages."""
     audit_id, issue_type = found.audit_id, params['issue_type']
+    running = found.audit.get('status') in ACTIVE_STATUSES
     if issue_type is None:
-        return success_response({'audit_id': audit_id, 'issue_types': _issue_types(found.audit)}, event)
+        return success_response({'audit_id': audit_id, 'issue_types': _issue_types(found.audit),
+                                 'audit_running': running}, event)
     items, token = found.store.issues_of_type(audit_id, issue_type, params['limit'], params['next_token'])
     return success_response({
-        'audit_id': audit_id, 'issue': descriptor_json(issue_type),
+        'audit_id': audit_id, 'issue': descriptor_json(issue_type), 'audit_running': running,
         'items': [_issue_json(item) for item in items], 'next_token': token,
     }, event)
 

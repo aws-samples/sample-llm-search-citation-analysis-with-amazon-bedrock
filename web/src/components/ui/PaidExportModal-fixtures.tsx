@@ -1,6 +1,7 @@
 /**
- * `PaidExportModal` open on a Labs list of `totalCount` rows (numbered from 0), its callbacks spies: `fetchChunk`
- * answers each chunk with the rows the list holds there, the downloads resolve.
+ * `PaidExportModal` open on a Labs list of `totalCount` rows (ranked keywords of example.com, page 2 of 50 on
+ * screen), its `onClose` a spy. Specs mock `api/exports` with `test/exportsApiMock`, so `mockStartExport` holds
+ * what the dialog queued.
  */
 import { vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -8,26 +9,38 @@ import {
   render, screen
 } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import { fakeList } from '../../exporters/paidExport-fixtures';
 import { LABS_EXPORT } from '../../api/seoDomains-fixtures';
+import {
+  EXPORTS_CONTEXT, type ExportsCenter
+} from '../../hooks/useExports';
+import { buildExportsCenter } from '../Exports/ExportsView-fixtures';
 import { PaidExportModal } from './PaidExportModal';
 
-type Props = ComponentProps<typeof PaidExportModal<number>>;
+type Props = ComponentProps<typeof PaidExportModal>;
 
-export function renderPaidExportModal(overrides: Partial<Props> = {}) {
-  const spies = {
-    onClose: vi.fn<() => void>(),
-    fetchChunk: fakeList(overrides.totalCount ?? 2500),
-    onDownload: vi.fn<(rows: readonly number[]) => Promise<void>>().mockResolvedValue(),
-    onDownloadScreen: vi.fn<() => Promise<void>>().mockResolvedValue(),
-  };
-  render(
+/** The list the dialog exports: example.com's ranked keywords by traffic, filtered to 10+ searches. */
+export const KEYWORD_LIST = {
+  table: 'keywords',
+  target: 'example.com',
+  sort: 'traffic',
+  order: 'desc',
+  filters: '{"min_volume":10}',
+} as const;
+
+/** Renders the open dialog, inside an Exports center whose `start` is `start` when one is given. */
+export function renderPaidExportModal(overrides: Partial<Props> = {}, start?: ExportsCenter['start']) {
+  const onClose = vi.fn<() => void>();
+  const dialog = (
     <PaidExportModal open title="ranked keywords" pricing={LABS_EXPORT} totalCount={2500} onScreenRows={50}
-      {...spies} {...overrides} />,
+      view="seo-domain" params={KEYWORD_LIST} screenPage={{
+        page: 2,
+        page_size: 50,
+      }} onClose={onClose} {...overrides} />
   );
+  render(start === undefined ? dialog : <EXPORTS_CONTEXT.Provider value={buildExportsCenter({ start })}>{dialog}</EXPORTS_CONTEXT.Provider>);
   return {
     user: userEvent.setup(),
-    ...spies,
+    onClose,
   };
 }
 
@@ -35,8 +48,12 @@ export function getRowsInputElement(): HTMLInputElement {
   return screen.getByLabelText<HTMLInputElement>('Rows to export');
 }
 
-export function getDownloadElement(): HTMLElement {
-  return screen.getByRole('button', { name: 'Download' });
+export function getStartElement(): HTMLElement {
+  return screen.getByRole('button', { name: 'Start export' });
+}
+
+export function getScreenExportElement(): HTMLElement {
+  return screen.getByRole('button', { name: 'Export the 50 rows on screen (free)' });
 }
 
 /** The live "Price: …" line. */
@@ -50,24 +67,12 @@ export async function typeRows(user: ReturnType<typeof userEvent.setup>, rows: s
   if (rows !== '') await user.type(getRowsInputElement(), rows);
 }
 
-/** Opens the dialog with `overrides`, asks for `rows` rows (the default when omitted) and presses Download. */
-export async function renderDownloadClicked(rows: string | null, overrides: Partial<Props> = {}) {
+/** Opens the dialog with `overrides`, asks for `rows` rows (the default when omitted) and presses Start export. */
+export async function renderStartClicked(rows: string | null, overrides: Partial<Props> = {}) {
   const rendered = renderPaidExportModal(overrides);
   if (rows !== null) await typeRows(rendered.user, rows);
-  await rendered.user.click(getDownloadElement());
+  await rendered.user.click(getStartElement());
   return rendered;
-}
-
-/** Presses the dialog's Cancel. */
-export async function clickCancel(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: 'Cancel' }));
-}
-
-/** Lets pending promises and timers of the export settle. */
-export function settle(): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, 0);
-  });
 }
 
 /** Keeps the console quiet about the failures a spec provokes. */

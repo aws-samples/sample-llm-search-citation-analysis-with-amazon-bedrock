@@ -39,7 +39,7 @@ export const useBrandMentions = (
   selectedTimestamp: string | null = null
 ) => {
   const {
-    data, loading, error, fetchData, reset
+    data, loading, error, computing, request, fetchData, reset
   } = useAnalysisEndpoint(brandMentionsEndpoint);
   // The scope object is rebuilt by callers on every render; key the effect on
   // its encoded form so a same-value scope does not refetch.
@@ -59,6 +59,8 @@ export const useBrandMentions = (
   }, [fetchData, reset, scopeKey, marketId, classificationFilter, queryPromptId, selectedTimestamp]);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

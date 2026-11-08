@@ -75,7 +75,7 @@ def action_center(module: ModuleType) -> Generator[ScopedReport, None, None]:
 
 def _queried_keywords(report: ScopedReport) -> list[str]:
     """The SearchResults partitions the request read, sorted."""
-    return sorted(key_parts(call.kwargs['KeyConditionExpression'])[0] for call in report.tables['search'].query.call_args_list)
+    return sorted({key_parts(call.kwargs['KeyConditionExpression'])[0] for call in report.tables['search'].query.call_args_list})
 
 
 def _recommended_keywords(body: Mapping[str, Any]) -> set[str]:
@@ -132,17 +132,6 @@ class TestSingleKeywordScope:
 
 
 class TestNoScope:
-    def test_loads_the_first_twenty_active_keywords_as_before(self, recommendations):
-        loader = MagicMock(return_value=[])
-        with action_center(recommendations) as report, patch.object(recommendations, 'load_recent_search_results', loader):
-            report.call(None)
-            resource = recommendations.dynamodb
-
-        loader.assert_called_once_with(
-            resource, recommendations.SEARCH_RESULTS_TABLE, max_keywords=20, keywords=None,
-            projection='keyword, #ts, provider, brands',
-        )
-
     def test_discovers_the_active_keywords_from_the_keywords_table(self, recommendations):
         with action_center(recommendations) as report:
             report.call(None)
@@ -154,7 +143,10 @@ class TestNoScope:
         with action_center(recommendations) as report:
             body = report.body(None)
 
-        assert sorted(body) == ['by_priority', 'generated_at', 'llm', 'llm_enhanced', 'recommendations', 'total_count']
+        assert sorted(body) == [
+            'as_of', 'by_priority', 'coverage', 'generated_at', 'keywords_truncated', 'llm', 'llm_enhanced', 'next_token',
+            'recommendations', 'refreshing', 'scope', 'source', 'stale', 'total', 'total_count',
+        ]
         assert _recommended_keywords(body) == {'hotel coruna spa', 'hotel marino beach'}
 
 
@@ -170,26 +162,39 @@ class TestLlmPass:
     def test_passes_the_scopes_keywords_to_the_llm_pass(self, llm_call):
         llm, _body = llm_call
 
-        config, _context, keywords = llm.call_args.args
-        assert (config, keywords) == (BRAND_CONFIG, MARINO_KEYWORDS)
+        config, _context, keywords, keywords_total = llm.call_args.args
+        assert (config, keywords, keywords_total) == (BRAND_CONFIG, ['hotel marino beach', 'best hotels galicia'], 2)
 
     def test_returns_the_llm_recommendations_next_to_the_rules(self, llm_call):
         _llm, body = llm_call
 
         assert body['llm_enhanced'] == [{'type': 'llm', 'priority': 'high', 'title': 'From the model'}]
 
-    def test_passes_no_keywords_to_the_llm_pass_without_a_scope(self, recommendations):
+    @pytest.fixture
+    def silent_llm(self, recommendations) -> Generator[tuple[ScopedReport, MagicMock], None, None]:
+        """The Action Center with an LLM pass that answers nothing."""
         llm = MagicMock(return_value=([], 'ok'))
         with action_center(recommendations) as report, patch.object(recommendations, 'generate_llm_recommendations', llm):
-            report.call({'use_llm': 'true'})
+            yield report, llm
 
-        assert llm.call_args.args[2] is None
+    def test_passes_every_active_keyword_by_impact_without_a_scope(self, silent_llm):
+        report, llm = silent_llm
+        report.call({'use_llm': 'true'})
+
+        assert llm.call_args.args[2] == ['hotel coruna spa', 'hotel marino beach', 'best hotels galicia']
+
+    def test_skips_the_llm_pass_on_a_later_page(self, silent_llm):
+        report, llm = silent_llm
+        first = report.body({'use_llm': 'true', 'limit': '1'})
+        report.call({'use_llm': 'true', 'limit': '1', 'next_token': first['next_token']})
+
+        assert llm.call_count == 1
 
 
-def _llm_prompt(module: ModuleType, keywords: list[str] | None) -> str:
-    """The prompt ``generate_llm_recommendations`` sends to Bedrock for ``keywords``."""
+def _llm_prompt(module: ModuleType, keywords: list[str], keywords_total: int = 0) -> str:
+    """The prompt ``generate_llm_recommendations`` sends to Bedrock for ``keywords`` of a ``keywords_total`` scope."""
     with patch.object(module, 'invoke_bedrock', return_value='[]') as bedrock:
-        module.generate_llm_recommendations(BRAND_CONFIG, '[]', keywords)
+        module.generate_llm_recommendations(BRAND_CONFIG, '[]', keywords, keywords_total)
     return bedrock.call_args.args[0]
 
 
@@ -205,13 +210,13 @@ class TestLlmPrompt:
     def test_sends_the_unscoped_prompt_without_a_scope_section(self, recommendations):
         scoped = _llm_prompt(recommendations, ['hotel marino beach'])
 
-        unscoped = _llm_prompt(recommendations, None)
+        unscoped = _llm_prompt(recommendations, [])
 
         assert unscoped == scoped.replace('Keywords In Scope (recommend for these only):\n- hotel marino beach\n\n', '')
         assert 'Keywords In Scope' not in unscoped
 
-    def test_names_at_most_fifty_keywords_and_counts_the_rest(self, recommendations):
-        prompt = _llm_prompt(recommendations, [f'keyword {index:02d}' for index in range(60)])
+    def test_names_the_given_keywords_and_counts_the_rest_of_the_scope(self, recommendations):
+        prompt = _llm_prompt(recommendations, [f'keyword {index:02d}' for index in range(50)], 60)
 
         assert ('- keyword 49\n- … and 10 more keywords\n\n' in prompt, '- keyword 50' in prompt) == (True, False)
 
@@ -223,7 +228,7 @@ class TestLlmTimeBudget:
             patch.object(recommendations, 'invoke_bedrock', return_value='[]') as bedrock,
             patch.object(recommendations, 'current_deadline', return_value=deadline),
         ):
-            recommendations.generate_llm_recommendations(BRAND_CONFIG, '[]', None)
+            recommendations.generate_llm_recommendations(BRAND_CONFIG, '[]')
 
         assert (bedrock.call_args.args[1], bedrock.call_args.kwargs['thinking'], bedrock.call_args.kwargs['deadline']) == (
             recommendations.ModelRole.GENERATION, False, deadline,

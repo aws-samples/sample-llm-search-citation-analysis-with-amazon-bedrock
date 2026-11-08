@@ -16,8 +16,8 @@ import { lambdaSourceCode } from './python-layer';
  *
  * Its own API rather than paths on the main one: the main stack owns the main
  * API's deployment and stage, so methods added from another stack would only
- * be served by whichever stack deployed last, and the main stack sits at
- * CloudFormation's 500-resource limit. The authorizer sets no authorization
+ * be served by whichever stack deployed last (the main stack was also then at
+ * CloudFormation's 500-resource limit). The authorizer sets no authorization
  * scopes, so it accepts the dashboard's ID token (an access token without
  * custom scopes would be refused by a scoped authorizer, the MCP one).
  */

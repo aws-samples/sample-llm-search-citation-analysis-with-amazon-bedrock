@@ -38,7 +38,7 @@ const legacySeoElementsFixture = {
 const seoRowFixtures = [
   {
     label: 'H3 Tags',
-    value: 'Sea view | Family | Suite | Standard | Superior',
+    value: 'Sea view | Family | Suite | Standard | Superior | Attic',
   },
   {
     label: 'OG Title',
@@ -79,10 +79,10 @@ describe('SeoElementsDisplay', () => {
     );
   });
 
-  it('shows at most five H3 tags', () => {
+  it('shows every H3 tag of the page', () => {
     render(<SeoElementsDisplay seoElements={seoElementsFixture} />);
 
-    expect(screen.queryByText(/Attic/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Attic/)).toBeInTheDocument();
   });
 
   it('keeps the rows the legacy job does carry', () => {

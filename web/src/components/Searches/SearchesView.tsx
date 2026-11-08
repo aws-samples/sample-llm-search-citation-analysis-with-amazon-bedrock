@@ -8,13 +8,8 @@ import {
 } from '../ui/PaginationHeader';
 import { paginate } from '../ui/pagination';
 import { summarizeSearches } from '../../formatting/searchSummary';
-import { exportToExcel } from '../../exporters/excelGenerator';
-import { datedExcelFileName } from '../../exporters/excelFileName';
-import {
-  SEARCH_EXCEL_COLUMNS, searchExcelRows
-} from '../../exporters/searchResultExporter';
-import { fetchAllSearches } from '../../api/searchPages';
 import { ErrorAlert } from '../ui/ErrorAlert';
+import { ExportAllButton } from '../ui/ExportAllButton';
 import { useSearchPages } from './useSearchPages';
 import {
   KeywordGroup,
@@ -38,7 +33,6 @@ export const SearchesView = ({
 }: SearchesViewProps) => {
   const pages = useSearchPages(firstPage, nextToken);
   const { searches } = pages;
-  const [exportError, setExportError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -75,22 +69,6 @@ export const SearchesView = ({
     setExpandedRow(expandedRow === keyword ? null : keyword);
   };
 
-  const downloadToExcel = async () => {
-    setExportError(null);
-    try {
-      const excelData = buildExcelData(await fetchAllSearches());
-      await exportToExcel({
-        data: excelData,
-        columns: SEARCH_EXCEL_COLUMNS,
-        sheetName: 'Searches',
-        fileName: datedExcelFileName('searches', new Date()),
-      });
-    } catch (err) {
-      console.error('[searches] Error exporting searches:', err);
-      setExportError('The searches could not be exported. Please try again.');
-    }
-  };
-
   const {
     pageItems: paginatedKeywords, totalItems
   } = paginate(keywordGroups, currentPage, itemsPerPage);
@@ -111,7 +89,7 @@ export const SearchesView = ({
   return (
     <>
       <div className="space-y-6">
-        <ErrorAlert message={pages.error ?? exportError} />
+        <ErrorAlert message={pages.error} />
         <StatsCards
           totalSearches={totalSearches}
           keywordCount={keywordGroups.length}
@@ -128,7 +106,7 @@ export const SearchesView = ({
           providers={providers}
           promptNames={promptNames}
           onClear={clearFilters}
-          onExport={downloadToExcel}
+          exportButton={<ExportAllButton view="searches" params={searchExportParams(searchQuery, providerFilter, promptFilter)} />}
         />
 
         <SearchTable
@@ -175,8 +153,16 @@ export const SearchesView = ({
   );
 };
 
-function buildExcelData(searches: Search[]): Record<string, unknown>[] {
-  return searches.flatMap(searchExcelRows);
+/**
+ * The export params of the view's filters: the keyword text (`keyword_contains`, the same
+ * case-insensitive substring match as the table), the provider and the query prompt.
+ */
+function searchExportParams(searchQuery: string, providerFilter: string, promptFilter: string): Record<string, string | null> {
+  return {
+    keyword_contains: searchQuery.trim() === '' ? null : searchQuery.trim(),
+    provider: providerFilter === 'all' ? null : providerFilter,
+    query_prompt_id: promptFilter === 'all' ? null : promptFilter,
+  };
 }
 
 interface SearchTableProps {

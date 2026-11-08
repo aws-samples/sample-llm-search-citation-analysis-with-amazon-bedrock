@@ -15,7 +15,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { SiteAuditView } from './SiteAuditView';
 
 /** The issue types the completed audit answers: a critical content issue and an AI-readiness notice. */
-export const ISSUE_TYPES = [
+const ISSUE_TYPES = [
   buildIssueTypeEntry(),
   buildIssueTypeEntry({
     issue_type: 'llms-txt-missing',

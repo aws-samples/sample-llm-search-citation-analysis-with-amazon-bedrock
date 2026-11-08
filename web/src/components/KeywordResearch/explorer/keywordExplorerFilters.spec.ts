@@ -5,6 +5,9 @@ import { buildKeywordRow } from '../../../api/seo-fixtures';
 import {
   EMPTY_FILTERS, activeFilterCount, filterKeywordRows, nextSort, parseBound, sortKeywordRows
 } from './keywordExplorerFilters';
+import {
+  SHARED_FILTER_CASES, SHARED_FILTER_ROWS
+} from './keywordExplorerFilters-fixtures';
 
 const easy = buildKeywordRow({
   keyword: 'hotel zurich',
@@ -141,5 +144,13 @@ describe('activeFilterCount', () => {
       maxDifficulty: '30',
       intents: ['commercial', 'unknown'],
     })).toBe(3);
+  });
+});
+
+describe.each(SHARED_FILTER_CASES)('the case shared with the export route: $name', ({
+  filters, sort, keywords
+}) => {
+  it('lists the keywords the server export lists, in its order', () => {
+    expect(sortKeywordRows(filterKeywordRows(SHARED_FILTER_ROWS, filters), sort).map((row) => row.keyword)).toStrictEqual(keywords);
   });
 });

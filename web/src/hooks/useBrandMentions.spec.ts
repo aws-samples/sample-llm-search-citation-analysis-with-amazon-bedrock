@@ -34,6 +34,8 @@ describe('useBrandMentions', () => {
       data: null,
       loading: false,
       error: null,
+      computing: null,
+      request: null,
     });
   });
 

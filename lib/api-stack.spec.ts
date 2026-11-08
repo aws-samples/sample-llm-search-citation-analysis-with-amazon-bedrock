@@ -1,21 +1,21 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { RUNTIME_CONFIG_OBJECT_KEY } from './api-stack';
+import { DASHBOARD_API_PARAMETERS, RUNTIME_CONFIG_OBJECT_KEY } from './api-stack';
 import {
-  extractApiStackSnapshot, permissionsOfFunction, synthesizeDashboardStacks
+  binAppSource, extractApiStackSnapshot, permissionsOfFunction, synthesizeDashboardStacks
 } from './api-stack-fixtures';
 import {
   COGNITO_AUTH, allowStatementsOfRole, methodRouteLabels, resolvePath, statementActions
 } from './citation-analysis-stack-fixtures';
-import { WILDCARD_PERMISSION_FUNCTION_KEYS } from './constructs/rest-api';
+import { DASHBOARD_API_FUNCTION_NAMES, WILDCARD_PERMISSION_FUNCTION_KEYS } from './constructs/rest-api';
 
 /**
  * CitationAnalysisApiStack (2.44.0): the dashboard REST API, moved out of the
  * main stack. One synthesis of both stacks proves the routes, auth, CORS,
- * throttling and permissions moved intact, and that the cross-stack
- * references are exports CloudFormation can keep: stable values only, and
- * only from the main stack to this one.
+ * throttling and permissions moved intact, that the API stack takes no
+ * cross-stack reference from the main stack, and that the main stack keeps
+ * the exports older API stacks import for one release.
  */
 const stacks = synthesizeDashboardStacks('ApiStackTest');
 const snapshot = extractApiStackSnapshot(stacks);
@@ -38,9 +38,33 @@ const PER_METHOD_PERMISSION_COUNTS: [string, number][] = [
   ['CitationAnalysis-API-GetBrandMentions', 2],
   ['CitationAnalysis-API-GetPersonaRankings', 2],
   ['CitationAnalysis-API-SelfReflection', 4],
+  ['CitationAnalysis-API-Exports', 10],
 ];
 
-const STABLE_IMPORT_TYPES = ['AWS::CloudFront::Distribution', 'AWS::Cognito::UserPool', 'AWS::Lambda::Function', 'AWS::S3::Bucket'];
+/**
+ * The CDK auto-exports a 2.45.0-as-built API stack imports, as synthesized
+ * from commit 704f0e6e (2.44.0 imported the same but the Exports function's),
+ * and the value each holds. The names are what CloudFormation matches.
+ */
+const LEGACY_API_STACK_EXPORTS: Record<string, unknown> = {
+  ExportsOutputFnGetAttAuthuserPool02493132Arn8F91F7E6: { 'Fn::GetAtt': ['AuthuserPool02493132', 'Arn'] },
+  ExportsOutputFnGetAttCitationsContentFunction2F1067F9ArnD9974755: { 'Fn::GetAtt': ['CitationsContentFunction2F1067F9', 'Arn'] },
+  ExportsOutputFnGetAttConfigMgmtFunctionAB4F8D8DArn0BCAAC19: { 'Fn::GetAtt': ['ConfigMgmtFunctionAB4F8D8D', 'Arn'] },
+  ExportsOutputFnGetAttContentStudioFunction121BA1DBArnC354F252: { 'Fn::GetAtt': ['ContentStudioFunction121BA1DB', 'Arn'] },
+  ExportsOutputFnGetAttExecutionMgmtFunction026AEF85ArnAC1F1951: { 'Fn::GetAtt': ['ExecutionMgmtFunction026AEF85', 'Arn'] },
+  ExportsOutputFnGetAttExportsFunctionC992267AArn7F706B36: { 'Fn::GetAtt': ['ExportsFunctionC992267A', 'Arn'] },
+  ExportsOutputFnGetAttGetBrandMentionsFunctionA70EE0B8Arn9478257F: { 'Fn::GetAtt': ['GetBrandMentionsFunctionA70EE0B8', 'Arn'] },
+  ExportsOutputFnGetAttGetPersonaRankingsFunction6FDC5C24Arn57086B7C: { 'Fn::GetAtt': ['GetPersonaRankingsFunction6FDC5C24', 'Arn'] },
+  ExportsOutputFnGetAttHealthCheckFunctionC4679183ArnFF0231CE: { 'Fn::GetAtt': ['HealthCheckFunctionC4679183', 'Arn'] },
+  ExportsOutputFnGetAttKeywordMgmtFunctionC12A3132ArnABE3F59E: { 'Fn::GetAtt': ['KeywordMgmtFunctionC12A3132', 'Arn'] },
+  ExportsOutputFnGetAttManageBrandConfigFunction693CF0EBArnFE16647B: { 'Fn::GetAtt': ['ManageBrandConfigFunction693CF0EB', 'Arn'] },
+  ExportsOutputFnGetAttManageUsersFunction557A064FArn0A356733: { 'Fn::GetAtt': ['ManageUsersFunction557A064F', 'Arn'] },
+  ExportsOutputFnGetAttSelfReflectionFunction51D74BC3ArnED6A416D: { 'Fn::GetAtt': ['SelfReflectionFunction51D74BC3', 'Arn'] },
+  ExportsOutputFnGetAttStatsInsightsFunction66C651E5Arn6B838786: { 'Fn::GetAtt': ['StatsInsightsFunction66C651E5', 'Arn'] },
+  ExportsOutputFnGetAttWebDistribution59C46482DomainNameC09D0E36: { 'Fn::GetAtt': ['WebDistribution59C46482', 'DomainName'] },
+  ExportsOutputRefWebBucket12880F5B704A1ACB: { Ref: 'WebBucket12880F5B' },
+  ExportsOutputRefWebDistribution59C46482F5F457E0: { Ref: 'WebDistribution59C46482' },
+};
 
 const [runtimeConfig] = snapshot.runtimeConfigDeployments;
 
@@ -60,10 +84,13 @@ describe('API stack routes', () => {
     expect(snapshot.authorizers).toHaveLength(1);
   });
 
-  it('authorizes against the user pool of the main stack', () => {
-    expect(resolvePath(snapshot.authorizers[0], ['ProviderARNs'])).toStrictEqual([
-      { 'Fn::ImportValue': expect.stringMatching(/:ExportsOutputFnGetAttAuthuserPool\w+Arn\w+$/) },
-    ]);
+  it('authorizes against the user pool whose id the main stack writes to SSM', () => {
+    expect(resolvePath(snapshot.authorizers[0], ['ProviderARNs'])).toStrictEqual([{
+      'Fn::Join': ['', [
+        'arn:', { Ref: 'AWS::Partition' }, ':cognito-idp:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':userpool/',
+        { Ref: snapshot.apiSsmParameters[DASHBOARD_API_PARAMETERS.userPoolId].logicalId },
+      ]],
+    }]);
   });
 
   it('answers a CORS preflight on every resource and on the root', () => {
@@ -102,7 +129,7 @@ describe('API stack throttling', () => {
 describe('API stack gateway responses', () => {
   it('exposes auth and integration failures to the dashboard origin only', () => {
     const dashboardOrigin = {
-      'Fn::Join': ['', ["'https://", { 'Fn::ImportValue': expect.stringMatching(/:ExportsOutputFnGetAttWebDistribution\w+DomainName\w+$/) }, "'"]],
+      'Fn::Join': ['', ["'", { Ref: snapshot.apiSsmParameters[DASHBOARD_API_PARAMETERS.corsOrigin].logicalId }, "'"]],
     };
 
     expect(snapshot.gatewayResponseOrigins).toStrictEqual(Array(5).fill(dashboardOrigin));
@@ -128,8 +155,8 @@ describe('API stack invoke permissions', () => {
     expect(permissions.filter((permission) => permission.sourceArn.includes('/test-invoke-stage/'))).toHaveLength(count / 2);
   });
 
-  it('grants API Gateway, and only API Gateway, all eighteen permissions', () => {
-    expect(snapshot.permissions.map((permission) => permission.principal)).toStrictEqual(Array(18).fill('apigateway.amazonaws.com'));
+  it('grants API Gateway, and only API Gateway, all twenty-eight permissions', () => {
+    expect(snapshot.permissions.map((permission) => permission.principal)).toStrictEqual(Array(28).fill('apigateway.amazonaws.com'));
   });
 
   it('leaves no API Gateway resource and no API Gateway permission in the main stack', () => {
@@ -139,35 +166,29 @@ describe('API stack invoke permissions', () => {
 });
 
 /**
- * Cross-stack references are exports of the main stack. CloudFormation
- * refuses to change or remove an export another stack imports, so every
- * imported value must be one that never changes for its resource: an ARN or
- * name the main stack fixes, never a layer version (rebuilt on every deploy
- * that touches `lambda/shared/`).
+ * 2.45.0 review F11: a cross-stack reference is a CloudFormation export, and
+ * CloudFormation refuses to change or remove an export another stack
+ * imports, so any import would let a later main-stack change block that
+ * stack's deploys. The API stack imports nothing: function ARNs come from
+ * fixed names, the rest from SSM parameters resolved at deploy time.
  */
 describe('API stack cross-stack references', () => {
-  it('imports only functions, the user pool, the distribution and the web bucket', () => {
-    expect([...new Set(snapshot.imports.map((entry) => entry.targetType))].sort((left, right) => left.localeCompare(right)))
-      .toStrictEqual(STABLE_IMPORT_TYPES);
+  it('imports no export of the main stack', () => {
+    expect(snapshot.apiImports).toStrictEqual([]);
   });
 
-  it('imports the twelve API functions, each by the fixed name its ARN is built from', () => {
-    const functionNames = snapshot.imports
-      .filter((entry) => entry.targetType === 'AWS::Lambda::Function')
-      .map((entry) => entry.fixedName);
-
-    expect(functionNames).toHaveLength(12);
-    expect(functionNames.filter((name) => typeof name !== 'string' || !name.startsWith('CitationAnalysis-API-'))).toStrictEqual([]);
+  it('reads the dashboard origin, the user pool id and the distribution id from SSM at deploy time', () => {
+    expect(Object.keys(snapshot.apiSsmParameters).sort((left, right) => left.localeCompare(right)))
+      .toStrictEqual(Object.values(DASHBOARD_API_PARAMETERS).sort((left, right) => left.localeCompare(right)));
+    expect(Object.values(snapshot.apiSsmParameters).map((parameter) => parameter.type))
+      .toStrictEqual(Array(3).fill('AWS::SSM::Parameter::Value<String>'));
   });
 
-  it('imports the web bucket, whose name the main stack fixes per account', () => {
-    expect(snapshot.imports.filter((entry) => entry.targetType === 'AWS::S3::Bucket').map((entry) => entry.fixedName)).toStrictEqual([
-      { 'Fn::Join': ['', ['citation-analysis-web-', { Ref: 'AWS::AccountId' }]] },
-    ]);
-  });
-
-  it('imports no layer and no version', () => {
-    expect(snapshot.imports.filter((entry) => /Layer|Version/.test(entry.exportName))).toStrictEqual([]);
+  it('reaches the thirteen API functions by the fixed names the main stack gives them', () => {
+    expect(snapshot.referencedFunctionNames).toStrictEqual(
+      Object.values(DASHBOARD_API_FUNCTION_NAMES).sort((left, right) => left.localeCompare(right)),
+    );
+    expect(snapshot.referencedFunctionNames.filter((name) => !snapshot.mainFunctionNames.includes(name))).toStrictEqual([]);
   });
 
   it('is deployed after the main stack, which references nothing of it', () => {
@@ -175,13 +196,54 @@ describe('API stack cross-stack references', () => {
     expect(stacks.main.dependencies).toStrictEqual([]);
     expect(snapshot.mainTemplateImports).toStrictEqual([]);
   });
+
+  it('gets that order from bin/, which declares the dependency CDK can no longer infer', () => {
+    expect(binAppSource()).toContain('apiStack.node.addDependency(stack);');
+  });
+});
+
+describe('Main stack SSM parameters for the API stack', () => {
+  it('writes the user pool id', () => {
+    expect(snapshot.mainSsmParameters[DASHBOARD_API_PARAMETERS.userPoolId]).toStrictEqual({ Ref: snapshot.mainUserPoolLogicalId });
+  });
+
+  it('writes the dashboard distribution id', () => {
+    expect(snapshot.mainSsmParameters[DASHBOARD_API_PARAMETERS.webDistributionId]).toStrictEqual({ Ref: snapshot.mainDistributionLogicalId });
+  });
+
+  it('writes the dashboard origin as https:// plus the distribution domain', () => {
+    expect(snapshot.mainSsmParameters[DASHBOARD_API_PARAMETERS.corsOrigin]).toStrictEqual({
+      'Fn::Join': ['', ['https://', { 'Fn::GetAtt': [snapshot.mainDistributionLogicalId, 'DomainName'] }]],
+    });
+  });
+});
+
+/**
+ * Upgrade from 2.44.0 or a 2.45.0 build before F11: the deployed API stack
+ * still imports CDK's automatic exports of the main stack, and `cdk deploy
+ * --all` updates the main stack first. CloudFormation refuses to remove an
+ * export in use, so the main stack keeps every one of them, under the same
+ * name, until the next release (then: delete `retainLegacyApiStackExports`).
+ * 2.44.0 imported all of these but the Exports function's ARN.
+ */
+describe('Main stack exports kept for one release', () => {
+  it('keeps exactly the exports a 2.44.0 or 2.45.0-as-built API stack imports, under their names', () => {
+    expect(snapshot.mainReferenceExports.map((entry) => entry.localName)).toStrictEqual(Object.keys(LEGACY_API_STACK_EXPORTS));
+  });
+
+  it('prefixes them with the stack name, as CDK did', () => {
+    expect([...new Set(snapshot.mainReferenceExports.map((entry) => entry.prefix))]).toStrictEqual([stacks.main.stackName]);
+  });
+
+  it('exports the same values: thirteen function ARNs, the user pool ARN, the bucket name, the distribution id and domain', () => {
+    expect(Object.fromEntries(snapshot.mainReferenceExports.map((entry) => [entry.localName, entry.value])))
+      .toStrictEqual(LEGACY_API_STACK_EXPORTS);
+  });
 });
 
 describe('Runtime config (config.json)', () => {
   it('writes the stage URL plus /api into the web bucket root', () => {
-    expect(resolvePath(runtimeConfig, ['DestinationBucketName'])).toStrictEqual({
-      'Fn::ImportValue': expect.stringMatching(/:ExportsOutputRefWebBucket\w+$/),
-    });
+    expect(resolvePath(runtimeConfig, ['DestinationBucketName'])).toStrictEqual(snapshot.mainWebBucketName);
     expect(resolvePath(runtimeConfig, ['DestinationBucketKeyPrefix'])).toBeUndefined();
     expect(JSON.stringify(resolvePath(runtimeConfig, ['SourceMarkers']))).toMatch(/"\/api\\""\]\]\}\}\]$/);
   });
@@ -207,6 +269,11 @@ describe('Runtime config (config.json)', () => {
       'cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation', 's3:GetObject', 's3:ListBucket', 's3:PutObject',
     ]);
     expect(JSON.stringify(allowStatementsOfRole(stacks.apiTemplate, roleId))).not.toContain('"Resource":"*"');
+  });
+
+  it('invalidates the distribution whose id the main stack writes to SSM', () => {
+    expect(resolvePath(runtimeConfig, ['DistributionId']))
+      .toStrictEqual({ Ref: snapshot.apiSsmParameters[DASHBOARD_API_PARAMETERS.webDistributionId].logicalId });
   });
 
   it('is left alone by the main stack web deployment, which neither uploads nor prunes it', () => {

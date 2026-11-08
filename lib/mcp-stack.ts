@@ -23,8 +23,8 @@ export interface CitationAnalysisMcpStackProps extends cdk.StackProps {
 /**
  * A sibling of `CitationAnalysisStack` holding the MCP server, its own REST
  * API and the CloudFront distribution in front of it (the server's host root
- * for OAuth discovery). Separate because the main stack sits at CloudFormation's 500-resource
- * limit, and because the server's API, authorizer and Cognito client are a
+ * for OAuth discovery). Separate because the main stack was then at CloudFormation's
+ * 500-resource limit, and because the server's API, authorizer and Cognito client are a
  * self-contained unit that can be removed without touching the dashboard.
  *
  * The server's shared layer is this stack's own version of the same build

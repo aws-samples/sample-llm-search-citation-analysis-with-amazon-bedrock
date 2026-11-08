@@ -11,6 +11,8 @@ import {
   pendingSectionPlaceholder,
 } from '../../layout';
 import type { ContentPlanSectionProps } from './ContentPlanSectionProps';
+import { ExportAllButton } from '../../../ui/ExportAllButton';
+import { requestParams } from '../../../../api/exports';
 
 interface KeywordCoverage {
   keyword: string;
@@ -55,11 +57,11 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordCoverage>> = [
  *    that may or may not be paying off (worth re-running analysis).
  *
  * The join is client-side because the citation-gaps and content-studio
- * endpoints don't share a foreign key. A backend rollup would be cleaner
- * but isn't blocking for the v1 of this report.
+ * endpoints don't share a foreign key; the report hook reads every page of
+ * the three lists before it joins them.
  */
 export function CoverageMapSection({
-  gaps, ideas, history, ...fetch
+  gaps, ideas, history, gapsRequest = null, ...fetch
 }: ContentPlanSectionProps) {
   const pending = pendingSectionPlaceholder({
     ...fetch,
@@ -79,6 +81,11 @@ export function CoverageMapSection({
       title="Coverage map"
       subtitle="Per-keyword snapshot: where the gaps are, what briefs already exist, and what ideas are queued up."
     >
+      {gapsRequest !== null && (
+        <div className="mb-2 flex justify-end">
+          <ExportAllButton view="gap-keyword-summaries" params={requestParams(gapsRequest)} />
+        </div>
+      )}
       <ReportTable
         columns={COLUMNS}
         rows={rows}

@@ -7,6 +7,8 @@ import {
   BLOCK_REASON_LABELS, BlockedPageBanner, isBlockReason 
 } from './BlockedPageBanner';
 import type { CrawlStatus } from '../../types';
+import { ExportAllButton } from '../ui/ExportAllButton';
+import { LoadMoreButton } from '../ui/LoadMoreButton';
 
 export interface HistoryCrawl {
   crawled_at: string;
@@ -107,21 +109,29 @@ const HistoryScreenshot = ({ crawl }: { crawl: HistoryCrawl }) => {
 };
 
 interface HistoryTabProps {
+  /** The page whose crawls these are (the export's `url`). */
+  url: string;
   history: HistoryCrawl[];
   historyLoading: boolean;
   historyError: string | null;
   selectedHistoryIndex: number;
   onSelectHistory: (index: number) => void;
   onRetry: () => void;
+  /** Appends the next page of older crawls; absent on the last page. */
+  onLoadMore: (() => unknown) | undefined;
+  loadingMore: boolean;
 }
 
 export const HistoryTab = ({
+  url,
   history,
   historyLoading,
   historyError,
   selectedHistoryIndex,
   onSelectHistory,
   onRetry,
+  onLoadMore,
+  loadingMore,
 }: HistoryTabProps) => {
   // How many crawls a page has is unknown until they arrive: a centred spinner, not a skeleton.
   if (historyLoading) return <CenteredLoading label="Loading crawl history..." />;
@@ -147,9 +157,12 @@ export const HistoryTab = ({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-1 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">
-          Previous Crawls ({history.length})
-        </h3>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-sm font-semibold text-gray-900">
+            Previous Crawls ({history.length}{onLoadMore === undefined ? '' : '+'})
+          </h3>
+          <ExportAllButton view="crawl-history" params={{ url }} />
+        </div>
         <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
           {history.map((crawl, idx) => (
             <HistoryItem
@@ -159,6 +172,7 @@ export const HistoryTab = ({
               onSelect={() => onSelectHistory(idx)}
             />
           ))}
+          <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load older crawls" />
         </div>
       </div>
       <div className="lg:col-span-2">

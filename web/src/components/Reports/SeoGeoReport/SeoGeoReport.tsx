@@ -1,4 +1,6 @@
-import { useSearchParams } from 'react-router-dom';
+import {
+  useNavigate, useSearchParams
+} from 'react-router-dom';
 import { useSeoGeo } from '../../../hooks/useSeoGeo';
 import {
   useSeoGeoInsights, type SeoGeoInsightsState
@@ -52,7 +54,7 @@ interface SeoGeoSectionsProps extends SeoGeoSectionProps {readonly insights: Seo
 
 /** The sections in order; one notice in their place when the SEO stack is not deployed. */
 function SeoGeoSections({
-  state, insights, scopeLabel
+  state, insights, exportScope
 }: SeoGeoSectionsProps) {
   if (state.notConfigured) {
     return <ReportSectionPlaceholder title="SEO vs GEO" variant="empty" message={SEO_NOT_DEPLOYED_MESSAGE} />;
@@ -61,9 +63,9 @@ function SeoGeoSections({
     <>
       <SeoGeoQuadrantSection state={state} />
       <SeoGeoChartSection state={state} />
-      <SeoGeoTrafficSection state={state} scopeLabel={scopeLabel} />
+      <SeoGeoTrafficSection state={state} exportScope={exportScope} />
       <SeoRecommendationsSection insights={insights} />
-      <SeoGeoTableSection state={state} scopeLabel={scopeLabel} />
+      <SeoGeoTableSection state={state} exportScope={exportScope} />
     </>
   );
 }
@@ -79,6 +81,7 @@ function SeoGeoSections({
  */
 export function SeoGeoReport() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   // The comparison has no per-keyword form, so only `?group=` narrows it.
   const scope = scopeFromSearch(searchParams, null);
   const groupId = scope.kind === 'group' ? scope.groupId : null;
@@ -98,9 +101,12 @@ export function SeoGeoReport() {
     <ReportLayout
       title="SEO vs GEO"
       subtitle={`Google organic position against AI answer visibility for "${scopeLabel}": where search standing and AI mentions agree, and where they do not. ${seoGeoMarketNote(marketLabel)}`}
-      actions={<GroupScopeSelector groups={groups} scope={scope} pathFor={(next) => seoGeoReportPath(next, market)} />}
+      actions={<GroupScopeSelector groups={groups} value={scope} onChange={(next) => navigate(seoGeoReportPath(next, market))} />}
     >
-      <SeoGeoSections state={state} insights={insights} scopeLabel={scopeLabel} />
+      <SeoGeoSections state={state} insights={insights} exportScope={{
+        ...(selectedMarketId === null ? {} : { market_id: selectedMarketId }),
+        ...(groupId === null ? {} : { group_id: groupId }),
+      }} />
       <KpiDefinitionsSection definitions={SEO_GEO_DEFINITIONS} />
     </ReportLayout>
   );

@@ -59,11 +59,13 @@ const citationGapsEndpoint = {
  */
 export function useCitationGaps() {
   const {
-    data, loading, error, fetchData
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(citationGapsEndpoint);
   const fetchCitationGaps = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

@@ -1,4 +1,5 @@
 import type { ReportScopeInfo } from './baseTypes';
+import type { ScopedResponseFields } from './scopeCoverage';
 /**
  * Brand-related types for brand mentions, visibility, and configuration.
  */
@@ -133,7 +134,7 @@ export interface BrandConfig {
 /**
  * Complete brand mentions response from the API.
  */
-export interface BrandMentionsResponse {
+export interface BrandMentionsResponse extends ScopedResponseFields {
   /** Null for a group / all answer, which has no single keyword. */
   keyword: string | null;
   timestamp: string | null;
@@ -151,9 +152,10 @@ export interface BrandMentionsResponse {
     brands: AggregatedBrand[];
     /** Every brand of the rows, whatever the classification filter. */
     total_unique_brands: number;
-    /** Brands of the requested classification, before the cap of `brands`. */
-    matching_brands: number;
-    brands_truncated: boolean;
+    /** Every brand of the requested classification (2.45.0 wave 5); `brands` is its first page. */
+    brands_total?: number;
+    /** The next page of `brands` (`view=brands&next_token=`); `null`/absent on the last. */
+    brands_next_token?: string | null;
     summary: {
       first_party_count: number;
       competitor_count: number;

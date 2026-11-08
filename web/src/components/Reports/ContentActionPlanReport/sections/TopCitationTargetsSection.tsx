@@ -10,6 +10,7 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 interface Props extends SectionFetchState {readonly gaps: CitationGapsResponse | null;}
 
@@ -50,7 +51,7 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<CitationGap>> = [
     header: 'Competitors named',
     cellClassName: 'text-xs',
     render: (source) => (source.competitor_brands.length > 0
-      ? source.competitor_brands.slice(0, 3).join(', ')
+      ? source.competitor_brands.join(', ')
       : '—'),
   },
 ];
@@ -100,6 +101,7 @@ export function TopCitationTargetsSection({
         rowKey={(source) => source.url}
         alignTop
       />
+      <p className="mt-2 text-right"><SeeAllLink to="/citation-gaps">See all citation gaps</SeeAllLink></p>
     </ReportSection>
   );
 }

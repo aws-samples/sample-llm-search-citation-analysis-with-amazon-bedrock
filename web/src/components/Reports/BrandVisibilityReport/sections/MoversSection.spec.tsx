@@ -20,6 +20,22 @@ function renderMovers(rows: KeywordTrend[]): void {
 }
 
 describe('MoversSection columns', () => {
+  it('lists the movers the server ranked over every keyword of the scope', () => {
+    render(<MoversSection {...settledTrends({
+      ...trendViewOf([movingKeyword('up-a', 3, 'improving')]),
+      top_movers: {
+        improving: [{
+          keyword: 'keyword on page 9',
+          visibility_score: 71,
+          change: 12,
+        }],
+        declining: [],
+      },
+    })} />);
+
+    expect(moverKeywords('Improving')).toStrictEqual(['keyword on page 9']);
+  });
+
   it('lists an improving keyword with its score and change in the Improving column', () => {
     renderMovers([movingKeyword('up-a', 3, 'improving', 62), movingKeyword('down-a', -4, 'declining')]);
 

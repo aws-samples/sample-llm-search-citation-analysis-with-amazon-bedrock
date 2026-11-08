@@ -2,7 +2,12 @@ import type {
   BrandKpis, GroupKpiHistoryResponse, GroupRun, GroupRunChange, GroupRunDriver, GroupRunDrivers, KeywordRun, KeywordRunHistory,
   KeywordRunSummary, KpiDeltas, KpiTrend, MentionChange, TrendedKpiId
 } from '../../../types/domain/groupKpiHistory';
-import type { GroupKpiDetail } from './groupKpiDetail';
+
+/** Every keyword's runs and every compared run's drivers, as the specs stub the on-demand reads. */
+export interface GroupKpiDetail {
+  readonly keywords: readonly KeywordRunHistory[];
+  readonly drivers: readonly GroupRunDrivers[];
+}
 
 export const RUN_1 = '2026-09-01T06:00:00.000000Z';
 export const RUN_2 = '2026-09-08T06:00:00.000000Z';
@@ -262,16 +267,6 @@ export const KEYWORD_HISTORIES: KeywordRunHistory[] = [
   buildKeywordHistory('hotel sol beach', []),
   buildKeywordHistory('hotel sol spa', [buildKeywordRun(), LOST_KEYWORD_RUN]),
 ];
-
-/** `KEYWORD_HISTORIES` as two `view=keywords` pages. */
-export const FIRST_KEYWORD_RUNS_PAGE = {
-  keywords: [KEYWORD_HISTORIES[0]],
-  next_token: 'page-2',
-};
-export const LAST_KEYWORD_RUNS_PAGE = {
-  keywords: [KEYWORD_HISTORIES[1]],
-  next_token: null,
-};
 
 /** What the export and the on-demand sections read besides `buildHistory()`: its keyword runs and its run's drivers. */
 export function buildDetail(overrides: Partial<GroupKpiDetail> = {}): GroupKpiDetail {

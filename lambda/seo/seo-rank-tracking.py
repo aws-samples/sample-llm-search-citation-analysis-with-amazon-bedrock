@@ -9,7 +9,7 @@ Rank tracking API (``/api/seo/rank-trackers``; shapes in ``web/src/types/api/seo
 - DELETE /rank-trackers/{id}             - archive; the history is kept (Admin)
 - POST   /rank-trackers/{id}/keywords    - add extra keywords (Admin); DELETE ?keyword_ids=a,b removes them (Admin)
 - GET    /rank-trackers/{id}/runs        - the latest run; POST starts a manual run (Admin)
-- GET    /rank-trackers/{id}/results?period=1d|7d|30d|90d
+- GET    /rank-trackers/{id}/results?period=1d|7d|30d|90d   (rows best position on the first device first)
 - GET    /rank-trackers/{id}/history?keyword_id=&days=   (at most 365 days)
 - GET    /rank-trackers/{id}/trend?days=
 
@@ -428,11 +428,31 @@ def _about(event: dict[str, Any], tracker: Tracker, **fields: Any) -> dict[str, 
     return success_response({'tracker_id': tracker.tracker_id, **fields}, event)
 
 
+def ranked_rows(body: dict[str, Any]) -> dict[str, Any]:
+    """
+    ``results`` with its rows as the table lists them: best position on the first tracked device first, rows
+    without a position there last, then by keyword.
+    """
+    devices = body.get('devices') or ['desktop']
+    device = devices[0]
+
+    def key(row: Mapping[str, Any]) -> tuple[bool, float, str, str]:
+        cell = row.get(device)
+        position = cell.get('position') if isinstance(cell, Mapping) else None
+        text = str(row.get('keyword') or '')
+        if isinstance(position, int | float) and not isinstance(position, bool):
+            return False, float(position), text.casefold(), text
+        return True, 0.0, text.casefold(), text
+
+    return {**body, 'rows': sorted(body.get('rows') or [], key=key)}
+
+
 @validate(RESULTS_SCHEMA)
 @with_tracker()
 def handle_results(event: dict[str, Any], _context: Any, *, tracker: Tracker, period: str,
                    **_kwargs: Any) -> dict[str, Any]:
-    return success_response(results(rank_table(), tracker, _run_keywords(tracker), period, utc_now()), event)
+    body = results(rank_table(), tracker, _run_keywords(tracker), period, utc_now())
+    return success_response(ranked_rows(body), event)
 
 
 @validate(HISTORY_SCHEMA)

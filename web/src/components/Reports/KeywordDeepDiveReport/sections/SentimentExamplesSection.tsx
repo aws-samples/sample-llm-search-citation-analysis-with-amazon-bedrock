@@ -6,6 +6,8 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
+import { scopeReportPath } from '../../scopeReport/scopeReportRoute';
 import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
 
 interface Props extends SectionFetchState {readonly mentions: BrandMentionsResponse | null;}
@@ -83,6 +85,14 @@ export function SentimentExamplesSection({
           />
         ))}
       </div>
+      {mentions?.keyword && (
+        <p className="mt-2 text-right">
+          <SeeAllLink to={scopeReportPath('/reports/sentiment', {
+            kind: 'keyword',
+            keyword: mentions.keyword,
+          }, 30)}>See every answer in the Sentiment report</SeeAllLink>
+        </p>
+      )}
     </ReportSection>
   );
 }

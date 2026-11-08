@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
-import type { ComponentProps } from 'react';
+import {
+  createElement, type ComponentProps
+} from 'react';
 import type { CitationFilters } from './CitationFilters';
 
 type CitationFiltersProps = ComponentProps<typeof CitationFilters>;
@@ -14,7 +16,7 @@ export function buildProps(overrides: Partial<CitationFiltersProps> = {}): Citat
     contentType: 'all',
     setContentType: vi.fn(),
     setCurrentPage: vi.fn(),
-    onDownloadExcel: vi.fn(),
+    exportButton: createElement('button', { type: 'button' }, 'Export all'),
     ...overrides,
   };
 }

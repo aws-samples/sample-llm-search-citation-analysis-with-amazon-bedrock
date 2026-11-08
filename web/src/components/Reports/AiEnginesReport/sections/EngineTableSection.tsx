@@ -1,7 +1,7 @@
 import type { VisibilityResponse } from '../../../../types';
 import { EngineKpiTable } from '../../layout/EngineKpiTable';
 import {
-  LatestRunSection, type ScopeSectionProps
+  LatestRunSection, SectionExport, type ScopeSectionProps
 } from '../../scopeReport';
 
 function noEngine({ engines }: VisibilityResponse): string | null {
@@ -17,7 +17,12 @@ export function EngineTableSection({ report }: ScopeSectionProps) {
       subtitle="Each KPI of your brand over one AI engine's answers in the latest runs, engines in name order."
       emptyMessage={noEngine}
     >
-      {({ engines }) => <EngineKpiTable engines={engines} />}
+      {({ engines }) => (
+        <>
+          <SectionExport view="engines" request={report.visibilityRequest} />
+          <EngineKpiTable engines={engines} />
+        </>
+      )}
     </LatestRunSection>
   );
 }

@@ -2,9 +2,12 @@ import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  fireEvent, render, screen, waitFor, within
+  fireEvent, render, screen, within
 } from '@testing-library/react';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import {
+  computingLabel, COMPUTING_JOB
+} from '../../test/scopedTestKit';
 import {
   brandKeywordsFixture,
   brandMentionsExportResponse,
@@ -17,14 +20,11 @@ import {
   selectBrandScope,
 } from './brandMentionsExport-fixtures';
 
-const mocks = vi.hoisted(() => ({
-  useBrandMentions: vi.fn(),
-  exportBrandMentionsFor: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({useBrandMentions: vi.fn(),}));
 
 vi.mock('../../hooks/useBrandMentions', () => ({useBrandMentions: mocks.useBrandMentions,}));
 
-vi.mock('./brandMentionsExport', () => ({exportBrandMentionsFor: mocks.exportBrandMentionsFor,}));
+vi.mock('../../api/exports', () => import('../../test/exportsApiMock'));
 
 vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
@@ -38,6 +38,9 @@ import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
+import {
+  chooseExportFormat, mockStartExport
+} from '../../test/exportsApiMock';
 
 vi.mock('../Personas/PersonaSelector', () => ({
   PersonaSelector: ({
@@ -72,23 +75,17 @@ function renderWithHistoricalRun(scope?: string): void {
   selectBrandRun();
 }
 
-/** Renders the keyword scope and presses the export button. */
-function renderAndPressExport(): void {
-  renderWithBrandScope();
-  fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
-}
-
 describe('BrandsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult());
     vi.mocked(useBrandConfig).mockReturnValue(buildBrandConfigHookResult());
     mocks.useBrandMentions.mockReturnValue({
+      computing: null,
       data: brandMentionsExportResponse,
       loading: false,
       error: null,
     });
-    mocks.exportBrandMentionsFor.mockResolvedValue(undefined);
   });
 
   it('renders the Brand Mentions heading when there are no keywords', () => {
@@ -137,6 +134,7 @@ describe('BrandsView', () => {
 
   it('shows the brand mentions skeleton while the first answer for a scope loads', () => {
     mocks.useBrandMentions.mockReturnValue({
+      computing: null,
       data: null,
       loading: true,
       error: null,
@@ -146,14 +144,27 @@ describe('BrandsView', () => {
     expect(screen.getByText('Loading brand mentions')).toBeInTheDocument();
   });
 
-  it('keeps the previous results on screen, marked busy, while a refetch loads', () => {
+  it('says the brand mentions are being computed while a view job runs for an older run', () => {
     mocks.useBrandMentions.mockReturnValue({
+      computing: COMPUTING_JOB,
       data: brandMentionsExportResponse,
       loading: true,
       error: null,
     });
     renderWithBrandScope();
-    const exportButton = screen.getByRole('button', { name: 'Export to Excel' });
+
+    expect(computingLabel('brand mentions')).toBeInTheDocument();
+  });
+
+  it('keeps the previous results on screen, marked busy, while a refetch loads', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      computing: null,
+      data: brandMentionsExportResponse,
+      loading: true,
+      error: null,
+    });
+    renderWithBrandScope();
+    const exportButton = screen.getByRole('button', { name: 'Export all' });
 
     expect(exportButton.closest('[aria-busy="true"]')).not.toBeNull();
   });
@@ -235,44 +246,53 @@ describe('BrandsView', () => {
     )).toBeInTheDocument();
   });
 
-  it('exports every appearance of the selected scope and filters when the button is pressed', async () => {
-    renderAndPressExport();
+  it('exports every brand of the selected scope and filters', async () => {
+    renderWithBrandScope();
 
-    await waitFor(() => {
-      expect(mocks.exportBrandMentionsFor).toHaveBeenCalledWith({
-        scope: KEYWORD_REPORT_SCOPE,
-        marketId: null,
-        filters: {
-          classification: null,
-          query_prompt_id: null,
-          timestamp: null,
-        },
-      }, 'hotels');
+    await chooseExportFormat('xlsx');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'brand-mention-summary',
+      params: { keyword: 'hotels' },
+      format: 'xlsx',
     });
   });
 
-  it('says how many brands the capped summary leaves out', () => {
+  it('exports every appearance of the selected scope and run', async () => {
+    renderWithHistoricalRun(GROUP_SCOPE_VALUE);
+
+    await chooseExportFormat('csv', 'Export all mentions');
+
+    expect(mockStartExport).toHaveBeenCalledWith({
+      view: 'brand-appearances',
+      params: {
+        group_id: 'group-coruna',
+        timestamp: HISTORICAL_BRAND_RUN,
+      },
+      format: 'csv',
+    });
+  });
+
+  it('pages the brands past the first page of the summary', () => {
     mocks.useBrandMentions.mockReturnValue({
+      computing: null,
       data: {
         ...brandMentionsExportResponse,
         aggregated: {
           ...brandMentionsExportResponse.aggregated,
-          matching_brands: 140,
-          brands_truncated: true,
+          brands_total: 140,
+          brands_next_token: 'page-2',
         },
+      },
+      request: {
+        path: '/brand-mentions',
+        params: new URLSearchParams({ keyword: 'hotels' }),
       },
       loading: false,
       error: null,
     });
     renderWithBrandScope();
 
-    expect(screen.getByText('Showing the top 2 of 140 brands by aggregate score; the Excel export has every mention.')).toBeInTheDocument();
-  });
-
-  it('shows the export loading state while the workbook is being generated', () => {
-    mocks.exportBrandMentionsFor.mockImplementation(() => new Promise(vi.fn()));
-    renderAndPressExport();
-
-    expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Load more brands' })).toBeInTheDocument();
   });
 });

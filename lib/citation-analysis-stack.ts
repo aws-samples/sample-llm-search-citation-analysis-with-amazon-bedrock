@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import type { IUserPool } from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -21,6 +22,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
+import { KpiWriteFailureAlarm } from './constructs/kpi-write-failure-alarm';
 import {
   ProviderSearch, providerSearchEnvironment, readExternalSearchProviders, readProviderConcurrency, readProviderPacing
 } from './constructs/provider-search';
@@ -30,12 +32,14 @@ import type { SeoStackInputs } from './seo-stack';
 import { BACKLINK_SNAPSHOTS_STATE_MACHINE_NAME } from './constructs/seo-backlinks';
 import { SEO_DOMAIN_SNAPSHOTS_STATE_MACHINE } from './constructs/seo-domain';
 import { RANK_TRACKER_SCHEDULE_GROUP } from './constructs/seo-rank-tracking';
+import { SEO_ROUTER_FUNCTION_NAME } from './constructs/seo-api';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
-import { RUNTIME_CONFIG_OBJECT_KEY, type DashboardApiInputs } from './api-stack';
+import { DASHBOARD_API_PARAMETERS, RUNTIME_CONFIG_OBJECT_KEY } from './api-stack';
+import { DASHBOARD_API_FUNCTION_NAMES, type DashboardApiFunctions } from './constructs/rest-api';
 import {
   apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
 } from './constructs/api-functions';
-import { citationAnalysisTable, type CitationAnalysisIndexSpec } from './constructs/tables';
+import { citationAnalysisTable, stringKey, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
 import {
   allow, apiKeySecret, lambdaServiceRole
@@ -54,13 +58,18 @@ const CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES = 60;
 const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
 
 /**
- * Lambda memory that buys one full vCPU (CPU is allocated in proportion to
- * memory). API routers that deserialize thousands of DynamoDB rows per
- * request are CPU-bound, not memory-bound: at 512 MB (~0.29 vCPU) an
- * unscoped /citations read used 224 MB and still ran out of time. Pay-per-use
- * cost is about flat for CPU-bound work, which finishes proportionally sooner.
+ * Memory of the CPU-bound read routers and the per-group insights worker: one
+ * full vCPU (owner decision, 2026-11-07). CPU is allocated in proportion to
+ * memory, and these deserialize thousands of DynamoDB rows per request. AWS
+ * Lambda Power Tuning of the read-only GET routes (balanced, 10 invocations
+ * per power) chose 1280 MB for /citations, /searches and /brand-mentions and
+ * 768-1024 MB for StatsInsights' single-keyword routes; one vCPU keeps margin
+ * above that for live scopes up to `shared/scope_source.LIVE_ROWS_BUDGET` (the
+ * window row cap of `shared/scoped_reports.py` scales with this size). The
+ * 30-day CloudWatch REPORT audit
+ * found no function at 60% of its peak memory.
  */
-const ONE_VCPU_MEMORY_MB = 1769;
+const TUNED_READ_MEMORY_MB = 1769;
 
 /**
  * Budget of one keyword research execution. The API's reader-side stale
@@ -99,12 +108,44 @@ const WORKFLOW_RUNS_RETENTION_DAYS = 30;
 const CITATION_ROLLUP_PREFIX = 'citation-rollups/';
 
 /**
+ * Key prefix of the scope snapshots in the keywords bucket (design 2.45.0,
+ * `shared/scope_snapshot.py`): one KeywordLatest object per keyword
+ * (`keywords/`, written by Deduplication), the per-scope builds and series
+ * (written by GenerateSummary's BuildScopeSnapshots) and the view jobs
+ * (`jobs/`, results and export files, expired after
+ * `SCOPE_SNAPSHOT_JOB_RETENTION_DAYS`).
+ */
+const SCOPE_SNAPSHOT_PREFIX = 'scope-snapshots/';
+const SCOPE_SNAPSHOT_JOBS_PREFIX = `${SCOPE_SNAPSHOT_PREFIX}jobs/`;
+const SCOPE_SNAPSHOT_JOB_RETENTION_DAYS = 7;
+
+/**
  * Keywords-bucket prefix for API responses too large for Lambda's 6 MiB cap
  * (`lambda/shared/response_spill.py` SPILL_PREFIX). Each object is read once,
  * through a 5-minute presigned URL, so a day is ample.
  */
 const API_RESPONSE_SPILL_PREFIX = 'api-responses/';
 const API_RESPONSE_SPILL_RETENTION_DAYS = 1;
+
+/**
+ * The export service (2.45.0, `shared/export_steps.py`): every view's
+ * "Export all" file and its checkpoints live under
+ * `exports/<owner>/<export_id>/` in the keywords bucket, and the job item
+ * expires after the same 7 days (`shared/export_contract.EXPORT_RETENTION_DAYS`).
+ */
+const EXPORTS_PREFIX = 'exports/';
+const EXPORT_RETENTION_DAYS = 7;
+export const EXPORTS_TABLE_NAME = 'CitationAnalysis-Exports';
+export const EXPORT_STATE_MACHINE_NAME = 'CitationAnalysis-Export';
+/**
+ * An export runs until its rows are written: each ExportChunk invocation
+ * writes until its own deadline and loops, ~4 history events per chunk, so
+ * thousands of chunks fit the 25,000-event limit. Seven days only stops a
+ * truly stuck export; the job item is gone by then anyway.
+ */
+const EXPORT_STATE_MACHINE_TIMEOUT_DAYS = 7;
+/** One chunk runs for the Lambda maximum; it stops 60 s before (`export-worker/handler.py`). */
+const EXPORT_WORKER_TIMEOUT_SECONDS = 900;
 
 /**
  * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the old
@@ -143,6 +184,47 @@ function workerFunction(
     { ...props, handler: props.handler ?? 'handler.handler' },
     cdk.RemovalPolicy.DESTROY
   );
+}
+
+/** What a function serving scoped views reads the scope snapshots with (`shared/scope_snapshot_serve.py`). */
+interface ScopeSnapshotReaderInputs {
+  bucket: s3.IBucket;
+  builder: lambda.IFunction;
+  queryPrompts: dynamodb.ITable;
+}
+
+/**
+ * Let `fn` serve scoped views from the scope snapshots: read the builds,
+ * request a debounced rebuild (`rebuild-requested.json`), start and forget
+ * view jobs (`jobs/`, on the GenerateSummary Lambda), and count the enabled
+ * personas the routing rule needs (QueryPrompts `EnabledIndex`).
+ */
+function grantScopeSnapshotReader(fn: lambda.Function, inputs: ScopeSnapshotReaderInputs): void {
+  fn.addEnvironment('SCOPE_SNAPSHOT_BUCKET', inputs.bucket.bucketName);
+  fn.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', inputs.builder.functionName);
+  fn.addEnvironment('DYNAMODB_TABLE_QUERY_PROMPTS', inputs.queryPrompts.tableName);
+  allow(fn, ['s3:GetObject'], [inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}*`)]);
+  allow(fn, ['s3:PutObject'], [
+    inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}rebuild-requested.json`),
+    inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_JOBS_PREFIX}*`),
+  ]);
+  allow(fn, ['s3:DeleteObject'], [inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_JOBS_PREFIX}*`)]);
+  allow(fn, ['lambda:InvokeFunction'], [inputs.builder.functionArn]);
+  allow(fn, ['dynamodb:Query'], [inputs.queryPrompts.tableArn, `${inputs.queryPrompts.tableArn}/index/EnabledIndex`]);
+}
+
+/**
+ * Keep the exports a 2.44.0 `CitationAnalysisApiStack` imports (CDK's
+ * automatic `<stack>:ExportsOutput...` exports of the API Lambdas' ARNs, the
+ * user pool ARN, the web bucket name and the distribution id and domain). The
+ * API stack no longer imports them (2.45.0 review F11),
+ * but `cdk deploy --all` updates this stack first, and CloudFormation refuses
+ * to remove an export that the deployed API stack still imports. `exportValue`
+ * gives each the same export name as before. Remove this call in the release
+ * after 2.45.0: by then every API stack has been updated and imports none of them.
+ */
+function retainLegacyApiStackExports(stack: cdk.Stack, values: string[]): void {
+  for (const value of values) stack.exportValue(value);
 }
 
 /** A stack output exported as `CitationAnalysis-<id>`. */
@@ -338,6 +420,332 @@ function loggedStateMachine(
   });
 }
 
+/** What the export service builds on in the main stack. */
+interface ExportServiceInputs {
+  sharedLayer: lambda.ILayerVersion;
+  /** The keywords bucket: export files under `exports/`. */
+  bucket: s3.IBucket;
+  /**
+   * The API Lambdas the row sources replay a view's route against, by router
+   * key (`shared/export_source_routes.py` `EXPORT_API_FUNCTIONS`).
+   */
+  routers: Record<string, lambda.IFunction>;
+  /**
+   * Prepare re-reads an Admin-only export's owner's groups from this pool
+   * (`export-worker/handler.py`, `AdminListGroupsForUser`).
+   */
+  userPool: IUserPool;
+}
+
+/**
+ * A step of the export state machine: one action of the export worker on the
+ * execution's `export_id`, retried on Lambda service errors and throttling.
+ */
+function exportStep(
+  scope: Construct,
+  id: string,
+  worker: lambda.IFunction,
+  action: string,
+  extra: Record<string, string> = {}
+): tasks.LambdaInvoke {
+  const task = lambdaStep(scope, id, worker, stepfunctions.TaskInput.fromObject({
+    action, 'export_id.$': '$.export_id', ...extra,
+  }));
+  task.addRetry({
+    errors: ['Lambda.TooManyRequestsException'],
+    interval: cdk.Duration.seconds(5),
+    maxAttempts: 6,
+    backoffRate: 2,
+  });
+  return task;
+}
+
+/**
+ * `CitationAnalysis-Export`: Prepare → ExportChunk until every row is
+ * written → Finalize; anything that escapes a step runs MarkFailed (abort
+ * the upload, mark the export failed) and fails the execution.
+ */
+function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfunctions.StateMachine {
+  const markFailed = exportStep(scope, 'MarkExportFailed', worker, 'fail', { 'error.$': '$.error' });
+  markFailed.next(new stepfunctions.Fail(scope, 'ExportFailed', {
+    error: 'ExportFailed',
+    cause: 'The export could not be completed; see the export item for the error.',
+  }));
+  const prepare = exportStep(scope, 'PrepareExport', worker, 'prepare');
+  const chunk = exportStep(scope, 'ExportChunk', worker, 'chunk');
+  // A chunk killed by its timeout or out of memory (Lambda.Unknown) resumes
+  // once from its checkpoint; the worker fails an export whose chunks stall.
+  chunk.addRetry({ errors: ['Lambda.Unknown'], interval: cdk.Duration.seconds(5), maxAttempts: 1 });
+  const finalize = exportStep(scope, 'FinalizeExport', worker, 'finalize');
+  for (const task of [prepare, chunk, finalize]) {
+    task.addCatch(markFailed, { errors: ['States.ALL'], resultPath: '$.error' });
+  }
+  const allRowsWritten = new stepfunctions.Choice(scope, 'AllRowsWritten')
+    .when(stepfunctions.Condition.booleanEquals('$.done', true), finalize)
+    .otherwise(chunk);
+  const role = new iam.Role(scope, 'ExportStateMachineRole', {
+    roleName: 'CitationAnalysis-ExportStateMachineRole',
+    assumedBy: new iam.ServicePrincipal('states.amazonaws.com'),
+    description: 'Role for the export state machine to invoke the export worker',
+  });
+  return loggedStateMachine(scope, 'ExportStateMachine', {
+    logGroupId: 'ExportStateMachineLogGroup',
+    stateMachineName: EXPORT_STATE_MACHINE_NAME,
+    definition: prepare.next(chunk).next(allRowsWritten),
+    role,
+    timeout: cdk.Duration.days(EXPORT_STATE_MACHINE_TIMEOUT_DAYS),
+  });
+}
+
+/**
+ * The export service (2.45.0): the Exports table, the worker that writes a
+ * view's whole file chunk by chunk, the state machine that runs it, and the
+ * `/api/exports` Lambda (start, list, read with a presigned download, cancel
+ * or delete, mark seen). Returns the API Lambda.
+ *
+ * Least privilege: the worker reads the views only by invoking the API
+ * routers (as the MCP server does; the caller's right to the view is checked
+ * when the export is queued), and both Lambdas touch only `exports/*` of the
+ * bucket. The download URL is presigned by the API Lambda for the owner on
+ * each request; the object itself is never public.
+ */
+function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Function {
+  const table = citationAnalysisTable(scope, 'ExportsTable', {
+    tableName: EXPORTS_TABLE_NAME,
+    partitionKey: stringKey('export_id'),
+    timeToLiveAttribute: 'expires_at',
+    globalSecondaryIndexes: [
+      { indexName: 'OwnerCreatedIndex', partitionKey: stringKey('owner'), sortKey: stringKey('created_at') },
+    ],
+  });
+  const exportObjects = inputs.bucket.arnForObjects(`${EXPORTS_PREFIX}*`);
+
+  const worker = workerFunction(scope, 'ExportWorker', {
+    functionName: 'CitationAnalysis-ExportWorker',
+    code: lambdaSourceCode('export-worker'),
+    layers: [inputs.sharedLayer],
+    // Invoked by Step Functions only: a chunk writes until 60 s before this.
+    timeout: cdk.Duration.seconds(EXPORT_WORKER_TIMEOUT_SECONDS),
+    // Mostly I/O (synchronous router invokes, S3 parts); the CPU-heavy reads
+    // run in the routers. The working set is about 200-300 MB (16 MiB part
+    // buffer and copy, checkpoint copies, one router page parsed). One vCPU
+    // (owner decision 2026-11-07) writes and deflates the XLSX parts at full
+    // speed; confirm the size from the REPORT lines of a 1M-row export.
+    memorySize: 1769,
+    description: 'Export service: prepare, write one chunk, finalize or fail one export',
+    environment: {
+      DYNAMODB_TABLE_EXPORTS: table.tableName,
+      EXPORTS_BUCKET: inputs.bucket.bucketName,
+      EXPORT_API_FUNCTIONS: cdk.Stack.of(scope).toJsonString(
+        Object.fromEntries(Object.entries(inputs.routers).map(([key, fn]) => [key, fn.functionName]))
+      ),
+      // Unset, an Admin-only export (the users list) fails closed at Prepare.
+      USER_POOL_ID: inputs.userPool.userPoolId,
+    },
+  });
+  // Prepare checks that the owner of an Admin-only export is still an Admin.
+  allow(worker, ['cognito-idp:AdminListGroupsForUser'], [inputs.userPool.userPoolArn]);
+  allow(worker, ['dynamodb:GetItem', 'dynamodb:PutItem'], [table.tableArn]);
+  // Multipart upload (Create/UploadPart/Complete are s3:PutObject), the
+  // checkpoint objects (put, get, delete) and Finalize's HeadObject.
+  allow(worker, ['s3:PutObject', 's3:GetObject', 's3:DeleteObject', 's3:AbortMultipartUpload'], [exportObjects]);
+  allow(worker, ['lambda:InvokeFunction'], Object.values(inputs.routers).map((fn) => fn.functionArn));
+
+  const stateMachine = exportStateMachine(scope, worker);
+
+  const api = apiFunction(scope, 'Exports', inputs.sharedLayer, {
+    functionName: DASHBOARD_API_FUNCTION_NAMES.exports,
+    handlerFiles: ['exports.py'],
+    memorySize: 512,
+    description: 'API: exports (start, list, read with a presigned download, cancel or delete, mark seen)',
+    environment: {
+      DYNAMODB_TABLE_EXPORTS: table.tableName,
+      EXPORTS_BUCKET: inputs.bucket.bucketName,
+      EXPORT_STATE_MACHINE_ARN: stateMachine.stateMachineArn,
+    },
+  });
+  allow(api, ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:Query'], [
+    table.tableArn, `${table.tableArn}/index/OwnerCreatedIndex`,
+  ]);
+  // Presign the owner's download (GetObject), delete a finished export and
+  // its checkpoints, abort a cancelled upload.
+  allow(api, ['s3:GetObject', 's3:DeleteObject', 's3:AbortMultipartUpload'], [exportObjects]);
+  allow(api, ['states:StartExecution'], [stateMachine.stateMachineArn]);
+  // Cancel: only executions of the export state machine (name-formatted to
+  // avoid a reference to the execution ARN, which is not a resource).
+  allow(api, ['states:StopExecution'], [cdk.Stack.of(scope).formatArn({
+    service: 'states',
+    resource: 'execution',
+    resourceName: `${EXPORT_STATE_MACHINE_NAME}:*`,
+    arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+  })]);
+  return api;
+}
+
+/** Measured at 10x (report-w6-b.md): every fold unit, series turn, rollup shard and merge peaks <= ~606 MB of heap and < 600 s CPU. */
+const SCOPE_SNAPSHOT_WORKER_MEMORY_MB = 1769;
+const SCOPE_SNAPSHOT_BUILD_NAME = 'CitationAnalysis-ScopeSnapshotBuild';
+
+/** What the distributed build reads and writes in the main stack. */
+interface ScopeSnapshotBuildInputs {
+  sharedLayer: lambda.ILayerVersion;
+  /** The keywords bucket: snapshots under `scope-snapshots/`, the rollup under `citation-rollups/`. */
+  bucket: s3.IBucket;
+  /** Starts the build (a heavy `build_scope_snapshots` or `build_citation_rollup`); gets the ARN and the start/list rights. */
+  generateSummary: lambda.Function;
+  /** The Deduplication Lambda: the `latest` backfill of keywords whose KeywordLatest object is behind. */
+  backfill: lambda.IFunction;
+  tables: {
+    keywords: dynamodb.ITable;
+    brandConfig: dynamodb.ITable;
+    queryPrompts: dynamodb.ITable;
+    keywordRunKpis: dynamodb.ITable;
+    keywordRunBrands: dynamodb.ITable;
+    searchResults: dynamodb.ITable;
+    citations: dynamodb.ITable;
+  };
+}
+
+/**
+ * One step of the build: the worker's `action` on the execution's build, retried on throttling. A step killed by its
+ * timeout or out of memory (Lambda.Unknown) is retried once: every step is idempotent (a fold unit, rollup shard or
+ * merge whose fragment exists returns at once; a series turn resumes from its saved progress).
+ */
+function buildStep(scope: Construct, id: string, worker: lambda.IFunction, payload: Record<string, unknown>, resultPath?: string): tasks.LambdaInvoke {
+  const task = new tasks.LambdaInvoke(scope, id, {
+    lambdaFunction: worker,
+    payload: stepfunctions.TaskInput.fromObject(payload),
+    payloadResponseOnly: true,
+    resultPath: resultPath ?? stepfunctions.JsonPath.DISCARD,
+    retryOnServiceExceptions: true,
+  });
+  task.addRetry({ errors: ['Lambda.TooManyRequestsException'], interval: cdk.Duration.seconds(10), maxAttempts: 6, backoffRate: 2 });
+  task.addRetry({ errors: ['Lambda.Unknown'], interval: cdk.Duration.seconds(10), maxAttempts: 1 });
+  return task;
+}
+
+/** A Distributed Map over the item list the plan wrote at `$.<keyField>` (`[{"<item>": n}, ...]`); results discarded. */
+function buildMap(scope: Construct, id: string, bucket: s3.IBucket, keyField: string, item: string, processor: stepfunctions.IChainable): stepfunctions.DistributedMap {
+  return new stepfunctions.DistributedMap(scope, id, {
+    maxConcurrency: 10,
+    mapExecutionType: stepfunctions.StateMachineType.STANDARD,
+    itemReader: new stepfunctions.S3JsonItemReader({ bucket, key: stepfunctions.JsonPath.stringAt(`$.${keyField}`) }),
+    itemSelector: { 'build_id.$': '$.build_id', [`${item}.$`]: `$$.Map.Item.Value.${item}` },
+    toleratedFailurePercentage: 0,
+    resultPath: stepfunctions.JsonPath.DISCARD,
+  }).itemProcessor(processor);
+}
+
+/**
+ * `CitationAnalysis-ScopeSnapshotBuild` (2.45.0 wave 6): the scope snapshots and the citation rollup of a tenant too large
+ * for one invocation, built in bounded steps (`lambda/shared/scope_snapshot_dist.py`, `lambda/shared/citation_rollup_dist.py`):
+ *
+ *   Plan -> Parallel( FoldUnits Map -> SeriesBatches Map (each item loops SeriesTurn until done)
+ *                   | RollupShards Map -> RollupMerges Map )
+ *        -> Publish (snapshots' current.json, then the rollup's current.json LAST)
+ *
+ * The state holds only the build id and S3 keys (< 1 KB); every list is an S3 item list the plan wrote. Any failure ends
+ * in BuildFailed with nothing published (both current.json files still name the previous builds).
+ */
+function scopeSnapshotBuild(scope: Construct, inputs: ScopeSnapshotBuildInputs): stepfunctions.StateMachine {
+  const { bucket, tables } = inputs;
+  const worker = workerFunction(scope, 'ScopeSnapshotWorker', {
+    functionName: 'CitationAnalysis-ScopeSnapshotWorker',
+    code: lambdaSourceCode('generate-summary'),
+    layers: [inputs.sharedLayer],
+    // Each step stops 30 s before this; a series turn after 480 s.
+    timeout: cdk.Duration.seconds(900),
+    // Measured at 10x: heap peak <= ~606 MB + ~150 MB runtime, under half of it; one vCPU (owner decision 2026-11-07).
+    memorySize: SCOPE_SNAPSHOT_WORKER_MEMORY_MB,
+    description: 'One step of the distributed scope snapshot and citation rollup build (plan, fold unit, series turn, rollup shard or merge, publish)',
+    environment: {
+      SCOPE_SNAPSHOT_BUCKET: bucket.bucketName,
+      SUMMARY_BUCKET: bucket.bucketName,
+      CITATION_ROLLUP_BUCKET: bucket.bucketName,
+      DYNAMODB_TABLE_KEYWORDS: tables.keywords.tableName,
+      DYNAMODB_TABLE_BRAND_CONFIG: tables.brandConfig.tableName,
+      DYNAMODB_TABLE_QUERY_PROMPTS: tables.queryPrompts.tableName,
+      DYNAMODB_TABLE_KEYWORD_RUN_KPIS: tables.keywordRunKpis.tableName,
+      DYNAMODB_TABLE_KEYWORD_RUN_BRANDS: tables.keywordRunBrands.tableName,
+      DYNAMODB_TABLE_SEARCH_RESULTS: tables.searchResults.tableName,
+      DYNAMODB_TABLE_CITATIONS: tables.citations.tableName,
+      KEYWORD_LATEST_BACKFILL_FUNCTION: inputs.backfill.functionName,
+    },
+  });
+  // Reads only: the keywords (Query on StatusIndex), brand config, personas, the per-run history, the newest run per
+  // keyword, and the Citations partitions (Query), the rest scan (Scan) and its item count (DescribeTable).
+  allow(worker, ['dynamodb:Query', 'dynamodb:GetItem'], [tables.keywords.tableArn, `${tables.keywords.tableArn}/index/*`]);
+  allow(worker, ['dynamodb:GetItem'], [tables.brandConfig.tableArn]);
+  allow(worker, ['dynamodb:Query'], [tables.queryPrompts.tableArn, `${tables.queryPrompts.tableArn}/index/EnabledIndex`]);
+  allow(worker, ['dynamodb:Query'], [tables.keywordRunKpis.tableArn, tables.keywordRunBrands.tableArn]);
+  allow(worker, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [tables.searchResults.tableArn]);
+  allow(worker, ['dynamodb:Query', 'dynamodb:Scan', 'dynamodb:DescribeTable'], [tables.citations.tableArn]);
+  const objects = [bucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}*`), bucket.arnForObjects(`${CITATION_ROLLUP_PREFIX}*`)];
+  allow(worker, ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], objects);
+  worker.addToRolePolicy(new iam.PolicyStatement({
+    actions: ['s3:ListBucket'],
+    resources: [bucket.bucketArn],
+    conditions: { StringLike: { 's3:prefix': [`${SCOPE_SNAPSHOT_PREFIX}*`, `${CITATION_ROLLUP_PREFIX}*`] } },
+  }));
+  allow(worker, ['lambda:InvokeFunction'], [inputs.backfill.functionArn]);
+
+  const failed = new stepfunctions.Fail(scope, 'ScopeSnapshotBuildFailed', {
+    error: 'ScopeSnapshotBuildFailed',
+    cause: 'Nothing published: both current.json files still name the previous builds',
+  });
+  // 1. Plan: {build_id, bucket, units_key, units, series_key, series_batches, rollup_shards_key, rollup_shards,
+  //    rollup_merges_key, rollup_merges, scopes} + reason.
+  const plan = buildStep(scope, 'PlanSnapshotBuild', worker, { action: 'snapshot_build_plan', 'reason.$': '$.reason' }, '$');
+  // 2a. Fold units, then the series batches (each item loops 480 s turns until done; the step fails itself past 40).
+  const units = buildMap(scope, 'FoldUnits', bucket, 'units_key', 'unit',
+    buildStep(scope, 'FoldUnit', worker, { action: 'snapshot_build_unit', 'build_id.$': '$.build_id', 'unit.$': '$.unit' }));
+  const seriesTurn = buildStep(scope, 'SeriesTurn', worker, {
+    action: 'snapshot_build_series', 'build_id.$': '$.build_id', 'batch.$': '$.batch', 'turn.$': '$.series.turn',
+  }, '$.series');
+  const startTurns = new stepfunctions.Pass(scope, 'StartSeriesTurns', { result: stepfunctions.Result.fromObject({ turn: 0, done: false }), resultPath: '$.series' });
+  const batchDone = new stepfunctions.Choice(scope, 'SeriesBatchDone')
+    .when(stepfunctions.Condition.booleanEquals('$.series.done', true), new stepfunctions.Succeed(scope, 'SeriesBatchBuilt'))
+    .otherwise(seriesTurn);
+  const series = buildMap(scope, 'SeriesBatches', bucket, 'series_key', 'batch', startTurns.next(seriesTurn).next(batchDone));
+  // 2b. Rollup shards (whole markets; the last item scans the rows of inactive keywords), then the merges.
+  const shards = buildMap(scope, 'RollupShards', bucket, 'rollup_shards_key', 'shard',
+    buildStep(scope, 'RollupShard', worker, { action: 'snapshot_build_rollup_shard', 'build_id.$': '$.build_id', 'shard.$': '$.shard' }));
+  const merges = buildMap(scope, 'RollupMerges', bucket, 'rollup_merges_key', 'merge',
+    buildStep(scope, 'RollupMerge', worker, { action: 'snapshot_build_rollup_merge', 'build_id.$': '$.build_id', 'merge.$': '$.merge' }));
+  const build = new stepfunctions.Parallel(scope, 'BuildSnapshotsAndRollup', { resultPath: stepfunctions.JsonPath.DISCARD })
+    .branch(units.next(series))
+    .branch(shards.next(merges));
+  // 3. Publish: the snapshots' current.json, then the rollup's (LAST).
+  const publish = buildStep(scope, 'PublishSnapshotBuild', worker, { action: 'snapshot_build_publish', 'build_id.$': '$.build_id', 'reason.$': '$.reason' }, '$.summary');
+  for (const state of [plan, build, publish]) {
+    state.addCatch(failed, { errors: ['States.ALL'], resultPath: '$.error' });
+  }
+  const role = new iam.Role(scope, 'ScopeSnapshotBuildRole', {
+    roleName: 'CitationAnalysis-ScopeSnapshotBuildRole',
+    assumedBy: new iam.ServicePrincipal('states.amazonaws.com'),
+    description: 'Role for the distributed scope snapshot and citation rollup build to invoke its worker and run its Maps',
+  });
+  const machine = loggedStateMachine(scope, 'ScopeSnapshotBuild', {
+    logGroupId: 'ScopeSnapshotBuildLogGroup',
+    stateMachineName: SCOPE_SNAPSHOT_BUILD_NAME,
+    definition: plan.next(build).next(publish),
+    role,
+    // The first 10x build: ~11 series turns of the `all` batch (~1.5 h at tracemalloc speed, about half in Lambda).
+    timeout: cdk.Duration.hours(6),
+  });
+  // The Distributed Maps' ItemReader (the plan's item lists live under the snapshot build).
+  bucket.grantRead(machine, `${SCOPE_SNAPSHOT_PREFIX}*`);
+
+  // GenerateSummary starts it (one execution name per workflow run) and checks that none runs. The ARN is formatted from
+  // the fixed name, not referenced: GenerateSummary -> machine -> worker -> Deduplication -> GenerateSummary would be a cycle.
+  const machineArn = cdk.Stack.of(scope).formatArn({
+    service: 'states', resource: 'stateMachine', resourceName: SCOPE_SNAPSHOT_BUILD_NAME, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+  });
+  inputs.generateSummary.addEnvironment('SCOPE_SNAPSHOT_BUILD_STATE_MACHINE_ARN', machineArn);
+  allow(inputs.generateSummary, ['states:StartExecution', 'states:ListExecutions'], [machineArn]);
+  return machine;
+}
+
 class WebBuildRequiredError extends Error {
   constructor() {
     super('Web dashboard not built. Run "./scripts/deploy.sh" for full deployment, or "cd web && npm install && npm run build" before "cdk deploy".');
@@ -363,8 +771,6 @@ export class CitationAnalysisStack extends cdk.Stack {
   public readonly mcpInputs: McpServerInputs;
   /** What the SEO stack builds on: the user pool. */
   public readonly seoInputs: SeoStackInputs;
-  /** What the API stack builds on: the API Lambdas, the user pool, the web bucket and the distribution. */
-  public readonly apiInputs: DashboardApiInputs;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -426,6 +832,32 @@ export class CitationAnalysisStack extends cdk.Stack {
       ],
     });
 
+    // DynamoDB Table: KeywordRunKpis (2.44.0)
+    // One row per (keyword, run) with the additive counts every KPI in
+    // shared/kpi_engine.py is computed from (shared/kpi_tally.py), written by
+    // DeduplicateCitations when the keyword's run completes. History reports
+    // (trends, overview, group KPIs, insights) sum these rows instead of
+    // re-reading every answer, so a 365-day window of 100 keywords is whole.
+    // Derived data: a missing row falls back to the raw answers, and the
+    // Deduplication Lambda's `backfill_keyword_run_kpis` action rebuilds it.
+    // The key of both per-(keyword, run) tables.
+    const perRunKeys = { partitionKey: stringKey('keyword'), sortKey: stringKey('run_timestamp') };
+    const keywordRunKpisTable = citationAnalysisTable(this, 'KeywordRunKpisTable', {
+      tableName: 'CitationAnalysis-KeywordRunKpis',
+      ...perRunKeys,
+    });
+
+    // DynamoDB Table: KeywordRunBrands (2.45.0)
+    // Every brand of a keyword run whose KeywordRunKpis row is capped at 25
+    // brands (shared/keyword_run_brands.py), written by DeduplicateCitations in
+    // the same call. A side table, not wider KeywordRunKpis rows, so live
+    // windows keep reading ~3 KB rows; the scope series and the window view
+    // jobs read it for exact brand leaderboards.
+    const keywordRunBrandsTable = citationAnalysisTable(this, 'KeywordRunBrandsTable', {
+      tableName: 'CitationAnalysis-KeywordRunBrands',
+      ...perRunKeys,
+    });
+
     // DynamoDB Table: CrawledContent
     // Stores crawled page content and summaries
     const crawledContentTable = citationAnalysisTable(this, 'CrawledContentTable', {
@@ -477,18 +909,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
 
-    // DynamoDB Table: KeywordRunKpis (2.44.0)
-    // One row per (keyword, run) with the additive counts every KPI in
-    // shared/kpi_engine.py is computed from (shared/kpi_tally.py), written by
-    // DeduplicateCitations when the keyword's run completes. History reports
-    // (trends, overview, group KPIs, insights) sum these rows instead of
-    // re-reading every answer, so a 365-day window of 100 keywords is whole.
-    // Derived data: a missing row falls back to the raw answers, and the
-    // Deduplication Lambda's `backfill_keyword_run_kpis` action rebuilds it.
-    const keywordRunKpisTable = citationAnalysisTable(this, 'KeywordRunKpisTable', {
-      tableName: 'CitationAnalysis-KeywordRunKpis',
-      ...stringKeys('keyword', 'run_timestamp'),
-    });
 
     // DynamoDB Table: ResearchTemplates
     // Saved system prompts for the keyword research agent (2.5.0). The
@@ -656,6 +1076,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       displayName: 'Citation Analysis KPI Alerts',
       masterKey: kpiAlertsKey,
     });
+    // A missed KeywordRunKpis / KeywordLatest write tells the topic's subscribers.
+    new KpiWriteFailureAlarm(this, 'KpiWriteFailureAlarm', { topic: kpiAlertsTopic });
 
     // ========================================
     // Secrets Manager - API Keys
@@ -740,6 +1162,24 @@ export class CitationAnalysisStack extends cdk.Stack {
           enabled: true,
           prefix: API_RESPONSE_SPILL_PREFIX,
           expiration: cdk.Duration.days(API_RESPONSE_SPILL_RETENTION_DAYS),
+        },
+        // View jobs (results, statuses, export files) answer one question of
+        // one build; exports upload in parts, so abandoned uploads go too.
+        {
+          id: 'ExpireScopeSnapshotJobs',
+          enabled: true,
+          prefix: SCOPE_SNAPSHOT_JOBS_PREFIX,
+          expiration: cdk.Duration.days(SCOPE_SNAPSHOT_JOB_RETENTION_DAYS),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+        // Export service files and checkpoints (shared/export_steps.py):
+        // 7 days, as the job item's TTL; exports upload in parts.
+        {
+          id: 'ExpireExports',
+          enabled: true,
+          prefix: EXPORTS_PREFIX,
+          expiration: cdk.Duration.days(EXPORT_RETENTION_DAYS),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
         },
       ],
     });
@@ -998,6 +1438,12 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        // 2.45.0: the run's KeywordRunBrands row and KeywordLatest object
+        // (with its counts block), built for the enabled personas.
+        DYNAMODB_TABLE_KEYWORD_RUN_BRANDS: keywordRunBrandsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
+        SCOPE_SNAPSHOT_BUCKET: keywordsBucket.bucketName,
       },
     });
     // The run's KPI row: read back (the backfill skips rows already current)
@@ -1006,6 +1452,18 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunKpisTable.grant(deduplicationLambdaRole, 'dynamodb:Query', 'dynamodb:PutItem');
     brandConfigTable.grantReadData(deduplicationLambdaRole);
     keywordsTable.grant(deduplicationLambdaRole, 'dynamodb:Scan');
+    // 2.45.0: the KeywordLatest object of the run (conditional read-modify-write),
+    // the brand row of a capped run, the personas, and the counts block's
+    // partition counts (Citations rows, CrawledContent on KeywordIndex).
+    allow(deduplicationLambdaRole, ['s3:GetObject', 's3:PutObject'], [keywordsBucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}keywords/*`)]);
+    keywordRunBrandsTable.grant(deduplicationLambdaRole, 'dynamodb:PutItem');
+    allow(deduplicationLambdaRole, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
+    allow(deduplicationLambdaRole, ['dynamodb:Query'], [`${crawledContentTable.tableArn}/index/KeywordIndex`]);
+    // The chained `latest` backfill invokes itself with its cursor (by name:
+    // the function's own ARN would make its role policy depend on it).
+    allow(deduplicationLambdaRole, ['lambda:InvokeFunction'], [cdk.Arn.format({
+      service: 'lambda', resource: 'function', resourceName: 'CitationAnalysis-Deduplication', arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    }, this)]);
 
     // Crawler Lambda Layer - Browser tools (Playwright + AgentCore)
     // Separate from shared layer to keep each under 250MB limit
@@ -1099,18 +1557,29 @@ export class CitationAnalysisStack extends cdk.Stack {
       // its input, ~1–3 KB each) and builds the full report in memory: a
       // few-thousand-keyword run is tens of MB of JSON to parse and re-serialize.
       // 256 MB / 60 s was sized for the old inline list of ~30 results.
-      // It also builds the citation rollup (BuildCitationRollup, and the async
-      // rebuild /api/citations requests): one projected parallel scan of
-      // Citations measured at 74 s CPU and 1.1 GB for 700k rows, hence 3008 MB
-      // (~1.7 vCPU) and the 900 s ceiling; the builder stops 30 s before it.
+      // In process it builds only what fits one invocation: the run summary
+      // (~100 MB), a citation rollup of <= 100k Citations rows (~230 MB
+      // measured) and a snapshot build within the 450 MB unit model; anything
+      // larger starts CitationAnalysis-ScopeSnapshotBuild (scopeSnapshotBuild),
+      // whose worker has one vCPU too. The builders stop 30 s before the 900 s;
+      // one vCPU (owner decision 2026-11-07).
       timeout: cdk.Duration.seconds(900),
-      memorySize: 3008,
-      description: 'Generate execution summary and statistics; build the citation rollup',
+      memorySize: 1769,
+      description: 'Generate execution summary and statistics; start or run the scope snapshot and citation rollup builds',
       environment: {
         CITATION_ROLLUP_BUCKET: keywordsBucket.bucketName,
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        // 2.45.0: BuildScopeSnapshots and the view jobs (shared/scope_snapshot_build.py,
+        // shared/view_job_routes.py): the KeywordLatest objects and builds in the
+        // keywords bucket, the per-run history, the personas, and the raw rows a
+        // mention job reads.
+        SCOPE_SNAPSHOT_BUCKET: keywordsBucket.bucketName,
+        DYNAMODB_TABLE_KEYWORD_RUN_KPIS: keywordRunKpisTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_RUN_BRANDS: keywordRunBrandsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
       },
     });
 
@@ -1125,17 +1594,31 @@ export class CitationAnalysisStack extends cdk.Stack {
     brandConfigTable.grantReadData(generateSummaryFunction);
     keywordsBucket.grantRead(generateSummaryFunction, `${CITATION_ROLLUP_PREFIX}*`);
     keywordsBucket.grantDelete(generateSummaryFunction, `${CITATION_ROLLUP_PREFIX}*`);
+    // The scope snapshots: read the KeywordLatest objects, write, list and
+    // prune builds and series, and write view-job results and export files
+    // (multipart uploads; grantWrite above covers put and abort bucket-wide).
+    keywordsBucket.grantRead(generateSummaryFunction, `${SCOPE_SNAPSHOT_PREFIX}*`);
+    keywordsBucket.grantDelete(generateSummaryFunction, `${SCOPE_SNAPSHOT_PREFIX}*`);
+    keywordRunKpisTable.grant(generateSummaryFunction, 'dynamodb:Query');
+    keywordRunBrandsTable.grant(generateSummaryFunction, 'dynamodb:Query');
+    allow(generateSummaryFunction, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
+    allow(generateSummaryFunction, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [searchResultsTable.tableArn]);
+    // A finished chained `latest` backfill starts a build; brand-config and
+    // persona writes start that backfill.
+    deduplicationFunction.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', generateSummaryFunction.functionName);
+    allow(deduplicationLambdaRole, ['lambda:InvokeFunction'], [generateSummaryFunction.functionArn]);
 
     const kpiAlertsFunction = workerFunction(this, 'KpiAlerts', {
       functionName: 'CitationAnalysis-KpiAlerts',
       code: lambdaSourceCode('kpi-alerts'),
       layers: [sharedLayer],
-      // Deserializes one run's answers for every keyword of every covered
-      // group (hundreds of thousands of rows at 5,000 keywords x personas):
-      // CPU-bound, so 1 vCPU. It also stops starting groups 30 s before the
+      // 2.45.0: pools snapshots from the run's KeywordRunKpis rows
+      // (BatchGetItem) and deserializes raw answers for keywords without a
+      // row and for the like-for-like comparison of both runs. One vCPU
+      // (owner decision 2026-11-07). It stops starting groups 30 s before the
       // timeout and lists the rest instead of timing out with nothing written.
       timeout: cdk.Duration.seconds(300),
-      memorySize: ONE_VCPU_MEMORY_MB,
+      memorySize: 1769,
       description: 'Record complete KPI snapshots and evaluate post-run alerts',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1152,6 +1635,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     searchResultsTable.grantReadData(kpiAlertsFunction);
+    // 2.45.0: one BatchGetItem of the run's KeywordRunKpis rows per 100
+    // keywords, pooled per (group, market); a keyword is read raw only when
+    // its row is missing or cannot answer.
+    kpiAlertsFunction.addEnvironment('DYNAMODB_TABLE_KEYWORD_RUN_KPIS', keywordRunKpisTable.tableName);
+    keywordRunKpisTable.grant(kpiAlertsFunction, 'dynamodb:BatchGetItem');
     keywordsTable.grantReadData(kpiAlertsFunction);
     keywordGroupsTable.grantReadData(kpiAlertsFunction);
     brandConfigTable.grantReadData(kpiAlertsFunction);
@@ -1177,8 +1665,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       // window read (CPU-bound deserialization, row cap sized by memory) stops
       // 75 s before the timeout, leaving the Bedrock call and the write their
       // time. 120 s / 512 MB ran every group in one call and lost them all on
-      // a timeout.
-      memorySize: ONE_VCPU_MEMORY_MB,
+      // a timeout. 2.45.0: the window comes from rollups (see
+      // TUNED_READ_MEMORY_MB).
+      memorySize: TUNED_READ_MEMORY_MB,
       timeout: cdk.Duration.seconds(300),
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1435,15 +1924,41 @@ export class CitationAnalysisStack extends cdk.Stack {
       resultPath: '$.citation_rollup',
     }), { errors: ['States.ALL'], resultPath: stepfunctions.JsonPath.DISCARD });
 
+    // 12b. Build the scope snapshots (design 2.45.0, shared/scope_snapshot_build.py)
+    // from the KeywordLatest objects this run's Deduplication steps wrote:
+    // after KpiAlerts read `$` as its report, before GenerateInsights, which
+    // reads a large group's facts from the fresh build. A failed build keeps
+    // the report and the previous build (readers see it as stale and ask for
+    // a rebuild).
+    const buildScopeSnapshotsTask = new tasks.LambdaInvoke(this, 'BuildScopeSnapshots', {
+      lambdaFunction: generateSummaryFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'build_scope_snapshots',
+        'execution_id.$': '$$.Execution.Name',
+      }),
+      payloadResponseOnly: true,
+      resultPath: '$.scope_snapshots',
+      retryOnServiceExceptions: true,
+    });
+    buildScopeSnapshotsTask.addCatch(new stepfunctions.Pass(this, 'BuildScopeSnapshotsFailed', {
+      result: stepfunctions.Result.fromObject({
+        status: 'failed',
+        message: 'Scope snapshot build failed; the analysis report is preserved.',
+      }),
+      resultPath: '$.scope_snapshots',
+    }).next(insightsChoice), { errors: ['States.ALL'], resultPath: stepfunctions.JsonPath.DISCARD });
+
     // 13. Define the complete workflow. Both alert branches retain every
     // GenerateSummary field and add only the top-level alerts block; the
-    // insights step adds only `narratives`, the rollup step `citation_rollup`.
+    // snapshot step adds only `scope_snapshots`, the insights step only
+    // `narratives`, the rollup step `citation_rollup`.
     const definition = parseKeywordsTask
       .next(processKeywordsMap)
       .next(generateSummaryTask)
       .next(kpiAlertsTask);
-    kpiAlertsFailed.next(insightsChoice);
-    kpiAlertsTask.next(insightsChoice);
+    kpiAlertsFailed.next(buildScopeSnapshotsTask);
+    kpiAlertsTask.next(buildScopeSnapshotsTask);
+    buildScopeSnapshotsTask.next(insightsChoice);
     generateInsightsMap.next(buildCitationRollupTask);
     generateInsightsFailed.next(buildCitationRollupTask);
     noInsightsToGenerate.next(buildCitationRollupTask);
@@ -1694,12 +2209,12 @@ export class CitationAnalysisStack extends cdk.Stack {
     // layer like every other API function (it shipped without it once and
     // answered 502 to every monitor).
     const healthCheckFunction = apiFunction(this, 'HealthCheck', sharedLayer, {
-      functionName: 'CitationAnalysis-API-Health',
+      functionName: DASHBOARD_API_FUNCTION_NAMES.health,
       handlerFiles: ['health.py'],
       timeout: cdk.Duration.seconds(5),
       // Python + the shared layer idle at ~95 MB; at 128 MB the function ran at
       // 74% of its memory (14-day CloudWatch REPORT peak, 2026-09-18).
-      memorySize: 256,
+      memorySize: 512,
       description: 'API: Health check endpoint for monitoring',
     });
     
@@ -1709,7 +2224,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // get-citation-gaps, get-recommendations, get-historical-trends
     // Routes requests based on API Gateway resource path
     const statsInsightsFunction = apiFunction(this, 'StatsInsights', sharedLayer, {
-      functionName: 'CitationAnalysis-API-StatsInsights',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['stats-insights'],
       handlerFiles: [
         'stats-insights.py',
         'get-stats.py',
@@ -1729,10 +2244,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       // Every route here is read-only bar a millisecond-scale put_item on
       // POST /recommendations/{id}/status, and recommendations are regenerated
       // per call rather than persisted — so nothing is lost by capping at the
-      // gateway ceiling. Sized for CPU (see ONE_VCPU_MEMORY_MB): the KPI views
-      // deserialize tens of thousands of answer rows per request, and the
-      // window row cap (shared/scoped_reports.py) scales with this size.
-      memorySize: ONE_VCPU_MEMORY_MB,
+      // gateway ceiling. Sized for CPU (see TUNED_READ_MEMORY_MB): Power
+      // Tuning chose 1024 MB for /visibility and 768 MB for /trends; one vCPU
+      // keeps margin for live scopes, and the window row cap
+      // (shared/scoped_reports.py) scales with this size.
+      memorySize: TUNED_READ_MEMORY_MB,
       description: 'API: Consolidated stats, visibility, insights, gaps, recommendations, and trends',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1756,7 +2272,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Replaces 5 individual Lambdas: get-citations, get-url-breakdown, get-searches,
     // get-crawled-content, browse-raw-responses
     const citationsContentFunction = apiFunction(this, 'CitationsContent', sharedLayer, {
-      functionName: 'CitationAnalysis-API-CitationsContent',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['citations-content'],
       handlerFiles: [
         'citations-content.py',
         'get-citations.py',
@@ -1765,10 +2281,11 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-crawled-content.py',
         'browse-raw-responses.py',
       ],
-      // Sized for CPU, not memory (see ONE_VCPU_MEMORY_MB): at 512 MB an
-      // unscoped /citations Scan of 71k rows used 224 MB and still timed out
-      // at 29 s on CPU (a customer log, 2026-11-04).
-      memorySize: ONE_VCPU_MEMORY_MB,
+      // Sized for CPU, not memory: at 512 MB an unscoped /citations Scan of
+      // 71k rows used 224 MB and still timed out at 29 s on CPU (a customer
+      // log, 2026-11-04). Power Tuning chose 1280 MB for /citations and
+      // /searches; one vCPU keeps margin (see TUNED_READ_MEMORY_MB).
+      memorySize: TUNED_READ_MEMORY_MB,
       description: 'API: Consolidated citations, URL breakdown, searches, crawled content, and raw responses',
       environment: {
         // Audit #12 canonical names.
@@ -1792,11 +2309,12 @@ export class CitationAnalysisStack extends cdk.Stack {
 
 
     const getBrandMentionsFunction = apiFunction(this, 'GetBrandMentions', sharedLayer, {
-      functionName: 'CitationAnalysis-API-GetBrandMentions',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['brand-mentions'],
       handlerFiles: ['get-brand-mentions.py'],
-      // CPU-bound: up to 100 keywords' latest runs deserialized per request
-      // (see ONE_VCPU_MEMORY_MB); 256 MB (0.14 vCPU) took 5.6 s for 16 keywords.
-      memorySize: ONE_VCPU_MEMORY_MB,
+      // CPU-bound: up to 100 keywords' latest runs deserialized per request;
+      // 256 MB (0.14 vCPU) took 5.6 s for 16 keywords. Power Tuning chose
+      // 1280 MB; one vCPU keeps margin (see TUNED_READ_MEMORY_MB).
+      memorySize: TUNED_READ_MEMORY_MB,
       description: 'API: Get brand mentions from search results',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -1807,9 +2325,12 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     const manageBrandConfigFunction = apiFunction(this, 'ManageBrandConfig', sharedLayer, {
-      functionName: 'CitationAnalysis-API-ManageBrandConfig',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['brand-config'],
       handlerFiles: ['manage-brand-config.py'],
-      memorySize: 256,
+      // 2.45.0: a 26 s invocation at 256 MB (0.14 vCPU) came 3 s from the
+      // gateway's 29 s limit; 1024 MB (owner decision 2026-11-07) quadruples
+      // its CPU share.
+      memorySize: 1024,
       description: 'API: Manage brand tracking configuration',
       environment: {
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
@@ -1820,7 +2341,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Consolidated Keyword Management Lambda (get-keywords + manage-keywords + keyword-research)
     const keywordMgmtFunction = apiFunction(this, 'KeywordMgmt', sharedLayer, {
-      functionName: 'CitationAnalysis-API-KeywordMgmt',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['keyword-mgmt'],
       handlerFiles: [
         'keyword-mgmt.py',
         'get-keywords.py',
@@ -1851,7 +2372,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts, custom reports and markets)
     const configMgmtFunction = apiFunction(this, 'ConfigMgmt', sharedLayer, {
-      functionName: 'CitationAnalysis-API-ConfigMgmt',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['config-mgmt'],
       handlerFiles: [
         'config-mgmt.py',
         'manage-query-prompts.py',
@@ -1863,8 +2384,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-markets.py',
       ],
       // Provider and model checks, market proposals and schedule pages run
-      // under the request deadline; 1024 MB halves their CPU-bound parts and
-      // the 2.8 s cold starts measured live at 256 MB.
+      // under the request deadline and are I/O-bound. 2.45.0: Power Tuning
+      // chose 256 MB for /query-prompts and the 30-day REPORT audit peaked at
+      // 48% of 256 MB; 1024 MB (owner decision 2026-11-07) for the 2.8 s
+      // cold starts measured live at 256 MB.
       memorySize: 1024,
       description: 'API: Consolidated query prompts, schedules, providers, KPI alerts, custom reports and markets',
       environment: {
@@ -1896,14 +2419,16 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Consolidated Execution Management Lambda (trigger-analysis + trigger-keyword-analysis + get-execution-status)
     const executionMgmtFunction = apiFunction(this, 'ExecutionMgmt', sharedLayer, {
-      functionName: 'CitationAnalysis-API-ExecutionMgmt',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['execution-mgmt'],
       handlerFiles: [
         'execution-mgmt.py',
         'trigger-analysis.py',
         'trigger-keyword-analysis.py',
         'get-execution-status.py',
       ],
-      // Run triggers resolve their scope from every active keyword.
+      // Run triggers resolve their scope from every active keyword: I/O-bound
+      // (2.45.0 30-day REPORT audit: 41% of memory at 256 MB); 1024 MB (owner
+      // decision 2026-11-07) for short cold starts.
       memorySize: 1024,
       description: 'API: Consolidated trigger analysis and execution status',
       environment: {
@@ -2043,9 +2568,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     // ========================================
 
     const getPersonaRankingsFunction = apiFunction(this, 'GetPersonaRankings', sharedLayer, {
-      functionName: 'CitationAnalysis-API-GetPersonaRankings',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['persona-rankings'],
       handlerFiles: ['get-persona-rankings.py'],
-      memorySize: 256,
+      // 2.45.0: Power Tuning (balanced, 10 invocations per power) chose
+      // 512 MB; 1024 MB (owner decision 2026-11-07) for short cold starts.
+      memorySize: 1024,
       description: 'API: Get per-persona brand ranking breakdowns',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -2060,7 +2587,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // ========================================
 
     const selfReflectionFunction = apiFunction(this, 'SelfReflection', sharedLayer, {
-      functionName: 'CitationAnalysis-API-SelfReflection',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['self-reflection'],
       handlerFiles: ['self-reflection.py'],
       // Deliberately ABOVE the 29s gateway ceiling — do not "fix" this to 29.
       //
@@ -2070,7 +2597,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       // That background invocation has no gateway in front of it and needs
       // the 60 s; the request path itself never waits on Bedrock.
       timeout: cdk.Duration.seconds(60),
-      memorySize: 256,
+      memorySize: 512,
       description: 'API: LLM self-reflection analysis for brand rankings',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
@@ -2141,7 +2668,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Requests only persist stream-owned rows; generation runs in the worker.
     const contentStudioFunction = apiFunction(this, 'ContentStudio', sharedLayer, {
-      functionName: 'CitationAnalysis-API-ContentStudio',
+      functionName: DASHBOARD_API_FUNCTION_NAMES['content-studio'],
       handlerFiles: ['content-studio.py'],
       memorySize: 512,
       description: 'API: Content Studio - ideas and durable content queues',
@@ -2168,6 +2695,34 @@ export class CitationAnalysisStack extends cdk.Stack {
     allow(contentStudioFunction, ['dynamodb:Scan'], [keywordsTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [keywordsStatusIndexArn]);
     allowSavedBedrockModels(contentStudioFunction, providerConfigTable);
+
+    // 2.45.0: every function serving a scoped view (or writing what changes
+    // one) reads the scope snapshots, requests rebuilds and starts view jobs.
+    const scopeSnapshotInputs = { bucket: keywordsBucket, builder: generateSummaryFunction, queryPrompts: queryPromptsTable };
+    for (const reader of [
+      statsInsightsFunction, citationsContentFunction, getBrandMentionsFunction, configMgmtFunction,
+      keywordMgmtFunction, contentStudioFunction, reportInsightsFunction,
+    ]) {
+      grantScopeSnapshotReader(reader, scopeSnapshotInputs);
+    }
+    // Distributed scope snapshot + citation rollup build (2.45.0 wave 6)
+    scopeSnapshotBuild(this, {
+      sharedLayer,
+      bucket: keywordsBucket,
+      generateSummary: generateSummaryFunction,
+      backfill: deduplicationFunction,
+      tables: {
+        keywords: keywordsTable, brandConfig: brandConfigTable, queryPrompts: queryPromptsTable,
+        keywordRunKpis: keywordRunKpisTable, keywordRunBrands: keywordRunBrandsTable,
+        searchResults: searchResultsTable, citations: citationsTable,
+      },
+    });
+    // Brand-config saves and persona writes start the KeywordLatest backfill
+    // (`latest`, chained) on the Deduplication Lambda.
+    for (const writer of [manageBrandConfigFunction, configMgmtFunction]) {
+      writer.addEnvironment('KEYWORD_LATEST_BACKFILL_FUNCTION', deduplicationFunction.functionName);
+      allow(writer, ['lambda:InvokeFunction'], [deduplicationFunction.functionArn]);
+    }
 
     const contentStudioWorkerFunction = workerFunction(this, 'ContentStudioWorker', {
       functionName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
@@ -2241,9 +2796,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // User Management Lambda
     const manageUsersFunction = apiFunction(this, 'ManageUsers', sharedLayer, {
-      functionName: 'CitationAnalysis-API-ManageUsers',
+      functionName: DASHBOARD_API_FUNCTION_NAMES.users,
       handlerFiles: ['manage-users.py'],
-      memorySize: 256,
+      memorySize: 512,
       description: 'API: Manage Cognito users',
       environment: {
         USER_POOL_ID: auth.userPool.userPoolId,
@@ -2265,6 +2820,30 @@ export class CitationAnalysisStack extends cdk.Stack {
       'cognito-idp:AdminListGroupsForUser',
       'cognito-idp:ListGroups',
     ], [auth.userPool.userPoolArn]);
+
+    // ========================================
+    // Export service (2.45.0)
+    // ========================================
+
+    const exportsFunction = exportService(this, {
+      sharedLayer,
+      bucket: keywordsBucket,
+      userPool: auth.userPool,
+      routers: {
+        'stats-insights': statsInsightsFunction,
+        'citations-content': citationsContentFunction,
+        'keyword-mgmt': keywordMgmtFunction,
+        'config-mgmt': configMgmtFunction,
+        'brand-mentions': getBrandMentionsFunction,
+        'persona-rankings': getPersonaRankingsFunction,
+        'content-studio': contentStudioFunction,
+        users: manageUsersFunction,
+        // The SEO stack's router, by its fixed name: the SEO stack deploys after
+        // this one, so a reference would be a cycle. An SEO export fails with a
+        // clear error while the SEO stack is not deployed.
+        seo: lambda.Function.fromFunctionName(this, 'SeoRouterForExports', SEO_ROUTER_FUNCTION_NAME),
+      },
+    });
 
     // ========================================
     // Visualization Dashboard - S3 + CloudFront
@@ -2390,25 +2969,40 @@ export class CitationAnalysisStack extends cdk.Stack {
     };
 
     this.seoInputs = { userPool: auth.userPool };
-    this.apiInputs = {
-      functions: {
-        health: healthCheckFunction,
-        'stats-insights': statsInsightsFunction,
-        'citations-content': citationsContentFunction,
-        'keyword-mgmt': keywordMgmtFunction,
-        'config-mgmt': configMgmtFunction,
-        'execution-mgmt': executionMgmtFunction,
-        'brand-mentions': getBrandMentionsFunction,
-        'brand-config': manageBrandConfigFunction,
-        'content-studio': contentStudioFunction,
-        users: manageUsersFunction,
-        'persona-rankings': getPersonaRankingsFunction,
-        'self-reflection': selfReflectionFunction,
-      },
-      userPool: auth.userPool,
-      webBucket,
-      distribution,
+    const apiFunctions: DashboardApiFunctions = {
+      health: healthCheckFunction,
+      'stats-insights': statsInsightsFunction,
+      'citations-content': citationsContentFunction,
+      'keyword-mgmt': keywordMgmtFunction,
+      'config-mgmt': configMgmtFunction,
+      'execution-mgmt': executionMgmtFunction,
+      'brand-mentions': getBrandMentionsFunction,
+      'brand-config': manageBrandConfigFunction,
+      'content-studio': contentStudioFunction,
+      users: manageUsersFunction,
+      'persona-rankings': getPersonaRankingsFunction,
+      'self-reflection': selfReflectionFunction,
+      exports: exportsFunction,
     };
+    retainLegacyApiStackExports(this, [
+      ...Object.values(apiFunctions).map((fn) => fn.functionArn),
+      auth.userPool.userPoolArn,
+      webBucket.bucketName,
+      distribution.distributionId,
+      distribution.distributionDomainName,
+    ]);
+    // What the API stack reads instead (see `CitationAnalysisApiStack`); the
+    // CORS origin parameter below is the third.
+    new cdk.aws_ssm.StringParameter(this, 'UserPoolIdParam', {
+      parameterName: DASHBOARD_API_PARAMETERS.userPoolId,
+      stringValue: auth.userPool.userPoolId,
+      description: 'Cognito user pool id, read by the dashboard API stack',
+    });
+    new cdk.aws_ssm.StringParameter(this, 'WebDistributionIdParam', {
+      parameterName: DASHBOARD_API_PARAMETERS.webDistributionId,
+      stringValue: distribution.distributionId,
+      description: 'Dashboard CloudFront distribution id, read by the dashboard API stack (config.json invalidation)',
+    });
 
     // Update Cognito User Pool Client callback URLs with CloudFront domain
     const cfnUserPoolClient = auth.userPoolClient.node.defaultChild as cdk.aws_cognito.CfnUserPoolClient;
@@ -2420,7 +3014,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     
     // Store CloudFront origin in SSM Parameter for Lambda functions to use
     const corsOriginParam = new cdk.aws_ssm.StringParameter(this, 'CorsOriginParam', {
-      parameterName: '/citation-analysis/cors-origin',
+      parameterName: DASHBOARD_API_PARAMETERS.corsOrigin,
       stringValue: cloudFrontOrigin,
       description: 'Allowed CORS origin for API responses',
     });
@@ -2432,7 +3026,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       keywordMgmtFunction, configMgmtFunction, executionMgmtFunction,
       getBrandMentionsFunction, manageBrandConfigFunction,
       contentStudioFunction, manageUsersFunction,
-      getPersonaRankingsFunction, selfReflectionFunction
+      getPersonaRankingsFunction, selfReflectionFunction,
+      exportsFunction,
     ];
     
     for (const fn of apiLambdaFunctions) {

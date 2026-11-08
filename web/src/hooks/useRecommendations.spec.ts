@@ -9,7 +9,7 @@ import {
   describeScopedRequests, mockRecommendationsResponse, renderFetchedRecommendations, statusesOf, trackedRecommendation
 } from './useRecommendations-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
+import { idleScopedEndpointState } from '../test/idleEndpointState';
 import { createDeferredValue } from '../test/fetchResponses';
 import { TestError } from '../test/testError';
 import { saveRecommendationStatus } from '../api/recommendations';
@@ -28,6 +28,7 @@ type FetchRecommendationsArgs = Parameters<ReturnType<typeof useRecommendations>
 const IDLE_STATUS_STATE = {
   updatingIds: [],
   statusError: null,
+  savedStatuses: {},
 };
 
 /** Fetches the fixture list, then saves `status` for its recommendation at `index` with the API storing it. */
@@ -45,12 +46,13 @@ describe('useRecommendations', () => {
     const { result } = renderHook(() => useRecommendations());
 
     expect(result.current).toStrictEqual({
-      ...idleEndpointState('fetchRecommendations', 'updateStatus'),
+      ...idleScopedEndpointState('fetchRecommendations', 'updateStatus'),
       ...IDLE_STATUS_STATE,
     });
   });
 
   describeEndpointHookContract({
+    scoped: true,
     subject: 'recommendations',
     useHook: useRecommendations,
     fetchName: 'fetchRecommendations',
@@ -59,8 +61,8 @@ describe('useRecommendations', () => {
     otherState: IDLE_STATUS_STATE,
     defaultResponse: mockRecommendationsResponse,
     defaultArgs: [],
-    // The recommendations fetch is not abortable: it passes only the URL.
-    expectedRequest: (url) => [url],
+    // The recommendations fetch is not abortable: it passes no signal.
+    expectedRequest: (url) => [url, { signal: undefined }],
     requests: [
       ['https://api.test.com/recommendations?scope=all&use_llm=false', 'no scope and no arguments are given', []],
       ['https://api.test.com/recommendations?scope=all&use_llm=true', 'LLM generation is requested', [true]],
@@ -79,6 +81,7 @@ describe('useRecommendations', () => {
     fetchOf: (hook) => hook.fetchRecommendations,
     response: mockRecommendationsResponse,
     urlFor: (scopeQuery) => `https://api.test.com/recommendations?${scopeQuery}&use_llm=false`,
+    expectedRequest: (url) => [url, { signal: undefined }],
   });
 
   describe('updateStatus', () => {

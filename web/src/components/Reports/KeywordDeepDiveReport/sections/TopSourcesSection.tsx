@@ -8,6 +8,7 @@ import {
   pendingSectionPlaceholder,
   type SectionFetchState,
 } from '../../layout';
+import { SeeAllLink } from '../../../ui/SeeAllLink';
 
 interface Props extends SectionFetchState {
   readonly gaps: CitationGapsResponse | null;
@@ -76,6 +77,7 @@ export function TopSourcesSection({
           emptyMessage="No sources cite competitors without also citing first-party brands. Strong position."
         />
       </div>
+      <p className="mt-2 text-right"><SeeAllLink to="/citation-gaps">See all citation gaps</SeeAllLink></p>
       {mentions?.config?.tracked_brands.competitors.length === 0 && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
           Note: no competitors are configured. The right-hand list is calculated

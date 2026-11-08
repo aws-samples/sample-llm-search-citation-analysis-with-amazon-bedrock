@@ -21,6 +21,12 @@ export function buildContentStudioHookResult(
 ): ContentStudioHookResult {
   return {
     ideas: [],
+    ideasScope: null,
+    ideasComputing: null,
+    ideasTotal: null,
+    ideasHasMore: false,
+    ideasLoadingMore: false,
+    loadMoreIdeas: vi.fn(),
     history: [],
     unviewedCount: 0,
     unviewedCountCapped: false,

@@ -54,12 +54,10 @@ describe('CitationFilters', () => {
     expect(props.setCurrentPage).toHaveBeenCalledWith(1);
   });
 
-  it('calls onDownloadExcel when Export button clicked', () => {
-    const props = renderCitationFilters();
+  it('renders the export button it is given', () => {
+    renderCitationFilters();
 
-    fireEvent.click(screen.getByText('Export'));
-
-    expect(props.onDownloadExcel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Export all' })).toBeInTheDocument();
   });
 
   it('displays current search query value', () => {

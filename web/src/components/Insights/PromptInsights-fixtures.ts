@@ -14,6 +14,8 @@ export function buildPromptInsightsHookResult(
     data: null,
     loading: false,
     error: null,
+    computing: null,
+    request: null,
     fetchPromptInsights: vi.fn(),
     ...overrides,
   };

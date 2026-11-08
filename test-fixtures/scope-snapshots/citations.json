@@ -1,0 +1,269 @@
+{
+  "route": "GET /api/citations",
+  "paging": null,
+  "cases": {
+    "complete": {
+      "description": "Large scope served from a fresh snapshot: every keyword included.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "total_citations": 58,
+        "total_urls": 41,
+        "total_citation_count": 73,
+        "content_type_counts": {
+          "video": 2,
+          "page": 39
+        },
+        "provider_stats": [
+          {
+            "provider": "openai",
+            "citation_count": 22
+          },
+          {
+            "provider": "perplexity",
+            "citation_count": 19
+          }
+        ],
+        "brand_stats": [
+          {
+            "brand": "Hotel Coruña Mar",
+            "mention_count": 9
+          },
+          {
+            "brand": "Meliá Galicia",
+            "mention_count": 6
+          }
+        ],
+        "matched_urls": 41,
+        "top_urls": [
+          {
+            "url": "https://www.booking.com/hotel/es/coruna-mar.html",
+            "citation_count": 6,
+            "by_provider": {
+              "openai": 2,
+              "perplexity": 2,
+              "gemini": 1,
+              "claude": 1
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          },
+          {
+            "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+            "citation_count": 5,
+            "by_provider": {
+              "openai": 2,
+              "gemini": 2
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          }
+        ],
+        "next_token": "eyJvZmZzZXQiOjJ9",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "live": {
+      "description": "Small scope computed for this request (at most LIVE_ROWS_BUDGET rows).",
+      "query": {
+        "group_id": "group-coruna"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "groups",
+          "group_ids": [
+            "group-coruna"
+          ],
+          "kind": "group",
+          "label": "1 group(s)",
+          "keyword_count": 2
+        },
+        "total_citations": 58,
+        "total_urls": 41,
+        "total_citation_count": 73,
+        "content_type_counts": {
+          "video": 2,
+          "page": 39
+        },
+        "provider_stats": [
+          {
+            "provider": "openai",
+            "citation_count": 22
+          },
+          {
+            "provider": "perplexity",
+            "citation_count": 19
+          }
+        ],
+        "brand_stats": [
+          {
+            "brand": "Hotel Coruña Mar",
+            "mention_count": 9
+          },
+          {
+            "brand": "Meliá Galicia",
+            "mention_count": 6
+          }
+        ],
+        "matched_urls": 41,
+        "top_urls": [
+          {
+            "url": "https://www.booking.com/hotel/es/coruna-mar.html",
+            "citation_count": 6,
+            "by_provider": {
+              "openai": 2,
+              "perplexity": 2,
+              "gemini": 1,
+              "claude": 1
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          },
+          {
+            "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+            "citation_count": 5,
+            "by_provider": {
+              "openai": 2,
+              "gemini": 2
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          }
+        ],
+        "next_token": "eyJvZmZzZXQiOjJ9",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 2,
+          "keywords_analyzed": 2,
+          "complete": true
+        },
+        "source": "live",
+        "as_of": null,
+        "stale": false,
+        "refreshing": false
+      }
+    },
+    "stale": {
+      "description": "The scope changed since the build: the previous figures, flagged, while a rebuild runs.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "scope": {
+          "mode": "all",
+          "kind": "all",
+          "label": "All keywords",
+          "keyword_count": 5000
+        },
+        "total_citations": 58,
+        "total_urls": 41,
+        "total_citation_count": 73,
+        "content_type_counts": {
+          "video": 2,
+          "page": 39
+        },
+        "provider_stats": [
+          {
+            "provider": "openai",
+            "citation_count": 22
+          },
+          {
+            "provider": "perplexity",
+            "citation_count": 19
+          }
+        ],
+        "brand_stats": [
+          {
+            "brand": "Hotel Coruña Mar",
+            "mention_count": 9
+          },
+          {
+            "brand": "Meliá Galicia",
+            "mention_count": 6
+          }
+        ],
+        "matched_urls": 41,
+        "top_urls": [
+          {
+            "url": "https://www.booking.com/hotel/es/coruna-mar.html",
+            "citation_count": 6,
+            "by_provider": {
+              "openai": 2,
+              "perplexity": 2,
+              "gemini": 1,
+              "claude": 1
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          },
+          {
+            "url": "https://www.tripadvisor.es/Hotels-g187507-A_Coruna.html",
+            "citation_count": 5,
+            "by_provider": {
+              "openai": 2,
+              "gemini": 2
+            },
+            "keyword_count": 2,
+            "content_type": "page"
+          }
+        ],
+        "next_token": "eyJvZmZzZXQiOjJ9",
+        "truncated": false,
+        "coverage": {
+          "keywords_total": 5000,
+          "keywords_analyzed": 5000,
+          "complete": true
+        },
+        "source": "snapshot",
+        "as_of": "2026-10-12T07:14:05Z",
+        "stale": true,
+        "refreshing": true
+      }
+    },
+    "computing": {
+      "description": "No build holds this combination yet: a view job computes it; repeat the same GET to poll.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 202,
+      "body": {
+        "status": "computing",
+        "job": {
+          "id": "job-citations-7c1d",
+          "started_at": "2026-10-12T07:20:11Z"
+        },
+        "retry_after_ms": 2000
+      }
+    },
+    "failed": {
+      "description": "The view job failed: answered once with 200, the next GET starts it again.",
+      "query": {
+        "scope": "all"
+      },
+      "status": 200,
+      "body": {
+        "status": "failed",
+        "message": "The view could not be computed; try again"
+      }
+    }
+  }
+}

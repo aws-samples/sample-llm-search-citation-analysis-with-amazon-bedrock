@@ -137,7 +137,7 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
   });
 
   it('describes the brand rankings as the latest period of every keyword, with its share of voice over time', () => {
-    expect(screen.getByText('Every brand the AI answers named in each keyword\'s latest period (the leading 10), by visibility score, '
+    expect(screen.getByText('Every brand the AI answers named in each keyword\'s latest period, by visibility score, '
       + 'and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.')).toBeInTheDocument();
   });
 

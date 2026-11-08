@@ -22,11 +22,33 @@ export const DASHBOARD_API_FUNCTION_KEYS = [
   'users',
   'persona-rankings',
   'self-reflection',
+  'exports',
 ] as const;
 
 export type DashboardApiFunctionKey = typeof DASHBOARD_API_FUNCTION_KEYS[number];
 
 export type DashboardApiFunctions = Record<DashboardApiFunctionKey, lambda.IFunction>;
+
+/**
+ * The fixed function name of each API Lambda. The main stack names its
+ * functions from this table and the API stack builds their ARNs from it, so
+ * the API stack needs no cross-stack reference (export) to reach them.
+ */
+export const DASHBOARD_API_FUNCTION_NAMES: Readonly<Record<DashboardApiFunctionKey, string>> = {
+  health: 'CitationAnalysis-API-Health',
+  'stats-insights': 'CitationAnalysis-API-StatsInsights',
+  'citations-content': 'CitationAnalysis-API-CitationsContent',
+  'keyword-mgmt': 'CitationAnalysis-API-KeywordMgmt',
+  'config-mgmt': 'CitationAnalysis-API-ConfigMgmt',
+  'execution-mgmt': 'CitationAnalysis-API-ExecutionMgmt',
+  'brand-mentions': 'CitationAnalysis-API-GetBrandMentions',
+  'brand-config': 'CitationAnalysis-API-ManageBrandConfig',
+  'content-studio': 'CitationAnalysis-API-ContentStudio',
+  users: 'CitationAnalysis-API-ManageUsers',
+  'persona-rankings': 'CitationAnalysis-API-GetPersonaRankings',
+  'self-reflection': 'CitationAnalysis-API-SelfReflection',
+  exports: 'CitationAnalysis-API-Exports',
+};
 
 /**
  * Routers that back many routes. Each gets ONE invoke permission for the
@@ -159,6 +181,7 @@ export class DashboardRestApi extends Construct {
     addInsightRoutes(apiResource, route);
     addContentStudioRoutes(apiResource, route);
     addSettingsRoutes(apiResource, route);
+    addExportRoutes(apiResource, route);
 
     this.addWildcardPermissions(props.functions);
     // Dev mode allows every origin so localhost can read the gateway
@@ -370,4 +393,16 @@ function addSettingsRoutes(apiResource: apigateway.IResource, route: Route): voi
   const userUsernameResource = usersResource.addResource('{username}');
   route(userUsernameResource, 'users', 'GET', 'PUT', 'DELETE');
   route(userUsernameResource.addResource('reset-password'), 'users', 'POST');
+}
+
+/**
+ * The export service: every view's "Export all" (2.45.0). Owner-only, which
+ * `exports.py` enforces; per-method invoke permissions (five methods).
+ */
+function addExportRoutes(apiResource: apigateway.IResource, route: Route): void {
+  const exportsResource = apiResource.addResource('exports');
+  route(exportsResource, 'exports', 'GET', 'POST');
+  const exportIdResource = exportsResource.addResource('{id}');
+  route(exportIdResource, 'exports', 'GET', 'DELETE');
+  route(exportIdResource.addResource('seen'), 'exports', 'POST');
 }

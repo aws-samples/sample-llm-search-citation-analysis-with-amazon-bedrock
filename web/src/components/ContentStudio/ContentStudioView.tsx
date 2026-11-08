@@ -1,20 +1,22 @@
 import {
-  useState, useEffect, useCallback, useId
+  useState, useEffect, useCallback, useId, useMemo
 } from 'react';
 import { useContentStudio } from '../../hooks/useContentStudio';
-import { ContentIdeaCard } from './ContentIdeaCard';
 import { ContentHistory } from './ContentHistory';
+import { ContentIdeasPanel } from './ContentIdeasPanel';
+import { useScopeSelection } from '../Insights/useScopeSelection';
+import {
+  decodeReportScope, encodeReportScope, reportScopeParams
+} from '../ui/reportScope';
+import { useSelectedMarketId } from '../Markets/marketSelectionContext';
 import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
-import { CenteredEmpty } from '../ui/CenteredState';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
 import {
   TabBar, TabPanel
 } from '../ui/TabBar';
-import {
-  ContentIdeasSkeleton, TabBadgeSkeleton
-} from './ContentStudioSkeletons';
+import { TabBadgeSkeleton } from './ContentStudioSkeletons';
 import type {
   ContentBriefBatchRequest,
   ContentIdea,
@@ -25,73 +27,12 @@ import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
 import { OverlayDialog } from './OverlayDialog';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  BOLT_PATHS, DOCUMENT_TEXT_PATHS, LIGHTBULB_PATHS, WARNING_PATHS 
+  BOLT_PATHS, LIGHTBULB_PATHS
 } from '../ui/iconPaths';
 
 type TabType = 'ideas' | 'brief' | 'history';
 
 interface ContentStudioViewProps { readonly keywords: Keyword[]; }
-
-interface IdeasTabContentProps {
-  loading: boolean;
-  ideas: ContentIdea[];
-  actionableIdeas: ContentIdea[];
-  generating: boolean;
-  selectedIdea: ContentIdea | null;
-  onCreateContent: (idea: ContentIdea) => void;
-}
-
-const IdeasTabContent = ({
-  loading, ideas, actionableIdeas, generating, selectedIdea, onCreateContent
-}: IdeasTabContentProps) => {
-  if (loading && ideas.length === 0) {
-    return <ContentIdeasSkeleton />;
-  }
-
-  if (actionableIdeas.length === 0) {
-    return (
-      <CenteredEmpty
-        icon={<StrokeIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" paths={DOCUMENT_TEXT_PATHS} />}
-        title="No content ideas available yet."
-        hint="Run an analysis and configure your brands to get started."
-      />
-    );
-  }
-
-  return (
-    <div className="grid gap-4">
-      {actionableIdeas.map(idea => (
-        <ContentIdeaCard
-          key={idea.id}
-          idea={idea}
-          onGenerate={onCreateContent}
-          isGenerating={generating && selectedIdea?.id === idea.id}
-        />
-      ))}
-    </div>
-  );
-};
-
-const NonActionableIdeas = ({ ideas }: { ideas: ContentIdea[] }) => {
-  const nonActionable = ideas.filter(i => !i.actionable);
-  if (nonActionable.length === 0) return null;
-
-  return (
-    <>
-      {nonActionable.map(idea => (
-        <div key={idea.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <StrokeIcon className="w-5 h-5 text-amber-500 mt-0.5" paths={WARNING_PATHS} />
-            <div>
-              <h4 className="font-medium text-amber-800">{idea.title}</h4>
-              <p className="text-sm text-amber-700 mt-1">{idea.description}</p>
-            </div>
-          </div>
-        </div>
-      ))}
-    </>
-  );
-};
 
 interface ConfirmGenerateModalProps {
   readonly idea: ContentIdea;
@@ -265,9 +206,20 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingIdea, setPendingIdea] = useState<ContentIdea | null>(null);
   const panelId = useId();
+  const selection = useScopeSelection();
+  const marketId = useSelectedMarketId();
+  const scopeKey = encodeReportScope(selection.scope);
+  // Keyed on the encoded scope, so a same-value scope keeps the same request.
+  const ideasParams = useMemo(() => reportScopeParams(decodeReportScope(scopeKey), marketId), [scopeKey, marketId]);
 
   const {
     ideas,
+    ideasScope,
+    ideasComputing,
+    ideasTotal,
+    ideasHasMore,
+    ideasLoadingMore,
+    loadMoreIdeas,
     history,
     unviewedCount,
     unviewedCountCapped,
@@ -288,17 +240,16 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
 
   const loadTab = useCallback((tab: TabType) => {
     if (tab === 'ideas') {
-      fetchIdeas();
-      return;
+      return fetchIdeas(ideasParams);
     }
     if (tab === 'history') {
       fetchHistory();
     }
-  }, [fetchIdeas, fetchHistory]);
+    return undefined;
+  }, [fetchIdeas, fetchHistory, ideasParams]);
 
-  useEffect(() => {
-    loadTab(activeTab);
-  }, [activeTab, loadTab]);
+  const { trackScopeRequest } = selection;
+  useEffect(() => trackScopeRequest(loadTab(activeTab)), [activeTab, loadTab, trackScopeRequest]);
 
   const handleCreateContent = (idea: ContentIdea) => {
     setPendingIdea(idea);
@@ -381,17 +332,24 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
 
       <TabPanel id={panelId} activeId={activeTab}>
         {activeTab === 'ideas' && (
-          <div className="space-y-4">
-            <IdeasTabContent
-              loading={loading}
-              ideas={ideas}
-              actionableIdeas={actionableIdeas}
-              generating={generating}
-              selectedIdea={selectedIdea}
-              onCreateContent={handleCreateContent}
-            />
-            <NonActionableIdeas ideas={ideas} />
-          </div>
+          <ContentIdeasPanel
+            keywords={keywords}
+            selection={selection}
+            params={ideasParams}
+            paging={{
+              ideasTotal,
+              ideasHasMore,
+              ideasLoadingMore,
+              loadMoreIdeas,
+            }}
+            loading={loading}
+            ideas={ideas}
+            ideasScope={ideasScope}
+            ideasComputing={ideasComputing}
+            generating={generating}
+            selectedIdea={selectedIdea}
+            onCreateContent={handleCreateContent}
+          />
         )}
 
         {activeTab === 'brief' && (

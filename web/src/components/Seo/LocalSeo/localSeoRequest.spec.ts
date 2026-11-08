@@ -2,7 +2,7 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  hasSearchPoint, identityFields, identityOf, pointFields, rankBand, sortedByDescending, targetFields
+  hasSearchPoint, identityFields, identityOf, pointFields, rankBand, targetFields
 } from './localSeoRequest';
 
 describe('pointFields', () => {
@@ -98,33 +98,4 @@ describe('rankBand', () => {
       expect(rankBand(rank)).toBe(band);
     }
   );
-});
-
-describe('sortedByDescending', () => {
-  it('puts rows without a value last', () => {
-    const rows = [{
-      id: 'a',
-      value: null 
-    }, {
-      id: 'b',
-      value: 2 
-    }, {
-      id: 'c',
-      value: 5 
-    }];
-
-    expect(sortedByDescending(rows, (row) => row.value).map((row) => row.id)).toStrictEqual(['c', 'b', 'a']);
-  });
-
-  it('keeps the provider order for equal values', () => {
-    const rows = [{
-      id: 'a',
-      value: 1 
-    }, {
-      id: 'b',
-      value: 1 
-    }];
-
-    expect(sortedByDescending(rows, (row) => row.value).map((row) => row.id)).toStrictEqual(['a', 'b']);
-  });
 });

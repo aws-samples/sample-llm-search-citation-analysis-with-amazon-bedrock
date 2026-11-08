@@ -3,7 +3,7 @@
  * view and the Keyword Deep Dive read, and one `view=appearances` page.
  */
 import type {
-  BrandAppearanceRow, BrandAppearancesPage, BrandMentionsResponse
+  AggregatedBrand, BrandAppearanceRow, BrandAppearancesPage, BrandMentionsResponse
 } from '../types';
 import {
   isNullableString, isRecord
@@ -17,7 +17,17 @@ export function isBrandMentionsResponse(data: unknown): data is BrandMentionsRes
     && Array.isArray(data.available_runs);
 }
 
-function isAppearanceRow(value: unknown): value is BrandAppearanceRow {
+/** One brand of the summary's `aggregated.brands` (a `view=brands` page holds the same rows). */
+export function isAggregatedBrand(value: unknown): value is AggregatedBrand {
+  return isRecord(value)
+    && typeof value.name === 'string'
+    && typeof value.classification === 'string'
+    && typeof value.aggregate_score === 'number'
+    && Array.isArray(value.providers);
+}
+
+/** One row of a `view=appearances` page. */
+export function isAppearanceRow(value: unknown): value is BrandAppearanceRow {
   return isRecord(value)
     && typeof value.brand === 'string'
     && typeof value.classification === 'string'

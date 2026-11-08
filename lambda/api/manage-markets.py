@@ -59,6 +59,7 @@ from shared.markets import (
 )
 from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError
 from shared.request_deadline import current_deadline
+from shared.snapshot_triggers import rebuilds_snapshot
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ def _stored_market_ids() -> set[str]:
     }
 
 
+@rebuilds_snapshot('markets changed')
 @auth.require_group(auth.ADMIN_GROUP)
 @json_object_body
 def _put_markets(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:

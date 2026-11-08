@@ -5,7 +5,7 @@ import {
   BrandTrendChart, type BrandTrendMetric
 } from '../../charts';
 import {
-  trendWindow, TrendSection, type ScopeSectionProps
+  SectionExport, trendWindow, TrendSection, type ScopeSectionProps
 } from '../../scopeReport';
 
 /** The metrics the chart can draw, in toggle order. */
@@ -58,6 +58,7 @@ export function BrandTrendSection({ report }: ScopeSectionProps) {
     >
       {(trends) => (
         <>
+          <SectionExport view="brand-trends" request={report.trendsRequest} />
           <MetricToggle metric={metric} onChange={setMetric} />
           <BrandTrendChart trends={trends.brand_trends} metric={metric} trackedLabel={trackedName(trends.latest_brands)} />
           {trends.brands_truncated === true && (

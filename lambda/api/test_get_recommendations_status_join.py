@@ -18,7 +18,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.utils import recommendation_id
+from testing.action_handler_fixtures import action_tables, rows_by_keyword
 from testing.module_loader import load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.search_results_fixtures import search_result_row
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -27,9 +30,7 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 def mod():
     """get-recommendations.py with boto3 patched out at module level."""
     with (
-        patch.dict(os.environ, {
-            'DYNAMODB_TABLE_SEARCH_RESULTS': 't',
-        }),
+        patch.dict(os.environ, REPORT_TABLES_ENV),
         patch('boto3.resource', return_value=MagicMock()),
         patch('boto3.client', return_value=MagicMock()),
     ):
@@ -158,12 +159,12 @@ def _rival(rank=1):
 
 
 def _result(keyword, provider, brands, timestamp=LATEST_TS):
-    return {'keyword': keyword, 'timestamp': timestamp, 'provider': provider, 'brands': brands}
+    return search_result_row(keyword, provider, brands, timestamp=timestamp)
 
 
 def _recommend(mod, items, config=RULES_CONFIG):
-    """Run the rules over `items` as if the search table had returned them."""
-    with patch.object(mod, 'load_recent_search_results', return_value=items):
+    """Run the rules over the active keywords of `items`, their SearchResults partitions answering `items`."""
+    with patch.object(mod, 'dynamodb', action_tables(rows_by_keyword(items))):
         return mod.generate_rule_based_recommendations(config)
 
 
@@ -181,7 +182,7 @@ def _gemini_omits_brand(keywords):
 
 
 def test_rules_return_only_the_configuration_recommendation_when_no_first_party_brand_is_configured(mod):
-    with patch.object(mod, 'load_recent_search_results') as loader:
+    with patch.object(mod, '_live_read') as loader:
         recs = mod.generate_rule_based_recommendations({'tracked_brands': {'competitors': ['Rival']}})
 
     assert [(rec['type'], rec['priority']) for rec in recs] == [('configuration', 'high')]

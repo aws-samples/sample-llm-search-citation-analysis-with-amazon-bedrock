@@ -109,10 +109,10 @@ describe('Sources domains table', () => {
     expect(within(sectionTitled('Cited domains')).getByText('Owned').closest('td')?.firstChild?.textContent).toBe('nike.com');
   });
 
-  it('notes when only the most cited domains are listed', () => {
+  it('counts the listed domains against every cited domain when more are left to load', () => {
     renderSources(reportWithVisibility({ sources_total: 40 }));
 
-    expect(screen.getByText('Listing the 3 most cited of 40 domains.')).toBeInTheDocument();
+    expect(screen.getByText('Showing 3 of 40 domains')).toBeInTheDocument();
   });
 
   it('puts only the Citation Gaps pointer under the table when every domain is listed', () => {

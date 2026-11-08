@@ -36,11 +36,13 @@ import {
  * Sources and Sentiment reports.
  */
 
+/** The `/trends` slice with its request, so a paged block (the per-keyword leaderboard) loads past its first page. */
 function trendSlice(report: ScopeReportData): TrendSectionProps {
   return {
     trends: report.trends.data,
     loading: report.trends.loading,
     error: report.trends.error,
+    request: report.trendsRequest ?? null,
   };
 }
 
@@ -67,7 +69,14 @@ function VisibilityHeadlineBlock({ report }: ScopeSectionProps) {
 /** One keyword ranks the brands of its latest run; a wider scope pools each keyword's latest period. */
 function BrandRankingsBlock({ report }: ScopeSectionProps) {
   if (report.scope.kind === 'keyword') {
-    return <LatestRunRankingsSection visibility={report.visibility.data} loading={report.visibility.loading} error={report.visibility.error} />;
+    return (
+      <LatestRunRankingsSection
+        visibility={report.visibility.data}
+        loading={report.visibility.loading}
+        error={report.visibility.error}
+        request={report.visibilityRequest ?? null}
+      />
+    );
   }
   return <PooledRankingsSection {...trendSlice(report)} />;
 }

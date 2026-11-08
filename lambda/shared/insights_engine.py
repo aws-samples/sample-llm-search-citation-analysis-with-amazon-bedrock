@@ -32,21 +32,23 @@ Positions are rounded to hundredths and points to tenths, as
 
 from __future__ import annotations
 
+import bisect
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from shared.insights_citations import CompetitorDomains, citation_ownership_facts, owned_pages_facts
-from shared.kpi_engine import (
-    COMPETITOR,
-    FIRST_PARTY,
-    Answer,
-    Sighting,
-    brand_kpis,
-    brand_table,
-    engine_breakdown,
-    percent,
+from shared.insights_citations import (
+    CompetitorDomains,
+    citation_ownership_from,
+    merge_owned_pages,
+    merge_ownership,
+    owned_pages_from,
+    owned_pages_partial,
+    ownership_partial,
 )
+from shared.insights_pages import PROMPT_ENGINE_MAX_KEYWORDS, listed_facts
+from shared.kpi_engine import COMPETITOR, FIRST_PARTY, Answer, brand_kpis, normalize_domain, percent
+from shared.kpi_tally import BrandTally, RunTally, run_tally, tally_brand_table, tally_kpis
 
 #: Top-1 share (percent of answers ranking the brand first) from which an engine already ranks the brand first.
 ENGINE_TOP1_MIN = 50.0
@@ -68,12 +70,10 @@ CAVEAT_SHARE_MIN = 30.0
 CAVEAT_MIN_MENTIONS = 5
 #: Caveat share from which a competitor caveat is high severity.
 CAVEAT_HIGH_SHARE = 50.0
-#: Reasons a competitor caveat lists at most.
+#: Reasons a competitor caveat row lists (``reasons_total`` counts them all; the ``caveat_reasons`` fact holds every one).
 CAVEAT_MAX_REASONS = 3
 #: The worst position a prompt-by-engine cell may hold before it is a lost cell (worse than 3rd, or not named).
 PROMPT_TOP_POSITION = 3
-#: Keywords the prompt-by-engine fact lists at most, lowest visibility score first.
-PROMPT_ENGINE_MAX_KEYWORDS = 50
 #: How many times the trailing count the leading count must be for a competitor-sites or documents insight to be high.
 LEAD_HIGH_RATIO = 2.0
 #: Citations the leading count needs for a competitor-sites or documents insight to be high.
@@ -139,11 +139,19 @@ def _play(top_1_share: float, citation_rate: float | None) -> str:
     return GET_RANKED_FIRST if cited else GET_MENTIONED_AND_CITED
 
 
-def engine_facts(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> list[dict[str, Any]]:
-    """Every KPI of the tracked brand per AI engine, with the play the engine calls for; engines in name order."""
+def _engine_row(engine: str, kpis: dict[str, Any]) -> dict[str, Any]:
+    return {'engine': engine, 'play': _play(kpis['top_1_share'], kpis['citation_rate']), 'kpis': kpis}
+
+
+def _engine_facts(tallies: Mapping[str, Mapping[str, Any]], owned_domains: list[str]) -> list[dict[str, Any]]:
+    """Every KPI of the tracked brand per AI engine (``tally_kpis`` of each keyword's counts of that engine), engines in name order."""
+    engines = sorted({engine for tally in tallies.values() for engine in tally['engines']})
     return [
-        {'engine': row['engine'], 'play': _play(row['kpis']['top_1_share'], row['kpis']['citation_rate']), 'kpis': row['kpis']}
-        for row in engine_breakdown(answers, owned_domains)
+        _engine_row(engine, tally_kpis(
+            (RunTally(keyword, '', {engine: tuple(tally['engines'][engine])}) for keyword, tally in tallies.items() if engine in tally['engines']),
+            owned_domains,
+        ))
+        for engine in engines
     ]
 
 
@@ -182,20 +190,18 @@ def _portfolio_row(row: Mapping[str, Any], best_position: float | None, best_sen
     }
 
 
-def portfolio_facts(answers: Iterable[Answer]) -> list[dict[str, Any]]:
+def _portfolio_facts(table: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """The first-party brands with ``SUBBRAND_MIN_MENTIONS`` mentions or more, each measured against the best of them.
 
+    ``table`` is the brand table (``brand_table`` order) of the scope's answers.
     ``position_gap`` is how many positions the brand trails the best (lowest)
     average position, ``sentiment_gap`` how many points it trails the best
     net sentiment; a gap at or over its threshold makes the brand ``weak``.
     Empty unless two brands qualify — a gap needs a brand to trail. A brand
     below the floor neither appears nor sets a baseline. Rows keep the
-    leaderboard order of ``brand_table``.
+    leaderboard order.
     """
-    qualifying = [
-        row for row in brand_table(answers)
-        if row['classification'] == FIRST_PARTY and row['mentions'] >= SUBBRAND_MIN_MENTIONS
-    ]
+    qualifying = [row for row in table if row['classification'] == FIRST_PARTY and row['mentions'] >= SUBBRAND_MIN_MENTIONS]
     if len(qualifying) < 2:
         return []
     best_position = min(_known(qualifying, 'average_position'), default=None)
@@ -262,61 +268,107 @@ def _prompt_row(keyword: str, answers: list[Answer]) -> dict[str, Any]:
     }
 
 
-def prompt_engine_facts(answers: Iterable[Answer]) -> dict[str, Any]:
+def prompt_row_order(row: Mapping[str, Any]) -> tuple[float, str, str]:
+    """Lowest visibility score first, then by keyword name."""
+    return row['visibility_score'], row['keyword'].lower(), row['keyword']
+
+
+def _prompt_engine_facts(prompt: Mapping[str, Any]) -> dict[str, Any]:
     """Per keyword, the brand's best position on each AI engine that answered it (``None``: not named at a known position).
 
     ``lost_engines`` are the engines placing the brand worse than
-    ``PROMPT_TOP_POSITION`` or not at all. Keywords are listed lowest
-    visibility score first (then by name), at most
-    ``PROMPT_ENGINE_MAX_KEYWORDS``; ``omitted`` counts the rest. ``engines``
+    ``PROMPT_TOP_POSITION`` or not at all. Every keyword is listed, lowest
+    visibility score first (then by name; an answer lists the first
+    ``PROMPT_ENGINE_MAX_KEYWORDS``, ``shared.insights_pages``). ``engines``
     are every engine that answered, in name order.
     """
-    by_keyword: dict[str, list[Answer]] = defaultdict(list)
-    for answer in answers:
-        by_keyword[answer.keyword].append(answer)
-    rows = [_prompt_row(keyword, keyword_answers) for keyword, keyword_answers in by_keyword.items()]
-    rows.sort(key=lambda row: (row['visibility_score'], row['keyword'].lower(), row['keyword']))
-    return {
-        'engines': sorted({engine for row in rows for engine in row['positions']}),
-        'keywords': rows[:PROMPT_ENGINE_MAX_KEYWORDS],
-        'omitted': max(len(rows) - PROMPT_ENGINE_MAX_KEYWORDS, 0),
-    }
+    return {'engines': list(prompt['engines']), 'keywords': [dict(row) for row in prompt['rows']]}
 
 
 # ---------------------------------------------------------------------------
 # Competitor caveat facts
 # ---------------------------------------------------------------------------
 
-def _caveat_row(sightings: list[Sighting]) -> dict[str, Any]:
-    caveats = [sighting for sighting in sightings if sighting.sentiment in CAVEAT_LABELS]
-    reasons = list(dict.fromkeys(sighting.reason for sighting in caveats if sighting.reason))
-    return {
-        'name': sightings[0].name,
-        'mentions': len(sightings),
-        'mixed': sum(sighting.sentiment == 'mixed' for sighting in caveats),
-        'negative': sum(sighting.sentiment == 'negative' for sighting in caveats),
-        'caveat_share': percent(len(caveats), len(sightings)),
-        'reasons': reasons[:CAVEAT_MAX_REASONS],
-    }
+def _caveat_partial(keyword: str, answers: Sequence[Answer]) -> dict[str, dict[str, Any]]:
+    """One keyword's competitor sightings per brand: mentions, the caveats among them, the first name and reasons, with their positions.
+
+    A position (keyword, answer index) orders sightings across keywords the way
+    the scope's answers come: keywords in scope order, answers in read order.
+    """
+    caveats: dict[str, dict[str, Any]] = {}
+    for index, answer in enumerate(answers):
+        position = [keyword.casefold(), keyword, index]
+        for sighting in answer.sightings:
+            if sighting.classification != COMPETITOR:
+                continue
+            row = caveats.setdefault(sighting.key, {'name': [position, sighting.name], 'mentions': 0, 'mixed': 0, 'negative': 0, 'reasons': []})
+            row['mentions'] += 1
+            if sighting.sentiment in CAVEAT_LABELS:
+                row[sighting.sentiment] += 1
+                if sighting.reason:
+                    row['reasons'] = _distinct_reasons([*row['reasons'], [position, sighting.reason]])
+    return caveats
 
 
-def competitor_caveat_facts(answers: Iterable[Answer]) -> list[dict[str, Any]]:
+def _distinct_reasons(reasons: Iterable[list[Any]]) -> list[list[Any]]:
+    """Every distinct reason, each at its first position, in position order (2.45.0 wave 5: no longer cut to ``CAVEAT_MAX_REASONS``)."""
+    first: dict[str, list[Any]] = {}
+    for position, reason in sorted(reasons, key=lambda entry: entry[0]):
+        first.setdefault(reason, position)
+    return [[position, reason] for reason, position in first.items()]
+
+
+def _merge_caveats(acc: dict[str, dict[str, Any]], part: Mapping[str, Mapping[str, Any]]) -> None:
+    for key, counted in part.items():
+        row = acc.get(key)
+        if row is None:
+            acc[key] = {**counted, 'reasons': list(counted['reasons'])}
+            continue
+        for field in ('mentions', 'mixed', 'negative'):
+            row[field] += int(counted[field])
+        row['name'] = min(row['name'], counted['name'], key=lambda entry: entry[0])
+        row['reasons'] = _distinct_reasons([*row['reasons'], *counted['reasons']])
+
+
+def _competitor_caveat_facts(caveats: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Per competitor named in the answers, its mentions, how many are worded mixed or negative, and why.
 
     A mention is one answer naming the competitor (its sighting at its best
     rank, as every KPI counts it). ``caveat_share`` is the mixed and negative
     mentions' percent of all its mentions; ``reasons`` the first
     ``CAVEAT_MAX_REASONS`` distinct stored reasons of those mentions, in
-    answer order. Most-mentioned competitor first, then by name.
+    answer order, and ``reasons_total`` how many there are (every one is in
+    ``_caveat_reason_facts``). Most-mentioned competitor first, then by name.
     """
-    by_brand: dict[str, list[Sighting]] = defaultdict(list)
-    for answer in answers:
-        for sighting in answer.sightings:
-            if sighting.classification == COMPETITOR:
-                by_brand[sighting.key].append(sighting)
-    rows = [_caveat_row(sightings) for sightings in by_brand.values()]
-    rows.sort(key=lambda row: (-row['mentions'], row['name'].lower()))
-    return rows
+    rows = [
+        (row['name'][0], {
+            'name': row['name'][1],
+            'mentions': row['mentions'],
+            'mixed': row['mixed'],
+            'negative': row['negative'],
+            'caveat_share': percent(row['mixed'] + row['negative'], row['mentions']),
+            'reasons': [reason for _position, reason in row['reasons'][:CAVEAT_MAX_REASONS]],
+            'reasons_total': len(row['reasons']),
+        })
+        for row in caveats.values()
+    ]
+    rows.sort(key=lambda entry: (-entry[1]['mentions'], entry[1]['name'].lower(), entry[0]))
+    return [row for _position, row in rows]
+
+
+def _caveat_reason_facts(caveats: Mapping[str, Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Every distinct reason of every competitor's mixed and negative mentions: ``{'reasons': [{competitor, reason}]}``.
+
+    In the competitor caveats' order, each competitor's reasons in answer
+    order; ``shared.insights_pages`` lists none in an answer and pages them
+    with ``view=caveat_reasons`` (2.45.0 wave 5).
+    """
+    names = {row['name'][1]: row for row in caveats.values()}
+    return {'reasons': [
+        {'competitor': fact['name'], 'reason': reason}
+        for fact in _competitor_caveat_facts(caveats)
+        for _position, reason in names[fact['name']]['reasons']
+    ]}
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +486,134 @@ def derive_insights(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
     return sorted(insights, key=_rank)
 
 
+# ---------------------------------------------------------------------------
+# Mergeable facts: one partial per keyword, summed over a scope
+# ---------------------------------------------------------------------------
+
+def _encoded_brand(brand: BrandTally) -> list[Any]:
+    return [brand.key, brand.name, brand.mentions, brand.points, brand.rank_sum, brand.rank_count, brand.best_rank, list(brand.split), list(brand.engines)]
+
+
+def _decoded_brand(fields: Sequence[Any]) -> BrandTally:
+    key, name, mentions, points, rank_sum, rank_count, best_rank, split, engines = fields
+    return BrandTally(key, name, FIRST_PARTY, mentions, points, rank_sum, rank_count, best_rank, tuple(split), tuple(engines))
+
+
+def keyword_partial(
+    keyword: str, answers: Sequence[Answer], owned_domains: Iterable[str] = (), competitor_domains: CompetitorDomains | None = None,
+) -> dict[str, Any] | None:
+    """What one keyword's latest-run ``answers`` add to a scope's facts (JSON-serializable); ``None`` without answers.
+
+    Additive counts per AI engine (``kpi_tally``) and per first-party brand,
+    the keyword's prompt-by-engine row, its citation counts by owner and owned
+    page, and its competitor sightings. ``merge_partials`` sums them and
+    ``facts_from_partials`` turns the sum into the facts.
+    """
+    if not answers:
+        return None
+    owned = [domain for domain in owned_domains if normalize_domain(domain)]
+    competitors = dict(competitor_domains or {})
+    tally = run_tally(keyword, '', answers, owned)
+    return {
+        'keyword': keyword,
+        'timestamp': max(answer.timestamp for answer in answers),
+        # What the counts were counted against, so a stored sum is shaped with the same configuration.
+        'owned': owned,
+        'competitor_domains': {brand: list(domains) for brand, domains in competitors.items()},
+        'tally': {
+            'engines': {engine: list(counts) for engine, counts in tally.engines.items()},
+            'first_party': [_encoded_brand(brand) for brand in tally.brands if brand.classification == FIRST_PARTY],
+        },
+        'prompt': _prompt_row(keyword, list(answers)),
+        'ownership': ownership_partial(answers, owned, competitors),
+        'owned_pages': owned_pages_partial(answers, owned),
+        'caveats': _caveat_partial(keyword, answers),
+    }
+
+
+def _empty_merge() -> dict[str, Any]:
+    return {
+        'keywords': 0, 'timestamp': '', 'owned': [], 'competitor_domains': {}, 'tallies': {},
+        'prompt': {'rows': [], 'count': 0, 'engines': []},
+        'ownership': {}, 'owned_pages': {'pages': {}, 'engines': {}}, 'caveats': {},
+    }
+
+
+def merge_partials(acc: dict[str, Any] | None, part: Mapping[str, Any]) -> dict[str, Any]:
+    """``acc`` (``None`` before the first keyword) with one keyword's ``keyword_partial`` added; associative and order-free.
+
+    Everything is summed except the prompt rows, every one kept lowest-scored
+    first (with their count), and the per-keyword tallies, which the engine and portfolio facts
+    pool in the scope's keyword order. ``part`` is never changed.
+    """
+    merged = acc if acc is not None else _empty_merge()
+    merged['keywords'] += 1
+    merged['timestamp'] = max(merged['timestamp'], str(part['timestamp']))
+    # Every partial of one build is counted against one configuration (the KeywordLatest ``config`` fingerprint).
+    merged['owned'] = list(part['owned'])
+    merged['competitor_domains'] = dict(part['competitor_domains'])
+    merged['tallies'][part['keyword']] = part['tally']
+    prompt = merged['prompt']
+    bisect.insort(prompt['rows'], part['prompt'], key=prompt_row_order)
+    prompt['count'] += 1
+    prompt['engines'] = sorted({*prompt['engines'], *part['prompt']['positions']})
+    merge_ownership(merged['ownership'], part['ownership'])
+    merge_owned_pages(merged['owned_pages'], part['owned_pages'])
+    _merge_caveats(merged['caveats'], part['caveats'])
+    return merged
+
+
+def _scope_order(keyword: str) -> tuple[str, str]:
+    return keyword.casefold(), keyword
+
+
+def _run_tallies(tallies: Mapping[str, Mapping[str, Any]]) -> list[RunTally]:
+    """The per-keyword tallies as ``RunTally`` values (first-party brands only), in the scope's keyword order."""
+    return [
+        RunTally(
+            keyword, '',
+            {engine: tuple(counts) for engine, counts in tallies[keyword]['engines'].items()},
+            brands=tuple(_decoded_brand(fields) for fields in tallies[keyword]['first_party']),
+        )
+        for keyword in sorted(tallies, key=_scope_order)
+    ]
+
+
+def scope_kpis(merged: Mapping[str, Any] | None, owned_domains: Iterable[str] = ()) -> dict[str, Any]:
+    """``brand_kpis`` of every answer the merged partials count."""
+    return tally_kpis(_run_tallies(merged['tallies']) if merged else [], list(owned_domains))
+
+
+def facts_from_partials(
+    merged: Mapping[str, Any] | None,
+    owned_domains: Iterable[str] = (),
+    history_keywords: Iterable[Mapping[str, Any]] | None = None,
+    competitor_domains: CompetitorDomains | None = None,
+) -> dict[str, Any]:
+    """The facts of a scope from its keywords' merged partials (``None``: no keyword with answers)."""
+    owned = [domain for domain in owned_domains if normalize_domain(domain)]
+    base = merged if merged is not None else _empty_merge()
+    tallies = base['tallies']
+    ordered = {keyword: tallies[keyword] for keyword in sorted(tallies, key=_scope_order)}
+    return {
+        'engines': _engine_facts(ordered, owned),
+        'prompt_engine': _prompt_engine_facts(base['prompt']),
+        'citation_ownership': citation_ownership_from(base['ownership'], bool(owned), competitor_domains),
+        'owned_pages': owned_pages_from(base['owned_pages']),
+        'competitor_caveats': _competitor_caveat_facts(base['caveats']),
+        'caveat_reasons': _caveat_reason_facts(base['caveats']),
+        'portfolio': _portfolio_facts(tally_brand_table(_run_tallies(tallies))),
+        'stability': stability_facts(history_keywords or ()),
+    }
+
+
+def _by_keyword(answers: Iterable[Answer]) -> dict[str, list[Answer]]:
+    grouped: dict[str, list[Answer]] = defaultdict(list)
+    for answer in answers:
+        grouped[answer.keyword].append(answer)
+    return grouped
+
+
 def compute_insights(
     answers: Iterable[Answer],
     owned_domains: Iterable[str] = (),
@@ -449,20 +629,36 @@ def compute_insights(
     group — ``None`` for any other scope, whose stability is then empty — and
     ``competitor_domains`` each tracked competitor's domains
     (``insights_citations.competitor_domains_from``); without them every
-    non-owned citation is third party.
+    non-owned citation is third party. Computed as a scope snapshot computes
+    it: one ``keyword_partial`` per keyword, merged, then shaped.
     """
-    pool = list(answers)
+    return insights_from_facts(compute_facts(answers, owned_domains, history_keywords, competitor_domains))
+
+
+def compute_facts(
+    answers: Iterable[Answer],
+    owned_domains: Iterable[str] = (),
+    history_keywords: Iterable[Mapping[str, Any]] | None = None,
+    competitor_domains: CompetitorDomains | None = None,
+) -> dict[str, Any]:
+    """The whole facts of ``compute_insights`` (every owned page, every keyword's prompt row), before they are listed."""
     owned = list(owned_domains)
-    facts = {
-        'engines': engine_facts(pool, owned),
-        'prompt_engine': prompt_engine_facts(pool),
-        'citation_ownership': citation_ownership_facts(pool, owned, competitor_domains),
-        'owned_pages': owned_pages_facts(pool, owned),
-        'competitor_caveats': competitor_caveat_facts(pool),
-        'portfolio': portfolio_facts(pool),
-        'stability': stability_facts(history_keywords or ()),
-    }
-    return {'facts': facts, 'insights': derive_insights(facts)}
+    merged: dict[str, Any] | None = None
+    for keyword, keyword_answers in _by_keyword(answers).items():
+        part = keyword_partial(keyword, keyword_answers, owned, competitor_domains)
+        if part is not None:
+            merged = merge_partials(merged, part)
+    return facts_from_partials(merged, owned, history_keywords, competitor_domains)
+
+
+def insights_from_facts(facts: Mapping[str, Any]) -> dict[str, Any]:
+    """The listed ``facts`` (each long list's first page, ``shared.insights_pages.listed_facts``) and the insights they support.
+
+    The body of ``/reports/insights`` beside its coverage fields; the insights
+    rest on the listed facts, as they did when the facts held only those rows.
+    """
+    listed = listed_facts(facts)
+    return {'facts': listed, 'insights': derive_insights(listed)}
 
 
 __all__ = [
@@ -482,11 +678,13 @@ __all__ = [
     'SUBBRAND_POSITION_GAP',
     'SUBBRAND_SENTIMENT_GAP',
     'UNSTABLE_POSITION_RANGE',
-    'competitor_caveat_facts',
+    'compute_facts',
     'compute_insights',
     'derive_insights',
-    'engine_facts',
-    'portfolio_facts',
-    'prompt_engine_facts',
+    'facts_from_partials',
+    'insights_from_facts',
+    'keyword_partial',
+    'merge_partials',
+    'scope_kpis',
     'stability_facts',
 ]

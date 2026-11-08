@@ -5,6 +5,7 @@ import {
   gateSection,
 } from '../../layout';
 import type { RollupSectionProps } from './rollupSection';
+import { ScopeCoverageNote } from '../../../ui/ScopeCoverageNote';
 
 interface Props extends RollupSectionProps {
   readonly competitor: string;
@@ -19,11 +20,12 @@ interface Props extends RollupSectionProps {
  * matters.
  */
 export function HeadlineSection({
-  competitor, rollup, keywordsAnalyzed, loading, error,
+  competitor, rollup, keywordsAnalyzed, loading, error, computing, response,
 }: Props) {
   const gate = gateSection({
     title: 'Headline',
     loading,
+    computing,
     loadingMessage: 'Loading rollup…',
     error,
     value: rollup,
@@ -31,12 +33,14 @@ export function HeadlineSection({
   });
   if (!gate.ready) return gate.placeholder;
 
-  const outrankedCount = gate.value.outranked_keywords.length;
+  // 2.45.0 pages the list; the total counts every outranked keyword of the scope.
+  const outrankedCount = gate.value.outranked_keywords_total ?? gate.value.outranked_keywords.length;
   const exclusiveCount = gate.value.exclusive_source_count;
   const highLiftCount = gate.value.high_priority_source_count;
 
   return (
     <ReportSection title="Headline">
+      <ScopeCoverageNote response={response} className="mb-3" />
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
         Across {keywordsAnalyzed} tracked keywords, vs <strong>{competitor}</strong>:
       </p>

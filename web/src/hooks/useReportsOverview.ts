@@ -58,11 +58,13 @@ const reportsOverviewEndpoint = {
  */
 export function useReportsOverview() {
   const {
-    data, loading, error, fetchData,
+    data, loading, error, computing, request, fetchData
   } = useAnalysisEndpoint(reportsOverviewEndpoint);
   const fetchReportsOverview = useMarketScopedFetch(fetchData);
 
   return {
+    computing,
+    request,
     data,
     loading,
     error,

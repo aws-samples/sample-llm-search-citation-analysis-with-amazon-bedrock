@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SeoGeoState } from '../../../../hooks/useSeoGeo';
+import type { SeoScopeParams } from '../../../../hooks/useSeoGeoRequest';
 import type { SeoGeoResponse } from '../../../../types/api/seo';
 import {
   gateSection, ReportSection, ReportSectionPlaceholder
@@ -14,8 +15,8 @@ export const SEO_GEO_EMPTY_MESSAGE = 'No active keyword in this market and scope
 /** Props of every SEO vs GEO section, in the report and as custom report blocks. */
 export interface SeoGeoSectionProps {
   readonly state: SeoGeoState;
-  /** The report's scope ("All keywords", a group name), named in exported file names. */
-  readonly scopeLabel?: string;
+  /** The report's market and keyword group, which a table's "Export all" exports; left out, no export is offered. */
+  readonly exportScope?: SeoScopeParams;
 }
 
 /**

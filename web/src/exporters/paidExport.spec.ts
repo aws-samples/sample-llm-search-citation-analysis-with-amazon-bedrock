@@ -1,14 +1,11 @@
 import {
-  describe, expect, it, vi
+  describe, expect, it
 } from 'vitest';
 import {
-  clampRows, ExportCancelledError, exportPlan, fetchAllChunks, priceText, type ExportChunk, type FetchChunk
+  clampRows, exportPlan, priceText
 } from './paidExport';
 import { LABS_EXPORT } from '../api/seoDomains-fixtures';
 import { BACKLINKS_EXPORT } from '../api/seoBacklinks-fixtures';
-import {
-  askedWindows, fakeList, WINDOWS_OF_2500
-} from './paidExport-fixtures';
 
 describe('exportPlan', () => {
   it('asks the remainder in the last chunk', () => {
@@ -75,63 +72,5 @@ describe('clampRows', () => {
 
   it.each([0, -5, Number.NaN, Number.POSITIVE_INFINITY])('refuses %s', (input) => {
     expect(clampRows(input, 10_000)).toBeNull();
-  });
-});
-
-describe('fetchAllChunks', () => {
-  const plan = exportPlan(2500, LABS_EXPORT).chunks;
-
-  it('returns the rows of every chunk in order', async () => {
-    const rows = await fetchAllChunks(plan, fakeList(5000), { signal: new AbortController().signal });
-
-    expect([rows.length, rows[0], rows[rows.length - 1]]).toStrictEqual([2500, 0, 2499]);
-  });
-
-  it('asks the chunks one after the other', async () => {
-    const fetchChunk = fakeList(5000);
-    await fetchAllChunks(plan, fetchChunk, { signal: new AbortController().signal });
-
-    expect(askedWindows(fetchChunk)).toStrictEqual(WINDOWS_OF_2500);
-  });
-
-  it('starts a request only once the one before has answered', async () => {
-    const order: string[] = [];
-    const fetchChunk = vi.fn<FetchChunk<number>>(async (offset) => {
-      order.push(`start ${offset}`);
-      await Promise.resolve();
-      order.push(`end ${offset}`);
-      return Array.from({ length: 1000 }, () => offset);
-    });
-    await fetchAllChunks(exportPlan(2000, LABS_EXPORT).chunks, fetchChunk, { signal: new AbortController().signal });
-
-    expect(order).toStrictEqual(['start 0', 'end 0', 'start 1000', 'end 1000']);
-  });
-
-  it('stops after a chunk shorter than asked (the end of the list)', async () => {
-    const fetchChunk = fakeList(1200);
-    const rows = await fetchAllChunks(plan, fetchChunk, { signal: new AbortController().signal });
-
-    expect([rows.length, fetchChunk.mock.calls.length]).toStrictEqual([1200, 2]);
-  });
-
-  it('reports each chunk before asking it', async () => {
-    const onProgress = vi.fn<(chunk: ExportChunk, index: number) => void>();
-    await fetchAllChunks(plan, fakeList(5000), {
-      signal: new AbortController().signal,
-      onProgress,
-    });
-
-    expect(onProgress.mock.calls).toStrictEqual(plan.map((chunk, index) => [chunk, index]));
-  });
-
-  it('asks nothing more once the signal aborts between two chunks', async () => {
-    const controller = new AbortController();
-    const fetchChunk = vi.fn<FetchChunk<number>>((offset, limit) => {
-      controller.abort();
-      return Promise.resolve(Array.from({ length: limit }, () => offset));
-    });
-
-    await expect(fetchAllChunks(plan, fetchChunk, { signal: controller.signal })).rejects.toThrow(ExportCancelledError);
-    expect(fetchChunk.mock.calls).toHaveLength(1);
   });
 });

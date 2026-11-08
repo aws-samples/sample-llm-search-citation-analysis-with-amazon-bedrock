@@ -5,9 +5,11 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import {
   DASHBOARD_API_FUNCTION_KEYS,
+  DASHBOARD_API_FUNCTION_NAMES,
   DashboardRestApi,
   WILDCARD_PERMISSION_FUNCTION_KEYS,
   type DashboardApiFunctions,
@@ -20,21 +22,17 @@ import {
  */
 export const RUNTIME_CONFIG_OBJECT_KEY = 'config.json';
 
-/** What the API stack takes from the main stack: values that never change for the lifetime of their resource. */
-export interface DashboardApiInputs {
-  /** The API Lambdas. Each has a fixed function name, so its ARN is stable. */
-  readonly functions: DashboardApiFunctions;
-  readonly userPool: cognito.IUserPool;
-  /** The dashboard bucket (fixed name `citation-analysis-web-<account>`); receives `config.json`. */
-  readonly webBucket: s3.IBucket;
-  /** The dashboard distribution: its domain is the CORS origin, its id the `/config.json` invalidation target. */
-  readonly distribution: cloudfront.IDistribution;
-}
-
-export interface CitationAnalysisApiStackProps extends cdk.StackProps {
-  /** The main stack's `apiInputs`. */
-  readonly inputs: DashboardApiInputs;
-}
+/**
+ * SSM parameters the main stack writes and the API stack reads at deploy
+ * time. Each holds a value that never changes for the lifetime of its
+ * resource (the user pool id, the distribution id, the dashboard origin).
+ */
+export const DASHBOARD_API_PARAMETERS = {
+  /** `https://<distribution domain>`: also what the API Lambdas allow as CORS origin. */
+  corsOrigin: '/citation-analysis/cors-origin',
+  userPoolId: '/citation-analysis/user-pool-id',
+  webDistributionId: '/citation-analysis/web-distribution-id',
+} as const;
 
 /**
  * The dashboard REST API, out of the main stack, which had reached
@@ -43,12 +41,19 @@ export interface CitationAnalysisApiStackProps extends cdk.StackProps {
  * a stack of its own; the tables, buckets, functions, user pool and
  * distribution it fronts stay in the main stack (fixed names and RETAIN).
  *
- * Cross-stack references are CloudFormation exports of the main stack, so
- * only values that never change are imported: function ARNs (fixed names),
- * the user pool ARN, the web bucket name and the distribution id and domain.
+ * It takes nothing from the main stack by cross-stack reference (2.45.0
+ * review F11). A reference is a CloudFormation export, and an export another
+ * stack imports can be neither changed nor removed, so renaming or replacing
+ * any of those resources would block the main stack's deploys. Instead:
+ * - the API Lambdas' ARNs are built from their fixed names
+ *   (`DASHBOARD_API_FUNCTION_NAMES`, which the main stack names them from);
+ * - the web bucket name is fixed per account (`citation-analysis-web-<account>`);
+ * - the user pool id, the distribution id and the dashboard origin are read
+ *   from SSM parameters the main stack writes (`DASHBOARD_API_PARAMETERS`),
+ *   resolved when this stack deploys.
  * The functions are imported here so their invoke permissions are created in
- * this stack: the main stack references nothing of this one, so there is no
- * cycle and `cdk deploy --all` deploys the main stack first.
+ * this stack. Nothing orders the two stacks implicitly any more, so `bin/`
+ * declares the dependency: `cdk deploy --all` deploys the main stack first.
  *
  * The API URL changes with the API (once, at the move), so the dashboard
  * does not bake it in: this stack writes `config.json` into the web bucket
@@ -57,14 +62,15 @@ export interface CitationAnalysisApiStackProps extends cdk.StackProps {
 export class CitationAnalysisApiStack extends cdk.Stack {
   public readonly restApi: DashboardRestApi;
 
-  constructor(scope: Construct, id: string, props: CitationAnalysisApiStackProps) {
+  constructor(scope: Construct, id: string, props: cdk.StackProps = {}) {
     super(scope, id, props);
-    const { inputs } = props;
-    const dashboardOrigin = `https://${inputs.distribution.distributionDomainName}`;
+    const dashboardOrigin = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.corsOrigin);
+    const userPoolId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.userPoolId);
+    const distributionId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.webDistributionId);
 
     this.restApi = new DashboardRestApi(this, 'DashboardApi', {
-      functions: importFunctions(this, inputs.functions),
-      userPool: cognito.UserPool.fromUserPoolArn(this, 'UserPool', inputs.userPool.userPoolArn),
+      functions: importFunctions(this),
+      userPool: cognito.UserPool.fromUserPoolId(this, 'UserPool', userPoolId),
       dashboardOrigin,
       // `cdk deploy --context dev=true`: gateway responses allow every origin (localhost:5173).
       devMode: this.node.tryGetContext('dev') === 'true',
@@ -74,19 +80,20 @@ export class CitationAnalysisApiStack extends cdk.Stack {
     // `prune: false` and `retainOnDelete: true`: the destination is the
     // whole dashboard bucket, so a prune or a delete-on-remove would take the
     // dashboard's own files with it.
-    const webBucket = s3.Bucket.fromBucketName(this, 'WebBucket', inputs.webBucket.bucketName);
+    const webBucket = s3.Bucket.fromBucketName(this, 'WebBucket', `citation-analysis-web-${this.account}`);
     new s3deploy.BucketDeployment(this, 'DeployRuntimeConfig', {
       sources: [s3deploy.Source.jsonData(RUNTIME_CONFIG_OBJECT_KEY, { apiUrl })],
       destinationBucket: webBucket,
-      role: this.runtimeConfigRole(webBucket, inputs.distribution.distributionId),
+      role: this.runtimeConfigRole(webBucket, distributionId),
       prune: false,
       retainOnDelete: true,
       contentType: 'application/json',
       // Revalidated on every load, so a moved API is picked up at once.
       cacheControl: [s3deploy.CacheControl.noCache()],
       distribution: cloudfront.Distribution.fromDistributionAttributes(this, 'WebDistribution', {
-        distributionId: inputs.distribution.distributionId,
-        domainName: inputs.distribution.distributionDomainName,
+        distributionId,
+        // `https://<domain>` -> `<domain>`; the invalidation itself needs only the id.
+        domainName: cdk.Fn.select(2, cdk.Fn.split('/', dashboardOrigin)),
       }),
       distributionPaths: [`/${RUNTIME_CONFIG_OBJECT_KEY}`],
     });
@@ -130,16 +137,22 @@ export class CitationAnalysisApiStack extends cdk.Stack {
 }
 
 /**
- * Each API Lambda as a function of this stack's environment, imported by ARN.
- * `sameEnvironment` lets CDK add the per-method invoke permissions here; the
- * routers with one wildcard permission (`DashboardRestApi`) are imported
- * without it and with `skipPermissions`, so CDK adds none for them.
+ * Each API Lambda, imported by the ARN its fixed name gives in this stack's
+ * account and region. `sameEnvironment` lets CDK add the per-method invoke
+ * permissions here; the routers with one wildcard permission
+ * (`DashboardRestApi`) are imported without it and with `skipPermissions`,
+ * so CDK adds none for them.
  */
-function importFunctions(scope: Construct, functions: DashboardApiFunctions): DashboardApiFunctions {
+function importFunctions(scope: cdk.Stack): DashboardApiFunctions {
   const imported = DASHBOARD_API_FUNCTION_KEYS.map((key) => {
     const wildcard = WILDCARD_PERMISSION_FUNCTION_KEYS.includes(key);
     return [key, lambda.Function.fromFunctionAttributes(scope, `${key}-Function`, {
-      functionArn: functions[key].functionArn,
+      functionArn: scope.formatArn({
+        service: 'lambda',
+        resource: 'function',
+        resourceName: DASHBOARD_API_FUNCTION_NAMES[key],
+        arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+      }),
       sameEnvironment: !wildcard,
       skipPermissions: wildcard,
     })] as const;
