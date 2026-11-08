@@ -157,6 +157,22 @@ class TestIsProviderEnabled:
         with patch.object(handler, 'dynamodb', mock_db):
             assert handler.is_provider_enabled('openai') is True
 
+    @pytest.mark.parametrize('item', [{}, {'Item': {'provider_id': 'google_ai_overview', 'consecutive_failures': 2}}])
+    def test_keeps_google_ai_overviews_off_until_an_admin_switches_it_on(self, mock_dynamodb, item):
+        """It bills a DataForSEO call per keyword and shares the SEO pages' login: saving that login must not start it."""
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = item
+
+        with patch.object(handler, 'dynamodb', mock_db):
+            assert handler.is_provider_enabled('google_ai_overview') is False
+
+    def test_runs_google_ai_overviews_once_switched_on(self, mock_dynamodb):
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {'Item': {'provider_id': 'google_ai_overview', 'enabled': True}}
+
+        with patch.object(handler, 'dynamodb', mock_db):
+            assert handler.is_provider_enabled('google_ai_overview') is True
+
     def test_returns_false_when_dynamodb_read_fails(self, mock_dynamodb):
         """Fails closed: a DynamoDB outage must not override a user disable.
 

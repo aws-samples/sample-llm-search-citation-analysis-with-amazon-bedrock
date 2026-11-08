@@ -119,6 +119,24 @@ class TestListing:
     def test_marks_overviews_unconfigured_when_dataforseo_has_no_credential(self, providers_api, aws):
         assert _listed(providers_api, 'google_ai_overview')['configured'] is False
 
+    def test_lists_overviews_off_until_an_admin_switches_it_on_even_with_the_login_saved(self, providers_api, aws):
+        _store_credential(aws)
+
+        assert _listed(providers_api, 'google_ai_overview')['enabled'] is False
+
+    def test_lists_overviews_off_when_its_row_holds_only_health_bookkeeping(self, providers_api, aws):
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'google_ai_overview', 'consecutive_failures': 0}}
+
+        assert _listed(providers_api, 'google_ai_overview')['enabled'] is False
+
+    def test_lists_overviews_on_once_switched_on(self, providers_api, aws):
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'google_ai_overview', 'enabled': True}}
+
+        assert _listed(providers_api, 'google_ai_overview')['enabled'] is True
+
+    def test_lists_a_provider_without_config_on_as_before(self, providers_api, aws):
+        assert _listed(providers_api, 'dataforseo')['enabled'] is True
+
     def test_keeps_secret_name_shared_by_both_entries(self, providers_api):
         names = {providers_api.PROVIDERS[provider_id]['secret_name'] for provider_id in ('dataforseo', 'google_ai_overview')}
 

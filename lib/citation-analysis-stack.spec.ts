@@ -960,9 +960,9 @@ describe('SearchAllProviders parallel search', () => {
     resolvePath(providerSearchBranch(synthesized.workflowScale.definition, providerId), ['States', stateName]);
   const searchTask = (providerId: string): unknown => branchState(providerId, `Search-${providerId}`);
 
-  it('fans out to one branch per provider', () => {
+  it('fans out to one branch per provider, the SEO stack\'s Google AI Overviews last', () => {
     expect(providerSearchBranchStarts(synthesized.workflowScale.definition))
-      .toStrictEqual(SEARCH_PROVIDER_IDS.map((id) => `Search-${id}`));
+      .toStrictEqual([...SEARCH_PROVIDER_IDS, 'google_ai_overview'].map((id) => `Search-${id}`));
   });
 
   it('keeps the branch outputs at provider_results and goes on to MergeProviderResults', () => {

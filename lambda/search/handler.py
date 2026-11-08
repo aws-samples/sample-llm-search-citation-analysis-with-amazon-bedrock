@@ -46,7 +46,7 @@ from shared.ai_clients import (
     PERPLEXITY_TIMEOUT_SECONDS,
     perplexity_agent_text,
 )
-from shared.config import PLAIN_KEYWORD_PROVIDERS, Provider
+from shared.config import PLAIN_KEYWORD_PROVIDERS, Provider, enabled_without_config
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_locations import UnsupportedMarketError, market_codes
@@ -198,10 +198,9 @@ def is_provider_enabled(provider_id: str) -> bool:
             type(e).__name__,
         )
         return False
-    if item:
-        return bool(item.get('enabled', True))
-    # No config row yet -> treat as enabled (first-run default)
-    return True
+    # No config row, or a row without the flag (health bookkeeping writes one): on, the first-run default,
+    # except a paid engine an Admin must switch on.
+    return bool((item or {}).get('enabled', enabled_without_config(provider_id)))
 
 # Cache for provider models, cleared at the start of every invocation. It used
 # to live for the whole warm container, so a model changed in Settings reached

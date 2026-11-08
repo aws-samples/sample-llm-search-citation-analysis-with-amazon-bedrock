@@ -53,12 +53,12 @@ interface SeoStackSnapshot {
   routerKeywordMetricsActions: string[];
   routerCacheActions: string[];
   mainResourceCount: number;
-  mainResourceCountWithSeoEngine: number;
-  /** SearchAllProviders branch start states without and with `-c seoEngine=true`. */
+  /** The main workflow's SearchAllProviders branch start states. */
   mainBranchStarts: unknown[];
-  mainBranchStartsWithSeoEngine: unknown[];
-  /** With `-c seoEngine=true`: each branch's `Search-<id>` task, keyed by the branch start state's provider id. */
-  mainSearchTasksWithSeoEngine: Record<string, unknown>;
+  /** Each branch's `Search-<id>` task, keyed by the branch start state's provider id. */
+  mainSearchTasks: Record<string, unknown>;
+  /** The Google AI Overviews branch's state that answers when its function is not deployed. */
+  aiOverviewNotDeployedState: unknown;
 }
 
 const ENV = { account: '123456789012', region: 'eu-west-1' };
@@ -137,20 +137,13 @@ function searchTasks(template: Template): Record<string, unknown> {
   }));
 }
 
-/** The main stack of a fresh app with the given CDK context. */
-function synthesizeMain(context: Record<string, string>): Template {
-  const app = new cdk.App({ context });
-  return Template.fromStack(new CitationAnalysisStack(app, 'MainStack', { env: ENV }));
-}
-
-/** Synthesize the SEO stack with its main stack, and the main stack again with `seoEngine=true`. */
+/** Synthesize the SEO stack with its main stack. */
 export function synthesizeSeoStackSnapshot(): SeoStackSnapshot {
   const app = new cdk.App();
   const main = new CitationAnalysisStack(app, 'MainStack', { env: ENV });
   const seoStack = new CitationAnalysisSeoStack(app, 'SeoStack', { env: ENV, inputs: main.seoInputs });
   const template = Template.fromStack(seoStack);
   const mainTemplate = Template.fromStack(main);
-  const mainWithSeoEngine = synthesizeMain({ seoEngine: 'true' });
   const methods = extractApiAuthSnapshots(template);
   const importValues = JSON.stringify(template.toJSON()).match(/"Fn::ImportValue":"[^"]+"/g) ?? [];
   return {
@@ -177,9 +170,11 @@ export function synthesizeSeoStackSnapshot(): SeoStackSnapshot {
     routerKeywordMetricsActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoKeywordMetrics'),
     routerCacheActions: mainTableActionsOfRole(template, SEO_ROUTER, 'CitationAnalysis-SeoCache'),
     mainResourceCount: resourceCount(mainTemplate),
-    mainResourceCountWithSeoEngine: resourceCount(mainWithSeoEngine),
     mainBranchStarts: branchStarts(mainTemplate),
-    mainBranchStartsWithSeoEngine: branchStarts(mainWithSeoEngine),
-    mainSearchTasksWithSeoEngine: searchTasks(mainWithSeoEngine),
+    mainSearchTasks: searchTasks(mainTemplate),
+    aiOverviewNotDeployedState: resolvePath(
+      providerSearchBranch(extractWorkflowScaleSnapshot(mainTemplate).definition, 'google_ai_overview'),
+      ['States', 'NotDeployed-google_ai_overview']
+    ),
   };
 }

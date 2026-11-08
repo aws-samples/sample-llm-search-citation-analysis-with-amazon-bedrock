@@ -9,6 +9,36 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.46.0] - 2026-11-08
+
+Google AI Overviews is part of every deployment. `npm run deploy` (`cdk deploy --all`) deploys the SEO stack and
+the engine's Lambda with the main stack, and the analysis workflow always has the engine's branch. The
+`-c seoEngine=true` flag and the second deploy it needed are gone. The engine is off until an Admin switches it on.
+
+### Upgrade notes
+
+- **Deploy every stack together** (`npm run deploy`). A `seoEngine` value in `cdk.json` or on the command line is
+  now ignored, and you can remove it.
+- **Google AI Overviews is off until an Admin switches it on** in Settings › AI Providers, even with the DataForSEO
+  login saved. A deployment that had switched it on keeps it on. **If you deployed with `-c seoEngine=true` and never
+  switched the engine on or off in Settings, it ran by default and now stops:** switch Google AI Overviews on in
+  Settings › AI Providers after upgrading to keep its answers. Its card shows it off until then.
+
+### Changed
+
+- `lib/constructs/provider-search.ts`: `EXTERNAL_SEARCH_PROVIDERS` (Google AI Overviews) replaces
+  `readExternalSearchProviders` and its CDK context flag. The `Search-google_ai_overview` branch catches
+  `Lambda.ResourceNotFoundException` into `NotDeployed-google_ai_overview`. That writes the failed provider row
+  with the error `CitationAnalysis-Search-google_ai_overview is not deployed`, so the run summary says why the
+  engine's answers are missing. Any other failure still becomes the usual failed row, and the branch still never
+  re-runs a billed call.
+- **Google AI Overviews defaults to off** (`OFF_UNTIL_ENABLED_PROVIDERS` in `lambda/shared/config.py`). Every
+  other provider with no saved setting still counts as on. The search Lambda and the Settings card read the same
+  default, also for a config row that holds only health bookkeeping. Before, saving the DataForSEO login for the SEO
+  pages would have started one billed call per keyword on every run (TENETS.md, tenet 7: paid is opt-in).
+- README (workflow, deploy order, setup, CDK context table), `docs/seo.md` (Setup) and the architecture diagram
+  no longer mention the flag.
+
 ## [2.45.2] - 2026-11-08
 
 ### Changed

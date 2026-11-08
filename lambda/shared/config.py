@@ -55,6 +55,16 @@ LLM_PROVIDERS: list[str] = [
 #: (``search/handler.py``): Google takes no persona wording.
 PLAIN_KEYWORD_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW})
 
+#: Answer engines that stay off until an Admin switches them on in Settings (a provider with no config row is
+#: otherwise on). Google AI Overviews bills one DataForSEO call per keyword and run, and it shares the DataForSEO
+#: login with the SEO pages, so saving that login must not start the spend (TENETS.md, tenet 7: paid is opt-in).
+OFF_UNTIL_ENABLED_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW})
+
+
+def enabled_without_config(provider_id: str) -> bool:
+    """Whether ``provider_id`` runs while it has no config row: every provider except the off-until-enabled ones."""
+    return provider_id not in OFF_UNTIL_ENABLED_PROVIDERS
+
 # List of search providers (for iteration)
 SEARCH_PROVIDERS: list[str] = [
     Provider.BRAVE,
