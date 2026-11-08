@@ -30,15 +30,19 @@ ZIZMOR_WHEEL_SHA256=58e878eb2dbd2c6183c105e1ac28c14f7dd1eca44a783f1fe2a69647d012
 BIN="$HOME/.local/bin"
 mkdir -p "$BIN"
 
-# Download a release asset and check it against its committed digest. Exit 1 when it cannot be fetched;
-# a digest mismatch exits the script (sha256sum under set -e).
+# Download a release asset and check it against its committed digest. Returns 1 only when the download failed
+# (the caller then falls back); a digest mismatch exits the whole script. The check is explicit because
+# callers use this function as an `if` condition, where `set -e` does not apply.
 release() {
   local url="$1" digest="$2" file="/tmp/${1##*/}"
   if ! curl -sSfL --retry 3 --retry-all-errors --retry-delay 10 -o "$file" "$url"; then
     printf 'install-ci-tools: release download failed: %s\n' "$url" >&2
     return 1
   fi
-  echo "${digest}  ${file}" | sha256sum --check --strict -
+  if ! echo "${digest}  ${file}" | sha256sum --check --strict - >&2; then
+    printf 'install-ci-tools: %s does not match its committed digest; refusing it and stopping\n' "$url" >&2
+    exit 1
+  fi
 }
 
 # The Go module proxy and checksum database verify the module; GOTOOLCHAIN=auto fetches the Go version the

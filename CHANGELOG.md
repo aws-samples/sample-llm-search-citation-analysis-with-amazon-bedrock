@@ -136,15 +136,6 @@ process.
     (`shared/seo_spend_limit.py`, 100 a UTC day, `SEO_PAID_REQUESTS_PER_DAY`); past it they answer 429 and make no
     DataForSEO call (tenet 4).
   - A snapshot schedule can be disabled after the SEO stack is gone; run-now refuses a body that is not a JSON object.
-- Dependencies: `jscpd` 5.4.2, `knip` 6.44.1 (root and dashboard), `@stryker-mutator/*` 10.1.1 (the npm group of
-  Dependabot #196, without `@vitest/eslint-plugin` 1.6.28, which wants TypeScript 6); the `minimatch` override is
-  `^11.0.1` in both packages (GHSA-g3hv-75wg-m249). The copy bundled inside `aws-cdk-lib` (10.2.6, also in its
-  latest release) cannot be overridden and stays until AWS CDK ships the fix. Knip 6.44 found the unused
-  `CitationsView` re-export in `components/Citations/index.ts`, now removed.
-- CI: the pinned gitleaks, actionlint and zizmor installs move to `scripts/install-ci-tools.sh`. Each still comes from
-  its GitHub release checked against a committed SHA-256; when the release download fails (GitHub answered 504 for
-  hours), the same version is installed from proxy.golang.org (verified by sum.golang.org) or from PyPI (a
-  hash-pinned wheel) instead of failing the lint lane.
   - Least privilege (tenet 6): the Google AI Overviews search role may only put and query answers on SearchResults
     and get and update its ProviderConfig row (no delete, no batch write). Every SEO feature table is granted per
     action; `DeleteItem` only where the code deletes (rank tracking: the run lock, a removed keyword).
@@ -159,6 +150,15 @@ process.
     of `TENETS.md`; moving them to AppSync Events is tracked in #208.
   - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
 
+- Dependencies: `jscpd` 5.4.2, `knip` 6.44.1 (root and dashboard), `@stryker-mutator/*` 10.1.1 (the npm group of
+  Dependabot #196, without `@vitest/eslint-plugin` 1.6.28, which wants TypeScript 6); the `minimatch` override is
+  `^11.0.1` in both packages (GHSA-g3hv-75wg-m249). The copy bundled inside `aws-cdk-lib` (10.2.6, also in its
+  latest release) cannot be overridden and stays until AWS CDK ships the fix. Knip 6.44 found the unused
+  `CitationsView` re-export in `components/Citations/index.ts`, now removed.
+- CI: the pinned gitleaks, actionlint and zizmor installs move to `scripts/install-ci-tools.sh`. Each still comes from
+  its GitHub release checked against a committed SHA-256; when the release download fails (GitHub answered 504 for
+  hours), the same version is installed from proxy.golang.org (verified by sum.golang.org) or from PyPI (a
+  hash-pinned wheel) instead of failing the lint lane.
 - `shared.bounded_reads.newest_items` is kept (2.41.0 removed it): the stored domain snapshots and the site-audit
   list read one newest-first page with it.
 - **GEO KPI corrections** ([docs/geo-corrections.md](docs/geo-corrections.md)): only the sources an answer cites
