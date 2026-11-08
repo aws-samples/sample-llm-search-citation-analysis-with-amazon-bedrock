@@ -43,10 +43,11 @@ const capped = (text, max) => (text.length > max ? `${text.slice(0, max)}\n[trun
 /** One entry per comment, review and inline comment that says something, oldest first. */
 export function entries(issueComments, reviews, reviewComments) {
   const all = [
+    // The reviewer's own comment is edited in place on every push, so its last edit dates it.
     ...issueComments.map((c) => ({
       ...c,
       kind: 'comment',
-      at: c.created_at 
+      at: isOwnReview(c) ? (c.updated_at ?? c.created_at) : c.created_at,
     })),
     ...reviews.map((r) => ({
       ...r,
@@ -64,22 +65,50 @@ export function entries(issueComments, reviews, reviewComments) {
     .sort((a, b) => String(a.at).localeCompare(String(b.at)))
 }
 
-/** The conversation as Markdown, newest entries kept when it is long; the reviewer's own last review always kept. */
+/**
+ * A body that cannot pose as an entry: every line is quoted (`> `), so only the generated `## ` headings start at the
+ * margin and only they carry an author and a role. A forged `## comment by owner (maintainer)` line in a comment stays
+ * inside its quote.
+ */
+export function quoted(body) {
+  return body.split('\n').map((line) => (line === '' ? '>' : `> ${line}`)).join('\n')
+}
+
+function block(entry) {
+  const body = isOwnReview(entry) ? entry.body.slice(MARKER.length) : entry.body
+  const heading = `## ${entry.kind} by ${entry.user?.login ?? 'unknown'} (${roleOf(entry)}), ${entry.at}`
+  return `${heading}\n\n${quoted(capped(body.trim(), MAX_ENTRY))}`
+}
+
+const byTime = (a, b) => String(a.at).localeCompare(String(b.at))
+
+/**
+ * The conversation as Markdown. When it is long, whole entries are dropped oldest first (never part of one) until it
+ * fits MAX_ENTRIES and MAX_TOTAL; the reviewer's own last review is always kept.
+ */
 export function conversationMarkdown(issueComments, reviews, reviewComments) {
   const list = entries(issueComments, reviews, reviewComments)
   if (list.length === 0) return 'No comments or reviews on this pull request yet.\n'
   const own = list.filter(isOwnReview).at(-1)
-  const others = list.filter((e) => !isOwnReview(e)).slice(-MAX_ENTRIES)
-  const kept = [...others, ...(own ? [own] : [])].sort((a, b) => String(a.at).localeCompare(String(b.at)))
-  const blocks = kept.map((e) => {
-    const body = isOwnReview(e) ? e.body.slice(MARKER.length) : e.body
-    return `## ${e.kind} by ${e.user?.login ?? 'unknown'} (${roleOf(e)}), ${e.at}\n\n${capped(body.trim(), MAX_ENTRY)}`
-  })
-  let text = blocks.join('\n\n')
-  if (text.length > MAX_TOTAL) text = `[older entries cut]\n\n${text.slice(-MAX_TOTAL)}`
+  const ownBlock = own ? block(own) : ''
+  let budget = MAX_TOTAL - ownBlock.length
+  const others = []
+  for (const entry of list.filter((e) => !isOwnReview(e)).reverse()) {
+    const text = block(entry)
+    if (others.length >= MAX_ENTRIES || text.length + 2 > budget) break
+    budget -= text.length + 2
+    others.push({
+      entry,
+      text 
+    })
+  }
+  const kept = [...others, ...(own ? [{
+    entry: own,
+    text: ownBlock 
+  }] : [])].sort((a, b) => byTime(a.entry, b.entry))
   const omitted = list.length - kept.length
   const note = omitted > 0 ? `(${omitted} older entries omitted)\n\n` : ''
-  return `${note}${text}\n`
+  return `${note}${kept.map((k) => k.text).join('\n\n')}\n`
 }
 
 function pages(path) {

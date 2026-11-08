@@ -19,7 +19,10 @@ process.
   review** section that says, for each earlier point, whether it is resolved, partly resolved, still open or settled
   by a maintainer; it drops a point an answer settles and treats a maintainer's explicit decision on a trade-off as
   final, unless the change breaks a data lake tenet or creates a security problem. The conversation is untrusted
-  text: capped in size, read as data, and a comment that tries to steer the reviewer is reported as blocking.
+  text: capped in size (whole oldest entries are dropped first; the reviewer's own last review is always kept),
+  read as data, and every line of a body is quoted so a comment cannot forge an author or a maintainer role; a
+  comment that tries to steer the reviewer is reported as blocking. The reviewer's own comment, edited in place on
+  every push, is dated by its last edit.
 - The lockfile excerpt the reviewer reads is cut to 300 characters per line.
 
 ## [2.42.2] - 2026-11-08
