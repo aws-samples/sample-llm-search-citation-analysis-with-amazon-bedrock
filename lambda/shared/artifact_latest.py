@@ -34,6 +34,7 @@ from typing import Any
 
 from shared import partial_kpi
 from shared.brand_names import FIRST_PARTY
+from shared.kpi_engine import engines_not_covered
 from shared.partial_contract import KeywordLatest, KeywordLatestRun, Partial
 from shared.snapshot_artifacts import ArtifactBuilder, SnapshotArtifacts, encode_snapshot_cursor
 from shared.view_builder import ViewBuilder, params_of
@@ -243,7 +244,11 @@ def _list_view(artifacts: SnapshotArtifacts, request: LatestParams, variant: str
 
 
 def serve_latest(artifacts: SnapshotArtifacts, request: LatestParams) -> dict[str, Any] | None:
-    """The visibility body (or one keyword, brand or source page) of ``request``; ``None`` when the build does not hold its variant."""
+    """The visibility body (or one keyword, brand or source page) of ``request``; ``None`` when the build does not hold its variant.
+
+    The body names the AI engines a persona's figures cannot cover (``engines_not_covered``): the plain-keyword
+    engines, asked only under the default prompt.
+    """
     variant = variant_of(request.persona, request.branded)
     if request.view in LIST_VIEWS:
         return _list_view(artifacts, request, variant)
@@ -267,6 +272,7 @@ def serve_latest(artifacts: SnapshotArtifacts, request: LatestParams) -> dict[st
         'brands_total': brands_total,
         'brands_next_token': encode_snapshot_cursor(BRANDS_LIMIT, brands_total, artifacts.build_id),
         **{name: view[name] for name in ('engines', 'sources', 'sources_total')},
+        'engines_not_covered': engines_not_covered(request.persona),
         'sources_next_token': encode_snapshot_cursor(SOURCES_LIMIT, view['sources_total'], artifacts.build_id),
         'keywords': listing['keywords'],
         'keywords_total': len(rows),

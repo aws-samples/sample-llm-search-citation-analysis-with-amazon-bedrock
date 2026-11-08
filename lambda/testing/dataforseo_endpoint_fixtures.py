@@ -1,16 +1,20 @@
 """DataForSEO endpoint test doubles: market codes, task results, wire items and a recording ``post_live``.
 
-Tests of ``shared.dataforseo_keywords`` / ``shared.dataforseo_serp`` patch
-``shared.dataforseo_client.post_live`` (and ``escape_keyword``) with these, so they never depend on
+Tests of ``shared.dataforseo_keywords`` / ``shared.dataforseo_serp`` and the Google AI Overviews client
+(``search/google_ai_overview.py``) patch ``shared.dataforseo_client.post_live`` (and ``escape_keyword``) with these, so they never depend on
 the client's real transport or status ladder. Domains are fictional (``example.com`` family).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import patch
 
+import pytest
+
+from shared import dataforseo_client
 from shared.dataforseo_client import DataForSeoError, TaskResult
 from shared.dataforseo_locations import MarketCodes
 
@@ -106,6 +110,17 @@ def ai_overview_item(markdown: str | None, references: list[Any] | None = None,
     }
 
 
+#: An overview citing two references (one nested) and carrying a link that is not a citation.
+TRACKER_OVERVIEW = ai_overview_item(
+    'Use Example Tracker.[[1]](https://tracker.example.com/blog)',
+    references=[{'url': 'https://tracker.example.com/blog', 'title': 'Tracker blog'}],
+    sub_items=[{
+        'references': [{'url': 'https://analytics.example.org/docs'}],
+        'links': [{'url': 'https://code.example.net/repo'}],
+    }],
+)
+
+
 def serp_result(items: list[Any], **overrides: Any) -> dict[str, Any]:
     """``task.result[0]`` of an organic live/advanced call."""
     result: dict[str, Any] = {
@@ -161,3 +176,18 @@ class FakePostLive:
     def task_for(self, path: str) -> dict[str, Any]:
         """The task body of the first call to ``path``."""
         return next(call.task for call in self.calls if call.path == path)
+
+
+def recording_post_live_fixture():
+    """A fixture yielding a ``FakePostLive`` in place of ``post_live``, with the documented ``escape_keyword`` rule.
+
+    Assign it to a module attribute (``fake = recording_post_live_fixture()``); pytest registers it under that name.
+    """
+    @pytest.fixture
+    def _recording_post_live() -> Iterator[FakePostLive]:
+        post_live = FakePostLive()
+        with patch.object(dataforseo_client, 'post_live', post_live), \
+                patch.object(dataforseo_client, 'escape_keyword', escape_keyword_fake):
+            yield post_live
+
+    return _recording_post_live

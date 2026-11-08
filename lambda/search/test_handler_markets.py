@@ -414,6 +414,19 @@ class TestRawResponseKey:
         assert (document['query_prompt_id'], document['market_id']) == ('p1', 'cl-es')
 
 
+class TestQueryLineage:
+    def test_records_the_query_sent_on_the_row(self, storage):
+        storage.store({**_llm_result(), 'query': 'As a family, flights to Lima'})
+
+        assert _stored_rows(storage)[0]['query'] == 'As a family, flights to Lima'
+
+    def test_records_the_query_sent_in_the_raw_document(self, storage):
+        storage.store({**_llm_result(), 'query': 'As a family, flights to Lima'})
+
+        document = json.loads(storage.s3.put_object.call_args.kwargs['Body'])
+        assert document['extracted']['query'] == 'As a family, flights to Lima'
+
+
 class TestBrandedRows:
     def test_marks_an_answer_to_a_query_naming_a_first_party_brand_branded_with_its_matcher_version(self, storage):
         storage.store({**_llm_result(), 'query': 'Is Altiplano a good airline?'})

@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Any
 
 
@@ -54,9 +55,41 @@ LLM_PROVIDERS: list[str] = [
     Provider.GOOGLE_AI_OVERVIEW,
 ]
 
-#: Answer engines a run asks the plain keyword once per keyword, whatever the personas
-#: (``search/handler.py``): Google takes no persona wording.
-PLAIN_KEYWORD_PROVIDERS: frozenset[str] = frozenset({Provider.GOOGLE_AI_OVERVIEW})
+@dataclass(frozen=True)
+class ProviderDefinition:
+    """What the code, not configuration, fixes about one provider.
+
+    Read-only: no API route, MCP tool or ProviderConfig row changes it. ``GET /providers`` shows it.
+    """
+
+    asks_plain_keyword: bool = False
+    """Asked the plain keyword once per keyword and run, whatever the personas, and its answer filed under the
+    default (unpersonalised) prompt. Changing it would change what past and future answers measure, so it is set
+    here only. Each answer row still records the query it was sent (``query``)."""
+
+
+#: Every provider's definition. Google AI Overviews takes no persona wording: a long persona prompt rarely
+#: triggers an overview.
+PROVIDER_DEFINITIONS: Mapping[str, ProviderDefinition] = MappingProxyType({
+    Provider.OPENAI: ProviderDefinition(),
+    Provider.PERPLEXITY: ProviderDefinition(),
+    Provider.GEMINI: ProviderDefinition(),
+    Provider.CLAUDE: ProviderDefinition(),
+    Provider.GOOGLE_AI_OVERVIEW: ProviderDefinition(asks_plain_keyword=True),
+    Provider.BRAVE: ProviderDefinition(),
+    Provider.TAVILY: ProviderDefinition(),
+    Provider.EXA: ProviderDefinition(),
+    Provider.SERPAPI: ProviderDefinition(),
+    Provider.FIRECRAWL: ProviderDefinition(),
+    Provider.AGENTCORE: ProviderDefinition(),
+})
+
+
+def asks_plain_keyword(provider_id: str) -> bool:
+    """Whether ``provider_id`` is asked the plain keyword once per keyword and run (an unknown id: no)."""
+    definition = PROVIDER_DEFINITIONS.get(provider_id)
+    return definition is not None and definition.asks_plain_keyword
+
 
 #: Answer engines that stay off until an Admin switches them on in Settings (a provider with no config row is
 #: otherwise on). Google AI Overviews bills one DataForSEO call per keyword and run, and it shares the DataForSEO

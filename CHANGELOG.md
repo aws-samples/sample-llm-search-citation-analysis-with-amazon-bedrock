@@ -9,6 +9,50 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.50.0] - 2026-11-09
+
+Google AI Overviews sits behind the provider contract: the search handler reads a provider field instead of
+checking provider names, and the engine's client moved next to the other search clients (#211).
+
+### Changed
+
+- **`asks_plain_keyword` provider field** (`ProviderDefinition` and `PROVIDER_DEFINITIONS` in
+  `lambda/shared/config.py`). It replaces the `PLAIN_KEYWORD_PROVIDERS` constant and the MCP copy of it,
+  `PLAIN_KEYWORD_ENGINES`. The search handler, the live-or-snapshot row estimate (`lambda/shared/scope_source.py`)
+  and the MCP run estimate (`lambda/mcp/spend.py`) read it. Google AI Overviews is the only provider with it set,
+  so runs ask the same queries as before.
+  - The field is set in code and is read-only. `GET /api/providers` lists it on every provider, and
+    `PUT /api/providers/{id}` answers 400 when the body carries it. A ProviderConfig row cannot override it, and
+    MCP has no provider write tool.
+- **`lambda/search/handler.py` checks no provider name.** A provider with `asks_plain_keyword` is asked once per
+  keyword and run under the default prompt. Search results are stored on any row whose client returned them,
+  instead of on search providers plus a named exception for Google AI Overviews.
+  `lambda/search/test_handler_provider_contract.py` fails if the handler compares anything with a provider id.
+- **The Google AI Overviews client lives in `lambda/search/`.** `lambda/search/google_ai_overview.py` holds the
+  DataForSEO call (from `lambda/shared/dataforseo_serp.py`) and the provider result (from the handler).
+  `lambda/search/ai_overview_answer.py` holds the answer and citation reading (was
+  `lambda/shared/dataforseo_ai_overview.py`). `lambda/shared/dataforseo_serp.py` keeps the SEO pages' organic SERP
+  panel. Both stacks package the whole `lambda/search/` directory, so `CitationAnalysis-Search-google_ai_overview`
+  in the SEO stack runs the same code. The shared error row moved to `lambda/search/provider_result.py`.
+
+### Added
+
+- **Every answer row records the query it was sent** (`query` on the SearchResults row and in the raw response's
+  `extracted` block). Each client reports what it sent: the persona's wording for the AI engines, the plain keyword
+  for Google AI Overviews and for the web-search providers, which take no persona template. Whether the row is
+  `branded` is decided from that stored value. Rows written before 2.50.0 have no `query`.
+- **Persona-filtered visibility names the engines it cannot cover.** `/api/visibility` with a `query_prompt_id`
+  other than `default` returns `engines_not_covered: ["google_ai_overview"]`. The engine was already absent from
+  that figure's engine count, engine coverage and per-engine rows, because its answers are filed under the default
+  prompt. The field says why, so the absence does not read as zero coverage. It is empty for every other request
+  (`engines_not_covered` in `lambda/shared/kpi_engine.py`).
+
+### Documentation
+
+- `docs/kpi-definitions.md` "Conventions" describes plain-keyword engines, the stored `query`, and how persona
+  figures treat plain-keyword engines. TENETS.md, tenet 5 row, now lists the provider-specific code still outside
+  `lambda/search/`.
+
 ## [2.49.0] - 2026-11-09
 
 An export that meets a view job still computing resumes on the job's `view-job.finished` event instead of waiting

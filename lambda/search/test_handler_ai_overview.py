@@ -1,6 +1,7 @@
-"""Google AI Overviews as an answer engine in the search handler, and the SearchResults rows it writes.
+"""Google AI Overviews as an answer engine: its client's provider result (``google_ai_overview``), and how the
+search handler asks it and stores its SearchResults rows.
 
-DataForSEO is never called: ``ai_overview_search`` is replaced on the handler module.
+DataForSEO is never called: ``ai_overview_search`` is replaced on the client module.
 """
 
 from __future__ import annotations
@@ -9,11 +10,13 @@ import os
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
+import google_ai_overview
 import pytest
+from google_ai_overview import AiOverviewResult
 
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_locations import GLOBAL_MARKET_CODES
-from shared.dataforseo_serp import AiOverviewResult, OrganicItem
+from shared.dataforseo_serp import OrganicItem
 from shared.markets import Market
 from shared.provider_health import INVALID_KEY, classify_provider_error
 from testing.handler_fixtures import handler_fixture
@@ -70,7 +73,7 @@ def overview(search_handler):
         patch.object(search_handler, '_record_provider_outcome'),
         patch.object(search_handler, 'stored_slim_results', return_value={}),
         patch.object(search_handler, 'store_search_results', return_value=True) as store,
-        patch.object(search_handler, 'ai_overview_search', return_value=_ANSWERED) as search,
+        patch.object(google_ai_overview, 'ai_overview_search', return_value=_ANSWERED) as search,
     ):
         yield MagicMock(search=search, store=store)
 
@@ -79,26 +82,26 @@ class TestRunner:
     def test_returns_no_answer_row_with_empty_response_when_page_has_no_overview(self, search_handler, overview):
         overview.search.return_value = _NO_OVERVIEW
 
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert (result['status'], result['response'], result['citations']) == ('no_answer', '', [])
 
     def test_keeps_organic_top_ten_on_no_answer_row(self, search_handler, overview):
         overview.search.return_value = _NO_OVERVIEW
 
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert [hit['url'] for hit in result['search_results']] == ['https://example.com/riazor', 'https://example.org/guide']
 
     def test_returns_overview_text_and_cited_urls_when_overview_shown(self, search_handler, overview):
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert (result['status'], result['response'], result['citations']) == (
             'success', 'Stay at Example Air Hotel.', ['https://example.com/riazor'],
         )
 
     def test_stores_organic_hits_in_search_results_shape_when_overview_shown(self, search_handler, overview):
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert result['search_results'][0] == {
             'url': 'https://example.com/riazor', 'title': 'Riazor rooms', 'snippet': 'Sea view rooms',
@@ -106,43 +109,43 @@ class TestRunner:
         }
 
     def test_keeps_dataforseos_result_as_returned_for_the_raw_object_and_the_markdown_beside_it(self, search_handler, overview):
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert (result['raw_response'], result['answer_markdown']) == (
             {'dataforseo_result': _RAW_RESULT}, 'Stay at Example Air Hotel.[[1]](https://example.com/riazor)',
         )
 
     def test_labels_row_as_llm_answer_engine(self, search_handler, overview):
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert (result['provider'], result['provider_type']) == ('google_ai_overview', 'llm')
 
     def test_asks_global_market_as_united_states_english_when_no_market(self, search_handler, overview):
-        search_handler.query_google_ai_overview(_KEYWORD)
+        google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         overview.search.assert_called_once_with(_KEYWORD, GLOBAL_MARKET_CODES)
 
     def test_makes_no_call_when_market_is_unsupported(self, search_handler, overview):
-        search_handler.query_google_ai_overview(_KEYWORD, _UNSERVED_MARKET)
+        google_ai_overview.query_google_ai_overview(_KEYWORD, _UNSERVED_MARKET)
 
         overview.search.assert_not_called()
 
     def test_returns_unsupported_market_error_row_when_market_is_unsupported(self, search_handler, overview):
-        result = search_handler.query_google_ai_overview(_KEYWORD, _UNSERVED_MARKET)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD, _UNSERVED_MARKET)
 
         assert (result['status'], result['error_category']) == ('error', 'unsupported_market')
 
     def test_keeps_dataforseo_error_code_when_call_fails(self, search_handler, overview):
         overview.search.side_effect = DataForSeoError('AUTH_FAILED', 'DataForSEO HTTP 401', provider_status=401)
 
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert (result['status'], result['error_code']) == ('error', 'AUTH_FAILED')
 
     def test_keeps_billed_cost_when_failed_call_was_charged(self, search_handler, overview):
         overview.search.side_effect = DataForSeoError('INTERNAL_ERROR', 'Invalid Field', cost_usd=0.004)
 
-        result = search_handler.query_google_ai_overview(_KEYWORD)
+        result = google_ai_overview.query_google_ai_overview(_KEYWORD)
 
         assert result['metadata']['cost_usd'] == 0.004
 
@@ -168,6 +171,29 @@ class TestOncePerKeyword:
             ('brave', 'p1'), ('brave', 'p2'), ('google_ai_overview', 'default'),
         ]
 
+    def test_records_the_plain_keyword_as_the_query_sent_when_run_has_personas(self, search_handler, overview):
+        search_handler.handler(dict(_PERSONA_EVENT), None)
+
+        stored = overview.store.call_args.args[2]
+        assert [result['query'] for result in stored] == [_KEYWORD]
+
+    def test_asks_any_provider_defined_to_ask_the_plain_keyword_once_under_the_default_prompt(self, search_handler, overview):
+        event = {**_PERSONA_EVENT, 'providers': ['brave']}
+        brave_row = {'provider': 'brave', 'provider_type': 'search', 'response': '', 'status': 'success', 'citations': []}
+        with (
+            patch.object(search_handler, 'asks_plain_keyword', side_effect=lambda provider: provider == 'brave'),
+            patch.object(search_handler.BraveSearchClient, 'search', side_effect=lambda *_args: dict(brave_row)) as search,
+        ):
+            response = search_handler.handler(event, None)
+
+        assert (search.call_count, [row['query_prompt_id'] for row in response['results']]) == (1, ['default'])
+
+    def test_asks_overviews_once_per_persona_when_its_definition_says_so(self, search_handler, overview):
+        with patch.object(search_handler, 'asks_plain_keyword', return_value=False):
+            search_handler.handler(dict(_PERSONA_EVENT), None)
+
+        assert overview.search.call_count == 2
+
     def test_reads_dataforseo_login_secret_when_overviews_selected(self, search_handler, overview):
         search_handler.execute_all_providers(_KEYWORD, providers=['google_ai_overview'])
 
@@ -179,6 +205,14 @@ class TestOncePerKeyword:
             response = search_handler.handler(dict(_PERSONA_EVENT), None)
 
         assert (response['results'], overview.search.call_count) == (list(stored.values()), 0)
+
+
+class TestRunnerQuery:
+    def test_records_the_query_it_sent_on_an_answered_row(self, search_handler, overview):
+        assert google_ai_overview.query_google_ai_overview(_KEYWORD)['query'] == _KEYWORD
+
+    def test_records_the_query_it_would_have_sent_on_an_unsupported_market_row(self, search_handler, overview):
+        assert google_ai_overview.query_google_ai_overview(_KEYWORD, _UNSERVED_MARKET)['query'] == _KEYWORD
 
 
 class TestBrandsAndStorage:
@@ -200,7 +234,7 @@ class TestBrandsAndStorage:
         assert brands == found
 
     def test_writes_organic_results_on_stored_row_when_page_has_no_overview(self, search_handler):
-        result = {**search_handler._aio_result(_NO_OVERVIEW), 'query_prompt_id': 'default'}
+        result = {**google_ai_overview.aio_result(_NO_OVERVIEW, _KEYWORD), 'query_prompt_id': 'default'}
 
         item = search_handler._result_item(_KEYWORD, '2026-10-02T10:00:00Z', result, {}, 'global', None)
 
@@ -246,6 +280,6 @@ def test_lists_overviews_after_claude_in_runner_registry(search_handler):
 def test_trims_organic_results_to_ten_when_page_has_more(search_handler):
     many = tuple(replace(_ORGANIC[0], position=index) for index in range(1, 13))
 
-    result = search_handler._aio_result(replace(_NO_OVERVIEW, organic=many))
+    result = google_ai_overview.aio_result(replace(_NO_OVERVIEW, organic=many), _KEYWORD)
 
     assert [hit['position'] for hit in result['search_results']] == list(range(1, 11))

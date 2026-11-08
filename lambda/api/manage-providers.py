@@ -36,6 +36,7 @@ from shared.auth import ADMIN_GROUP, get_caller_identity, require_group
 from shared.config import (
     SEO_DAILY_CALL_LIMIT_ATTRIBUTE,
     SEO_DAILY_CALL_LIMIT_MAX,
+    asks_plain_keyword,
     enabled_without_config,
     seo_daily_call_limit,
 )
@@ -1025,6 +1026,8 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             **_model_fields(provider_id, config),
             'docs_url': info['docs_url'],
             'type': info.get('type', PROVIDER_TYPE_LLM),
+            # Read-only: set in code (shared.config.PROVIDER_DEFINITIONS); PUT refuses it.
+            'asks_plain_keyword': asks_plain_keyword(provider_id),
             **{field: info[field] for field in _PASSTHROUGH_FIELDS if field in info},
             **_key_state_fields(provider_id, config, secret_status),
             **_limit_fields(provider_id, config),
@@ -1081,6 +1084,10 @@ def _key_refusal(provider_id: str) -> str | None:
     return None
 
 
+#: The provider definition field ``GET /providers`` shows and no update may set (``shared.config.ProviderDefinition``).
+READ_ONLY_FIELD = 'asks_plain_keyword'
+
+
 @dataclass
 class _ProviderUpdate:
     """What one PUT /providers/{id} changes, read from the body before anything is proven or written."""
@@ -1102,6 +1109,9 @@ class _ProviderUpdate:
 def _parse_update(provider_id: str, body: dict, event: dict) -> _ProviderUpdate | dict:
     """The update ``body`` asks for, or the 400 for the first malformed field."""
     update = _ProviderUpdate(provider_id, validate=bool(body.get('validate', True)))
+    if READ_ONLY_FIELD in body:
+        # What a provider is asked is fixed in code: changing it would change what past and future answers measure.
+        return validation_error(f'{READ_ONLY_FIELD} is set in code and cannot be changed', event, READ_ONLY_FIELD)
     if body.get('api_key'):
         refusal = _key_refusal(provider_id)
         if refusal:

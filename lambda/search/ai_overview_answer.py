@@ -1,5 +1,7 @@
 """Google AI Overview evidence from a DataForSEO organic SERP result: answer text and cited URLs.
 
+Part of the Google AI Overviews client (``google_ai_overview``), next to the other search clients.
+
 The AI Overview of one Google organic results page: its markdown, the plain prose brand extraction
 reads (citation pills removed), and the cited reference URLs. The overview is the FIRST ``items[]``
 element with ``type == 'ai_overview'``; citations are its top-level ``references`` then every

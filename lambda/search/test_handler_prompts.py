@@ -352,6 +352,18 @@ class TestQueryTemplateSubstitution:
         call_args = openai_client.responses_with_web_search.call_args
         assert call_args.kwargs.get('query') == 'As a family traveler, find me hotels in malaga'
 
+    def test_records_the_persona_wording_it_sent_on_the_result(self, openai_client):
+        result = handler.query_openai('hotels in malaga', 'key', query_template='As a family traveler, find me {keyword}')
+
+        assert result['query'] == 'As a family traveler, find me hotels in malaga'
+
+    def test_records_the_query_it_sent_on_an_error_result(self, openai_client):
+        openai_client.responses_with_web_search.side_effect = RuntimeError('boom')
+
+        result = handler.query_openai('hotels in malaga', 'key', query_template='For a family, {keyword}')
+
+        assert (result['status'], result['query']) == ('error', 'For a family, hotels in malaga')
+
     def test_openai_default_query_without_template(self, openai_client):
         """query_openai sends the bare keyword when no template is provided.
 

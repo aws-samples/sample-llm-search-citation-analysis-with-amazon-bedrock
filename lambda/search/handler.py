@@ -16,7 +16,10 @@ from typing import Any, NamedTuple
 import boto3
 from boto3.dynamodb.conditions import Key
 from branded_query import BRANDED_MATCHER_VERSION, branded_query_matcher_for
+from google_ai_overview import CALL_WORST_CASE_SECONDS as AIO_CALL_WORST_CASE_SECONDS
+from google_ai_overview import query_google_ai_overview
 from perplexity_sources import perplexity_sources
+from provider_result import ProviderResult, provider_error_result
 
 # Import lightweight API clients
 from api_clients import (
@@ -46,11 +49,9 @@ from shared.ai_clients import (
     PERPLEXITY_TIMEOUT_SECONDS,
     perplexity_agent_text,
 )
-from shared.config import PLAIN_KEYWORD_PROVIDERS, Provider, enabled_without_config
+from shared.config import Provider, asks_plain_keyword, enabled_without_config
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dataforseo_client import DataForSeoError
-from shared.dataforseo_locations import UnsupportedMarketError, market_codes
-from shared.dataforseo_serp import AIO_MODEL, AIO_TIMEOUT_SECONDS, AiOverviewResult, OrganicItem, ai_overview_search
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
 from shared.kpi_engine import NO_ANSWER
@@ -266,23 +267,6 @@ CLAUDE_CITATION_SYSTEM_PROMPT = (
 SLOW_ENGINE_MAX_ATTEMPTS = 3
 
 
-ProviderResult = dict[str, Any]
-"""One provider's answer to one query: ``provider``, ``response``, ``citations``, ``status``, ``metadata``, ..."""
-
-
-def provider_error_result(provider: str, model: str, error: Exception, start_time: float) -> ProviderResult:
-    """The uniform error-result dict every query_* previously duplicated."""
-    return {
-        "provider": provider,
-        "response": "",
-        "citations": [],
-        "status": "error",
-        "error": str(error),
-        "raw_response": None,
-        "metadata": {"model": model, "latency_ms": int((time.time() - start_time) * 1000)}
-    }
-
-
 def _merge_citations(citations: list[str], extra: Iterable[str]) -> list[str]:
     """Append the URLs in ``extra`` that ``citations`` does not already hold, keeping order."""
     for citation in extra:
@@ -341,13 +325,14 @@ def _query_llm(
     a brand from, and counting it would lower every rate.
     """
     start_time = time.time()
+    query = build_provider_query(keyword, query_template)
     try:
-        raw_response = request(build_provider_query(keyword, query_template))
+        raw_response = request(query)
         latency_ms = int((time.time() - start_time) * 1000)
         parsed = parse(raw_response)
     except Exception as e:
         logger.exception('%s error', provider)
-        return provider_error_result(provider, model, e, start_time)
+        return {**provider_error_result(provider, model, e, start_time), "query": query}
 
     status = "success" if parsed.text.strip() else NO_ANSWER
     logger.info(
@@ -356,6 +341,7 @@ def _query_llm(
     )
     return {
         "provider": provider,
+        "query": query,
         "response": parsed.text,
         "citations": parsed.citations,
         "retrieved_urls": parsed.retrieved_urls,
@@ -614,97 +600,18 @@ def query_claude(
     )
 
 
-# --- Google AI Overviews (DataForSEO SERP) ------------------------------------
-
-#: The organic results kept on an AI Overviews row (the SERP is fetched at depth 10).
-AIO_ORGANIC_LIMIT = 10
-
-#: ``error_category`` of a market DataForSEO cannot localise: nothing was sent, nothing billed.
-UNSUPPORTED_MARKET = 'unsupported_market'
-
-#: ``PLAIN_KEYWORD_PROVIDERS`` (``shared.config``) are asked the plain keyword once per keyword and run:
-#: a long persona prompt rarely triggers an overview. Their single row carries the
-#: unpersonalised prompt (``DEFAULT_QUERY_PROMPT``) even when the run has personas.
-
-#: The prompt of an unpersonalised query (also the run's only prompt when it has no personas).
+#: The prompt of an unpersonalised query: the run's only prompt when it has no personas, and the one every
+#: provider that ``asks_plain_keyword`` (``shared.config.ProviderDefinition``) is asked under, once per keyword
+#: and run, even when the run has personas.
 DEFAULT_QUERY_PROMPT: dict[str, Any] = {"id": "default", "name": "Default", "template": None}
-
-
-def _aio_search_result(item: OrganicItem) -> dict[str, Any]:
-    """One organic result as an entry of a SearchResults row's ``search_results``."""
-    return {
-        "url": item.url,
-        "title": item.title,
-        "snippet": item.description,
-        "position": item.position,
-        "domain": item.domain,
-        "rank_absolute": item.rank_absolute,
-        "source": Provider.GOOGLE_AI_OVERVIEW,
-    }
-
-
-def _aio_result(overview: AiOverviewResult) -> ProviderResult:
-    """The row of an answered (``success``) or overview-less (``no_answer``) results page."""
-    organic = [_aio_search_result(item) for item in overview.organic[:AIO_ORGANIC_LIMIT]]
-    return {
-        "provider": Provider.GOOGLE_AI_OVERVIEW,
-        "provider_type": "llm",
-        "response": overview.answer_text,
-        "citations": list(overview.citations),
-        "status": overview.status,
-        "search_results": organic,
-        # Bronze: DataForSEO's task result as returned (D2), so the overview's references can be read again (D3).
-        # The rendered markdown is kept beside it; the row's `response` is the plain prose brands are read from.
-        "raw_response": {"dataforseo_result": overview.raw_result},
-        "answer_markdown": overview.answer_markdown,
-        "metadata": overview.metadata,
-    }
-
-
-def _aio_error(error: Exception, start_time: float, **fields: Any) -> ProviderResult:
-    """The error row of a failed AI Overviews call, with ``fields`` (``error_code``, ``error_category``) added."""
-    result = provider_error_result(Provider.GOOGLE_AI_OVERVIEW, AIO_MODEL, error, start_time)
-    result["provider_type"] = "llm"
-    return {**result, **fields}
-
-
-def query_google_ai_overview(keyword: str, market: Market | None = None) -> ProviderResult:
-    """The AI Overview Google shows for the plain ``keyword`` in ``market``.
-
-    A market DataForSEO cannot localise is an error row with ``error_category``
-    ``unsupported_market`` and no call. A DataForSEO failure keeps its
-    ``DataForSeoError.code`` as ``error_code`` (provider health maps it) and
-    any billed cost in ``metadata.cost_usd``.
-    """
-    start_time = time.time()
-    try:
-        codes = market_codes(market)
-    except UnsupportedMarketError as error:
-        logger.info('Google AI Overviews skipped: %s', error)
-        return _aio_error(error, start_time, error_category=UNSUPPORTED_MARKET)
-    try:
-        overview = ai_overview_search(keyword, codes)
-    except DataForSeoError as error:
-        logger.warning('Google AI Overviews failed: %s %s', error.code, error.provider_status)
-        result = _aio_error(error, start_time, error_code=error.code)
-        if error.cost_usd:
-            result["metadata"]["cost_usd"] = error.cost_usd
-        return result
-    except Exception as error:
-        logger.exception('Google AI Overviews error')
-        return _aio_error(error, start_time)
-    logger.info(
-        "Google AI Overviews: %s with %s citations for '%s'", overview.status, len(overview.citations), keyword,
-    )
-    return _aio_result(overview)
 
 
 def _run_google_ai_overview_provider(
     keyword: str, api_key: str, query_template: str | None, market: Market | None,
 ) -> ProviderResult:
-    """Google AI Overviews for the plain keyword (no persona template); the DataForSEO
-    client reads the ``dataforseo-key`` login itself, so ``api_key`` only proves it is set."""
-    return query_google_ai_overview(keyword, market)
+    """Google AI Overviews (``google_ai_overview``); the DataForSEO client reads the ``dataforseo-key`` login
+    itself, so ``api_key`` only proves it is set. Asked under ``DEFAULT_QUERY_PROMPT``, so the query is the keyword."""
+    return query_google_ai_overview(build_provider_query(keyword, query_template), market)
 
 
 def _run_openai_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
@@ -745,7 +652,7 @@ ProviderRunner = Callable[[str, str, str | None, Market | None], ProviderResult]
 def _search_provider_runner(client_class: type) -> ProviderRunner:
     """Search providers share one shape: build the client, search the keyword (they take no template)."""
     def run(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
-        return client_class(api_key).search(keyword, market)
+        return {**client_class(api_key).search(keyword, market), "query": keyword}
     return run
 
 
@@ -793,8 +700,7 @@ PROVIDER_CALL_WORST_CASE_SECONDS: dict[str, float] = {
     # The submit's attempts, then the Search Archive polled until its own deadline.
     Provider.SERPAPI: SERPAPI_REQUEST_ATTEMPTS * SERPAPI_REQUEST_TIMEOUT_SECONDS + SERPAPI_POLL_DEADLINE_SECONDS
     + RETRY_BACKOFF_SECONDS,
-    # One live SERP call, never re-sent (billed): its own timeout.
-    Provider.GOOGLE_AI_OVERVIEW: AIO_TIMEOUT_SECONDS,
+    Provider.GOOGLE_AI_OVERVIEW: AIO_CALL_WORST_CASE_SECONDS,
     **{
         client.provider_id: DEFAULT_MAX_RETRIES * client.timeout + RETRY_BACKOFF_SECONDS
         for client in (BraveSearchClient, TavilySearchClient, ExaSearchClient, FirecrawlSearchClient, AgentCoreSearchClient)
@@ -970,6 +876,8 @@ def _result_item(
         "provider_type": provider_type,
         "query_prompt_id": query_prompt_id,
         "query_prompt_name": result.get("query_prompt_name", "Default"),
+        # What was sent (lineage reads it here, never from the provider's current definition).
+        "query": str(result.get("query") or keyword),
         "market_id": market_id,
         "response": result.get("response", ""),
         "citations": result.get("citations", []),
@@ -977,13 +885,13 @@ def _result_item(
         "brands": brand_data.get("brands", []),
         "brand_count": brand_data.get("brand_count", 0),
     }
-    # Add search results for search providers and the AI Overviews organic top 10
-    # (convert floats to Decimal for DynamoDB)
-    if (provider_type == "search" or provider in PLAIN_KEYWORD_PROVIDERS) and result.get("search_results"):
+    # The search results a client returned (search providers, the AI Overviews organic top 10);
+    # floats become Decimal for DynamoDB.
+    if result.get("search_results"):
         item["search_results"] = convert_floats_to_decimal(result.get("search_results", []))
     if provider_type == "llm":
         item["retrieved_urls"] = list(result.get("retrieved_urls") or [])
-        item["branded"] = bool(is_branded and is_branded(str(result.get("query") or keyword)))
+        item["branded"] = bool(is_branded and is_branded(item["query"]))
         item["branded_version"] = BRANDED_MATCHER_VERSION
         item["citations_version"] = CITATIONS_VERSION
     if s3_uri:
@@ -1006,6 +914,7 @@ def _store_raw_result(
     if not raw_response:
         return None
     extracted_data = {
+        "query": str(result.get("query") or keyword),
         "response_text": result.get("response", ""),
         "citations": result.get("citations", []),
         "retrieved_urls": result.get("retrieved_urls", []),
@@ -1139,8 +1048,9 @@ def _run_prompt(
     for result in results:
         result['query_prompt_id'] = prompt_id
         result['query_prompt_name'] = prompt_name
-        # The string the engines were asked: what decides whether the row is branded.
-        result['query'] = build_provider_query(keyword, prompt.get('template'))
+        # The string the provider was sent, as its client reported it (D2, D4): stored on the row, and what
+        # decides whether the row is branded. A client that reports none was sent the prompt's wording.
+        result.setdefault('query', build_provider_query(keyword, prompt.get('template')))
     return results
 
 
@@ -1195,7 +1105,7 @@ class _SearchRun:
 def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> dict[str, Any]:
     """Run every query prompt across the selected providers, storing each prompt's answers as it finishes.
 
-    Plain-keyword engines (``PLAIN_KEYWORD_PROVIDERS``) are asked once, under
+    Providers that ``asks_plain_keyword`` are asked once, under
     ``DEFAULT_QUERY_PROMPT``, whatever the personas. Prompts whose answers an
     earlier attempt of the same run stored are not asked again. When
     ``deadline`` leaves too little time for the next prompt's worst case, no
@@ -1221,9 +1131,9 @@ def _search_keyword(event: dict[str, Any], deadline: Deadline | None = None) -> 
     if run.stored:
         logger.info('Resuming the run: %d answer(s) already stored are not asked again', len(run.stored))
 
-    # Plain-keyword engines run once, unpersonalised, whatever the personas.
-    prompted = [provider for provider in providers if provider not in PLAIN_KEYWORD_PROVIDERS]
-    plain = [provider for provider in providers if provider in PLAIN_KEYWORD_PROVIDERS]
+    # Plain-keyword providers run once, unpersonalised, whatever the personas.
+    prompted = [provider for provider in providers if not asks_plain_keyword(provider)]
+    plain = [provider for provider in providers if asks_plain_keyword(provider)]
     all_results: list[dict[str, Any]] = []
     if prompted:
         for prompt in query_prompts:

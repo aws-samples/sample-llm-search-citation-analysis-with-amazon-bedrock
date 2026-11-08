@@ -26,7 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from shared.brand_names import COMPETITOR, FIRST_PARTY, normalize_brand_key
-from shared.config import LLM_PROVIDERS, Provider
+from shared.config import LLM_PROVIDERS, Provider, asks_plain_keyword
 from shared.constants import UNRANKED_SENTINEL
 from shared.markets import GLOBAL_MARKET_ID
 
@@ -206,6 +206,23 @@ def _cited_urls(citations: object) -> tuple[str, ...]:
     return tuple(dict.fromkeys(urls))
 
 
+#: The persona of an unpersonalised answer (``query_prompt_id`` ``default``, or none on older rows).
+DEFAULT_PERSONA = 'default'
+
+
+def engines_not_covered(persona: str | None) -> list[str]:
+    """The AI engines a figure narrowed to ``persona`` holds no answer of, whatever was run.
+
+    An engine that ``asks_plain_keyword`` (Google AI Overviews) is asked once per keyword and run under the
+    default prompt, never a persona's wording, so a persona's figures cannot include it: it is named here and
+    left out of their engine count (``engines``, ``engine_coverage``) rather than read as zero coverage. Every
+    answer (``None``) and the default persona cover every engine.
+    """
+    if persona is None or persona == DEFAULT_PERSONA:
+        return []
+    return [provider for provider in LLM_PROVIDERS if asks_plain_keyword(provider)]
+
+
 def _is_answer_row(row: Mapping[str, Any]) -> bool:
     # The provider decides the type: web-search providers never write an answer.
     # Rows written before `status` existed were only stored for answers.
@@ -230,7 +247,7 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
     return Answer(
         keyword=str(row.get('keyword') or ''),
         provider=str(row['provider']),
-        persona=str(row.get('query_prompt_id') or 'default'),
+        persona=str(row.get('query_prompt_id') or DEFAULT_PERSONA),
         timestamp=str(row.get('timestamp') or ''),
         sightings=tuple(by_key.values()),
         cited_domains=frozenset(filter(None, (normalize_domain(url) for url in row.get('citations') or []))),
@@ -547,6 +564,7 @@ __all__ = [
     'ANSWER_PROJECTION',
     'BRANDED_FILTERS',
     'COMPETITOR',
+    'DEFAULT_PERSONA',
     'KPI_IDS',
     'NO_ANSWER',
     'PERCENT_KPIS',
@@ -562,6 +580,7 @@ __all__ = [
     'brand_kpis',
     'brand_table',
     'engine_breakdown',
+    'engines_not_covered',
     'filter_branded',
     'is_owned_domain',
     'kpi_changes',

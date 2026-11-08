@@ -7,9 +7,11 @@ This is the reference for every visibility KPI the system reports: what each one
 
 ## Conventions
 
-**Answer.** The unit of measurement is one successful answer from one AI engine (OpenAI, Perplexity, Gemini, Claude, Google AI Overviews) to one query in one analysis run. A query is a keyword, optionally rewritten by a persona. For example, one run over 10 keywords, 4 engines and no personas produces up to 40 answers.
+**Answer.** The unit of measurement is one successful answer from one AI engine (OpenAI, Perplexity, Gemini, Claude, Google AI Overviews) to one query in one analysis run. A query is a keyword, optionally rewritten by a persona, except for the plain-keyword engines below, which are always asked the keyword itself. For example, one run over 10 keywords, 4 engines and no personas produces up to 40 answers. Each answer row records the query that engine was actually sent (`query`), and that stored value is the record of what was asked, whatever the engine's definition says later. Rows written before 2.50 carry no `query`.
 
-**Google AI Overviews.** Google AI Overviews is an AI engine: the overview Google writes at the top of a results page (read through DataForSEO) is an answer, its references are its citations. It is asked the plain keyword once per keyword and run, never a persona's wording, so its answer is filed under the default (unpersonalised) prompt. A results page without an overview is *no answer* (`status` `no_answer`) and is excluded from every KPI; it is counted separately as [overview presence](#google-ai-overviews-presence).
+**Plain-keyword engines.** An engine whose provider definition sets `asks_plain_keyword` is asked the plain keyword once per keyword and run, never a persona's wording, and its answer is filed under the default (unpersonalised) prompt. Today that is Google AI Overviews. The field is set in code (`PROVIDER_DEFINITIONS` in `lambda/shared/config.py`), and no API route, MCP tool or ProviderConfig row can change it, because changing it would change what past and future answers measure. `GET /api/providers` shows it as a read-only field. A figure narrowed to one persona (`query_prompt_id` other than `default`) therefore holds no answer from a plain-keyword engine. Such an engine is left out of that figure's engine count (`engines`, and the denominator of [engine coverage](#engine_coverage--engine-coverage)) and out of its per-engine rows, and `/api/visibility` names it in `engines_not_covered` so that its absence is not read as zero coverage. Figures over every answer, or narrowed to the default prompt, cover every engine (`engines_not_covered` is empty).
+
+**Google AI Overviews.** Google AI Overviews is an AI engine: the overview Google writes at the top of a results page (read through DataForSEO) is an answer, its references are its citations. It is a [plain-keyword engine](#conventions): asked the plain keyword once per keyword and run, never a persona's wording, so its answer is filed under the default (unpersonalised) prompt. A results page without an overview is *no answer* (`status` `no_answer`) and is excluded from every KPI; it is counted separately as [overview presence](#google-ai-overviews-presence).
 
 These are not answers and are excluded from every KPI:
 
@@ -169,7 +171,7 @@ With each label the extractor stores `sentiment_quote`, the passage of the answe
 
 **Formula:** AI engines with at least one answer naming the brand ÷ AI engines with at least one answer in scope × 100.
 
-**Edge cases:** empty when there are no answers. Engines that were disabled, or failed for the whole scope, are not in the denominator.
+**Edge cases:** empty when there are no answers. Engines that were disabled, or failed for the whole scope, are not in the denominator. For a persona's figures, plain-keyword engines (Google AI Overviews) are not in the denominator either; `/api/visibility` lists them in `engines_not_covered`.
 
 Not the same as the "provider coverage" on Prompt Insights, which divides the engines naming the brand by every result row of the latest run (web-search, failed and persona rows included).
 
