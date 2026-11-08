@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from shared.kpi_engine import answer_from_row, answers_from_rows
+from shared.kpi_engine import answer_from_row
 from testing.events import parse_response
 from testing.report_scope_fixtures import brand, load_scoped_handler, result, scoped_report
 

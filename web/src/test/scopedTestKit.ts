@@ -55,7 +55,8 @@ export async function awaitThenAdvance(request: () => Promise<unknown>, ms: numb
 
 /** Presses the "Load more <noun>" button of a paged list. */
 export async function clickLoadMore(noun: string): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: `Load more ${noun}` }));
+  // Waits for the button: it appears once the first page has answered, which a loaded runner can delay.
+  await userEvent.click(await screen.findByRole('button', { name: `Load more ${noun}` }));
 }
 
 /** The visible text of a `ComputingState` naming `subject` (its screen-reader label). */
