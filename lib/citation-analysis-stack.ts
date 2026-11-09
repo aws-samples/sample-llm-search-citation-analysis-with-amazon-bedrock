@@ -42,7 +42,7 @@ import {
 import { citationAnalysisTable, stringKey, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
 import {
-  allow, apiKeySecret, lambdaServiceRole
+  allow, allowWhere, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
 import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
@@ -147,6 +147,20 @@ export const EXPORT_STATE_MACHINE_NAME = 'CitationAnalysis-Export';
 const EXPORT_STATE_MACHINE_TIMEOUT_DAYS = 7;
 /** One chunk runs for the Lambda maximum; it stops 60 s before (`export-worker/handler.py`). */
 const EXPORT_WORKER_TIMEOUT_SECONDS = 900;
+/**
+ * The `view-job.finished` event (2.49.0, `shared/view_job_events.py`): a view
+ * job publishes it to the default bus once its outcome is stored, and the
+ * export state machine resumes on it.
+ */
+export const VIEW_JOB_EVENT_SOURCE = 'citation-analysis.view-jobs';
+export const VIEW_JOB_FINISHED_DETAIL_TYPE = 'view-job.finished';
+/**
+ * How long WaitForViewJob waits for that event before it runs ExportChunk
+ * once more (an event lost): a view job runs in GenerateSummary for at most
+ * 900 s, and a computing status that old counts as dead
+ * (`shared/view_jobs.py` JOB_STALE_SECONDS), so 960 s covers any live job.
+ */
+const EXPORT_VIEW_JOB_WAIT_SECONDS = 960;
 
 /**
  * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the old
@@ -438,6 +452,17 @@ interface ExportServiceInputs {
   userPool: IUserPool;
 }
 
+/** Retry an export step on Lambda throttling (the service exceptions retry already). */
+function retryThrottledExportStep(task: tasks.LambdaInvoke): tasks.LambdaInvoke {
+  task.addRetry({
+    errors: ['Lambda.TooManyRequestsException'],
+    interval: cdk.Duration.seconds(5),
+    maxAttempts: 6,
+    backoffRate: 2,
+  });
+  return task;
+}
+
 /**
  * A step of the export state machine: one action of the export worker on the
  * execution's `export_id`, retried on Lambda service errors and throttling.
@@ -449,24 +474,44 @@ function exportStep(
   action: string,
   extra: Record<string, string> = {}
 ): tasks.LambdaInvoke {
-  const task = lambdaStep(scope, id, worker, stepfunctions.TaskInput.fromObject({
+  return retryThrottledExportStep(lambdaStep(scope, id, worker, stepfunctions.TaskInput.fromObject({
     action, 'export_id.$': '$.export_id', ...extra,
+  })));
+}
+
+/**
+ * WaitForViewJob: the worker registers this task's token against the view
+ * job run the chunk met (`wait_view_job`, `shared/export_view_job_wait.py`)
+ * and the execution pauses until the job's `view-job.finished` event sends
+ * the token back (nothing runs or re-checks meanwhile). A failed job sends a
+ * task failure, which the catch turns into MarkFailed. The task output is
+ * discarded, so the next chunk sees the execution input.
+ */
+function waitForViewJobStep(scope: Construct, worker: lambda.IFunction): tasks.LambdaInvoke {
+  return retryThrottledExportStep(new tasks.LambdaInvoke(scope, 'WaitForViewJob', {
+    lambdaFunction: worker,
+    integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+    payload: stepfunctions.TaskInput.fromObject({
+      action: 'wait_view_job',
+      'export_id.$': '$.export_id',
+      'view_job.$': '$.view_job',
+      task_token: stepfunctions.JsonPath.taskToken,
+    }),
+    resultPath: stepfunctions.JsonPath.DISCARD,
+    taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.seconds(EXPORT_VIEW_JOB_WAIT_SECONDS)),
+    retryOnServiceExceptions: true,
   }));
-  task.addRetry({
-    errors: ['Lambda.TooManyRequestsException'],
-    interval: cdk.Duration.seconds(5),
-    maxAttempts: 6,
-    backoffRate: 2,
-  });
-  return task;
 }
 
 /**
  * `CitationAnalysis-Export`: Prepare → ExportChunk until every row is
- * written → Finalize; a chunk that met a view job still computing answers
- * `wait_seconds` and the execution waits in `WaitForViewJob` before the next
- * chunk. Anything that escapes a step runs MarkFailed (abort the upload,
- * mark the export failed) and fails the execution.
+ * written → Finalize. A chunk that met a view job still computing answers
+ * the job's run (`view_job`) and the execution waits in WaitForViewJob for
+ * the job's event, then runs the next chunk once. When that wait times out
+ * (an event lost), ExportChunkAfterViewJobWait runs the chunk once more and
+ * fails the export if the same job still computes. Anything that escapes a
+ * step runs MarkFailed (abort the upload, mark the export failed) and fails
+ * the execution.
  */
 function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfunctions.StateMachine {
   const markFailed = exportStep(scope, 'MarkExportFailed', worker, 'fail', { 'error.$': '$.error' });
@@ -476,22 +521,24 @@ function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfun
   }));
   const prepare = exportStep(scope, 'PrepareExport', worker, 'prepare');
   const chunk = exportStep(scope, 'ExportChunk', worker, 'chunk');
+  const chunkAfterWait = exportStep(scope, 'ExportChunkAfterViewJobWait', worker, 'chunk', { 'timed_out_job.$': '$.view_job.id' });
+  const finalize = exportStep(scope, 'FinalizeExport', worker, 'finalize');
+  const waitForViewJob = waitForViewJobStep(scope, worker);
   // A chunk killed by its timeout or out of memory (Lambda.Unknown) resumes
   // once from its checkpoint; the worker fails an export whose chunks stall.
-  chunk.addRetry({ errors: ['Lambda.Unknown'], interval: cdk.Duration.seconds(5), maxAttempts: 1 });
-  const finalize = exportStep(scope, 'FinalizeExport', worker, 'finalize');
-  for (const task of [prepare, chunk, finalize]) {
+  for (const task of [chunk, chunkAfterWait]) {
+    task.addRetry({ errors: ['Lambda.Unknown'], interval: cdk.Duration.seconds(5), maxAttempts: 1 });
+  }
+  waitForViewJob.addCatch(chunkAfterWait, { errors: ['States.Timeout'], resultPath: stepfunctions.JsonPath.DISCARD });
+  for (const task of [prepare, chunk, chunkAfterWait, waitForViewJob, finalize]) {
     task.addCatch(markFailed, { errors: ['States.ALL'], resultPath: '$.error' });
   }
-  // A view job the export reads is still computing: wait here (nothing is billed) instead of in the worker.
-  const waitForViewJob = new stepfunctions.Wait(scope, 'WaitForViewJob', {
-    time: stepfunctions.WaitTime.secondsPath('$.wait_seconds'),
-  });
-  waitForViewJob.next(chunk);
   const allRowsWritten = new stepfunctions.Choice(scope, 'AllRowsWritten')
     .when(stepfunctions.Condition.booleanEquals('$.done', true), finalize)
-    .when(stepfunctions.Condition.isPresent('$.wait_seconds'), waitForViewJob)
+    .when(stepfunctions.Condition.isPresent('$.view_job'), waitForViewJob)
     .otherwise(chunk);
+  waitForViewJob.next(chunk);
+  chunkAfterWait.next(allRowsWritten);
   const role = new iam.Role(scope, 'ExportStateMachineRole', {
     roleName: 'CitationAnalysis-ExportStateMachineRole',
     assumedBy: new iam.ServicePrincipal('states.amazonaws.com'),
@@ -504,6 +551,41 @@ function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfun
     role,
     timeout: cdk.Duration.days(EXPORT_STATE_MACHINE_TIMEOUT_DAYS),
   });
+}
+
+/**
+ * Resume the exports waiting on a view job: `view-job.finished` on the
+ * default bus invokes the export worker (`view_job_finished`), which sends
+ * back the task token of every export waiting on that run. The worker
+ * answers tokens of its own state machine only (named, not referenced: the
+ * state machine already references the worker).
+ */
+function resumeExportsOnViewJobEvents(scope: Construct, worker: lambda.Function): void {
+  new events.Rule(scope, 'ViewJobFinishedRule', {
+    ruleName: 'CitationAnalysis-ViewJobFinished',
+    description: 'A view job finished or failed: resume the exports waiting on it',
+    eventPattern: { source: [VIEW_JOB_EVENT_SOURCE], detailType: [VIEW_JOB_FINISHED_DETAIL_TYPE] },
+    targets: [new eventTargets.LambdaFunction(worker, {
+      event: events.RuleTargetInput.fromObject({
+        action: 'view_job_finished',
+        job_id: events.EventField.fromPath('$.detail.job_id'),
+        started_at: events.EventField.fromPath('$.detail.started_at'),
+        status: events.EventField.fromPath('$.detail.status'),
+      }),
+      // Delivery to Lambda: a lost event only delays the export until the WaitForViewJob timeout.
+      maxEventAge: cdk.Duration.seconds(EXPORT_VIEW_JOB_WAIT_SECONDS),
+      retryAttempts: 4,
+    })],
+  });
+  // EventBridge invokes the worker asynchronously (Step Functions invokes it synchronously), so a resume that raises
+  // (Step Functions refused a token) is retried by Lambda: twice, and not after the waits it would resume timed out.
+  worker.configureAsyncInvoke({ retryAttempts: 2, maxEventAge: cdk.Duration.seconds(EXPORT_VIEW_JOB_WAIT_SECONDS) });
+  allow(worker, ['states:SendTaskSuccess', 'states:SendTaskFailure'], [cdk.Stack.of(scope).formatArn({
+    service: 'states',
+    resource: 'stateMachine',
+    resourceName: EXPORT_STATE_MACHINE_NAME,
+    arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+  })]);
 }
 
 /**
@@ -561,6 +643,7 @@ function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Fu
   allow(worker, ['lambda:InvokeFunction'], Object.values(inputs.routers).map((fn) => fn.functionArn));
 
   const stateMachine = exportStateMachine(scope, worker);
+  resumeExportsOnViewJobEvents(scope, worker);
 
   const api = apiFunction(scope, 'Exports', inputs.sharedLayer, {
     functionName: DASHBOARD_API_FUNCTION_NAMES.exports,
@@ -1612,6 +1695,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunBrandsTable.grant(generateSummaryFunction, 'dynamodb:Query');
     allow(generateSummaryFunction, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(generateSummaryFunction, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [searchResultsTable.tableArn]);
+    // A view job publishes view-job.finished (shared/view_job_events.py) to the default bus, under its own source only.
+    allowWhere(generateSummaryFunction, ['events:PutEvents'], [this.formatArn({
+      service: 'events', resource: 'event-bus', resourceName: 'default',
+    })], { StringEquals: { 'events:source': VIEW_JOB_EVENT_SOURCE } });
     // A finished chained `latest` backfill starts a build; brand-config and
     // persona writes start that backfill.
     deduplicationFunction.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', generateSummaryFunction.functionName);

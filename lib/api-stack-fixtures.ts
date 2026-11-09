@@ -5,6 +5,7 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { CitationAnalysisApiStack } from './api-stack';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  collectGetAttTargets,
   extractApiAuthSnapshots,
   importedExportNames,
   namedFunctions,
@@ -45,6 +46,8 @@ export function synthesizeDashboardStacks(id: string, context: Record<string, st
 /** One `AWS::Lambda::Permission` of a template: the function name(s) its ARN spells out and its source ARN. */
 export interface InvokePermissionSnapshot {
   functionNames: string[];
+  /** Logical ids of the functions the permission names by `Fn::GetAtt` (a function of the same template). */
+  functionLogicalIds: string[];
   principal: string;
   /** The source ARN as JSON, so its literal parts (`/*\/*\/*`, `/test-invoke-stage/`) can be matched as text. */
   sourceArn: string;
@@ -92,9 +95,11 @@ export interface ApiStackSnapshot {
   mainDistributionLogicalId: string;
 }
 
-function permissionsOf(template: Template): InvokePermissionSnapshot[] {
+/** Every `AWS::Lambda::Permission` of `template`: whom it lets invoke which function, from which source. */
+export function permissionsOf(template: Template): InvokePermissionSnapshot[] {
   return Object.values(template.findResources('AWS::Lambda::Permission')).map((permission) => ({
     functionNames: namedFunctions(resolvePath(permission, ['Properties', 'FunctionName'])),
+    functionLogicalIds: collectGetAttTargets(resolvePath(permission, ['Properties', 'FunctionName'])),
     principal: resolveString(permission, ['Properties', 'Principal']),
     sourceArn: JSON.stringify(resolvePath(permission, ['Properties', 'SourceArn'])) ?? '',
   }));

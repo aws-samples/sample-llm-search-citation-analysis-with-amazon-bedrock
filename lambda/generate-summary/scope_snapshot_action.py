@@ -12,7 +12,9 @@ The ``build_scope_snapshots`` and ``view_job`` actions of the GenerateSummary La
   set (``snapshot_build_steps``).
 - ``{"action": "view_job", "job_id": "..."}``: started by a GET the snapshot
   cannot answer (``shared.scope_snapshot_serve.view_job_response``); computes
-  and stores that one view (``shared.view_jobs.run_view_job``).
+  and stores that one view (``shared.view_jobs.run_view_job``), then
+  publishes ``view-job.finished`` to the default EventBridge bus
+  (``shared.view_job_events``), which resumes the exports waiting on it.
 
 Environment: ``SCOPE_SNAPSHOT_BUCKET`` (else ``SUMMARY_BUCKET``, the same
 keywords bucket), ``DYNAMODB_TABLE_KEYWORDS``, ``DYNAMODB_TABLE_BRAND_CONFIG``,
@@ -51,6 +53,7 @@ from shared.scope_snapshot_build import READ_WORKERS, SnapshotSources, build_sna
 from shared.scope_snapshot_dist import needs_distribution
 from shared.snapshot_triggers import start_keyword_latest_backfill
 from shared.utils import get_brand_config
+from shared.view_job_events import FinishedStatus, publish_finished
 from shared.view_job_routes import JobResources, view_job_computers
 from shared.view_jobs import run_view_job
 
@@ -200,6 +203,11 @@ def job_resources(deadline: Deadline) -> JobResources:
     )
 
 
+def publish_view_job_finished(job: str, started_at: str, status: FinishedStatus) -> bool:
+    """Publish the job's ``view-job.finished`` event (a refusal is logged; waiting exports fall back to their timeout)."""
+    return publish_finished(boto3.client('events'), job, started_at, status)
+
+
 def view_job(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Compute the view job ``event['job_id']`` with its route's computation (``shared.view_job_routes``); the job's summary."""
     job = str(event.get('job_id') or '')
@@ -208,7 +216,9 @@ def view_job(event: dict[str, Any], context: Any) -> dict[str, Any]:
     deadline = Deadline(budget_from_context(context, BUILD_MARGIN_SECONDS))
     activate_deadline(deadline)
     try:
-        summary = run_view_job(_s3(), _bucket(), job, computers=view_job_computers(job_resources(deadline)))
+        summary = run_view_job(
+            _s3(), _bucket(), job, computers=view_job_computers(job_resources(deadline)), notify=publish_view_job_finished,
+        )
     finally:
         clear_request_deadline()
     logger.info('View job: %s', summary)

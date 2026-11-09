@@ -12,7 +12,11 @@
   then spends the deadline (its ``clock`` jumps), as a slow source does;
   with ``spends_deadline=False`` it stops there before the deadline (a source
   keeping time for itself) and says so with ``RowsEnd.STOPPED``.
-- ``FakeStepFunctions`` records ``start_execution`` / ``stop_execution``.
+- ``FakeStepFunctions`` records ``start_execution`` / ``stop_execution`` and
+  the task-token answers (``send_task_success`` / ``send_task_failure``): a
+  token in ``ended`` (its task timed out or was stopped) answers
+  ``TaskTimedOut``, one answered before ``InvalidToken``, and ``refusing``
+  makes every answer fail with that error code.
 """
 
 from __future__ import annotations
@@ -210,10 +214,33 @@ class ListRowSource:
 
 @dataclass
 class FakeStepFunctions:
-    """``start_execution`` / ``stop_execution`` recorded; ``running`` holds executions not stopped."""
+    """``start_execution`` / ``stop_execution`` and the task-token answers recorded (see the module docstring)."""
 
     started: list[dict[str, Any]] = field(default_factory=list)
     stopped: list[dict[str, Any]] = field(default_factory=list)
+    succeeded: list[str] = field(default_factory=list)
+    failed: list[dict[str, Any]] = field(default_factory=list)
+    ended: set[str] = field(default_factory=set)
+    refusing: str | None = None
+
+    def _answer(self, token: str, operation: str) -> None:
+        code = self.refusing
+        if code is None and token in self.ended:
+            code = 'TaskTimedOut'
+        if code is None and (token in self.succeeded or token in {failure['taskToken'] for failure in self.failed}):
+            code = 'InvalidToken'
+        if code is not None:
+            raise ClientError({'Error': {'Code': code, 'Message': token}}, operation)
+
+    def send_task_success(self, **params: Any) -> dict[str, Any]:
+        self._answer(params['taskToken'], 'SendTaskSuccess')
+        self.succeeded.append(params['taskToken'])
+        return {}
+
+    def send_task_failure(self, **params: Any) -> dict[str, Any]:
+        self._answer(params['taskToken'], 'SendTaskFailure')
+        self.failed.append(dict(params))
+        return {}
 
     def start_execution(self, **params: Any) -> dict[str, Any]:
         self.started.append(dict(params))

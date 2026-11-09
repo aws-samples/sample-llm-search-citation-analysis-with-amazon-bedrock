@@ -106,7 +106,7 @@ export function findStateMachineLogicalId(template: Template, stateMachineName: 
 }
 
 /** Collect every logical ID referenced by an Fn::GetAtt anywhere in a node. */
-function collectGetAttTargets(node: unknown, found: string[] = []): string[] {
+export function collectGetAttTargets(node: unknown, found: string[] = []): string[] {
   if (Array.isArray(node)) {
     for (const item of node) collectGetAttTargets(item, found);
     return found;

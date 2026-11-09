@@ -1,0 +1,5 @@
+{
+  "_comment": "The view-job.finished event both sides agree on: lambda/shared/view_job_events.py publishes it, lib/citation-analysis-stack.ts routes it (ViewJobFinishedRule).",
+  "source": "citation-analysis.view-jobs",
+  "detail_type": "view-job.finished"
+}

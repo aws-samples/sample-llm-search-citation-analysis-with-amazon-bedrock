@@ -4,7 +4,7 @@ import {
 import { synthesizeDashboardStacks } from './api-stack-fixtures';
 import { COGNITO_AUTH, methodRouteLabels } from './citation-analysis-stack-fixtures';
 import {
-  extractExportServiceSnapshot, referencedLogicalIds, resourcesGranting
+  extractExportServiceSnapshot, readViewJobEventNames, referencedLogicalIds, resourcesGranting
 } from './export-jobs-fixtures';
 
 /**
@@ -19,6 +19,9 @@ const SEVEN_DAYS_IN_SECONDS = 7 * 24 * 60 * 60;
 const EXPORTS_OBJECTS = /^\{"Fn::Join":\["",\[\{"Fn::GetAtt":\["KeywordsBucket\w+","Arn"\]\},"\/exports\/\*"\]\]\}$/;
 const SPILLED_RESPONSES = /"\/api-responses\/\*"\]\]\}$/;
 const CATCH_ALL_TO_MARK_FAILED = [{ errors: ['States.ALL'], next: 'MarkExportFailed', resultPath: '$.error' }];
+/** A view job runs at most 900 s, and a computing status that old is dead: the wait covers any live job. */
+const VIEW_JOB_WAIT_SECONDS = 960;
+const EXPORT_STATE_MACHINE_ARN_SUFFIX = /:stateMachine\/?:?CitationAnalysis-Export"\]\]\}$/;
 const SERVICE_EXCEPTIONS = [
   'Lambda.ClientExecutionTimeoutException', 'Lambda.ServiceException', 'Lambda.AWSLambdaException', 'Lambda.SdkClientException',
 ];
@@ -49,14 +52,45 @@ describe('Export state machine', () => {
       type: 'Choice',
       choices: [
         { Variable: '$.done', BooleanEquals: true, Next: 'FinalizeExport' },
-        { Variable: '$.wait_seconds', IsPresent: true, Next: 'WaitForViewJob' },
+        { Variable: '$.view_job', IsPresent: true, Next: 'WaitForViewJob' },
       ],
       defaultState: 'ExportChunk',
     });
   });
 
-  it('waits for a computing view job in the state machine, not in the worker, then writes the next chunk', () => {
-    expect(states.WaitForViewJob).toMatchObject({ type: 'Wait', secondsPath: '$.wait_seconds', next: 'ExportChunk' });
+  it('has no Wait state: nothing waits a while and re-checks a view job', () => {
+    expect(Object.values(states).filter((state) => state.type === 'Wait')).toStrictEqual([]);
+  });
+
+  it('waits for a computing view job on a task token the worker registers against the job run', () => {
+    expect(states.WaitForViewJob).toMatchObject({
+      type: 'Task',
+      resource: expect.stringMatching(/:states:::lambda:invoke\.waitForTaskToken$/),
+      parameters: {
+        action: 'wait_view_job', 'export_id.$': '$.export_id', 'view_job.$': '$.view_job', 'task_token.$': '$$.Task.Token',
+      },
+      resultPath: null,
+      next: 'ExportChunk',
+    });
+  });
+
+  it('gives up waiting for the event after the longest a view job can run', () => {
+    expect(states.WaitForViewJob.timeoutSeconds).toBe(VIEW_JOB_WAIT_SECONDS);
+  });
+
+  it('runs the chunk once more when the wait times out, and fails the export on any other error of the wait', () => {
+    expect(states.WaitForViewJob.catch).toStrictEqual([
+      { errors: ['States.Timeout'], next: 'ExportChunkAfterViewJobWait', resultPath: null },
+      ...CATCH_ALL_TO_MARK_FAILED,
+    ]);
+  });
+
+  it('tells the chunk after a timed-out wait which job it waited on, then goes on as after any chunk', () => {
+    expect(states.ExportChunkAfterViewJobWait).toMatchObject({
+      parameters: { action: 'chunk', 'export_id.$': '$.export_id', 'timed_out_job.$': '$.view_job.id' },
+      next: 'AllRowsWritten',
+      catch: CATCH_ALL_TO_MARK_FAILED,
+    });
   });
 
   it('sends each step its action and the execution export id', () => {
@@ -80,16 +114,19 @@ describe('Export state machine', () => {
   });
 
   it('retries every step on Lambda service exceptions and throttling', () => {
-    expect(['PrepareExport', 'ExportChunk', 'FinalizeExport', 'MarkExportFailed'].map((name) => states[name].retry.slice(0, 2)))
-      .toStrictEqual(Array(4).fill([
+    expect(['PrepareExport', 'ExportChunk', 'ExportChunkAfterViewJobWait', 'WaitForViewJob', 'FinalizeExport', 'MarkExportFailed']
+      .map((name) => states[name].retry.slice(0, 2)))
+      .toStrictEqual(Array(6).fill([
         { errors: SERVICE_EXCEPTIONS, maxAttempts: 6 },
         { errors: ['Lambda.TooManyRequestsException'], maxAttempts: 6 },
       ]));
   });
 
   it('resumes a chunk killed by its timeout once from its checkpoint, and no other step', () => {
-    expect(states.ExportChunk.retry[2]).toStrictEqual({ errors: ['Lambda.Unknown'], maxAttempts: 1 });
-    expect(['PrepareExport', 'FinalizeExport', 'MarkExportFailed'].map((name) => states[name].retry)).not.toContainEqual(
+    expect([states.ExportChunk.retry[2], states.ExportChunkAfterViewJobWait.retry[2]]).toStrictEqual(Array(2).fill(
+      { errors: ['Lambda.Unknown'], maxAttempts: 1 }
+    ));
+    expect(['PrepareExport', 'WaitForViewJob', 'FinalizeExport', 'MarkExportFailed'].map((name) => states[name].retry)).not.toContainEqual(
       expect.arrayContaining([expect.objectContaining({ errors: ['Lambda.Unknown'] })])
     );
   });
@@ -100,6 +137,59 @@ describe('Export state machine', () => {
 
   it('may invoke only the export worker', () => {
     expect(referencedLogicalIds(snapshot.stateMachineRoleStatements, 'lambda:InvokeFunction')).toStrictEqual([snapshot.workerLogicalId]);
+  });
+});
+
+describe('Resuming exports on view-job.finished', () => {
+  const { viewJobRule } = snapshot;
+  const target = (viewJobRule.Targets as Record<string, unknown>[] | undefined)?.[0] ?? {};
+
+  it('matches the event the view jobs publish, by the names both languages share', () => {
+    const names = readViewJobEventNames();
+
+    expect(viewJobRule.EventPattern).toStrictEqual({ source: [names.source], 'detail-type': [names.detailType] });
+  });
+
+  it('listens on the default bus', () => {
+    expect(viewJobRule.EventBusName).toBeUndefined();
+  });
+
+  it('invokes the export worker with the job run and its status', () => {
+    expect(JSON.stringify(target.Arn)).toContain(snapshot.workerLogicalId);
+    expect(target.InputTransformer).toStrictEqual({
+      InputPathsMap: { 'detail-job_id': '$.detail.job_id', 'detail-started_at': '$.detail.started_at', 'detail-status': '$.detail.status' },
+      InputTemplate: '{"action":"view_job_finished","job_id":<detail-job_id>,"started_at":<detail-started_at>,"status":<detail-status>}',
+    });
+  });
+
+  it('stops retrying the delivery of an event to the worker once the waiting exports have timed out anyway', () => {
+    expect(target.RetryPolicy).toStrictEqual({ MaximumEventAgeInSeconds: VIEW_JOB_WAIT_SECONDS, MaximumRetryAttempts: 4 });
+  });
+
+  it('retries a resume that raised twice, within the same bound (EventBridge invokes the worker asynchronously)', () => {
+    expect(snapshot.workerAsyncInvoke).toStrictEqual([{ retryAttempts: 2, maxEventAgeSeconds: VIEW_JOB_WAIT_SECONDS }]);
+  });
+
+  it('lets EventBridge invoke the worker for this rule only', () => {
+    expect(snapshot.workerInvokePermissions).toStrictEqual([
+      { principal: 'events.amazonaws.com', sourceArn: expect.stringContaining('ViewJobFinishedRule') },
+    ]);
+  });
+
+  it('lets the worker answer task tokens of the export state machine only', () => {
+    expect(['states:SendTaskSuccess', 'states:SendTaskFailure'].map((action) => resourcesGranting(snapshot.workerStatements, action)))
+      .toStrictEqual(Array(2).fill([expect.stringMatching(EXPORT_STATE_MACHINE_ARN_SUFFIX)]));
+    expect(snapshot.workerStatements.flatMap((statement) => statement.actions).filter((action) => action.startsWith('states:')))
+      .toStrictEqual(['states:SendTaskSuccess', 'states:SendTaskFailure']);
+  });
+
+  it('lets GenerateSummary publish to the default bus under the view jobs source only', () => {
+    const publishing = snapshot.generateSummaryStatements.filter((statement) => statement.actions.includes('events:PutEvents'));
+
+    expect(publishing.map((statement) => [statement.actions, statement.conditions])).toStrictEqual([
+      [['events:PutEvents'], JSON.stringify({ StringEquals: { 'events:source': readViewJobEventNames().source } })],
+    ]);
+    expect(publishing[0].resources).toMatch(/:event-bus\/default"\]\]\}$/);
   });
 });
 

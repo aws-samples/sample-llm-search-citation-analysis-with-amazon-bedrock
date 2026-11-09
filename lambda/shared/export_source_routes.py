@@ -27,8 +27,9 @@ removed from a route is removed from its export too.
 - A page that leaves no row (a filter applied after the read emptied it)
   is followed by an ``ExportMark`` at the next page, so the checkpoint
   moves on even when no row is written for many pages.
-- A ``202 computing`` answer (a view job is building the scope) is waited for
-  within the deadline; the next chunk retries it. A page that says it is
+- A ``202 computing`` answer (a view job is building the scope) stops the
+  chunk and names the job's run (``ExportRead.view_job``): the state machine
+  waits for its ``view-job.finished`` event, then the next chunk asks again. A page that says it is
   partial (``truncated`` …) is asked again and fails the export if it stays
   partial: an export is complete or it is an error, never a short file.
 
@@ -70,6 +71,7 @@ from shared.export_route_position import (
     parse_position,
     row_identity,
 )
+from shared.export_view_job_wait import ViewJobRun, run_from
 from shared.kpi_engine import KPI_IDS, SPLIT_LABELS
 from shared.request_deadline import Deadline
 from shared.response_spill import SPILL_KEY
@@ -83,10 +85,13 @@ EXPORT_SERVICE_SUB = EXPORT_SERVICE
 
 @dataclass
 class ExportRead:
-    """One chunk's route reads: whom they are made for, and how long a view job still computing asks to wait."""
+    """One chunk's route reads: whom they are made for, and the view job still computing that stopped them."""
 
     owner: str
+    view_job: ViewJobRun | None = None
+    """The run of the view job a route answered ``202 computing`` for."""
     wait_seconds: float | None = None
+    """How long that answer asked to wait (``retry_after_ms``): only executions started before 2.49.0 wait on it."""
 
 
 _export_read: ContextVar[ExportRead | None] = ContextVar('export_read', default=None)
@@ -96,9 +101,9 @@ _export_read: ContextVar[ExportRead | None] = ContextVar('export_read', default=
 def reading_for(owner: str) -> Generator[ExportRead]:
     """Every route read made inside names ``owner`` (the export's owner, as ``cognito:username`` names a caller).
 
-    A route answering ``202 computing`` stops the reads and sets ``wait_seconds`` on the yielded ``ExportRead``:
-    the export state machine waits that long before the next chunk, so no Lambda sleeps while a view job runs
-    (TENETS.md, tenets 7 and 8).
+    A route answering ``202 computing`` stops the reads and sets ``view_job`` on the yielded ``ExportRead``:
+    the export state machine waits for that job's ``view-job.finished`` event before the next chunk, so nothing
+    runs or re-checks while a view job computes (TENETS.md, tenets 7 and 8).
     """
     read = ExportRead(owner)
     token = _export_read.set(read)
@@ -121,7 +126,7 @@ INVOKE_START_SECONDS = ROUTER_CONNECT_SECONDS + ROUTER_READ_SECONDS + 1.0
 SPILL_TIMEOUT_SECONDS = (2, 20)
 #: Times a page that says it is partial is asked again before the export fails.
 PARTIAL_RETRIES = 3
-#: Longest wait for a view job between two asks.
+#: Longest wait an execution started before 2.49.0 takes for a view job between two asks.
 MAX_COMPUTING_WAIT_SECONDS = 10.0
 #: Largest spilled body read (a router's whole answer stays under 6 MiB; JSON may expand a little).
 MAX_SPILL_BYTES = 12 * 1024 * 1024
@@ -559,7 +564,7 @@ class _ListReading:
     def _page(self, token: RouteToken, deadline: Deadline, *, reread: bool = False) -> _Page | None:
         """
         The page at ``token``, or ``None`` when the deadline came first or a view job is still computing (the next
-        chunk asks again; for a computing job, after the wait the state machine takes).
+        chunk asks again; for a computing job, after the state machine heard that the job finished).
 
         A read starts only while more than ``INVOKE_START_SECONDS`` remain.
 
@@ -570,10 +575,8 @@ class _ListReading:
         while deadline.remaining() > INVOKE_START_SECONDS:
             status, body = self.source.invoker(self._request(token, reread=reread))
             if status == 202:
-                # A view job is computing: stop here and let the state machine wait (never sleep in the Lambda).
-                read = _export_read.get()
-                if read is not None:
-                    read.wait_seconds = _retry_after(body)
+                # A view job is computing: stop here and let the state machine wait for its event (never sleep in the Lambda).
+                self._computing(body)
                 return None
             if status != 200 or not isinstance(body, dict | list) or job_failed(body):
                 raise ExportSourceError(f'{self.route_list.path} answered {status}: {_message(body)}')
@@ -586,6 +589,15 @@ class _ListReading:
             return self._parsed(body, token)
         deadline.cut = True
         return None
+
+    def _computing(self, body: Any) -> None:
+        """Name the computing view job's run on the chunk's ``ExportRead``; a ``202`` without one fails the export."""
+        run = run_from(body.get('job')) if isinstance(body, dict) else None
+        if run is None:
+            raise ExportSourceError(f'{self.route_list.path} answered 202 without its view job')
+        read = _export_read.get()
+        if read is not None:
+            read.view_job, read.wait_seconds = run, _retry_after(body)
 
     def _matching(self, row: Mapping[str, Any]) -> bool:
         wanted = {path: self.params[name] for name, path in self.route_list.matches.items() if self.params.get(name, '').strip()}
