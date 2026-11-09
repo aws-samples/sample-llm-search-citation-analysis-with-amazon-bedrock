@@ -167,7 +167,7 @@ export interface Execution {
   /**
    * Keyword counts of the run's ProcessKeywords Distributed Map, from the
    * status API's `progress`. `null` before the map run starts and for runs
-   * started before the Distributed Map; absent until the first status poll.
+   * started before the Distributed Map; absent until the first status read.
    */
   progress?: {
     keywords_total: number;

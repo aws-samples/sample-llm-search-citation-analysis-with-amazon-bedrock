@@ -10,9 +10,10 @@ import {
 } from '../test/fetchResponses';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
   flushContentStudioPromises,
@@ -102,7 +103,7 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     await flushContentStudioPromises();
     staleHistory.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
     await flushContentStudioPromises();
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(contentStudioRequestUrls('/batches/batch-1')).toHaveLength(2);
     rendered.unmount();
@@ -146,7 +147,7 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     await flushContentStudioPromises();
     await flushContentStudioPromises();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['terminal-1', 'terminal-2'])).toStrictEqual({
       'terminal-1': 1,

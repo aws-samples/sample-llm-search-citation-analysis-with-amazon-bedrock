@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from shared.change_events import KPI_ALERTS_RAISED, RUN_STEP_FINISHED
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, KPI_VERSION, deterministic_alert_id
 from shared.request_deadline import Deadline
 from testing.clocks import JumpClock
@@ -359,7 +360,7 @@ class TestCompleteSnapshotEvaluation:
 
         assert snapshots.put_item.call_args.kwargs['Item']['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
-    def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
+    def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module, change_events_bus) -> None:
         _snapshots, alerts, resource = _single_group_tables()
         specification = {**_MENTION_RATE_DROP, 'entity': 'group-1'}
 
@@ -398,6 +399,15 @@ class TestCompleteSnapshotEvaluation:
             'ConditionExpression': 'attribute_not_exists(id)',
         }
         assert result['alerts_created'] == 1
+        assert change_events_bus.details(KPI_ALERTS_RAISED) == [{'execution_id': 'exec-1', 'count': 1}]
+
+    def test_a_run_without_new_alerts_announces_only_its_step(self, worker_module, change_events_bus) -> None:
+        _snapshots, _alerts, resource = _single_group_tables()
+
+        _run_complete_group(worker_module, resource, _ALERTS_DISABLED, None)
+
+        assert change_events_bus.details(KPI_ALERTS_RAISED) == []
+        assert change_events_bus.details(RUN_STEP_FINISHED) == [{'execution_id': 'exec-1', 'step': 'kpi_alerts'}]
 
     def test_names_the_run_and_the_snapshotted_groups_for_the_insights_step(self, worker_module) -> None:
         _snapshots, _alerts, resource = _single_group_tables()

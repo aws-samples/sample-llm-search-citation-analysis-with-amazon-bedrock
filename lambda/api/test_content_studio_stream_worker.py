@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from shared.change_events import CONTENT_CHANGED
 from testing.content_studio_fixtures import (
     CONTENT_STUDIO_TABLE_NAME,
     ReconcileWorkerRun,
@@ -242,13 +243,14 @@ def test_claims_pending_row_with_owner_lease_and_first_attempt() -> None:
     assert values[":lease_expires_at"] - values[":now"] == 360
 
 
-def test_skips_duplicate_delivery_when_first_delivery_generated_content() -> None:
+def test_skips_duplicate_delivery_when_first_delivery_generated_content(change_events_bus) -> None:
     resource, rows, event = stream_worker_case()
 
     generation = _deliver(resource, event, times=2)
 
     generation.assert_called_once_with(rows["content-1"]["idea_data"], _BRAND_CONFIG)
     assert rows["content-1"]["status"] == "generated"
+    assert change_events_bus.details(CONTENT_CHANGED) == [{"content_id": "content-1", "status": "generated"}]
 
 
 def test_returns_row_to_pending_when_processing_crashes_before_attempt_cap() -> None:
@@ -405,11 +407,12 @@ def test_leaves_active_generating_lease_untouched() -> None:
     run.lambda_client.invoke.assert_not_called()
 
 
-def test_terminalizes_exhausted_pending_row_without_model_dispatch() -> None:
+def test_terminalizes_exhausted_pending_row_without_model_dispatch(change_events_bus) -> None:
     row = {**pending_recovery_row("content-1"), "generation_attempts": 3}
     run = _reconcile([row], pending=[row])
 
     assert run.response == {"dispatched": 0, "terminalized": 1}
+    assert change_events_bus.details(CONTENT_CHANGED) == [{"content_id": "content-1", "status": "failed"}]
     assert run.rows["content-1"]["status"] == "failed"
     assert run.rows["content-1"]["generation_terminal_reason"] == (
         "max_attempts_exhausted"

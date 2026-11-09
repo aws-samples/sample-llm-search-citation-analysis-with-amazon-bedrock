@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { TestError } from '../../test/testError';
 import {
-  RUNTIME_CONFIG_PATH, loadRuntimeConfig 
+  RUNTIME_CONFIG_PATH, liveEventsEndpoints, loadRuntimeConfig 
 } from './runtimeConfig';
 import {
   BUILD_TIME_API_URL,
@@ -81,5 +81,48 @@ describe('API_BASE_URL', () => {
     const { API_BASE_URL } = await import('./index');
 
     expect(API_BASE_URL).toBe(DEPLOYED_API_URL);
+  });
+});
+
+const LIVE_EVENTS = {
+  httpDomain: 'abc123.appsync-api.eu-west-1.amazonaws.com',
+  realtimeDomain: 'abc123.appsync-realtime-api.eu-west-1.amazonaws.com',
+};
+
+describe('loadedLiveEvents', () => {
+  it('is the liveEvents of /config.json once loadRuntimeConfig read it', async () => {
+    vi.resetModules();
+    const runtimeConfig = await import('./runtimeConfig');
+    await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({
+      apiUrl: DEPLOYED_API_URL,
+      liveEvents: LIVE_EVENTS 
+    })));
+
+    expect(runtimeConfig.loadedLiveEvents()).toStrictEqual(LIVE_EVENTS);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['missing its real-time domain', { httpDomain: LIVE_EVENTS.httpDomain }],
+    ['a URL instead of a host name', {
+      ...LIVE_EVENTS,
+      httpDomain: `https://${LIVE_EVENTS.httpDomain}/event` 
+    }],
+    ['not an object', 'abc123'],
+  ])('is null when liveEvents is %s, and the API still loads', async (_case, liveEvents) => {
+    vi.resetModules();
+    const runtimeConfig = await import('./runtimeConfig');
+    const result = await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({
+      apiUrl: DEPLOYED_API_URL,
+      liveEvents 
+    })));
+
+    expect([result.status, runtimeConfig.loadedLiveEvents()]).toStrictEqual(['ready', null]);
+  });
+});
+
+describe('liveEventsEndpoints', () => {
+  it('trims both host names', () => {
+    expect(liveEventsEndpoints(` ${LIVE_EVENTS.httpDomain} `, LIVE_EVENTS.realtimeDomain)).toStrictEqual(LIVE_EVENTS);
   });
 });

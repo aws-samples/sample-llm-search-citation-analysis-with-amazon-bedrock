@@ -36,6 +36,7 @@ import {
 } from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import {
   deferAuthenticatedFetch, mockAuthenticatedFetch

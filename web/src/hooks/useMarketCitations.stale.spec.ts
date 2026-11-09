@@ -1,5 +1,5 @@
 import {
-  describe, expect, it, vi
+  afterEach, describe, expect, it, vi
 } from 'vitest';
 import { act } from '@testing-library/react';
 import {
@@ -8,11 +8,13 @@ import {
 import { isCitationsPage } from '../api/citationPages';
 import { fixtureBody } from '../types/domain/scopeCoverage-fixtures';
 import { setupFakeTimersAndFetch } from '../test/scopedTestKit';
+import { STALE_REFETCH_LIMIT } from './useStaleRefetch';
 import {
-  STALE_REFETCH_INTERVAL_MS, STALE_REFETCH_LIMIT
-} from './useStaleRefetch';
+  emitLive, liveSubscriberCount, resetLiveEvents
+} from '../test/liveEventsMock';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
@@ -23,21 +25,37 @@ const staleSnapshot = buildCitationsPage({
   refreshing: true,
 });
 
+const BUILT = {
+  type: 'scope-snapshots.built',
+  status: 'built' 
+};
+
 describe('useMarketCitations on a stale scope snapshot', () => {
   setupFakeTimersAndFetch();
+  afterEach(() => {
+    resetLiveEvents();
+  });
 
-  it('reads the page again 10 s after a stale snapshot answered', async () => {
+  it('reads the page again once it listens for the rebuild, to catch up', async () => {
     renderCitationTable({ body: staleSnapshot });
     await act(() => vi.advanceTimersByTimeAsync(0));
-
-    await act(() => vi.advanceTimersByTimeAsync(STALE_REFETCH_INTERVAL_MS));
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('reads the page again when a snapshot build ends', async () => {
+    renderCitationTable({ body: staleSnapshot });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    await emitLive('snapshots', BUILT);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the stale figures on screen without a loading state while it reads again', async () => {
     const { result } = renderCitationTable({ body: staleSnapshot });
-    await act(() => vi.advanceTimersByTimeAsync(STALE_REFETCH_INTERVAL_MS));
+    await act(() => vi.advanceTimersByTimeAsync(0));
 
     expect([result.current.loading, result.current.totals?.stale]).toStrictEqual([false, true]);
   });
@@ -45,28 +63,27 @@ describe('useMarketCitations on a stale scope snapshot', () => {
   it('stops reading again after the refetch limit', async () => {
     renderCitationTable({ body: staleSnapshot });
 
-    // One refetch per interval: the next timer starts once the page read in the previous one has rendered.
     await Array.from({ length: STALE_REFETCH_LIMIT + 5 }).reduce<Promise<void>>(async (previous) => {
       await previous;
-      await act(() => vi.advanceTimersByTimeAsync(STALE_REFETCH_INTERVAL_MS));
+      await emitLive('snapshots', BUILT);
+      await act(() => vi.advanceTimersByTimeAsync(0));
     }, act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     }));
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(STALE_REFETCH_LIMIT + 1);
+    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('snapshots')]).toStrictEqual([STALE_REFETCH_LIMIT + 1, 0]);
   });
 
-  it('reads a current page once', async () => {
+  it('reads a current page once and listens for nothing', async () => {
     renderCitationTable({
       body: buildCitationsPage({
         source: 'snapshot',
         stale: false 
       }) 
     });
+    await act(() => vi.advanceTimersByTimeAsync(0));
 
-    await act(() => vi.advanceTimersByTimeAsync(STALE_REFETCH_INTERVAL_MS * 3));
-
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('snapshots')]).toStrictEqual([1, 0]);
   });
 });
 

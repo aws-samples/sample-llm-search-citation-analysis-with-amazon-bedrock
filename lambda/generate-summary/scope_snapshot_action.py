@@ -16,6 +16,11 @@ The ``build_scope_snapshots`` and ``view_job`` actions of the GenerateSummary La
   publishes ``view-job.finished`` to the default EventBridge bus
   (``shared.view_job_events``), which resumes the exports waiting on it.
 
+Both announce what they finished (``shared.change_events``): a finished view job
+``view-job.finished`` (``job_id``, ``status``), an in-process build
+``scope-snapshots.built`` and, inside a run, ``run.step.finished``. A distributed
+build announces itself through its state machine's status changes.
+
 Environment: ``SCOPE_SNAPSHOT_BUCKET`` (else ``SUMMARY_BUCKET``, the same
 keywords bucket), ``DYNAMODB_TABLE_KEYWORDS``, ``DYNAMODB_TABLE_BRAND_CONFIG``,
 ``DYNAMODB_TABLE_QUERY_PROMPTS`` (enabled personas), for the series history
@@ -40,6 +45,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from shared.change_events import RUN_STEP_FINISHED, SNAPSHOTS_BUILT, VIEW_JOB_FINISHED, publish_change
 from shared.keyword_run_brands import keyword_run_brands_table
 from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import owned_domains_from
@@ -65,6 +71,10 @@ BUILD_MARGIN_SECONDS = 30.0
 MAX_SERIES_RESUMES = 8
 #: The build reason of the build a finished ``latest`` backfill starts: it asks for no backfill itself (no loop).
 BACKFILL_BUILD_REASON = 'keyword_latest_backfill'
+#: Build summaries that hand the build to the distributed state machine, which announces its own end.
+_HANDED_OVER = frozenset({'started', 'running'})
+#: View job summaries that end the job (``skipped``: another invocation owns it, or nothing was asked).
+_JOB_ENDINGS = frozenset({'done', 'failed'})
 
 
 class SnapshotConfigurationError(RuntimeError):
@@ -188,7 +198,18 @@ def build_scope_snapshots(event: dict[str, Any], context: Any) -> dict[str, Any]
     finally:
         clear_request_deadline()
     logger.info('Scope snapshots: %s', summary)
+    _announce_build(event, summary)
     return summary
+
+
+def _announce_build(event: Mapping[str, Any], summary: Mapping[str, Any]) -> None:
+    status = str(summary.get('status') or '')
+    if status in _HANDED_OVER:
+        return
+    publish_change(SNAPSHOTS_BUILT, {'status': status})
+    execution = event.get('execution_id')
+    if isinstance(execution, str) and execution:
+        publish_change(RUN_STEP_FINISHED, {'execution_id': execution, 'step': 'build_scope_snapshots'})
 
 
 def job_resources(deadline: Deadline) -> JobResources:
@@ -222,4 +243,6 @@ def view_job(event: dict[str, Any], context: Any) -> dict[str, Any]:
     finally:
         clear_request_deadline()
     logger.info('View job: %s', summary)
+    if summary.get('status') in _JOB_ENDINGS:
+        publish_change(VIEW_JOB_FINISHED, {'job_id': job, 'status': summary['status']})
     return summary

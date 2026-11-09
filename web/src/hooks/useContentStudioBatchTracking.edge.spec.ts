@@ -14,7 +14,7 @@ import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   buildRunningBatchStatusesFor,
   dispatchBatchCandidateStorageEvent,
   flushContentStudioPromises,
@@ -48,6 +48,7 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const expiredRegistration = 1_000_000 - CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS;
 
@@ -211,7 +212,7 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
     ]);
     staleStatus.resolve(createMockJsonResponse(buildRunningBatchStatusResponse()));
     await flushContentStudioPromises();
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
     rendered.unmount();

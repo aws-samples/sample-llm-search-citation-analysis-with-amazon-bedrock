@@ -19,6 +19,10 @@ AWS, so a fixed placeholder region keeps them hermetic.
 
 import os
 import sys
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
 
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
@@ -33,3 +37,16 @@ for _path in (_LAYER_PYTHON_DIR, _LAMBDA_DIR):
     while _path in sys.path:
         sys.path.remove(_path)
     sys.path.insert(0, _path)
+
+
+@pytest.fixture(autouse=True)
+def change_events_bus() -> Iterator[Any]:
+    """Every test publishes its change events (``shared.change_events``) into a fresh recorder, never to AWS.
+
+    Imported here, not at the top: ``testing`` and ``shared`` resolve only once the path shim above has run. Its
+    own ``MonkeyPatch``, not the ``monkeypatch`` fixture, so an autouse fixture does not reorder other fixtures'
+    teardown. Request ``change_events_bus`` by name to read what a test published.
+    """
+    from testing.change_event_stubs import install_recorder
+    with pytest.MonkeyPatch.context() as patcher:
+        yield install_recorder(patcher)

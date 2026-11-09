@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from shared.change_events import EXPORT_CHANGED
 from shared.export_contract import MAX_RUNNING_EXPORTS_PER_USER
 from shared.export_jobs import ExportJobs, NewExport, StaleExportError, TooManyExportsError, new_item, slots_key
 from testing.export_fakes import exports_table
@@ -103,3 +104,14 @@ def test_the_slots_item_is_not_an_export_of_its_owner(jobs: ExportJobs) -> None:
     jobs.create(_queued())
 
     assert jobs.owned(slots_key(ALICE.sub), ALICE.sub) is None
+
+
+def test_a_status_change_is_announced_to_its_owner(jobs: ExportJobs, change_events_bus) -> None:
+    created = jobs.create(_queued())
+    running = jobs.save(created, NOW, status='running', upload_id='upload-1')
+    jobs.save(running, NOW, written=10)
+    jobs.save(jobs.get(created['export_id']), NOW, status='ready')
+
+    assert change_events_bus.details(EXPORT_CHANGED) == [
+        {'export_id': created['export_id'], 'status': status, 'owner_sub': ALICE.sub} for status in ('running', 'ready')
+    ]

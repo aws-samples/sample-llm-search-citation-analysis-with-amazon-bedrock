@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from map_run_results import MapRunResultsError, load_keyword_results
 
+from shared.change_events import RUN_STEP_FINISHED
 from testing.env import cleared_env
 from testing.map_run_fixtures import (
     RUN_TIMESTAMP,
@@ -150,3 +151,15 @@ class TestSummaryStorageIsRequired:
         report = summary.handler({'execution_id': 'exec-1', 'keyword_results': [compact_keyword_result('hotel spa')]}, None)
 
         assert report['run_metadata']['processed_keywords'] == [{'keyword': 'hotel spa', 'timestamp': RUN_TIMESTAMP}]
+
+
+class TestRunStepEvent:
+    def test_a_workflow_summary_announces_its_run_step(self, summary, change_events_bus) -> None:
+        _summarize(summary, map_run_objects([child_record('hotel spa')]), 1)
+
+        assert change_events_bus.details(RUN_STEP_FINISHED) == [{'execution_id': 'analysis-20261001100000', 'step': 'generate_summary'}]
+
+    def test_a_direct_invocation_announces_nothing(self, summary, change_events_bus) -> None:
+        summary.handler({'execution_id': 'exec-1', 'keyword_results': [compact_keyword_result('hotel spa')]}, None)
+
+        assert change_events_bus.entries == []

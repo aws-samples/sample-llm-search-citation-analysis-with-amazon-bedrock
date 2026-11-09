@@ -1,11 +1,15 @@
 /**
- * Where the dashboard finds its API at run time.
+ * Where the dashboard finds its API and its live events at run time.
  *
- * Deployed dashboards read `/config.json` (`{ "apiUrl": "<stage url>/api" }`),
- * which `CitationAnalysisApiStack` writes into the web bucket: the API URL
- * changes with the API stack, so it is not built into the bundle. On the Vite
- * dev server a `VITE_API_URL` (`.env.local`) wins and nothing is fetched; in a
+ * Deployed dashboards read `/config.json` (`{ "apiUrl": "<stage url>/api",
+ * "liveEvents": { "httpDomain", "realtimeDomain" } }`), which
+ * `CitationAnalysisApiStack` writes into the web bucket: the API URL changes
+ * with the API stack, so it is not built into the bundle. On the Vite dev
+ * server a `VITE_API_URL` (`.env.local`) wins and nothing is fetched; in a
  * production build it is only the fallback when `/config.json` is missing.
+ * The live events domains (`CitationAnalysisEventsStack`) come from the same
+ * object, or from `VITE_LIVE_EVENTS_*` on the dev server; without them the
+ * dashboard reads each state once and is not told when it changes.
  *
  * This module must stay free of imports from the app: `main.tsx` loads it
  * before anything that reads `API_BASE_URL` is evaluated.
@@ -31,7 +35,22 @@ export interface RuntimeConfigSources {
   readonly production: boolean;
 }
 
-const loaded = { apiUrl: '' };
+/** The AWS AppSync Events domains (no scheme): the HTTP one authorizes, the real-time one carries the WebSocket. */
+export interface LiveEventsEndpoints {
+  readonly httpDomain: string;
+  readonly realtimeDomain: string;
+}
+
+const loaded: {
+  apiUrl: string;
+  liveEvents: LiveEventsEndpoints | null 
+} = {
+  apiUrl: '',
+  liveEvents: null,
+};
+
+/** A bare host name: letters, digits, dots and dashes. Anything else (a scheme, a path) is not used. */
+const DOMAIN = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/iu;
 
 function defaultSources(): RuntimeConfigSources {
   return {
@@ -47,23 +66,56 @@ function nonEmpty(value: string | undefined): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-/** The `apiUrl` of a `/config.json` response, or `undefined` when the body is not that JSON object. */
-async function readApiUrl(response: Response): Promise<string | undefined> {
-  if (!response.ok) return undefined;
+function field(value: unknown, name: string): unknown {
+  return typeof value === 'object' && value !== null ? Reflect.get(value, name) : undefined;
+}
+
+function domain(value: unknown): string | undefined {
+  const trimmed = typeof value === 'string' ? nonEmpty(value) : undefined;
+  return trimmed !== undefined && DOMAIN.test(trimmed) ? trimmed : undefined;
+}
+
+/** Both live events domains, or `null` when either is missing or not a bare host name. */
+export function liveEventsEndpoints(httpDomain: unknown, realtimeDomain: unknown): LiveEventsEndpoints | null {
+  const http = domain(httpDomain);
+  const realtime = domain(realtimeDomain);
+  return http === undefined || realtime === undefined ? null : {
+    httpDomain: http,
+    realtimeDomain: realtime,
+  };
+}
+
+interface FetchedConfig {
+  readonly apiUrl: string | undefined;
+  readonly liveEvents: LiveEventsEndpoints | null;
+}
+
+const NO_CONFIG: FetchedConfig = {
+  apiUrl: undefined,
+  liveEvents: null,
+};
+
+/** The `apiUrl` and `liveEvents` of a `/config.json` response; nothing when the body is not that JSON object. */
+async function readConfig(response: Response): Promise<FetchedConfig> {
+  if (!response.ok) return NO_CONFIG;
   try {
     const parsed: unknown = JSON.parse(await response.text());
-    const apiUrl: unknown = typeof parsed === 'object' && parsed !== null ? Reflect.get(parsed, 'apiUrl') : undefined;
-    return typeof apiUrl === 'string' ? nonEmpty(apiUrl) : undefined;
+    const apiUrl = field(parsed, 'apiUrl');
+    const liveEvents = field(parsed, 'liveEvents');
+    return {
+      apiUrl: typeof apiUrl === 'string' ? nonEmpty(apiUrl) : undefined,
+      liveEvents: liveEventsEndpoints(field(liveEvents, 'httpDomain'), field(liveEvents, 'realtimeDomain')),
+    };
   } catch {
-    return undefined;
+    return NO_CONFIG;
   }
 }
 
-async function fetchApiUrl(sources: RuntimeConfigSources): Promise<string | undefined> {
+async function fetchConfig(sources: RuntimeConfigSources): Promise<FetchedConfig> {
   try {
-    return await readApiUrl(await sources.fetchConfig(RUNTIME_CONFIG_PATH));
+    return await readConfig(await sources.fetchConfig(RUNTIME_CONFIG_PATH));
   } catch {
-    return undefined;
+    return NO_CONFIG;
   }
 }
 
@@ -84,11 +136,24 @@ function accept(apiUrl: string, production: boolean): RuntimeConfigResult {
 export async function loadRuntimeConfig(sources: RuntimeConfigSources = defaultSources()): Promise<RuntimeConfigResult> {
   const buildTimeApiUrl = nonEmpty(sources.buildTimeApiUrl);
   if (sources.devServer && buildTimeApiUrl !== undefined) return accept(buildTimeApiUrl, sources.production);
-  const apiUrl = (await fetchApiUrl(sources)) ?? buildTimeApiUrl;
+  const fetched = await fetchConfig(sources);
+  loaded.liveEvents = fetched.liveEvents;
+  const apiUrl = fetched.apiUrl ?? buildTimeApiUrl;
   return apiUrl === undefined ? { status: 'unavailable' } : accept(apiUrl, sources.production);
 }
 
 /** The URL `loadRuntimeConfig` resolved; the build-time `VITE_API_URL` (or `''`) before it ran, as in specs. */
 export function loadedApiUrl(): string {
   return loaded.apiUrl === '' ? (import.meta.env.VITE_API_URL ?? '') : loaded.apiUrl;
+}
+
+/**
+ * The live events domains `loadRuntimeConfig` read from `/config.json`; on the dev server (or before it ran, as
+ * in specs) the `VITE_LIVE_EVENTS_*` ones; `null` when there are none.
+ */
+export function loadedLiveEvents(): LiveEventsEndpoints | null {
+  return loaded.liveEvents ?? liveEventsEndpoints(
+    import.meta.env.VITE_LIVE_EVENTS_HTTP_DOMAIN,
+    import.meta.env.VITE_LIVE_EVENTS_REALTIME_DOMAIN
+  );
 }

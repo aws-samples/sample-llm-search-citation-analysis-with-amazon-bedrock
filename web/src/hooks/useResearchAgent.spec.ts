@@ -2,7 +2,9 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import { act } from '@testing-library/react';
-import { AGENT_POLL_INTERVAL_MS } from './useResearchAgent';
+import {
+  emitLive, liveSubscriberCount, resetLiveEvents
+} from '../test/liveEventsMock';
 import { buildAgentJob } from '../components/KeywordResearch/agent/agent-fixtures';
 import type { StartAgentRequest } from '../api/keywordResearch';
 import {
@@ -13,6 +15,7 @@ import type {
 } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const START_REQUEST: StartAgentRequest = {
   seed: 'Hotel Gran Marino',
@@ -35,6 +38,7 @@ describe('useResearchAgent', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    resetLiveEvents();
   });
 
   it('lists the agent runs from history on mount', async () => {
@@ -95,7 +99,7 @@ describe('useResearchAgent', () => {
     expect(result.current.selected).toBeNull();
   });
 
-  it('re-reads active runs on the poll interval until they finish', async () => {
+  it('re-reads active runs when they change, catching up once on connect, until they finish', async () => {
     const result = await renderAgentRuns({
       history: [buildAgentJob({
         id: 'job-r',
@@ -118,15 +122,19 @@ describe('useResearchAgent', () => {
     });
     expect(result.current.jobs).toHaveLength(1);
 
-    await advanceBy(AGENT_POLL_INTERVAL_MS);
+    await advanceBy(0);
     expect(result.current.jobs[0].keyword_count).toBe(20);
 
-    await advanceBy(AGENT_POLL_INTERVAL_MS);
+    await emitLive('research', {
+      type: 'research-job.changed',
+      job_id: 'job-r' 
+    });
     expect(result.current.jobs[0].status).toBe('completed');
 
-    const polls = requests().filter((request) => request === 'GET /keyword-research/job-r').length;
-    await advanceBy(AGENT_POLL_INTERVAL_MS * 2);
-    expect(requests().filter((request) => request === 'GET /keyword-research/job-r')).toHaveLength(polls);
+    const reads = requests().filter((request) => request === 'GET /keyword-research/job-r').length;
+    await advanceBy(60_000);
+    expect([requests().filter((request) => request === 'GET /keyword-research/job-r').length, liveSubscriberCount('research')])
+      .toStrictEqual([reads, 0]);
   });
 
   it('opening a run loads its full detail including the prompt', async () => {

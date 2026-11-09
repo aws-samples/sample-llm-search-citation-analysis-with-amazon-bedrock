@@ -16,8 +16,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from botocore.exceptions import ClientError
 
+from shared.change_events import SELF_REFLECTION_FINISHED
 from shared.models import BedrockDeadlineError
 from shared.self_invoke import SelfInvokeDispatchError
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
@@ -164,10 +166,18 @@ class TestJobRun:
 
         assert Job(reflection, prepared=gone).failure == 'No search results found.'
 
-    def test_ignores_a_malformed_job_without_touching_the_table(self, reflection):
+    def test_ignores_a_malformed_job_without_touching_the_table(self, reflection, change_events_bus):
         job = Job(reflection, {'keyword': 'k'})
 
-        assert (job.result, job.table.method_calls) == ({'status': 'ignored'}, [])
+        assert (job.result, job.table.method_calls, change_events_bus.entries) == ({'status': 'ignored'}, [], [])
+
+    @pytest.mark.parametrize(('bedrock', 'status'), [(None, 'done'), (ValueError('boom'), 'failed')])
+    def test_announces_how_the_job_ended(self, reflection, change_events_bus, bedrock, status):
+        Job(reflection, bedrock=bedrock)
+
+        assert change_events_bus.details(SELF_REFLECTION_FINISHED) == [
+            {'keyword': 'hotel con spa', 'brand': 'Hotel Sol', 'query_prompt_id': 'familia', 'status': status},
+        ]
 
 
 class Get:

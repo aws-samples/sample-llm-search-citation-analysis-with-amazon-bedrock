@@ -1,8 +1,8 @@
 import {
-  describe, it, expect, vi
+  afterEach, describe, it, expect, vi
 } from 'vitest';
 import {
-  renderHook, act 
+  renderHook, act, waitFor
 } from '@testing-library/react';
 import { useExecutionPolling } from './useExecutionPolling';
 import type { AnalysisScope } from '../types';
@@ -12,14 +12,16 @@ import {
   createMockFetch,
   renderTriggeredExecutionPolling,
   mockKeywordProgress,
+  statusReads,
   triggerWithProgress,
 } from './useExecutionPolling-fixtures';
 
 import {
-  advanceFakeTime, runEachTestWithFakeTimers
-} from '../test/fakeTime';
+  emitLive, liveSubscriberCount, resetLiveEvents
+} from '../test/liveEventsMock';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
@@ -149,35 +151,84 @@ describe('useExecutionPolling keyword progress', () => {
   });
 });
 
-describe('useExecutionPolling polling lifecycle', () => {
-  runEachTestWithFakeTimers();
+describe('useExecutionPolling live lifecycle', () => {
+  afterEach(() => {
+    resetLiveEvents();
+  });
 
-  it('stops polling and fires onComplete exactly once after a terminal status', async () => {
-    // Regression for AUDIT-2026-08-19 2.16: the interval handle lived in
-    // useState, the interval callback froze a stale stopPolling closure over
-    // null, clearInterval never ran, and onComplete fired on every 3s tick.
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('SUCCEEDED'),}));
+  it('fires onComplete exactly once after a terminal status and listens to nothing more', async () => {
+    // Regression for AUDIT-2026-08-19 2.16: onComplete fired on every 3s tick of the old poll.
+    mockAuthenticatedFetch.mockImplementation(createMockFetch({ statusResponse: createMockStatusResponse('SUCCEEDED') }));
     const onComplete = vi.fn();
-
     const { result } = renderHook(() => useExecutionPolling(onComplete));
 
     await act(async () => {
       await result.current.triggerAnalysis();
     });
-    const fetchCallsAfterCompletion = mockAuthenticatedFetch.mock.calls.length;
+    await emitLive('runs', {
+      type: 'execution.status',
+      executionArn: mockExecutionArn,
+      status: 'SUCCEEDED' 
+    });
 
-    await advanceFakeTime(9000);
-
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterCompletion);
+    expect([onComplete.mock.calls.length, liveSubscriberCount('runs')]).toStrictEqual([1, 0]);
   });
 
-  it('keeps polling on the interval while the execution is running', async () => {
-    await renderTriggeredExecutionPolling(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
-    const fetchCallsAfterTrigger = mockAuthenticatedFetch.mock.calls.length;
+  it('reads the status once to catch up when it starts listening to a running execution', async () => {
+    await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING') }));
 
-    await advanceFakeTime(6000);
+    await waitFor(() => {
+      expect(statusReads()).toBe(2);
+    });
+  });
 
-    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterTrigger + 2);
+  it.each([
+    ['its own status change', {
+      type: 'execution.status',
+      executionArn: mockExecutionArn,
+      status: 'RUNNING' 
+    }],
+    ['one of its steps', {
+      type: 'run.step.finished',
+      execution_id: 'test',
+      step: 'generate_summary' 
+    }],
+    ['a keyword finishing', {
+      type: 'run.keyword.finished',
+      status: 'success' 
+    }],
+  ])('reads the status again on %s', async (_case, event) => {
+    await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING') }));
+    await waitFor(() => {
+      expect(statusReads()).toBe(2);
+    });
+
+    await emitLive('runs', event);
+
+    await waitFor(() => {
+      expect(statusReads()).toBe(3);
+    });
+  });
+
+  it('ignores another execution’s status change', async () => {
+    await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING') }));
+    await waitFor(() => {
+      expect(statusReads()).toBe(2);
+    });
+
+    await emitLive('runs', {
+      type: 'execution.status',
+      executionArn: `${mockExecutionArn}-other`,
+      status: 'SUCCEEDED' 
+    });
+
+    expect(statusReads()).toBe(2);
+  });
+
+  it('stops listening when the hook unmounts', async () => {
+    const { unmount } = await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING') }));
+    unmount();
+
+    expect(liveSubscriberCount('runs')).toBe(0);
   });
 });

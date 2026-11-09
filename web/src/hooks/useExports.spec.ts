@@ -1,5 +1,5 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  afterEach, describe, expect, it, vi
 } from 'vitest';
 import {
   act, renderHook, waitFor
@@ -9,61 +9,66 @@ import {
 } from '../test/exportsApiMock';
 import { buildExportSummary } from '../types/domain/exports-fixtures';
 import {
-  EXPORT_POLL_MS, useExports, useExportsCenter
+  emitLive, liveSubscriberCount, resetLiveEvents
+} from '../test/liveEventsMock';
+import {
+  useExports, useExportsCenter
 } from './useExports';
 
 vi.mock('../api/exports', () => import('../test/exportsApiMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const RUNNING = buildExportSummary({ status: 'running' });
 const READY = buildExportSummary({ status: 'ready' });
 
-describe('useExportsCenter polling', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
+describe('useExportsCenter live list', () => {
   afterEach(() => {
-    vi.useRealTimers();
+    resetLiveEvents();
   });
 
-  it('re-reads the list every 5 s while an export is running', async () => {
+  it('listens to the user’s own exports channel while an export runs, reading once to catch up', async () => {
     mockListExports.mockResolvedValue({ exports: [RUNNING] });
     renderHook(() => useExportsCenter());
-    await act(() => vi.advanceTimersByTimeAsync(0));
 
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-
-    expect(mockListExports).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+    expect(liveSubscriberCount('exports')).toBe(1);
   });
 
-  it('stops polling once no export is queued or running', async () => {
+  it('re-reads the list when one of the user’s exports changes', async () => {
+    mockListExports.mockResolvedValue({ exports: [RUNNING] });
+    renderHook(() => useExportsCenter());
+    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+
+    await emitLive('exports', {
+      type: 'export.changed',
+      export_id: RUNNING.export_id,
+      status: 'ready' 
+    });
+
+    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(3));
+  });
+
+  it('stops listening once no export is queued or running', async () => {
     mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
     renderHook(() => useExportsCenter());
-    await act(() => vi.advanceTimersByTimeAsync(0));
 
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-
-    expect(mockListExports).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+    expect(liveSubscriberCount('exports')).toBe(0);
   });
 
-  it('does not poll when every export is finished', async () => {
+  it('does not listen when every export is finished', async () => {
     mockListExports.mockResolvedValue({ exports: [READY] });
     renderHook(() => useExportsCenter());
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS * 3));
+    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(1));
 
-    expect(mockListExports).toHaveBeenCalledTimes(1);
+    expect(liveSubscriberCount('exports')).toBe(0);
   });
 
-  it('toasts that a running export is ready when a poll sees it finished', async () => {
+  it('toasts that a running export is ready when the read after its event sees it finished', async () => {
     mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
     const { result } = renderHook(() => useExportsCenter());
-    await act(() => vi.advanceTimersByTimeAsync(0));
 
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-
-    expect(result.current.toasts.map((toast) => [toast.tone, toast.message])).toStrictEqual([['success', 'Citations export is ready']]);
+    await waitFor(() => expect(result.current.toasts.map((toast) => [toast.tone, toast.message])).toStrictEqual([['success', 'Citations export is ready']]));
   });
 
   it('shows a browser notification when the user allowed them', async () => {
@@ -71,19 +76,21 @@ describe('useExportsCenter polling', () => {
     vi.stubGlobal('Notification', Object.assign(notification, { permission: 'granted' }));
     mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
     renderHook(() => useExportsCenter());
-    await act(() => vi.advanceTimersByTimeAsync(0));
 
-    await act(() => vi.advanceTimersByTimeAsync(EXPORT_POLL_MS));
-
-    expect(notification).toHaveBeenCalledWith('Citations export is ready', {
+    await waitFor(() => expect(notification).toHaveBeenCalledWith('Citations export is ready', {
       body: 'citations-group-coruna.xlsx',
       tag: 'exp-coruna',
-    });
+    }));
     vi.unstubAllGlobals();
   });
 });
 
 describe('useExportsCenter actions', () => {
+  afterEach(() => {
+    resetLiveEvents();
+    mockListExports.mockReset();
+  });
+
   it('counts the finished exports the user has not seen', async () => {
     mockListExports.mockResolvedValue({
       exports: [READY, buildExportSummary({
@@ -98,7 +105,13 @@ describe('useExportsCenter actions', () => {
   });
 
   it('lists a started export first and toasts that it started', async () => {
-    mockListExports.mockResolvedValue({ exports: [READY] });
+    const started = buildExportSummary({
+      export_id: 'exp-alerts',
+      view: 'alerts',
+      status: 'queued' 
+    });
+    mockStartExport.mockResolvedValueOnce(started);
+    mockListExports.mockResolvedValueOnce({ exports: [READY] }).mockResolvedValue({ exports: [started, READY] });
     const { result } = renderHook(() => useExportsCenter());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -169,7 +182,12 @@ describe('useExportsCenter actions', () => {
         exports: [READY],
         next_token: 'p2',
       })
-      .mockResolvedValueOnce({ exports: [buildExportSummary({ export_id: 'older' })] });
+      .mockResolvedValueOnce({
+        exports: [buildExportSummary({
+          export_id: 'older',
+          status: 'ready' 
+        })] 
+      });
     const { result } = renderHook(() => useExportsCenter());
     await waitFor(() => expect(result.current.nextToken).toBe('p2'));
 

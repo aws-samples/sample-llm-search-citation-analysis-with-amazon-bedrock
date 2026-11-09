@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react';
-import { vi } from 'vitest';
+import { emitLive } from '../test/liveEventsMock';
 import {
   ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
   readStoredContentStudioBatchCandidates,
@@ -150,9 +150,12 @@ export async function resolveRunningBatchStatus(
   await flushContentStudioPromises();
 }
 
-export async function advanceContentStudioPoll(): Promise<void> {
-  await act(async () => {
-    vi.advanceTimersByTime(10_000);
-    await Promise.resolve();
+/** A Content Studio item changed (`content.changed`), as the live events channel announces it. */
+export async function announceContentChange(contentId = 'content-elsewhere'): Promise<void> {
+  await emitLive('content-studio', {
+    type: 'content.changed',
+    content_id: contentId,
+    status: 'generated',
   });
+  await flushContentStudioPromises();
 }

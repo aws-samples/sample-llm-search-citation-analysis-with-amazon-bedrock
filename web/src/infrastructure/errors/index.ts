@@ -2,6 +2,7 @@
  * Error handling utilities barrel export.
  */
 export {
+  abortReason,
   ApiRequestError,
   ApiConfigError,
   clientRejectionMessage,

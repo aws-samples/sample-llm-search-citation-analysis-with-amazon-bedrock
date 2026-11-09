@@ -8,6 +8,7 @@ import {
   createDeferredResponse, createMockJsonResponse, type DeferredResponse
 } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { resetLiveEvents } from '../test/liveEventsMock';
 import type {
   ContentStatus, ContentStudioHistory
 } from '../types';
@@ -122,4 +123,5 @@ export function restoreContentStudioHookTest(): void {
   vi.useRealTimers();
   vi.restoreAllMocks();
   localStorage.clear();
+  resetLiveEvents();
 }

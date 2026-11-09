@@ -27,7 +27,7 @@ export const REGENERATING_MESSAGE = 'Regenerating…';
 interface Props extends InsightsSectionProps {
   /** The report's scope: only a keyword group has a narrative to regenerate. */
   readonly scope: ReportScope;
-  /** The report period, sent with the poll so it reads the same payload the report does. */
+  /** The report period, sent with the read after regenerating so it reads the same payload the report does. */
   readonly days: number;
 }
 
@@ -164,7 +164,7 @@ function NarrativeBody({
  * The stored narrative of the scope's latest run: up to three insights and
  * six recommendations, each followed by the computed insights it cites, and
  * who wrote it when. An admin can regenerate a group's narrative; the
- * section then polls until the new one is stored.
+ * section then waits for its live event until the new one is stored.
  */
 export function NarrativeSection({
   scope, days, data, loading, error

@@ -7,7 +7,9 @@ import {
 import {
   buildGridJob, buildStartJobResponse
 } from '../../../api/seoLocal-fixtures';
-import { startLocalJob } from './localSeoApi-fixtures';
+import {
+  fetchLocalJob, startLocalJob
+} from './localSeoApi-fixtures';
 import {
   GRID_CONFIRM, askForGrid, runGrid, setupLocalSeoPage
 } from './LocalSeoView-fixtures';
@@ -77,6 +79,7 @@ describe('RankGridTab results', () => {
 
   it('shows progress while the grid searches are still running', async () => {
     startLocalJob.mockResolvedValue(buildStartJobResponse(buildGridJob('collecting', null)));
+    fetchLocalJob.mockResolvedValue(buildGridJob('collecting', null));
 
     await runGrid();
 

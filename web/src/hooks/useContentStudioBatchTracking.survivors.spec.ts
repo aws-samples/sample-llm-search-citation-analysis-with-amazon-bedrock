@@ -8,7 +8,7 @@ import {
   storeActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
 import {
-  advanceContentStudioPoll, flushContentStudioPromises
+  announceContentChange, flushContentStudioPromises
 } from './useContentStudioBatchTracking-fixtures';
 import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
@@ -16,6 +16,7 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
@@ -39,7 +40,7 @@ describe('useContentStudioBatchTracking no-op poll outcome', () => {
     requestBehavior.shouldFailBatchStatus = true;
     const rendersBeforeError = renderCount.value;
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(renderCount.value).toBe(rendersBeforeError);
   });

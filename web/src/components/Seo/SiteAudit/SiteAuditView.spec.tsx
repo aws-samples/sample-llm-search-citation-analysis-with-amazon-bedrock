@@ -1,5 +1,5 @@
 import {
-  act, screen, waitFor, within
+  screen, waitFor, within
 } from '@testing-library/react';
 import {
   afterEach, beforeEach, describe, expect, it, vi
@@ -11,7 +11,9 @@ import {
 import {
   AUDIT_ID, PAGE_URL, buildAuditDetail, buildSiteAudit
 } from '../../../api/seoAudits-fixtures';
-import { AUDIT_POLL_MS } from '../../../hooks/useSiteAuditDetail';
+import {
+  emitLive, liveSubscriberCount, resetLiveEvents
+} from '../../../test/liveEventsMock';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
 import { findBrandTrackingLinkElement } from '../settingsDomains-fixtures';
 import {
@@ -25,6 +27,7 @@ vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoAudits');
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
+vi.mock('../../../infrastructure/liveEvents', () => import('../../../test/liveEventsMock'));
 
 const RUNNING = buildAuditDetail({
   status: 'running',
@@ -42,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  resetLiveEvents();
 });
 
 describe('SiteAuditView setup', () => {
@@ -161,29 +165,36 @@ describe('SiteAuditView running audit', () => {
     expect(await screen.findByText('40 of 200 pages crawled (limit 500)')).toBeInTheDocument();
   });
 
-  it('reads the audit again after the poll interval while it runs', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('reads the audit again when a step of it ran, and not for another audit', async () => {
     setupSiteAudit({ detail: RUNNING });
     renderSiteAudit();
     await screen.findByText('Crawling pages');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(AUDIT_POLL_MS);
-    });
-
     await waitFor(() => {
       expect(fetchAudit).toHaveBeenCalledTimes(2);
     });
+    await emitLive('seo', {
+      type: 'seo-job.changed',
+      feature: 'audit',
+      id: 'another-audit' 
+    });
+    await emitLive('seo', {
+      type: 'seo-job.changed',
+      feature: 'audit',
+      id: AUDIT_ID 
+    });
+
+    await waitFor(() => {
+      expect(fetchAudit).toHaveBeenCalledTimes(3);
+    });
   });
 
-  it('clears the poll timer when the view unmounts', async () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+  it('stops listening when the view unmounts', async () => {
     setupSiteAudit({ detail: RUNNING });
     const { unmount } = renderSiteAudit();
     await screen.findByText('Crawling pages');
-    const callsBefore = clearTimeoutSpy.mock.calls.length;
     unmount();
 
-    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(liveSubscriberCount('seo')).toBe(0);
   });
 
   it('lets an admin cancel a running audit', async () => {

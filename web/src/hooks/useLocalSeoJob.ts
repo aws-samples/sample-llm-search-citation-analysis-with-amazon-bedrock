@@ -5,12 +5,16 @@ import { seoErrorMessage } from '../api/seo';
 import {
   fetchLocalJob, startLocalJob
 } from '../api/seoLocal';
+import {
+  deploymentChannel, eventField, type LiveEvent
+} from '../infrastructure/liveEvents';
 import type {
   LocalJob, LocalJobRequest
 } from '../types/api/seoLocal';
+import { useLiveRefresh } from './useLiveRefresh';
 
-export const JOB_POLL_INTERVAL_MS = 5000;
 const TERMINAL: readonly LocalJob['status'][] = ['completed', 'failed', 'timed_out'];
+const SEO_CHANNEL = deploymentChannel('seo');
 
 export type LocalJobState =
   | { readonly status: 'idle' }
@@ -36,19 +40,22 @@ function isTerminal(job: LocalJob): boolean {
   return TERMINAL.includes(job.status);
 }
 
+/** Whether `event` says a step of local SEO job `jobId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
+export function isLocalJobEvent(event: LiveEvent, jobId: string): boolean {
+  return eventField(event, 'feature') === 'local' && eventField(event, 'id') === jobId;
+}
+
 /**
- * A queued local SEO job: one paid `POST /seo/local/jobs` on the user's click, then the free status route
- * every 5 s until the job completes, fails or times out. An unmount or reset stops the polling.
+ * A queued local SEO job: one paid `POST /seo/local/jobs` on the user's click; then, while it runs, the free
+ * status route is read once when the SEO channel connects (and reconnects) and again whenever a step of this job
+ * ran (TENETS.md tenet 8), until the job completes, fails or times out. An unmount or reset stops listening.
  */
 export function useLocalSeoJob(): LocalJobController {
   const [state, setState] = useState<LocalJobState>({ status: 'idle' });
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
 
   const stop = useCallback(() => {
     generationRef.current += 1;
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = null;
   }, []);
 
   useEffect(() => stop, [stop]);
@@ -70,13 +77,22 @@ export function useLocalSeoJob(): LocalJobController {
       job,
       reused 
     });
-    if (isTerminal(job)) return;
-    timerRef.current = setTimeout(() => {
-      fetchLocalJob(job.job_id)
-        .then((next) => { show(next, reused, generation); })
-        .catch((failure: unknown) => { fail(generation, failure); });
-    }, JOB_POLL_INTERVAL_MS);
-  }, [fail]);
+  }, []);
+
+  const running = state.status === 'running' ? state : null;
+  useLiveRefresh(
+    running === null ? null : SEO_CHANNEL,
+    async () => {
+      if (running === null) return;
+      const generation = generationRef.current;
+      try {
+        show(await fetchLocalJob(running.job.job_id), running.reused, generation);
+      } catch (failure) {
+        fail(generation, failure);
+      }
+    },
+    (event) => running !== null && isLocalJobEvent(event, running.job.job_id)
+  );
 
   const start = useCallback(async (request: LocalJobRequest) => {
     stop();

@@ -15,6 +15,7 @@ import {
 } from './useContentStudio-fixtures';
 import {
   advanceContentStudioTimersAsync,
+  reconnectContentStudio,
   buildPollingHistoryItem,
   contentHistoryStatuses,
   countContentHistoryRequests,
@@ -36,6 +37,8 @@ import {
 } from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
+import { liveSubscriberCount } from '../test/liveEventsMock';
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
@@ -240,7 +243,7 @@ describe('useContentStudio history mutations', () => {
   });
 });
 
-describe('useContentStudio status polling', () => {
+describe('useContentStudio status reads', () => {
   it.each(statusFailures)(
     'exposes a visible error after three consecutive %s status failures',
     async (_label, statusFailure) => {
@@ -259,21 +262,21 @@ describe('useContentStudio status polling', () => {
     const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
     const callsAtFailureLimit = countContentStatusRequests();
 
-    await advanceContentStudioTimersAsync(30_000);
+    await reconnectContentStudio(3);
 
     expect(callsAtFailureLimit).toBe(3);
     expect(countContentStatusRequests()).toBe(3);
     unmount();
   });
 
-  it('leaves no polling timer behind once the only generating item reaches three consecutive failures', async () => {
+  it('stops listening once the only generating item reaches three consecutive failures', async () => {
     const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
 
-    expect(vi.getTimerCount()).toBe(0);
+    expect([vi.getTimerCount(), liveSubscriberCount('content-studio')]).toStrictEqual([0, 0]);
     unmount();
   });
 
-  it('keeps one status request in flight when multiple polling intervals elapse', async () => {
+  it('keeps one status request in flight when several changes are announced during it', async () => {
     const {
       deferredStatusFetch, unmount
     } = await renderContentStudioWithDeferredPolling([[
@@ -281,7 +284,7 @@ describe('useContentStudio status polling', () => {
     ]]);
     expect(deferredStatusFetch.statusRequests).toHaveLength(1);
 
-    await advanceContentStudioTimersAsync(30_000);
+    await reconnectContentStudio(3);
 
     expect(deferredStatusFetch.statusRequests).toHaveLength(1);
     unmount();
@@ -368,12 +371,12 @@ describe('useContentStudio status polling', () => {
       deferredStatusFetch.statusRequests.slice(0, 2),
       ['network-failure', 'generating']
     );
-    await advanceContentStudioTimersAsync(10_000);
+    await reconnectContentStudio(1);
     await settleDeferredStatusBatch(
       deferredStatusFetch.statusRequests.slice(2, 4),
       ['network-failure', 'generating']
     );
-    await advanceContentStudioTimersAsync(10_000);
+    await reconnectContentStudio(1);
     await settleDeferredStatusBatch(
       deferredStatusFetch.statusRequests.slice(4, 6),
       ['network-failure', 'generated']
@@ -391,7 +394,7 @@ describe('useContentStudio status polling', () => {
     unmount();
   });
 
-  it('continues polling healthy items when another item reaches its failure limit', async () => {
+  it('keeps reading healthy items when another item reaches its failure limit', async () => {
     const { unmount } = await renderPollingContentStudio({
       historyResponse: buildContentHistoryPayload([
         buildPollingHistoryItem('content-a'),
@@ -400,7 +403,7 @@ describe('useContentStudio status polling', () => {
       statusFailures: { 'content-a': 'network' },
       statusResponses: { 'content-b': contentStatusPayload('content-b', 'generating') },
     });
-    await advanceContentStudioTimersAsync(40_000);
+    await reconnectContentStudio(4);
 
     expect(countContentStatusRequests('content-a')).toBe(3);
     expect(countContentStatusRequests('content-b')).toBe(5);
@@ -424,15 +427,13 @@ describe('useContentStudio status polling', () => {
     expect(console.error).toHaveBeenCalledTimes(0);
   });
 
-  it('clears the polling interval when the hook unmounts', async () => {
+  it('stops listening when the hook unmounts', async () => {
     const { unmount } = await renderContentStudioWithDeferredPolling([[
       buildPollingHistoryItem('content-a'),
     ]]);
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
-    const callsBeforeUnmount = clearIntervalSpy.mock.calls.length;
+    expect(liveSubscriberCount('content-studio')).toBe(1);
     unmount();
 
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
-    clearIntervalSpy.mockRestore();
+    expect(liveSubscriberCount('content-studio')).toBe(0);
   });
 });

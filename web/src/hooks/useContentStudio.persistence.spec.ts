@@ -11,7 +11,7 @@ import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   buildRunningBatchStatusesFor,
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
@@ -33,7 +33,6 @@ import {
   activeBatchIds,
   batchStatusRequestCounts,
   renderTwoRunningBatchesWithFakeTimers,
-  spyOnAggregatePollIntervals,
   renderTwoVisibleRunningBatches,
   startTerminalBatch,
 } from './useContentStudio-scenario-fixtures';
@@ -56,6 +55,8 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
+import { liveSubscriberCount } from '../test/liveEventsMock';
 
 import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
@@ -80,16 +81,15 @@ describe('useContentStudio recovered batch persistence', () => {
     });
   });
 
-  it('uses one ten-second interval for every recovered batch', async () => {
-    const aggregatePollIntervals = spyOnAggregatePollIntervals();
+  it('listens once for every recovered batch', async () => {
     const {
       fetch, unmount
     } = renderTwoRunningBatches();
     await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(1);
+      expect(batchStatusRequestUrls(fetch, 'batch-2').length).toBeGreaterThan(0);
     });
 
-    expect(aggregatePollIntervals()).toHaveLength(1);
+    expect(liveSubscriberCount('content-studio')).toBe(1);
     unmount();
   });
 
@@ -158,7 +158,7 @@ describe('useContentStudio recovered batch persistence', () => {
     });
     await flushContentStudioPromises();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
       'batch-terminal': 1,
@@ -168,13 +168,13 @@ describe('useContentStudio recovered batch persistence', () => {
   });
 });
 
-describe('useContentStudio aggregate batch timer', () => {
+describe('useContentStudio aggregate batch reads', () => {
   it('requests another status for every tracked batch after ten seconds', async () => {
     const {
       fetch, unmount
     } = await renderTwoRunningBatchesWithFakeTimers();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
       'batch-1': 2,
@@ -189,7 +189,7 @@ describe('useContentStudio aggregate batch timer', () => {
     const [firstStatus, secondStatus] = deferNextTwoAuthenticatedFetches();
     const rendered = renderHook(() => useContentStudio());
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
     rendered.unmount();
@@ -231,19 +231,17 @@ describe('useContentStudio aggregate batch timer', () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(expect.anything());
   });
 
-  it('clears the aggregate interval when the hook unmounts', async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+  it('stops listening when the hook unmounts', async () => {
     const {
       fetch, unmount
     } = renderTwoRunningBatches();
     await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
+      expect(batchStatusRequestUrls(fetch, 'batch-1').length).toBeGreaterThan(0);
     });
-    const callsBeforeUnmount = clearIntervalSpy.mock.calls.length;
 
     unmount();
 
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
+    expect(liveSubscriberCount('content-studio')).toBe(0);
   });
 });
 
@@ -254,7 +252,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent(['batch-2']);
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(activeBatchIds(result.current)).toStrictEqual(['batch-2']);
     expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
@@ -329,7 +327,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent([], 'other.key');
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(result.current.activeBatches).toHaveLength(2);
     expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(2);
@@ -391,8 +389,8 @@ describe('useContentStudio batch request races', () => {
       throw new TypeError('Storage unavailable');
     });
 
-    await advanceContentStudioPoll();
-    await advanceContentStudioPoll();
+    await announceContentChange();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
       'batch-terminal': 2,
@@ -420,7 +418,7 @@ describe('useContentStudio batch request races', () => {
     missingBatchIds.push('batch-1');
     vi.setSystemTime(Date.now() + CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS);
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(activeBatchIds(result.current)).toStrictEqual(['batch-terminal']);
   });

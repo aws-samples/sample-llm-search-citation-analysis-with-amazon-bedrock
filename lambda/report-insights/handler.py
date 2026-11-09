@@ -52,6 +52,7 @@ from typing import Any
 from shared import action_scope_serve, scope_snapshot_serve
 from shared.answer_queries import history_since, query_keyword_run_rows, query_latest_run_rows
 from shared.artifact_insights import ARTIFACT_KEY as INSIGHTS_ARTIFACT
+from shared.change_events import NARRATIVE_FINISHED, publish_change
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights, insights_from_facts
@@ -470,4 +471,7 @@ def handler(event: Any, context: Any) -> dict[str, Any]:
             outcomes = list(pool.map(lambda run: _guarded(run, brand_config), runs))
     finally:
         clear_request_deadline()
+    for outcome in outcomes:
+        # An open report re-reads its narrative on it (a regenerate request waits for exactly this).
+        publish_change(NARRATIVE_FINISHED, {key: outcome[key] for key in ('group_id', 'market_id', 'status') if key in outcome})
     return _summary(outcomes, run_timestamp)

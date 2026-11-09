@@ -1,16 +1,20 @@
 import {
   useCallback, useEffect, useState
 } from 'react';
+import {
+  deploymentChannel, eventField, type LiveEvent
+} from '../infrastructure/liveEvents';
 import type { SelfReflectionResponse } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
 import {
   fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
+import { useLiveRefresh } from './useLiveRefresh';
 
-/** How often a running analysis is checked; the API's job runs 60 s at most. */
-export const SELF_REFLECTION_POLL_INTERVAL_MS = 3000;
-/** Checks before giving up on a running analysis (two minutes at the interval above). */
-export const SELF_REFLECTION_MAX_POLLS = 40;
+/** How long a running analysis is waited for before giving up; the API's job runs 60 s at most. */
+export const SELF_REFLECTION_WAIT_LIMIT_MS = 120_000;
+
+const INSIGHTS_CHANNEL = deploymentChannel('insights');
 export const SELF_REFLECTION_GAVE_UP = 'The analysis is taking longer than expected; try again in a minute.';
 export const SELF_REFLECTION_NO_RESULT = 'The analysis finished without a result; try again.';
 
@@ -102,12 +106,23 @@ function finishedReflection(status: SelfReflectionStatus | null): SelfReflection
   return status.results[0] ?? null;
 }
 
-/** Why polling ended without a reflection, or `null` while it may still bring one. */
-function pollingError(status: SelfReflectionStatus | null, polls: number): string | null {
+/** Why the wait ended without a reflection, or `null` while it may still bring one. */
+function waitingError(status: SelfReflectionStatus | null, gaveUp: boolean): string | null {
   if (status?.job?.status === 'failed') return status.job.error ?? SELF_REFLECTION_NO_RESULT;
   if (status !== null && status.job === null && status.results.length === 0) return SELF_REFLECTION_NO_RESULT;
-  if (polls >= SELF_REFLECTION_MAX_POLLS && status?.job?.status === 'pending') return SELF_REFLECTION_GAVE_UP;
+  if (gaveUp) return SELF_REFLECTION_GAVE_UP;
   return null;
+}
+
+/**
+ * Whether `event` says the analysis `pending` waits for finished (`self-reflection.finished`,
+ * `lambda/api/self-reflection.py`): same keyword, brand and persona.
+ */
+export function isReflectionFinished(event: LiveEvent, pending: SelfReflectionPending): boolean {
+  return event.type === 'self-reflection.finished'
+    && eventField(event, 'keyword') === pending.keyword
+    && eventField(event, 'brand') === pending.brand
+    && eventField(event, 'query_prompt_id') === pending.query_prompt_id;
 }
 
 /**
@@ -115,39 +130,44 @@ function pollingError(status: SelfReflectionStatus | null, polls: number): strin
  *
  * The POST answers at once when no model call is needed (a cached or
  * trivial answer); otherwise it answers 202 and the model is asked in the
- * background, so the hook checks `GET /self-reflection` every
- * `SELF_REFLECTION_POLL_INTERVAL_MS` until the job finishes or fails, at most
- * `SELF_REFLECTION_MAX_POLLS` times. `loading` stays true meanwhile; unmount
- * stops the checks.
+ * background, so the hook listens to the insights channel and reads
+ * `GET /self-reflection` once when the subscription becomes active (and
+ * after every reconnect) and again when the job's `self-reflection.finished`
+ * event arrives (TENETS.md tenet 8). It gives up after
+ * `SELF_REFLECTION_WAIT_LIMIT_MS`. `loading` stays true meanwhile; unmount
+ * stops listening.
  */
 export function useSelfReflection() {
   const trigger = useAnalysisEndpoint(reflectionTriggerEndpoint);
-  const poll = useAnalysisEndpoint(reflectionStatusEndpoint);
-  const [polls, setPolls] = useState(0);
+  const status = useAnalysisEndpoint(reflectionStatusEndpoint);
+  const [gaveUp, setGaveUp] = useState(false);
   const { fetchData: fetchTrigger } = trigger;
   const {
     fetchData: fetchStatus, reset: resetStatus 
-  } = poll;
+  } = status;
 
   const pending = isSelfReflectionPending(trigger.data) ? trigger.data : null;
-  const result = isSelfReflectionResponse(trigger.data) ? trigger.data : finishedReflection(poll.data);
-  const error = trigger.error ?? poll.error ?? (pending === null ? null : pollingError(poll.data, polls));
+  const result = isSelfReflectionResponse(trigger.data) ? trigger.data : finishedReflection(status.data);
+  const error = trigger.error ?? status.error ?? (pending === null ? null : waitingError(status.data, gaveUp));
   const waiting = pending !== null && result === null && error === null;
 
+  useLiveRefresh(
+    waiting ? INSIGHTS_CHANNEL : null,
+    () => (pending === null ? Promise.resolve() : fetchStatus(pending)),
+    (event) => pending !== null && isReflectionFinished(event, pending)
+  );
+
   useEffect(() => {
-    if (pending === null || !waiting || poll.loading) return undefined;
-    const timer = setTimeout(() => {
-      setPolls((count) => count + 1);
-      void fetchStatus(pending);
-    }, SELF_REFLECTION_POLL_INTERVAL_MS);
+    if (!waiting) return undefined;
+    const timer = setTimeout(() => setGaveUp(true), SELF_REFLECTION_WAIT_LIMIT_MS);
     return () => {
       clearTimeout(timer);
     };
-  }, [pending, waiting, poll.loading, poll.data, fetchStatus]);
+  }, [waiting]);
 
   const triggerReflection = useCallback((...args: Parameters<typeof reflectionTriggerEndpoint.buildRequest>) => {
     resetStatus();
-    setPolls(0);
+    setGaveUp(false);
     return fetchTrigger(...args);
   }, [resetStatus, fetchTrigger]);
 

@@ -18,6 +18,7 @@ export {
 
 // Errors
 export {
+  abortReason,
   ApiRequestError,
   ApiConfigError,
   clientRejectionMessage,

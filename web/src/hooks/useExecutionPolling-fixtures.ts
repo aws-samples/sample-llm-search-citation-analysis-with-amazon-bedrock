@@ -103,3 +103,8 @@ export function createMockFetch(options: {
     });
   });
 }
+
+/** How many times the execution status route was read. */
+export function statusReads(): number {
+  return mockAuthenticatedFetch.mock.calls.filter(([url]) => String(url).includes('/executions/')).length;
+}

@@ -13,6 +13,9 @@ import {
 import {
   getErrorMessage, isDefinitiveClientRejection
 } from '../infrastructure';
+import {
+  deploymentChannel, eventField
+} from '../infrastructure/liveEvents';
 import type {
   ContentBriefBatchRequest,
   ContentBriefBatchStartResponse,
@@ -30,8 +33,10 @@ import {
   CONTENT_HISTORY_PAGE_SIZE, useContentHistoryPaging
 } from './useContentHistoryPaging';
 import { useContentIdeasPaging } from './useContentIdeasPaging';
+import { useLiveRefresh } from './useLiveRefresh';
 
-const GENERATING_POLL_INTERVAL = 10000;
+/** Content Studio status changes (`content.changed`, `lambda/api/content-studio.py`). */
+export const CONTENT_STUDIO_CHANNEL = deploymentChannel('content-studio');
 const MAX_CONSECUTIVE_STATUS_FAILURES = 3;
 const STATUS_POLLING_ERROR = 'Unable to check content generation status after 3 attempts. Refresh to try again.';
 
@@ -72,7 +77,6 @@ export function useContentStudio() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollingError, setPollingError] = useState<string | null>(null);
-  const itemPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const latestIdeasReadRef = useRef<symbol | null>(null);
   const latestHistoryReadRef = useRef<symbol | null>(null);
   const historyRequestRef = useRef<AbortController | null>(null);
@@ -213,19 +217,13 @@ export function useContentStudio() {
     const itemStatusPoll = itemStatusPollRef.current;
     itemStatusPollRef.current = null;
     itemStatusPoll?.abort();
-    if (itemPollingRef.current !== null) {
-      clearInterval(itemPollingRef.current);
-      itemPollingRef.current = null;
-    }
   }, []);
 
+  /** One status read of every independently generating item; history again when one of them ended. */
   const pollGeneratingItems = useCallback(async () => {
     if (itemStatusPollRef.current !== null) return;
     const generatingItems = pollableItems(history, pollingFailureCountsRef.current);
-    if (generatingItems.length === 0) {
-      stopItemPolling();
-      return;
-    }
+    if (generatingItems.length === 0) return;
 
     const itemStatusPoll = new AbortController();
     itemStatusPollRef.current = itemStatusPoll;
@@ -236,24 +234,20 @@ export function useContentStudio() {
       if (itemStatusPollRef.current !== itemStatusPoll) return;
       const hasTerminalTransition = processStatusResults(generatingItems, statusResults);
       if (hasTerminalTransition) await fetchHistory();
-      const hasPollableItems = pollableItems(history, pollingFailureCountsRef.current).length > 0;
-      if (itemStatusPollRef.current === itemStatusPoll && !hasPollableItems) stopItemPolling();
     } finally {
       if (itemStatusPollRef.current === itemStatusPoll) itemStatusPollRef.current = null;
     }
-  }, [fetchHistory, history, processStatusResults, stopItemPolling]);
+  }, [fetchHistory, history, processStatusResults]);
 
-  const startItemPolling = useCallback(() => {
-    if (itemPollingRef.current !== null) return;
-    const hasPollableItems = pollableItems(history, pollingFailureCountsRef.current).length > 0;
-    if (!hasPollableItems) return;
-
-    itemPollingRef.current = setInterval(
-      () => void pollGeneratingItems(),
-      GENERATING_POLL_INTERVAL
-    );
-    void pollGeneratingItems();
-  }, [history, pollGeneratingItems]);
+  const watchedItems = pollableItems(history, pollingFailureCountsRef.current);
+  const watchedIds = new Set(watchedItems.map((item) => item.id));
+  // While an item generates, its status is read once when the channel connects (and reconnects) and again when
+  // the item changes (TENETS.md tenet 8); nothing is read on a timer.
+  useLiveRefresh(
+    watchedItems.length > 0 ? CONTENT_STUDIO_CHANNEL : null,
+    pollGeneratingItems,
+    (event) => event.type === 'content.changed' && watchedIds.has(eventField(event, 'content_id') ?? '')
+  );
 
   useEffect(() => {
     const activeIds = new Set(history.filter(isIndependentlyGenerating).map((item) => item.id));
@@ -263,9 +257,11 @@ export function useContentStudio() {
     const hasExhaustedItem = [...pollingFailureCountsRef.current.values()]
       .some((failureCount) => failureCount >= MAX_CONSECUTIVE_STATUS_FAILURES);
     if (!hasExhaustedItem) setPollingError(null);
-    startItemPolling();
+    // A new history (a load, or the refresh after an item ended) is checked once: the read in flight, if any,
+    // was for the old one and is dropped.
+    void pollGeneratingItems();
     return stopItemPolling;
-  }, [history, startItemPolling, stopItemPolling]);
+  }, [history, pollGeneratingItems, stopItemPolling]);
 
   /** The first page of ideas of `params` (scope and market; every keyword when empty). */
   const fetchIdeas = useCallback(async (params: Readonly<Record<string, string>> = {}): Promise<ContentIdea[]> => {

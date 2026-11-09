@@ -1,6 +1,7 @@
 /**
- * The Exports center (2.45.0): the caller's exports, polled every 5 s while any is queued or
- * running (and not at all otherwise), a toast when one is started or finishes, a browser
+ * The Exports center (2.45.0): the caller's exports, read on mount and, while any is queued or
+ * running, again whenever one of them changes status (the user's own `exports` channel, TENETS.md
+ * tenet 8) and once on every (re)connect; a toast when one is started or finishes, a browser
  * notification when the user allowed it, and the header badge count of finished exports the
  * user has not seen. One instance lives in `ExportsProvider`; views read it with `useExports`.
  */
@@ -11,6 +12,7 @@ import {
   deleteExport, fetchDownloadUrl, isExportActive, listExports, markExportSeen, startExport, type ExportRequest
 } from '../api/exports';
 import { getErrorMessage } from '../infrastructure';
+import { userChannel } from '../infrastructure/liveEvents';
 import type { ExportSummary } from '../types/domain/exports';
 import {
   appendPage, countUnseen, finishedBetween, markedSeen, mergeFirstPage
@@ -18,9 +20,10 @@ import {
 import {
   finishedExportTitle, notifyExportFinished
 } from './exportNotifications';
+import { useLiveRefresh } from './useLiveRefresh';
 
-/** How often the list is re-read while an export is queued or running. */
-export const EXPORT_POLL_MS = 5_000;
+/** The signed-in user's own exports channel: nobody else hears their exports change. */
+const EXPORTS_CHANNEL = userChannel('exports');
 
 /** A short message in the corner; `started` and `ready` link to the Exports page. */
 export interface ExportToast {
@@ -150,7 +153,7 @@ function useExportList(push: (tone: ExportToast['tone'], message: string) => voi
   };
 }
 
-function usePolling(exports: readonly ExportSummary[], refresh: (signal?: AbortSignal) => Promise<void>): void {
+function useLiveList(exports: readonly ExportSummary[], refresh: (signal?: AbortSignal) => Promise<void>): void {
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
@@ -158,15 +161,7 @@ function usePolling(exports: readonly ExportSummary[], refresh: (signal?: AbortS
   }, [refresh]);
 
   const active = exports.some(isExportActive);
-  useEffect(() => {
-    if (!active) return undefined;
-    const controller = new AbortController();
-    const timer = setTimeout(() => { void refresh(controller.signal); }, EXPORT_POLL_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [active, exports, refresh]);
+  useLiveRefresh(active ? EXPORTS_CHANNEL : null, () => refresh());
 }
 
 /** The single Exports center state (mounted once, in `ExportsProvider`). */
@@ -177,7 +172,7 @@ export function useExportsCenter(): ExportsCenter {
   const {
     list, listRef, apply, loading, loadingMore, error, refresh, loadMore
   } = useExportList(push);
-  usePolling(list.exports, refresh);
+  useLiveList(list.exports, refresh);
 
   const start = useCallback(async (request: ExportRequest) => {
     const summary = await startExport(request);

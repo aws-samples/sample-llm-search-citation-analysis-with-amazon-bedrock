@@ -5,10 +5,18 @@ import {
   fetchLatestRankRun, startRankRun
 } from '../api/seoRankTracking';
 import { seoErrorMessage } from '../api/seo';
+import {
+  deploymentChannel, eventField, type LiveEvent
+} from '../infrastructure/liveEvents';
 import type { RankRun } from '../types/api/seoRankTracking';
+import { useLiveRefresh } from './useLiveRefresh';
 
-/** How often the latest run is read while it is pending or running (free read). */
-export const RUN_POLL_MS = 3000;
+const SEO_CHANNEL = deploymentChannel('seo');
+
+/** Whether `event` says a step of a run of tracker `trackerId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
+export function isRankRunEvent(event: LiveEvent, trackerId: string): boolean {
+  return eventField(event, 'feature') === 'rank' && eventField(event, 'id') === trackerId;
+}
 
 export function isRunActive(run: RankRun | null): boolean {
   return run !== null && (run.status === 'pending' || run.status === 'running');
@@ -23,9 +31,9 @@ export interface RankRunControl {
 }
 
 /**
- * The tracker's latest run: polled every `RUN_POLL_MS` while it is active, and
- * `onFinished` called once when it ends, so the caller re-reads the results.
- * `start` is the only paid action and runs only when called.
+ * The tracker's latest run: while it is active, read again (free) whenever a step of one of the tracker's runs
+ * ran and once on every (re)connect of the SEO channel (TENETS.md tenet 8), and `onFinished` called once when it
+ * ends, so the caller re-reads the results. `start` is the only paid action and runs only when called.
  */
 export function useRankTrackingRun(trackerId: string, initial: RankRun | null, onFinished: () => void): RankRunControl {
   const [run, setRun] = useState<RankRun | null>(initial);
@@ -51,16 +59,14 @@ export function useRankTrackingRun(trackerId: string, initial: RankRun | null, o
   }, [initial]);
 
   const active = isRunActive(run);
-  useEffect(() => {
-    if (!active) return undefined;
-    const timer = setInterval(() => {
-      fetchLatestRankRun(trackerId).then((latest) => {
-        setRun(latest);
-        if (!isRunActive(latest)) finishedRef.current();
-      }, (failure: unknown) => setError(seoErrorMessage(failure)));
-    }, RUN_POLL_MS);
-    return () => clearInterval(timer);
-  }, [active, trackerId, setError]);
+  useLiveRefresh(
+    active ? SEO_CHANNEL : null,
+    () => fetchLatestRankRun(trackerId).then((latest) => {
+      setRun(latest);
+      if (!isRunActive(latest)) finishedRef.current();
+    }, (failure: unknown) => setError(seoErrorMessage(failure))),
+    (event) => isRankRunEvent(event, trackerId)
+  );
 
   const begin = useCallback(() => {
     setStart({

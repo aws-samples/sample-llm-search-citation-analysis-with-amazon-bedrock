@@ -1,13 +1,22 @@
 import {
-  useCallback, useEffect, useRef, useState
+  useCallback, useRef, useState
 } from 'react';
 import { seoErrorMessage } from '../api/seo';
 import { fetchLighthouseRun } from '../api/seoPerformance';
+import {
+  deploymentChannel, eventField, type LiveEvent
+} from '../infrastructure/liveEvents';
 import type {
   LighthouseRun, StartRunResponse
 } from '../types/api/seoPerformance';
+import { useLiveRefresh } from './useLiveRefresh';
 
-export const RUN_POLL_INTERVAL_MS = 5000;
+const SEO_CHANNEL = deploymentChannel('seo');
+
+/** Whether `event` says a step of Lighthouse run `runId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
+export function isLighthouseRunEvent(event: LiveEvent, runId: string): boolean {
+  return eventField(event, 'feature') === 'lighthouse' && eventField(event, 'id') === runId;
+}
 
 /** Nothing shown yet, a start or open under way, a run on screen, or why it could not be shown. */
 export type RunState =
@@ -50,8 +59,9 @@ function failed(failure: unknown): RunState {
 }
 
 /**
- * One Lighthouse run on screen: started on a click (or opened from the list), then read every 5 s while it
- * runs. The polling reads are free; an unmount, a newer start or a newer open stops them.
+ * One Lighthouse run on screen: started on a click (or opened from the list); while it runs, it is read again
+ * (free) once when the SEO channel connects or reconnects and whenever a step of it ran (TENETS.md tenet 8). An
+ * unmount, a newer start or a newer open stops listening to it.
  */
 export function usePerformanceRun(): RunController {
   const [state, setState] = useState<RunState>({ status: 'idle' });
@@ -69,19 +79,21 @@ export function usePerformanceRun(): RunController {
     }
   }, []);
 
-  useEffect(() => {
-    if (state.status !== 'running') return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetchLighthouseRun(state.run.run_id, { signal: controller.signal })
-        .then((run) => { if (!controller.signal.aborted) setState(shown(run, state.reused)); })
-        .catch((failure: unknown) => { if (!controller.signal.aborted) setState(failed(failure)); });
-    }, RUN_POLL_INTERVAL_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [state]);
+  const running = state.status === 'running' ? state : null;
+  useLiveRefresh(
+    running === null ? null : SEO_CHANNEL,
+    async () => {
+      if (running === null) return;
+      const ticket = latest.current;
+      try {
+        const run = await fetchLighthouseRun(running.run.run_id);
+        if (latest.current === ticket) setState(shown(run, running.reused));
+      } catch (failure) {
+        if (latest.current === ticket) setState(failed(failure));
+      }
+    },
+    (event) => running !== null && isLighthouseRunEvent(event, running.run.run_id)
+  );
 
   const open = useCallback((runId: string) => show(async () => ({
     run: await fetchLighthouseRun(runId),

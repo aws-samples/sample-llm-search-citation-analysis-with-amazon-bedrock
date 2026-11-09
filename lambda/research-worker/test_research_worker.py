@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.ai_clients import WEB_SEARCH_PROVIDERS
+from shared.change_events import RESEARCH_JOB_CHANGED
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.module_loader import load_handler_module_offline
 
@@ -1274,6 +1275,29 @@ class TestCheckpointWriteContract:
     def test_missing_job_answers_failed_for_round_one_when_the_event_names_no_round(self, event, expected):
         with patch.object(_mod, 'research_table', _table_with(None)):
             assert _mod.handler(event, None) == expected
+
+
+class TestChangeEvents:
+    def test_every_action_announces_its_job(self, change_events_bus):
+        with patch.object(_mod, 'research_table', _table_with(None)):
+            _mod.handler({'action': 'fail', 'job_id': 'job-9'}, None)
+
+        assert change_events_bus.details(RESEARCH_JOB_CHANGED) == [{'job_id': 'job-9'}]
+
+    def test_an_action_that_raises_still_announces_its_job(self, change_events_bus):
+        table = _table_with(_finished_expansion_job())
+        table.update_item.side_effect = conditional_check_failure(message='checkpoints keep moving')
+
+        with pytest.raises(_mod.CheckpointConflictError):
+            _run_on(table, {'action': 'finalize', 'job_id': 'job-1'})
+
+        assert change_events_bus.details(RESEARCH_JOB_CHANGED) == [{'job_id': 'job-1'}]
+
+    def test_an_unknown_action_announces_nothing(self, change_events_bus):
+        with pytest.raises(ValueError, match='Unknown research worker action'):
+            _mod.handler({'action': 'nap', 'job_id': 'job-1'}, None)
+
+        assert change_events_bus.entries == []
 
 
 

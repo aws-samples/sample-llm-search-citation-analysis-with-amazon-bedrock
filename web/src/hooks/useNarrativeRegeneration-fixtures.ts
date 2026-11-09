@@ -1,6 +1,6 @@
 /**
  * Replacement for the `api/client` module in the narrative specs, and the
- * payloads the regenerate poll reads:
+ * payloads the regenerate wait reads:
  *
  * ```ts
  * vi.mock('../api/client', () => import('./useNarrativeRegeneration-fixtures'));
@@ -41,7 +41,7 @@ export function buildRegeneratedNarrative(): InsightsNarrative {
   });
 }
 
-/** Every poll of `GET /reports/insights` answers `narrative`; the regenerate request is accepted. */
+/** Every read of `GET /reports/insights` answers `narrative`; the regenerate request is accepted. */
 export function stubRegenerateAndPoll(narrative: InsightsNarrative | null): void {
   mockApiPost.mockResolvedValue({
     status: 'accepted',

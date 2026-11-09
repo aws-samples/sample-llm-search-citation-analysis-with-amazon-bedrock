@@ -121,12 +121,6 @@ export function batchStatusRequestCounts(
   ]));
 }
 
-/** Spies on `setInterval`; the returned reader lists the ten-second aggregate poll intervals. */
-export function spyOnAggregatePollIntervals(): () => unknown[] {
-  const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
-  return () => setIntervalSpy.mock.calls.filter(([, milliseconds]) => milliseconds === 10_000);
-}
-
 /** Renders a bare hook and starts `mockBatchRequest` without awaiting it. */
 export function renderPendingBatchStart() {
   const rendered = renderHook(() => useContentStudio());

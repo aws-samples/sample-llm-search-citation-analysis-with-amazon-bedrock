@@ -60,6 +60,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.answer_queries import query_keyword_run_rows
 from shared.brand_names import normalize_brand_key
+from shared.change_events import KPI_ALERTS_RAISED, RUN_STEP_FINISHED, publish_change
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import BatchGetUnprocessedError, batch_get_items, collect_all_items
 from shared.dynamodb_conditions import applied_conditionally
@@ -125,6 +126,13 @@ class GroupMarket(NamedTuple):
     def snapshot_key(self) -> str:
         """The snapshot ``group_id``: the plain group id for the global market, ``<group>#<market>`` otherwise."""
         return market_scoped_key(self.group_id, self.market_id)
+
+
+def _announce(execution_id: str, alerts_created: int) -> None:
+    """Tell the bus the run's alert step finished and, when it raised any, how many alerts (``shared.change_events``)."""
+    publish_change(RUN_STEP_FINISHED, {'execution_id': execution_id, 'step': 'kpi_alerts'})
+    if alerts_created:
+        publish_change(KPI_ALERTS_RAISED, {'execution_id': execution_id, 'count': alerts_created})
 
 
 def _skipped(reason: str | None) -> dict[str, Any]:
@@ -558,6 +566,7 @@ def handler(event: object, context: Any) -> dict[str, Any]:
         logger.warning('Time budget spent: %d group/market pair(s) left unevaluated', len(evaluation.out_of_time))
 
     notification = _notify(new_alerts, execution_id, settings)
+    _announce(execution_id, len(new_alerts))
     return {
         'status': 'completed',
         'run_timestamp': run_timestamp,

@@ -1,5 +1,5 @@
 /**
- * One audit: its progress while queued or running (polled), its failure, or its summary, AI-readiness panel and
+ * One audit: its progress while queued or running (read again as its steps run), its failure, or its summary, AI-readiness panel and
  * issues once completed. A cancelled audit shows what it had found before it stopped, if anything.
  *
  * "Export all" (once summarized) writes the issue types, the pages of every issue type and the robots.txt AI

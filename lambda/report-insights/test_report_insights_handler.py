@@ -14,6 +14,7 @@ import pytest
 from shared import partial_insights, scoped_reports
 from shared.artifact_insights import InsightsBuilder
 from shared.artifact_registry import fold_scope
+from shared.change_events import NARRATIVE_FINISHED
 from shared.markets import markets_from_item
 from shared.models import BedrockInvocationError
 from shared.partial_contract import KeywordLatest, PartialConfig
@@ -192,7 +193,7 @@ class TestFailures:
         assert result['skipped'] == 1
         bedrock.assert_not_called()
 
-    def test_keeps_the_other_groups_when_one_group_fails(self, worker_module) -> None:
+    def test_keeps_the_other_groups_when_one_group_fails_and_announces_each(self, worker_module, change_events_bus) -> None:
         replies = [BedrockInvocationError('throttled'), _model_reply(model_narrative([_VALID_INSIGHT]))]
 
         with _worker(worker_module, _model_reply(model_narrative())):
@@ -201,6 +202,9 @@ class TestFailures:
                 result = worker_module.handler(_workflow_event('group-1', 'group-2'), None)
 
         assert (result['failed'], result['generated']) == (1, 1)
+        assert change_events_bus.details(NARRATIVE_FINISHED) == [
+            {'group_id': 'group-1', 'status': 'failed'}, {'group_id': 'group-2', 'status': 'generated'},
+        ]
 
 
 class TestRegenerate:

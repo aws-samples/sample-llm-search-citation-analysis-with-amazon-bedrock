@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { act } from '@testing-library/react';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   dispatchBatchStorageEvent,
   flushContentStudioPromises,
   newestTrackedBatchIdsAfterElevenStarts,
@@ -31,24 +31,24 @@ import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import {
   activeBatchIds,
   renderTwoVisibleRunningBatches,
-  spyOnAggregatePollIntervals,
   startRunningBatch,
 } from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
+import { liveSubscriberCount } from '../test/liveEventsMock';
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
 
 describe('useContentStudioBatchTracking mutation boundaries', () => {
-  it('creates no polling interval when no batch IDs are stored', () => {
-    const aggregatePollIntervals = spyOnAggregatePollIntervals();
+  it('listens to nothing when no batch IDs are stored', () => {
     const fetch = createMockFetch();
 
     renderContentStudio(fetch);
 
     expect(requestUrlsContaining(fetch, '/batches/')).toStrictEqual([]);
-    expect(aggregatePollIntervals()).toStrictEqual([]);
+    expect(liveSubscriberCount('content-studio')).toBe(0);
   });
 
   it('replaces one batch card instead of duplicating a repeated batch start', async () => {
@@ -63,14 +63,14 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     unmount();
   });
 
-  it('continues polling an accepted running batch after ten seconds', async () => {
+  it('reads an accepted running batch again when a Content Studio item changes', async () => {
     vi.useFakeTimers();
     const {
       fetch, unmount
     } = await startRunningBatch();
     await flushContentStudioPromises();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestUrls(fetch)).toHaveLength(2);
     unmount();
@@ -98,7 +98,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     await flushContentStudioPromises();
 
     const [batchTwoStatus, batchOneStatus] = deferNextTwoAuthenticatedFetches();
-    await advanceContentStudioPoll();
+    await announceContentChange();
     await resolveRunningBatchStatus(batchOneStatus, 'batch-1');
 
     const laterBatchIds = Array.from({ length: 9 }, (_, index) => `batch-${index + 3}`);

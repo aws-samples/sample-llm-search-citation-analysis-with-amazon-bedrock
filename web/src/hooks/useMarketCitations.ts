@@ -22,8 +22,9 @@ import {
 } from '../infrastructure';
 import { apiRequestErrors } from './useAnalysisEndpoint';
 import {
-  STALE_REFETCH_INTERVAL_MS, STALE_REFETCH_LIMIT
+  SNAPSHOTS_CHANNEL, STALE_REFETCH_LIMIT, isSnapshotBuildEnded
 } from './useStaleRefetch';
+import { useLiveChannel } from './useLiveChannel';
 
 /**
  * `GET /citations?market_id=&limit=`: one market's provider, brand and
@@ -100,8 +101,9 @@ interface Loaded {
 }
 
 /**
- * The refetch round of request `key`: while its page is a stale snapshot being rebuilt, the round
- * goes up every 10 s (at most 18 times) so the page is read again; a new request starts at 0.
+ * The refetch round of request `key`: while its page is a stale snapshot being rebuilt, the round goes up when
+ * a snapshot build ends (the `snapshots` live channel) and once when that subscription becomes active, at most
+ * `STALE_REFETCH_LIMIT` times, so the page is read again; a new request starts at 0.
  */
 function useStaleSnapshotRound(key: string, loaded: Loaded | null): number {
   const [refetch, setRefetch] = useState({
@@ -110,15 +112,18 @@ function useStaleSnapshotRound(key: string, loaded: Loaded | null): number {
   });
   const round = refetch.key === key ? refetch.round : 0;
   const stalePage = loaded?.key === key && loaded.page?.stale === true && loaded.page.source !== 'live';
+  const waiting = stalePage && round < STALE_REFETCH_LIMIT;
+  const next = (): void => setRefetch((current) => ({
+    key,
+    round: (current.key === key ? current.round : 0) + 1,
+  }));
 
-  useEffect(() => {
-    if (!stalePage || round >= STALE_REFETCH_LIMIT) return undefined;
-    const timer = setTimeout(() => setRefetch({
-      key,
-      round: round + 1,
-    }), STALE_REFETCH_INTERVAL_MS);
-    return () => clearTimeout(timer);
-  }, [stalePage, round, key, loaded]);
+  useLiveChannel(waiting ? SNAPSHOTS_CHANNEL : null, {
+    onConnected: next,
+    onEvent: (event) => {
+      if (isSnapshotBuildEnded(event)) next();
+    },
+  });
   return round;
 }
 

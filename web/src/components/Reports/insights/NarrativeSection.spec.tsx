@@ -10,7 +10,7 @@ import {
   buildRegeneratedNarrative, mockApiPost, stubRegenerateAndPoll
 } from '../../../hooks/useNarrativeRegeneration-fixtures';
 import {
-  NARRATIVE_POLL_ATTEMPTS, NARRATIVE_POLL_INTERVAL_MS, REGENERATE_TIMEOUT_MESSAGE
+  NARRATIVE_WAIT_LIMIT_MS, REGENERATE_TIMEOUT_MESSAGE
 } from '../../../hooks/useNarrativeRegeneration';
 import { buildInsights } from '../../../types/domain/insights-fixtures';
 import {
@@ -32,6 +32,7 @@ import {
 
 vi.mock('../../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 vi.mock('../../../api/client', () => import('../../../hooks/useNarrativeRegeneration-fixtures'));
+vi.mock('../../../infrastructure/liveEvents', () => import('../../../test/liveEventsMock'));
 
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
@@ -175,7 +176,7 @@ describe('NarrativeSection', () => {
     });
   });
 
-  describe('regenerate polling', () => {
+  describe('regenerate waiting', () => {
     runEachTestWithFakeTimers();
 
     beforeEach(() => {
@@ -187,7 +188,7 @@ describe('NarrativeSection', () => {
       renderNarrative();
 
       await confirmRegenerate();
-      await advanceFakeTime(NARRATIVE_POLL_INTERVAL_MS);
+      await advanceFakeTime(0);
 
       expect(narrativeItems('Insights')[0]).toContain('Gemini cita a Aurora Airways en solo el 20% de las respuestas.');
     });
@@ -197,7 +198,7 @@ describe('NarrativeSection', () => {
       renderNarrative();
 
       await confirmRegenerate();
-      await advanceFakeTime(NARRATIVE_POLL_INTERVAL_MS * NARRATIVE_POLL_ATTEMPTS);
+      await advanceFakeTime(NARRATIVE_WAIT_LIMIT_MS);
 
       expect(screen.getByRole('status')).toHaveTextContent(REGENERATE_TIMEOUT_MESSAGE);
     });

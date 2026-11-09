@@ -24,10 +24,16 @@ from typing import Any
 sys.path.insert(0, '/opt/python')
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from shared.change_events import SEO_JOB_CHANGED, publish_change
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 Step = Callable[[dict[str, Any]], dict[str, Any]]
+
+#: The id an open SEO view watches, by feature (``seo-job.changed``, ``shared.change_events``): a rank tracker's
+#: latest run, a local SEO job, a Lighthouse run, a site audit. The domain and backlink snapshots have no such view.
+WATCHED_JOB_IDS: Mapping[str, str] = {'rank': 'tracker_id', 'local': 'job_id', 'lighthouse': 'run_id', 'audit': 'audit_id'}
 
 
 class UnknownStepError(KeyError):
@@ -47,11 +53,27 @@ def steps() -> Mapping[str, Step]:
     return registry
 
 
+def watched_job(name: str, event: Mapping[str, Any]) -> dict[str, str] | None:
+    """The ``{feature, id}`` a dashboard view watches for step ``name``, or ``None`` for a feature no view watches."""
+    feature = name.split('.', 1)[0]
+    key = WATCHED_JOB_IDS.get(feature)
+    if key is None:
+        return None
+    state = event.get('state')
+    value = event.get(key) if key in event else (state.get(key) if isinstance(state, Mapping) else None)
+    return {'feature': feature, 'id': value} if isinstance(value, str) and value else None
+
+
 def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
-    """Run the step the event names."""
+    """Run the step the event names, then announce that its job may have changed (a raised step included)."""
     name = event.get('step')
     step = steps().get(name) if isinstance(name, str) else None
-    if step is None:
+    if step is None or not isinstance(name, str):
         raise UnknownStepError(f'unknown SEO job step {name!r}')
     logger.info('seo-jobs step %s', name)
-    return step(event)
+    try:
+        return step(event)
+    finally:
+        job = watched_job(name, event)
+        if job is not None:
+            publish_change(SEO_JOB_CHANGED, job)

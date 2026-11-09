@@ -8,7 +8,7 @@ import {
   startKeywordExpansion,
 } from '../api/keywordResearch';
 import type { ResearchType } from '../api/keywordResearch';
-import { pollResearchJob } from './researchPolling';
+import { watchResearchJob } from './researchJobWatch';
 import { useResearchHistoryPages } from './useResearchHistoryPages';
 import type {
   CompetitorAnalysis, CompetitorAnalysisResult, KeywordExpansionResult, KeywordResearchItem
@@ -124,19 +124,20 @@ export const useKeywordResearch = () => {
   const [activeJob, setActiveJob] = useState<KeywordResearchItem | null>(null);
   const historyPages = useResearchHistoryPages();
 
-  // Cancellation for the long-running poll loops (AUDIT 2.20): each
-  // start/retry claims a new generation; a later call or unmount invalidates
-  // older generations, stopping their polls at the next tick and dropping
-  // their stale state updates.
-  const pollGenerationRef = useRef(0);
+  // Cancellation for the long waits (AUDIT 2.20): each start/retry claims a
+  // new generation; a later call or unmount aborts the older one, which stops
+  // listening for its job at once and drops its stale state updates.
+  const generationRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => {
-    pollGenerationRef.current += 1;
+    generationRef.current?.abort();
   }, []);
 
   const claimGeneration = useCallback(() => {
-    const generation = ++pollGenerationRef.current;
-    return () => pollGenerationRef.current !== generation;
+    generationRef.current?.abort();
+    const generation = new AbortController();
+    generationRef.current = generation;
+    return generation.signal;
   }, []);
 
   /**
@@ -144,21 +145,22 @@ export const useKeywordResearch = () => {
    * `activeJob`, the merged result in the matching result slot. Shared by
    * start, retry and re-attach.
    */
-  const trackJob = useCallback(async (jobId: string, type: TrackedResearchType, isCancelled: () => boolean) => {
+  const trackJob = useCallback(async (jobId: string, type: TrackedResearchType, cancelled: AbortSignal) => {
+    const isCancelled = () => cancelled.aborted;
     storeActiveJob({
       id: jobId,
       type 
     });
     try {
-      const job = await pollResearchJob({
+      const job = await watchResearchJob({
         jobId,
-        isCancelled,
+        signal: cancelled,
         onProgress: (snapshot) => {
           if (!isCancelled()) setActiveJob(snapshot);
         },
         timeoutMessage: TIMEOUT_MESSAGES[type],
       });
-      // null means the poll was superseded or unmounted — keep the stored id
+      // null means the wait was superseded or unmounted — keep the stored id
       // so a remount can re-attach, and drop the rest silently.
       if (!job) return;
       setActiveJob(job);
@@ -204,16 +206,16 @@ export const useKeywordResearch = () => {
     action: string,
     shownJob: KeywordResearchItem | null = null
   ) => {
-    const isCancelled = claimGeneration();
+    const cancelled = claimGeneration();
     beginRun(type);
     setActiveJob(shownJob);
     try {
       const job = await start();
-      if (isCancelled()) return;
+      if (cancelled.aborted) return;
       setActiveJob(job);
-      await trackJob(job.id, type, isCancelled);
+      await trackJob(job.id, type, cancelled);
     } catch (err) {
-      if (isCancelled()) return;
+      if (cancelled.aborted) return;
       setError(getErrorMessage(err, 'research'));
       setLoading(false);
       console.error(`[research] Error ${action}:`, err);
@@ -252,9 +254,9 @@ export const useKeywordResearch = () => {
   useEffect(() => {
     const stored = readStoredActiveJob();
     if (stored === null) return;
-    const isCancelled = claimGeneration();
+    const cancelled = claimGeneration();
     beginRun(stored.type);
-    void trackJob(stored.id, stored.type, isCancelled);
+    void trackJob(stored.id, stored.type, cancelled);
   }, [beginRun, claimGeneration, trackJob]);
 
   return {
