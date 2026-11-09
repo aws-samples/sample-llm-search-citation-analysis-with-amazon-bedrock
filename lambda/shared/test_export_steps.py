@@ -185,6 +185,13 @@ def _route_harness(route: PagedRoute, clock: JumpClock, *, limit: int = 3) -> Ex
     return ExportHarness(source, clock=clock)
 
 
+def _waited_on_view_job(computing: int) -> tuple[ExportHarness[RouteSource], str, dict[str, Any]]:
+    """A prepared export of three items whose route answers ``202 computing`` ``computing`` times, after one chunk; that chunk's answer."""
+    harness = _route_harness(PagedRoute(numbered_items(3), computing_first=computing), JumpClock())
+    export_id = harness.start()
+    return harness, export_id, chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+
+
 def _two_pages_a_chunk() -> ExportHarness[RouteSource]:
     """Ten items, three a page, behind a router so slow that the second page of a chunk answers with half a second left."""
     clock = JumpClock()
@@ -215,24 +222,17 @@ class TestChunkEnd:
         assert [line[0] for line in csv_lines(data)[1:]] == [f'item-{index:03d}' for index in range(10)]
 
     def test_a_chunk_meeting_a_computing_view_job_names_the_run_the_state_machine_waits_for(self) -> None:
-        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
-        export_id = harness.start()
-
-        answer = chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+        harness, export_id, answer = _waited_on_view_job(computing=1)
 
         assert (answer['done'], answer['view_job'], harness.item(export_id).get('stalls')) == (False, _VIEW_JOB_RUN, 0)
 
     def test_an_export_waiting_on_a_view_job_reads_as_running_with_its_progress(self) -> None:
-        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
-        export_id = harness.start()
-        chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+        harness, export_id, _ = _waited_on_view_job(computing=1)
 
         assert {key: summary(harness.item(export_id))[key] for key in ('status', 'rows')} == {'status': 'running', 'rows': 0}
 
     def test_a_chunk_meeting_a_computing_view_job_keeps_the_wait_executions_started_before_2_49_take(self) -> None:
-        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=1), JumpClock())
-
-        assert chunk(harness.deps, harness.start(), JumpClock().deadline(CHUNK_SECONDS))['wait_seconds'] == 2
+        assert _waited_on_view_job(computing=1)[2]['wait_seconds'] == 2
 
     def test_an_export_waiting_on_a_view_job_longer_than_the_stall_limit_still_completes(self) -> None:
         harness = _route_harness(PagedRoute(numbered_items(3), computing_first=STALL_LIMIT + 2), JumpClock())
@@ -247,9 +247,7 @@ class TestAfterATimedOutViewJobWait:
 
     @staticmethod
     def _waited(computing: int) -> tuple[ExportHarness[RouteSource], str]:
-        harness = _route_harness(PagedRoute(numbered_items(3), computing_first=computing), JumpClock())
-        export_id = harness.start()
-        chunk(harness.deps, export_id, JumpClock().deadline(CHUNK_SECONDS))
+        harness, export_id, _ = _waited_on_view_job(computing)
         return harness, export_id
 
     @staticmethod
