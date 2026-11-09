@@ -1566,6 +1566,14 @@ describe('Dashboard content security policy', () => {
     ]);
   });
 
+  it('lets the dashboard reach the API over HTTPS and the live events over a WebSocket (wss://<realtime domain>/event/realtime)', () => {
+    expect(synthesized.contentSecurityPolicy['connect-src']).toStrictEqual([
+      "'self'",
+      'https://*.amazonaws.com',
+      'wss://*.amazonaws.com',
+    ]);
+  });
+
   it('still forbids every site from framing the dashboard', () => {
     expect(synthesized.contentSecurityPolicy['frame-ancestors']).toStrictEqual(["'none'"]);
   });

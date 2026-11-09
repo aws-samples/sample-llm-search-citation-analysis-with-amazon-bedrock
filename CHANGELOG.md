@@ -27,6 +27,9 @@ job view subscribes while its job runs and reads its REST route once on connect 
   running job.
 - `npm run dev`: set `VITE_LIVE_EVENTS_HTTP_DOMAIN` and `VITE_LIVE_EVENTS_REALTIME_DOMAIN` in `web/.env.local` from
   the stack's outputs. Without them a view reads its job once and is not told when it changes.
+- The dashboard's content security policy (`CitationAnalysis-SecurityHeaders-v3`) adds `wss://*.amazonaws.com` to
+  `connect-src`, so browsers allow the WebSocket to the Event API's real-time domain. The main stack's deploy
+  updates the response headers policy.
 
 ### Added
 
@@ -85,6 +88,9 @@ job view subscribes while its job runs and reads its REST route once on connect 
   Lighthouse runs, site audits, the Exports list, view jobs (`api/viewJobs.ts`) and stale scope snapshots
   (`useStaleRefetch`, `useMarketCitations`). The waits keep their limits as one timer each: 3 minutes for a view
   job, 2 minutes for a ranking analysis or a narrative, 36 minutes for a research job.
+- The run view applies the terminal status a run's `execution.status` event names when the read that event
+  triggers fails (`useExecutionPolling`): that event is the last one about the run, so the view no longer stays on
+  RUNNING with nothing left to read, and `onComplete` still fires once.
 - A narrative regenerate that the worker skipped or failed now ends as failed at once, instead of after the
   two-minute wait.
 - TENETS.md: the "Until AppSync Events is in place" clause and the polling items of the tenet 8 gap row are gone,

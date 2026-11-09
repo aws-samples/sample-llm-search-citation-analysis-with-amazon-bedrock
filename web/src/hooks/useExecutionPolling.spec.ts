@@ -160,21 +160,30 @@ async function renderRunningExecution() {
   return view;
 }
 
+/** Renders the hook with an `onComplete` spy over `fetch`, triggers an analysis, then emits the run's `status` change. */
+async function renderAnnouncedExecution(fetch: ReturnType<typeof createMockFetch>, status: string, readsBefore = 0) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  const onComplete = vi.fn();
+  const view = renderHook(() => useExecutionPolling(onComplete));
+  await act(async () => {
+    await view.result.current.triggerAnalysis();
+  });
+  if (readsBefore > 0) await waitForStatusReads(readsBefore);
+  await emitLive('runs', {
+    type: 'execution.status',
+    executionArn: mockExecutionArn,
+    status,
+  });
+  return {
+    ...view,
+    onComplete,
+  };
+}
+
 describe('useExecutionPolling live lifecycle', () => {
   it('fires onComplete exactly once after a terminal status and listens to nothing more', async () => {
     // Regression for AUDIT-2026-08-19 2.16: onComplete fired on every 3s tick of the old poll.
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ statusResponse: createMockStatusResponse('SUCCEEDED') }));
-    const onComplete = vi.fn();
-    const { result } = renderHook(() => useExecutionPolling(onComplete));
-
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
-    await emitLive('runs', {
-      type: 'execution.status',
-      executionArn: mockExecutionArn,
-      status: 'SUCCEEDED' 
-    });
+    const { onComplete } = await renderAnnouncedExecution(createMockFetch({ statusResponse: createMockStatusResponse('SUCCEEDED') }), 'SUCCEEDED');
 
     expect([onComplete.mock.calls.length, liveSubscriberCount('runs')]).toStrictEqual([1, 0]);
   });
@@ -218,6 +227,21 @@ describe('useExecutionPolling live lifecycle', () => {
     });
 
     expect(statusReads()).toBe(2);
+  });
+
+  it.each([
+    ['applies the announced end of its run, fires onComplete and stops listening', 'FAILED', ['FAILED', 1, 0]],
+    ['keeps the run running and listening when the event announced no end', 'RUNNING', ['RUNNING', 0, 1]],
+  ])('when the read after a status change fails, %s', async (_case, announced, expected) => {
+    // The run's terminal status change is the last event about it: a failed read must not leave the view on RUNNING.
+    const {
+      result, onComplete 
+    } = await renderAnnouncedExecution(createMockFetch({ failStatusFrom: 2 }), announced, 2);
+    await waitForStatusReads(3);
+
+    await waitFor(() => {
+      expect([result.current.execution?.status, onComplete.mock.calls.length, liveSubscriberCount('runs')]).toStrictEqual(expected);
+    });
   });
 
   it('stops listening when the hook unmounts', async () => {

@@ -20,6 +20,20 @@ import { useLiveRefresh } from './useLiveRefresh';
 const RUNS_CHANNEL = deploymentChannel('runs');
 const TERMINAL_STATUSES: readonly string[] = ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED'];
 
+/** What one status read found: a terminal status, a status still running, or nothing (the read failed). */
+type StatusRead = 'terminal' | 'running' | 'unread';
+
+function isTerminalStatus(status: string | undefined): status is Exclude<ExecutionStatus, 'RUNNING'> {
+  return status !== undefined && TERMINAL_STATUSES.includes(status);
+}
+
+/** The terminal status `event` announces for execution `arn` (its Step Functions status change), else `null`. */
+function announcedEnd(event: LiveEvent, arn: string): ExecutionStatus | null {
+  if (event.type !== 'execution.status' || eventField(event, 'executionArn') !== arn) return null;
+  const status = eventField(event, 'status');
+  return isTerminalStatus(status) ? status : null;
+}
+
 /**
  * Whether `event` on the runs channel may change execution `arn`: its own Step Functions status change, one of
  * its steps (`run.step.finished` names the execution by name), or a keyword finishing (which names no run; one
@@ -128,23 +142,38 @@ export const useExecutionPolling = (onComplete?: () => void) => {
   const completedArn = useRef<string | null>(null);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  // The terminal status the runs channel announced for the watched execution. It is the last event about the run,
+  // so when the read it triggers fails the view applies it instead of staying on RUNNING with nothing left to read.
+  const announced = useRef<{
+    arn: string;
+    status: ExecutionStatus 
+  } | null>(null);
+
+  /** Stop watching `executionArn` and fire `onComplete` once for it. */
+  const finish = useCallback((executionArn: string) => {
+    setWatchedArn((watched) => (watched === executionArn ? null : watched));
+    if (completedArn.current !== executionArn) {
+      completedArn.current = executionArn;
+      onCompleteRef.current?.();
+    }
+  }, []);
 
   /**
-   * Fetch and apply the execution status. Returns true when the execution
-   * reached a terminal state, after which nothing more is read for it.
+   * Fetch and apply the execution status: `terminal` when the execution reached a terminal state, after which
+   * nothing more is read for it, and `unread` when the read failed.
    */
-  const fetchExecutionStatus = useCallback(async (executionArn: string): Promise<boolean> => {
+  const fetchExecutionStatus = useCallback(async (executionArn: string): Promise<StatusRead> => {
     try {
       const encodedArn = encodeURIComponent(executionArn);
       const response = await authenticatedFetch(`${API_BASE_URL}/executions/${encodedArn}`);
 
       if (!response.ok) {
         console.error('Failed to fetch execution status:', response.status);
-        return false;
+        return 'unread';
       }
 
       const json: unknown = await response.json();
-      if (!isExecutionStatusResponse(json) || !json.execution) return false;
+      if (!isExecutionStatusResponse(json) || !json.execution) return 'unread';
       const status = json.execution.status;
       setExecution(prev => ({
         arn: executionArn,
@@ -155,25 +184,37 @@ export const useExecutionPolling = (onComplete?: () => void) => {
         stop_date: json.execution?.stop_date,
         progress: decodeKeywordProgress(json.progress),
       }));
-      if (!TERMINAL_STATUSES.includes(status)) return false;
-      setWatchedArn((watched) => (watched === executionArn ? null : watched));
-      if (completedArn.current !== executionArn) {
-        completedArn.current = executionArn;
-        onCompleteRef.current?.();
-      }
-      return true;
+      if (!TERMINAL_STATUSES.includes(status)) return 'running';
+      finish(executionArn);
+      return 'terminal';
     } catch (err) {
       console.error('Error fetching execution status:', err);
-      return false;
+      return 'unread';
     }
-  }, []);
+  }, [finish]);
 
   useLiveRefresh(
     watchedArn === null ? null : RUNS_CHANNEL,
     async () => {
-      if (watchedArn !== null) await fetchExecutionStatus(watchedArn);
+      if (watchedArn === null) return;
+      const read = await fetchExecutionStatus(watchedArn);
+      const end = announced.current;
+      if (read !== 'unread' || end?.arn !== watchedArn) return;
+      setExecution((prev) => (prev?.arn === end.arn ? {
+        ...prev,
+        status: end.status 
+      } : prev));
+      finish(end.arn);
     },
-    (event) => watchedArn !== null && concernsExecution(event, watchedArn)
+    (event) => {
+      if (watchedArn === null || !concernsExecution(event, watchedArn)) return false;
+      const status = announcedEnd(event, watchedArn);
+      if (status !== null) announced.current = {
+        arn: watchedArn,
+        status 
+      };
+      return true;
+    }
   );
 
   const triggerAnalysis = async (scope?: AnalysisScope): Promise<TriggerResult> => {
@@ -210,8 +251,7 @@ export const useExecutionPolling = (onComplete?: () => void) => {
           events: [],
         });
 
-        const alreadyTerminal = await fetchExecutionStatus(arn);
-        if (!alreadyTerminal) setWatchedArn(arn);
+        if (await fetchExecutionStatus(arn) !== 'terminal') setWatchedArn(arn);
 
         const keywordCount = triggerJson.keywords_count;
         return {
