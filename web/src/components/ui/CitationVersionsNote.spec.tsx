@@ -4,7 +4,7 @@ import {
 import {
   render, screen
 } from '@testing-library/react';
-import { citationVersionsOf } from './CitationVersionsNote';
+import { citationVersionFieldsOf } from './CitationVersionsNote';
 import { ScopeCoverageNote } from './ScopeCoverageNote';
 
 const COVERAGE = {
@@ -31,7 +31,7 @@ const CURRENT = {
 };
 
 describe('citation versions note', () => {
-  it('names each rule with its answers when a scope mixes them', () => {
+  it('names each rule with its answers when the server flags a mix', () => {
     const visibility = {
       coverage: COVERAGE,
       kpis: MIXED,
@@ -43,7 +43,7 @@ describe('citation versions note', () => {
     );
   });
 
-  it('shows nothing for a scope of one rule', () => {
+  it('shows nothing when the server says the figures hold one rule', () => {
     const visibility = {
       coverage: COVERAGE,
       kpis: CURRENT,
@@ -53,38 +53,16 @@ describe('citation versions note', () => {
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
-  it('flags a trend whose periods each hold one rule but not the same one', () => {
-    const older = {
-      citation_versions: [{
-        version: 'unversioned (pre-2.43.0)',
-        answers: 5,
-      }],
-      citation_versions_mixed: false,
+  it('reads a trend window mix the server gives at the top, even when each period holds one rule', () => {
+    const trend = {
+      ...MIXED,
+      trend_data: [{ kpis: CURRENT }],
     };
 
-    expect(citationVersionsOf({ trend_data: [{ kpis: older }, { kpis: CURRENT }] })).toStrictEqual([
-      {
-        version: 'unversioned (pre-2.43.0)',
-        answers: 5,
-      },
-      {
-        version: '2',
-        answers: 40,
-      },
-    ]);
+    expect(citationVersionFieldsOf(trend)).toBe(trend);
   });
 
-  it('reads the scope total and not the periods again when the response has both', () => {
-    expect(citationVersionsOf({
-      kpis: CURRENT,
-      trend_data: [{ kpis: CURRENT }],
-    })).toStrictEqual([{
-      version: '2',
-      answers: 40,
-    }]);
-  });
-
-  it('shows nothing for an API body from before 2.48.0', () => {
-    expect(citationVersionsOf({ kpis: { citation_rate: 20 } })).toStrictEqual([]);
+  it('shows nothing for an API body from before 2.52.0', () => {
+    expect(citationVersionFieldsOf({ kpis: { citation_rate: 20 } })).toBeUndefined();
   });
 });

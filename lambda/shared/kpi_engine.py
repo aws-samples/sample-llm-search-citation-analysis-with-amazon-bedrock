@@ -293,6 +293,19 @@ def citation_versions(answers: int, current: int) -> dict[str, Any]:
     return {'citation_versions': versions, 'citation_versions_mixed': len(versions) > 1}
 
 
+def combined_citation_versions(kpi_objects: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """``citation_versions`` over the answers of disjoint KPI objects together (a trend's periods: its whole window).
+
+    Periods that each hold one rule, but not the same one, mix two definitions over the window.
+    """
+    answers = current = 0
+    for kpis in kpi_objects:
+        for entry in kpis.get('citation_versions') or ():
+            answers += int(entry['answers'])
+            current += int(entry['answers']) if entry['version'] == str(CITATIONS_VERSION) else 0
+    return citation_versions(answers, current)
+
+
 def answers_from_rows(rows: Iterable[Mapping[str, Any]]) -> list[Answer]:
     return [answer for answer in map(answer_from_row, rows) if answer is not None]
 

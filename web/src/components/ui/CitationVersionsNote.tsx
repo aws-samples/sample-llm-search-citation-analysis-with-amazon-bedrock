@@ -1,47 +1,29 @@
 /*
- * Whether a view's citation figures add up answers stored under different citation rules (2.48.0, tenet 2).
+ * Whether a view's citation figures add up answers stored under different citation rules (2.52.0, tenet 2).
  *
  * Since 2.43.0 an answer row records `citations_version`: 2 counts only the sources the answer cites. Rows from
  * before carry none ("unversioned (pre-2.43.0)") and counted every source the engine returned. Every KPI object
  * the API answers says which rules its answers were stored under (`citation_versions`) and whether it mixes them
- * (`citation_versions_mixed`); a view over a period that spans the upgrade shows this note above its figures.
+ * (`citation_versions_mixed`), and a trend says it for its whole window. The server decides the mix; a view whose
+ * figures mix rules shows this note above them.
  */
 
-import type {
-  CitationVersionCount, CitationVersionFields 
-} from '../../types/domain/citationVersions';
+import type { CitationVersionFields } from '../../types/domain/citationVersions';
 
 const COUNT = new Intl.NumberFormat('en');
 
-function versionsOfKpis(value: unknown): readonly CitationVersionCount[] | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  return (value as CitationVersionFields).citation_versions;
+function isVersionFields(value: unknown): value is CitationVersionFields {
+  return typeof value === 'object' && value !== null && 'citation_versions_mixed' in value;
 }
 
 /**
- * The answers per citation rule behind `response`'s figures: its own `kpis` when it has them (the whole scope),
- * else the sum of its trend periods (`trend_data`, disjoint windows).
+ * The citation-rule fields the server gave `response`'s figures: a trend's own (its whole window, every period
+ * together), else its `kpis` (the scope's); `undefined` for an API body from before 2.52.0.
  */
-export function citationVersionsOf(response: unknown): CitationVersionCount[] {
-  if (typeof response !== 'object' || response === null) return [];
-  const {
-    kpis, trend_data: trendData 
-  } = response as {
-    kpis?: unknown;
-    trend_data?: unknown 
-  };
-  const own = versionsOfKpis(kpis);
-  const periods = Array.isArray(trendData) ? trendData.map((period: unknown) => versionsOfKpis((period as { kpis?: unknown } | null)?.kpis)) : [];
-  const totals = new Map<string, number>();
-  for (const versions of own === undefined ? periods : [own]) {
-    for (const {
-      version, answers 
-    } of versions ?? []) totals.set(version, (totals.get(version) ?? 0) + answers);
-  }
-  return [...totals].map(([version, answers]) => ({
-    version,
-    answers,
-  }));
+export function citationVersionFieldsOf(response: unknown): CitationVersionFields | undefined {
+  if (isVersionFields(response)) return response;
+  const kpis = typeof response === 'object' && response !== null ? (response as { kpis?: unknown }).kpis : undefined;
+  return isVersionFields(kpis) ? kpis : undefined;
 }
 
 /** "under citation rule 2" for a numbered rule; an unversioned rule names itself. */
@@ -51,8 +33,9 @@ function ruleLabel(version: string): string {
 
 /** A note when the figures mix citation rules; nothing otherwise (or for an older API body). */
 export function CitationVersionsNote({ response }: { readonly response: unknown }) {
-  const versions = citationVersionsOf(response);
-  if (versions.length < 2) return null;
+  const fields = citationVersionFieldsOf(response);
+  if (fields?.citation_versions_mixed !== true) return null;
+  const versions = fields.citation_versions ?? [];
   const parts = versions.map(({
     version, answers 
   }) => `${COUNT.format(answers)} answers ${ruleLabel(version)}`);

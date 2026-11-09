@@ -26,6 +26,8 @@ Every KPI says which citation rule its answers were stored under, and a figure t
     --payload '{"action":"backfill_keyword_run_kpis","latest":true,"chain":true}' out.json
   ```
 
+- **Snapshot-served views show the flag after the next snapshot build.** Artifacts built before the deploy carry
+  no `citation_versions`, so a view served from them shows no note until the next build (live views show it at once).
 - No stored answer is rewritten (D1).
 
 ### Changed
@@ -35,13 +37,15 @@ Every KPI says which citation rule its answers were stored under, and a figure t
   the answer cites count. Rows from before carry none and count as `unversioned (pre-2.43.0)`. A citation KPI over a
   period that spans the upgrade adds up two definitions, so each KPI object lists each rule with its answers
   (`[{"version": "2", "answers": 120}, {"version": "unversioned (pre-2.43.0)", "answers": 40}]`) and flags the mix.
-  The scope's KPIs, each engine's, each trend period's and the KPI history carry it. REST and MCP answer it
-  unchanged.
+  The scope's KPIs, each engine's, each trend period's and the KPI history carry it. A trend also carries both
+  fields at the top for its whole window (`combined_citation_versions`): periods that each hold one rule, but not
+  the same one, mix two definitions over the window. REST and MCP answer it unchanged.
 - The tallies count `citations_current` (answers under the current rule), so a pooled figure knows its mix without
   reading the answers. `KeywordRunKpis` rows, KeywordLatest objects and scope series move to format 2 (see Upgrade
   notes).
 - **The dashboard shows a note** above a view whose citation figures mix the two rules, with the answers of each
-  (`ScopeCoverageNote`, `CitationVersionsNote`). A trend reads it from its periods.
+  (`ScopeCoverageNote`, `CitationVersionsNote`). It reads the server's `citation_versions_mixed`: a trend's own,
+  else the scope's `kpis`.
 - `docs/kpi-definitions.md` (Conventions, "Citation versions") and the tenet 2 and D2 rows of TENETS.md describe it.
   `CITATIONS_VERSION` now lives in `shared/kpi_engine.py`, and the search Lambda imports it.
 

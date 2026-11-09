@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import pytest
@@ -205,6 +206,17 @@ def _two_days() -> dict[str, list[Answer]]:
 
 
 class TestTrendView:
+    def test_flags_a_window_whose_periods_each_hold_one_rule_but_not_the_same(self):
+        """Before 2.43.0 then after: no period mixes, the window does, and the body says so for REST and MCP too."""
+        answers = {'spa': [_rival_only('spa', DAY_1), dataclasses.replace(_hotel_first('spa', DAY_2), citations_version=2)]}
+
+        view = tallied_trend_view(['spa'], answers, 'day')
+
+        assert [point['kpis']['citation_versions_mixed'] for point in view['trend_data']] == [False, False]
+        assert (view['citation_versions'], view['citation_versions_mixed']) == (
+            [{'version': '2', 'answers': 1}, {'version': 'unversioned (pre-2.43.0)', 'answers': 1}], True,
+        )
+
     def test_holds_every_answer_of_a_period_in_one_point(self):
         points = tallied_trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['trend_data']
 
