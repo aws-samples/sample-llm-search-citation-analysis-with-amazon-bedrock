@@ -25,6 +25,10 @@ export const USER_NAMESPACE = 'user';
 /**
  * The `user` namespace's subscribe handler (APPSYNC_JS): the channel's second segment must be the caller's own
  * Cognito `sub`. A wildcard (`/user/*`) or anyone else's sub is refused, so a user hears only their own channel.
+ *
+ * It reads the context fields the AppSync Events context reference documents: `ctx.info.channel.segments` (the
+ * namespace first, so `segments[1]` is the sub) and `ctx.identity.sub` for user pool callers. It lets a subscription
+ * through only when both are present and equal: a missing identity, sub or owner segment is refused.
  */
 export const OWN_CHANNEL_ONLY_HANDLER = `import { util } from '@aws-appsync/utils';
 
@@ -108,13 +112,13 @@ export class CitationAnalysisEventsStack extends cdk.Stack {
     });
   }
 
-  /** The relay: one event in, one signed publish out; the publish grants are its only permissions besides its logs. */
   /** The dashboard's Cognito user pool, by the id the main stack writes to SSM. */
   private dashboardUserPool(): cognito.IUserPool {
     const userPoolId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.userPoolId);
     return cognito.UserPool.fromUserPoolId(this, 'UserPool', userPoolId);
   }
 
+  /** The relay: one event in, one signed publish out; the publish grants are its only permissions besides its logs. */
   private relayFunction(): lambda.Function {
     const role = lambdaServiceRole(
       this, 'RelayRole', 'CitationAnalysis-LiveEventsRelayRole',

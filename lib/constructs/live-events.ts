@@ -55,7 +55,11 @@ export const CHANGE_EVENT_SOURCES = {
 
 type ChangeEventArea = keyof typeof CHANGE_EVENT_SOURCES;
 
-/** The workflow's per-keyword progress event (`RUN_KEYWORD_FINISHED` in `lambda/shared/change_events.py`). */
+/**
+ * The workflow's per-keyword progress event. Step Functions puts it itself (`PublishKeywordProgress`), so it has no
+ * Python producer; the relay's route table keys it, and `WORKFLOW_KEYWORD_FINISHED` in
+ * `lambda/testing/live_events_fixtures.py` is its Python counterpart in the tests.
+ */
 export const RUN_KEYWORD_FINISHED = { source: CHANGE_EVENT_SOURCES.runs, detailType: 'run.keyword.finished' } as const;
 
 /**
