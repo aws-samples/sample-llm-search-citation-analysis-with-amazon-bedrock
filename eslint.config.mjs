@@ -37,6 +37,8 @@ export default tseslint.config(
       'node_modules',
       'cdk.out',
       '**/cdk.out',
+      // Git-ignored local caches and helper scripts (validate logs, screenshot tools).
+      '.cache/**',
       '*.config.ts',
       '*.config.mts',
       '*.config.mjs',
