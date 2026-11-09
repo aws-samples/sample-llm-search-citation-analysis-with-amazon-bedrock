@@ -50,7 +50,8 @@ describe('ScheduleForm', () => {
   it('gives every scope option exact submission metadata', () => {
     renderScheduleForm();
 
-    const radios = screen.getAllByRole<HTMLInputElement>('radio');
+    // Only the keyword-scope radios: the "What to run" cards are radios too when the SEO stack is configured.
+    const radios = screen.getAllByRole<HTMLInputElement>('radio').filter((radio) => radio.name === 'schedule-scope-mode');
 
     expect(radios.map(valuedFieldIdentity)).toStrictEqual([
       {

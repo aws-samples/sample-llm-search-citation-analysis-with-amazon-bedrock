@@ -177,6 +177,8 @@ def _provider_gap_rule(findings: _ScopeFindings) -> list[dict[str, Any]]:
         {
             'type': 'provider_gap',
             'priority': 'medium',
+            # The engine id: `recommendation_id` hashes it, so a saved status keeps matching when the title wording changes.
+            'provider': provider,
             'title': f'Not Appearing on {provider_display_name(provider)}',
             'description': f'Your brand doesn\'t appear in {provider_display_name(provider)} answers for {len(keywords)} keywords.',
             'action': f'Research what sources {provider_display_name(provider)} prefers and ensure your brand is mentioned there.',

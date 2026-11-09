@@ -2,7 +2,7 @@
  * DataForSEO list prices (USD upper bounds per call) for the SEO lookups whose API answers no estimate before the
  * call. They mirror `lambda/shared/dataforseo_pricing.py` and `estimated_cost_usd` in `lambda/seo/seo-keywords.py`,
  * read from DataForSEO's per-account price table (`GET /v3/appendix/user_data`) in September 2026, as listed in
- * docs/seo.md › Prices. Change them together with the backend.
+ * docs/seo.md › Prices. `lambda/seo/test_seo_prices_contract.py` fails when they drift from the backend.
  */
 import type { KeywordResearchMode } from '../../types/api/seo';
 

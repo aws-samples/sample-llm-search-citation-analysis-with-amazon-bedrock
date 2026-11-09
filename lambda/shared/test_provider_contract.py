@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from types import ModuleType
 
-from shared.config import LLM_PROVIDERS, Provider
+from shared.config import LLM_PROVIDERS, PROVIDER_DISPLAY_NAMES, Provider
 from shared.provider_models import DEFAULT_PROVIDER_MODELS
 from testing.handler_fixtures import handler_fixture
 
@@ -104,3 +104,17 @@ def test_settings_links_each_answer_engine_to_the_key_page_the_dashboard_does(ma
 
 def test_the_dashboard_falls_back_to_the_default_model_of_each_answer_engine():
     assert _web_fallback_models() == DEFAULT_PROVIDER_MODELS
+
+
+def _web_search_provider_names() -> dict[str, str]:
+    """``SEARCH_PROVIDER_NAMES`` of ``providers.ts``: web-search provider id to display name."""
+    source = _WEB_PROVIDERS.read_text(encoding='utf-8')
+    match = re.search(r'const SEARCH_PROVIDER_NAMES: ReadonlyMap<string, string> = new Map\(\[\n(.*?)\n\]\);', source, flags=re.DOTALL)
+    assert match is not None, 'SEARCH_PROVIDER_NAMES not found'
+    return dict(re.findall(r"^  \['([a-z_]+)', '([^']+)'\],$", match.group(1), flags=re.MULTILINE))
+
+
+def test_the_lambdas_name_every_provider_as_the_dashboard_does():
+    """Recommendation titles (``provider_display_name``) use the names the dashboard shows."""
+    dashboard = {**_web_record('PROVIDER_NAMES'), **_web_search_provider_names()}
+    assert PROVIDER_DISPLAY_NAMES == dashboard

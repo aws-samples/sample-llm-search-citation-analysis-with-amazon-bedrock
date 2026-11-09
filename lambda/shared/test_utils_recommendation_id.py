@@ -58,3 +58,19 @@ def test_same_id_when_type_and_title_differ_only_by_case():
     a = {'type': 'GAP', 'title': 'Pitch X'}
     b = {'type': 'gap', 'title': 'pitch x'}
     assert recommendation_id(a) == recommendation_id(b)
+
+
+def test_a_provider_gap_keeps_the_id_it_had_before_display_names():
+    # Statuses saved before 2.54.0 hashed "Not Appearing on Gemini" (the engine id title-cased).
+    before = {'type': 'provider_gap', 'title': 'Not Appearing on Gemini', 'keywords': ['kw-a', 'kw-b', 'kw-c']}
+    now = {
+        'type': 'provider_gap', 'provider': 'gemini', 'title': 'Not Appearing on Google Gemini',
+        'keywords': ['kw-a', 'kw-b', 'kw-c'],
+    }
+    assert recommendation_id(now) == recommendation_id(before) == 'bf52210486b4acf3'
+
+
+def test_a_provider_gap_id_ignores_the_display_title():
+    a = {'type': 'provider_gap', 'provider': 'google_ai_overview', 'title': 'Not Appearing on Google AI Overviews'}
+    b = {'type': 'provider_gap', 'provider': 'google_ai_overview', 'title': 'Not Appearing on Google_Ai_Overview'}
+    assert recommendation_id(a) == recommendation_id(b)

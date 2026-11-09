@@ -365,6 +365,20 @@ def brand_names_match(candidate: object, tracked: object) -> bool:
     return c == t
 
 
+def _id_title(recommendation: dict[str, Any]) -> str:
+    """The title the id hashes, lower-cased.
+
+    A provider-gap card carries its engine id (``provider``) and hashes the
+    title it had before display names ("Not Appearing on Gemini", from
+    ``str.title()`` of the id), so the statuses saved against it keep matching
+    whatever the card's visible title says.
+    """
+    provider = recommendation.get('provider')
+    if recommendation.get('type') == 'provider_gap' and isinstance(provider, str) and provider:
+        return f'not appearing on {provider.title()}'.lower()
+    return (recommendation.get('title') or '').strip().lower()
+
+
 def recommendation_id(recommendation: dict[str, Any]) -> str:
     """
     Compute a deterministic stable id for a recommendation.
@@ -386,7 +400,7 @@ def recommendation_id(recommendation: dict[str, Any]) -> str:
     """
     import hashlib
     rec_type = (recommendation.get('type') or '').strip().lower()
-    title = (recommendation.get('title') or '').strip().lower()
+    title = _id_title(recommendation)
     keywords = recommendation.get('keywords') or []
     keyword_part = '|'.join(sorted(str(k).strip().lower() for k in keywords))
     payload = f"{rec_type}::{title}::{keyword_part}".encode()

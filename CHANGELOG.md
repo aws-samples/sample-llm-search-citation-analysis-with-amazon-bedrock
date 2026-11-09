@@ -129,6 +129,11 @@ process.
 - Action Center and Content Studio provider-gap items cover only the AI engines (web-search providers write no
   answer), use display names ("Not Appearing on Google Gemini") and keep a stable order
   (`shared/recommendation_rules.py`, `shared/content_idea_rules.py`, `shared/config.py` `provider_display_name`).
+  A provider-gap card carries its engine id (`provider`), and `recommendation_id` hashes the title it had before
+  (`Not Appearing on Gemini`), so Action Center statuses saved against it keep matching.
+  `shared/test_provider_contract.py` checks that the Lambdas use the dashboard's display names, and
+  `seo/test_seo_prices_contract.py` that the Keyword Explorer's price table (`Seo/seoPrices.ts`) matches the prices the
+  Lambdas bill with.
 
 ### Changed
 
@@ -139,8 +144,6 @@ process.
   say "Showing N of M", keep a "Load more" button for keyboard users, and show "Try again" after a failed page.
 - Amazon Bedrock Web Search: `webSearchRegion` also accepts `us-west-2`, where AgentCore Web Search is now
   available, so the gateway can run in the same region as the other stacks.
-- `.kiro/agents/ux-ui-auditor.json`: a Kiro agent that audits and fixes dashboard components for light and dark
-  theme problems.
 - ESLint ignores `.cache/`, the git-ignored local caches and helper scripts.
 - The session's dark overrides sit in `web/src/index.css`'s `@layer utilities` ahead of the generated Tailwind 4
   utilities, and its class names follow Tailwind 4 (`rounded-sm`, `shadow-xs`, `outline-hidden`, `shrink-0`).
