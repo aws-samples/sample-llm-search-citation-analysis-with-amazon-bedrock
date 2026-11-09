@@ -5,6 +5,11 @@ The oracle is the pre-move ``api/get-citation-gaps.py`` code (``_map_sources_to_
 2.44.0, without the DynamoDB reads), kept here until S4 lands. The shared rules
 must find the same gaps, covered sources and counts; they only sort list fields
 and break the old ties (equal priority and citations) by URL, then keyword.
+
+One deliberate change is not the oracle's: since 2.45.0 wave 5 a scope ranks
+every gap of every keyword (``keyword_gap_entry`` is ``complete``), where the
+2.44.0 rollup took each keyword's five best gaps. So the rollup oracle ranks
+every gap of every keyword in the old order.
 """
 
 from __future__ import annotations
@@ -150,11 +155,23 @@ def test_scope_rollup_totals_match_the_pre_move_rollup(rows: Rows, config: Confi
 @SCOPES
 def test_scope_rollup_top_gaps_hold_the_pre_move_ranking(rows: Rows, config: Config) -> None:
     runs = latest_runs(rows)
-    candidates = [gap for run in runs.values() for gap in _oracle_classify(run, config)[0][:5]]
+    candidates = [gap for run in runs.values() for gap in _oracle_classify(run, config)[0]]
     candidates.sort(key=lambda gap: (priority_rank(gap.get('priority')), -gap['citation_count']))
     rollup = scope_gap_rollup(entry for keyword, run in runs.items() if (entry := keyword_gap_entry(keyword, run, config)))
 
     assert _sort_keys(rollup['top_gaps']) == _sort_keys(candidates[:SCOPE_TOP_GAPS])
+
+
+def test_scope_rollup_top_gaps_keep_a_keywords_sixth_gap() -> None:
+    citations = [f'https://source-{index}.example/' for index in range(6)]
+    row = {
+        'keyword': 'spa', 'timestamp': '2026-09-02T06:00:00.000000Z', 'provider': 'openai', 'status': 'success',
+        'brands': [{'name': 'Parador', 'classification': 'competitor'}], 'citations': citations,
+    }
+    entry = keyword_gap_entry('spa', [row], BASE_BRAND_CONFIG)
+
+    assert entry is not None
+    assert [gap['url'] for gap in scope_gap_rollup([entry])['top_gaps']] == citations
 
 
 @EXAMPLES
