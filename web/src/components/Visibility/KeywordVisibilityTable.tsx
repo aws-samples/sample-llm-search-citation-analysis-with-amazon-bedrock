@@ -9,6 +9,8 @@ import {
 } from '../Reports/layout';
 import { InfoTooltip } from '../ui/InfoTooltip';
 import { OverviewPanel } from './OverviewPanel';
+import { RowLimitToggle } from './RowLimitToggle';
+import { useRowLimit } from './useRowLimit';
 
 /** The KPIs of each keyword row, in column order. */
 const KEYWORD_KPIS = [
@@ -44,7 +46,7 @@ const COLUMNS: readonly SortableColumn[] = [
     render: (row) => (
       <>
         <span className="font-medium text-gray-900">{row.keyword}</span>
-        {!row.has_data && <span className="block text-xs text-gray-400">No analysis data yet</span>}
+        {!row.has_data && <span className="block text-xs text-gray-500">No analysis data yet</span>}
       </>
     ),
   },
@@ -94,7 +96,7 @@ function SortHeader({
   const arrow = descending ? ' ↓' : ' ↑';
   return (
     <th aria-sort={ariaSort(active, descending)} className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-      <button type="button" onClick={() => onSort(column.key)} className="uppercase hover:text-gray-900">
+      <button type="button" onClick={() => onSort(column.key)} className="uppercase hover:text-gray-900 dark:hover:text-white">
         {column.header}
         {active && <span aria-hidden="true">{arrow}</span>}
       </button>
@@ -113,7 +115,7 @@ function BodyRows({ rows }: { readonly rows: readonly KeywordVisibilityRow[] }) 
     <>
       {rows.map((row) => (
         // Stryker disable next-line StringLiteral: Tailwind-only dimming; the "No analysis data yet" hint and dashes carry the state
-        <tr key={row.keyword} className={row.has_data ? '' : 'bg-gray-50 text-gray-400'}>
+        <tr key={row.keyword} className={row.has_data ? '' : 'bg-gray-50 text-gray-500'}>
           {COLUMNS.map((column) => <td key={column.key} className="px-3 py-2 text-sm">{column.render(row)}</td>)}
         </tr>
       ))}
@@ -124,7 +126,8 @@ function BodyRows({ rows }: { readonly rows: readonly KeywordVisibilityRow[] }) 
 /**
  * Every keyword of the scope with its latest run's KPIs, sortable by any
  * column; unknown values (and keywords without data) stay last. A paged
- * scope sorts the rows loaded so far.
+ * scope sorts the rows loaded so far. The first rows of the sort show until
+ * the reader opens the full list; the paged list's footer shows once it is open.
  */
 export function KeywordVisibilityTable({
   rows, footer
@@ -146,11 +149,12 @@ export function KeywordVisibilityTable({
   };
 
   const sorted = sortKey === 'keyword' ? sortByKeyword(rows, descending) : sortByKpi(rows, sortKey, descending);
+  const rowLimit = useRowLimit(sorted);
 
   return (
     <OverviewPanel title={TITLE}>
       <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table aria-label={TITLE} className="min-w-full divide-y divide-gray-200 text-sm">
+        <table aria-label={TITLE} className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
           <thead className="bg-gray-50">
             <tr>
               {COLUMNS.map((column) => (
@@ -158,12 +162,12 @@ export function KeywordVisibilityTable({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
-            <BodyRows rows={sorted} />
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            <BodyRows rows={rowLimit.visible} />
           </tbody>
         </table>
       </div>
-      {footer}
+      <RowLimitToggle rowLimit={rowLimit} total={sorted.length} noun="keywords" footer={footer} />
     </OverviewPanel>
   );
 }

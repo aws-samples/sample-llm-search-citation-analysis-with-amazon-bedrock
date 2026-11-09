@@ -217,7 +217,7 @@ describe('Competitor Benchmark leaderboard', () => {
     renderBenchmark();
     const [nike, adidas] = within(sectionTitled('Leaderboard')).getAllByRole('row').slice(1);
 
-    expect(nike).toHaveClass('bg-emerald-50');
+    expect(nike).toHaveClass('bg-violet-50');
     expect(adidas.getAttribute('class')).toBe('');
   });
 

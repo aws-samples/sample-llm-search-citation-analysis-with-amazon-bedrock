@@ -29,7 +29,7 @@ export function ReportBlockView({
   return (
     <div data-block-type={definition.type}>
       {definition.category !== 'reference' && (
-        <p className="mb-1 break-after-avoid text-xs font-semibold uppercase tracking-wider text-gray-400">
+        <p className="mb-1 break-after-avoid text-xs font-semibold uppercase tracking-wider text-gray-500">
           {`${categoryLabel(definition.category)}${everyKeywordNote}`}
         </p>
       )}

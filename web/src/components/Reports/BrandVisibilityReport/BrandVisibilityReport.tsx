@@ -84,7 +84,7 @@ export function BrandVisibilityReport({ keywords }: Props) {
           groups={groups}
           value={scope}
           onChange={(next) => navigate(pathFor(next))}
-          className="min-w-[16rem]"
+          className="w-full sm:w-80"
         />
       )}
     >

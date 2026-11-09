@@ -14,6 +14,7 @@ import { KeywordsManager } from './KeywordsManager';
 import {
   BULK_CONFLICT_MESSAGE,
   bulkCreatedKeywordFixture,
+  chooseKeywordAction,
   CREATE_CONFLICT_MESSAGE,
   CREATE_FALLBACK_MESSAGE,
   createdKeywordFixture,
@@ -25,7 +26,9 @@ import {
   DELETE_SERVER_MESSAGE,
   existingKeywordFixture,
   extendedCreatedKeywordFixture,
+  expectNoRequest,
   FAILED_BULK_KEYWORD,
+  getNewKeywordInput,
   malformedKeywordFixture,
   submitBulk,
   submitCreate,
@@ -83,7 +86,7 @@ describe('KeywordsManager', () => {
     it('renders manager heading when keyword list is empty', () => {
       renderManager([]);
 
-      expect(screen.getByRole('heading', { name: 'Manage Keywords' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Keywords' })).toBeInTheDocument();
     });
 
     it('renders keyword text when keywords exist', () => {
@@ -101,7 +104,7 @@ describe('KeywordsManager', () => {
     it('renders single-entry input by default', () => {
       renderManager([]);
 
-      expect(screen.getByPlaceholderText('Enter new keyword...')).toBeInTheDocument();
+      expect(getNewKeywordInput()).toBeInTheDocument();
     });
   });
 
@@ -199,9 +202,9 @@ describe('KeywordsManager', () => {
     it('sends nothing for a blank entry submitted with Enter', async () => {
       renderManager();
 
-      await userEvent.setup().type(screen.getByPlaceholderText('Enter new keyword...'), '   {Enter}');
+      await userEvent.setup().type(getNewKeywordInput(), '   {Enter}');
 
-      expect(mockApiPost).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+      expectNoRequest(mockApiPost);
     });
 
     it('refuses a duplicate keyword without a request and says it already exists', async () => {
@@ -210,21 +213,16 @@ describe('KeywordsManager', () => {
       await submitCreate(' Hotels ');
 
       expect(await screen.findByText('"Hotels" already exists')).toBeInTheDocument();
-      expect(mockApiPost).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+      expectNoRequest(mockApiPost);
     });
 
     it('refuses a rename onto another keyword without a request', async () => {
       renderManager([existingKeywordFixture, createdKeywordFixture]);
-      const user = userEvent.setup();
-      await user.click(screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }));
-      const input = screen.getByDisplayValue(existingKeywordFixture.keyword);
-      await user.clear(input);
-      await user.type(input, createdKeywordFixture.keyword);
 
-      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await submitUpdate(createdKeywordFixture.keyword);
 
       expect(await screen.findByText('"resorts" already exists')).toBeInTheDocument();
-      expect(mockApiPut).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+      expectNoRequest(mockApiPut);
     });
   });
 
@@ -413,7 +411,7 @@ describe('KeywordsManager', () => {
 
     async function renderStatusChange(keyword: Keyword, action: 'Activate' | 'Pause') {
       const props = renderManager([keyword]);
-      await userEvent.click(screen.getByRole('button', { name: `${action} ${keyword.keyword}` }));
+      await chooseKeywordAction(keyword.keyword, action);
       return props;
     }
 

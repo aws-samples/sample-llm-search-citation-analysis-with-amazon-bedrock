@@ -8,6 +8,7 @@ import { SeeAllLink } from '../../../ui/SeeAllLink';
 export function ShareOfVoiceSection({ report }: ScopeSectionProps) {
   return (
     <LatestRunSection
+      loadingShape="chart"
       report={report}
       title="Share of voice"
       subtitle="Each brand's share of all brand mentions in the latest runs; the smaller brands share one slice."

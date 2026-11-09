@@ -80,6 +80,7 @@ export function PerKeywordTableSection({
     title: 'Per-keyword leaderboard',
     loading,
     loadingMessage: 'Loading per-keyword rankings…',
+    loadingShape: 'table',
     error,
     computing,
     trends,
@@ -107,7 +108,7 @@ export function PerKeywordTableSection({
 }
 
 function trendRowClass(trend: TrendDirection | undefined): string {
-  if (trend === 'improving') return 'bg-emerald-50 dark:bg-emerald-950/20';
+  if (trend === 'improving') return 'bg-gray-50 dark:bg-gray-950/20';
   if (trend === 'declining') return 'bg-red-50 dark:bg-red-950/20';
   return '';
 }
@@ -115,7 +116,7 @@ function trendRowClass(trend: TrendDirection | undefined): string {
 // Stryker disable next-line ObjectLiteral: the badge palette is Tailwind-only; the badge text names the trend
 const TREND_BADGE_STYLES: Readonly<Record<TrendDirection, string>> = {
   // Stryker disable next-line StringLiteral: improving badge colors are presentation-only
-  improving: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  improving: 'bg-gray-100 text-emerald-800 dark:bg-gray-950 dark:text-emerald-300',
   // Stryker disable next-line StringLiteral: declining badge colors are presentation-only
   declining: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
   // Stryker disable next-line StringLiteral: stable badge colors are presentation-only

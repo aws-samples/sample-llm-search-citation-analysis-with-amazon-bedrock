@@ -1,11 +1,11 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  afterEach, describe, expect, it, vi
 } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { GroupBriefIdea } from '../../types';
 import * as groupBriefSource from './GroupBriefForm-source';
 import {
-  prepareGroupBriefClientIdMocks, submitGroupBriefTwice
+  setupGroupBriefHookMocks, submitGroupBriefTwice
 } from './GroupBriefForm-client-id-fixtures';
 import {
   renderGroupBriefForm, selectGroupForBrief, submitGroupBrief
@@ -27,13 +27,13 @@ const repeatedSubmissionCases = [
   },
 ];
 
-beforeEach(prepareGroupBriefClientIdMocks);
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe('GroupBriefForm client request IDs', () => {
+  setupGroupBriefHookMocks();
+
   it.each(repeatedSubmissionCases)('$testName', async ({
     outcomes,
     expectedIds,

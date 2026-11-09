@@ -8,7 +8,7 @@ import { SectionCard } from './SectionCard';
 const ACCESS_BADGE: Record<ToolAccess, string> = {
   read: 'bg-gray-100 text-gray-700',
   write: 'bg-blue-50 text-blue-700',
-  spend: 'bg-amber-50 text-amber-800',
+  spend: 'bg-gray-50 text-amber-800',
   'admin-spend': 'bg-red-50 text-red-700',
 };
 

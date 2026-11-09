@@ -42,10 +42,10 @@ function newestCell(row: RankResultRow, devices: readonly RankDevice[]): RankCel
 }
 
 function UrlCell({ cell }: { readonly cell: RankCell | null }) {
-  if (cell?.url == null) return <td className={`${CELL} text-gray-400`}>–</td>;
+  if (cell?.url == null) return <td className={`${CELL} text-gray-500`}>–</td>;
   return (
     <td className={`${CELL} max-w-xs truncate`}>
-      <a href={cell.url} target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline dark:text-indigo-300">
+      <a href={cell.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline dark:text-blue-300">
         {cell.url}
       </a>
     </td>

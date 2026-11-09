@@ -39,6 +39,7 @@ export function gateRollup(title: string, {
     loading,
     computing,
     loadingMessage: 'Loading…',
+    loadingShape: 'table',
     error,
     value: rollup,
   });

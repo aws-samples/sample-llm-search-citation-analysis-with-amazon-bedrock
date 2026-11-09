@@ -47,20 +47,20 @@ interface PrioritySummaryProps {
 
 const PrioritySummary = ({ byPriority }: PrioritySummaryProps) => (
   <div className="grid grid-cols-3 gap-3 sm:gap-4">
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-red-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">High Priority</div>
       <div className="text-xl sm:text-2xl font-bold text-red-600">{byPriority.high}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Urgent actions needed</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Urgent actions needed</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-yellow-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">Medium</div>
-      <div className="text-xl sm:text-2xl font-bold text-yellow-600">{byPriority.medium}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Should address soon</div>
+      <div className="text-xl sm:text-2xl font-bold text-amber-700">{byPriority.medium}</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Should address soon</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 border-green-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">Low</div>
-      <div className="text-xl sm:text-2xl font-bold text-green-600">{byPriority.low}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Nice to have</div>
+      <div className="text-xl sm:text-2xl font-bold text-emerald-600">{byPriority.low}</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Nice to have</div>
     </div>
   </div>
 );
@@ -77,7 +77,7 @@ const LlmEnhancedSection = ({
 }) => (
   <div className="mt-8">
     <h3 className="text-lg font-medium mb-4 flex items-center gap-2 text-gray-900">
-      <StrokeIcon className="w-5 h-5 text-indigo-500" paths={SPARKLES_PATHS} />
+      <StrokeIcon className="w-5 h-5 text-blue-500" paths={SPARKLES_PATHS} />
       AI-Enhanced Recommendations
     </h3>
     <div className="space-y-4">
@@ -102,7 +102,7 @@ const LLM_HINTS = {
 } as const;
 
 const LlmHint = ({ timedOut }: { readonly timedOut: boolean }) => (
-  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-700">
+  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-blue-700">
     <div className="flex items-center gap-2">
       <StrokeIcon className="w-4 h-4" paths={INFO_CIRCLE_PATHS} />
       {timedOut ? LLM_HINTS.timedOut : LLM_HINTS.empty}

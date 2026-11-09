@@ -11,7 +11,7 @@ vi.mock('chart.js', () => import('./chartJs-fixtures'));
 describe('BrandChart', () => {
   it('displays title', () => {
     render(<BrandChart data={[]} />);
-    expect(screen.getByText('Brand Mentions')).toBeInTheDocument();
+    expect(screen.getByText('Citations by Brand')).toBeInTheDocument();
   });
 
   it('shows empty state when data is empty', () => {

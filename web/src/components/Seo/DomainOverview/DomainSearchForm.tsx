@@ -106,9 +106,9 @@ export function DomainSearchForm({
         <DomainQuickPicks picks={domains.picks} onPick={pick} />
         {domains.missingOwnDomain && <NoOwnDomainHint />}
       </div>
-      <p className="text-xs text-gray-400">
-        Answers are cached for 12 hours. Labs covers the countries with keyword data
-        from Labs only; other markets show &quot;not available&quot;.
+      <p className="text-xs text-gray-500">
+        Each lookup is a paid DataForSEO call; the same lookup within 12 hours comes from the cache. Keyword
+        data covers some countries only; other markets show &quot;not available&quot;.
       </p>
     </form>
   );

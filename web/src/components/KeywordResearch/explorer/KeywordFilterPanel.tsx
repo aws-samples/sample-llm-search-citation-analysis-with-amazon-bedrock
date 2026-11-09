@@ -112,7 +112,7 @@ export function KeywordFilterPanel({
           </label>
         ))}
       </fieldset>
-      <p className="text-xs text-gray-400 mt-1">
+      <p className="text-xs text-gray-500 mt-1">
         Include terms must all appear; any exclude term hides the keyword (separate terms with commas). A keyword without a value never passes a bound on it.
       </p>
     </div>

@@ -33,7 +33,7 @@ function priorityStyles(priority: Priority): string {
     return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
   }
   if (priority === 'medium') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
+    return 'bg-gray-100 text-amber-800 dark:bg-gray-950 dark:text-amber-300';
   }
-  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
 }

@@ -167,7 +167,9 @@ function isTrackedDomain(value: unknown): boolean {
 }
 
 export function isBacklinkSnapshotsResponse(value: unknown): value is BacklinkSnapshotsResponse {
-  return isRecord(value) && Array.isArray(value.domains) && value.domains.every(isTrackedDomain);
+  return isRecord(value)
+    && typeof value.estimated_run_cost_usd === 'number'
+    && Array.isArray(value.domains) && value.domains.every(isTrackedDomain);
 }
 
 export function isBacklinkSnapshotRunResponse(value: unknown): value is BacklinkSnapshotRunResponse {

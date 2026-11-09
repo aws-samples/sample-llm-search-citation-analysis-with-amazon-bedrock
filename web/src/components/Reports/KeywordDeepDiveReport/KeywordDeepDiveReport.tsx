@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import {
-  useNavigate, useParams 
+  useLocation, useNavigate, useParams
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import {
@@ -20,6 +20,7 @@ import { ProviderDeltaSection } from './sections/ProviderDeltaSection';
 import { TopSourcesSection } from './sections/TopSourcesSection';
 import { SentimentExamplesSection } from './sections/SentimentExamplesSection';
 import { RecommendationsSection } from './sections/RecommendationsSection';
+import { NoAnswersNotice } from './sections/NoAnswersNotice';
 import { LatestRunRankingsSection } from '../BrandVisibilityReport/sections/BrandRankingsSection';
 import type { Keyword } from '../../../types';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
@@ -41,6 +42,8 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
  */
 export function KeywordDeepDiveReport({ keywords }: Props) {
   const navigate = useNavigate();
+  // The query (`?print=1`, `?market=`) rides along when the report picks or changes its keyword.
+  const { search } = useLocation();
   const params = useParams<{ keyword?: string }>();
   const selectedKeyword = params.keyword
     ? decodeURIComponent(params.keyword)
@@ -60,14 +63,14 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
   useEffect(() => {
     if (!selectedKeyword && keywords.length > 0) {
       navigate(
-        `/reports/keyword/${encodeURIComponent(keywords[0].keyword)}`,
+        `/reports/keyword/${encodeURIComponent(keywords[0].keyword)}${search}`,
         { replace: true },
       );
     }
-  }, [selectedKeyword, keywords, navigate]);
+  }, [selectedKeyword, keywords, navigate, search]);
 
   const handleKeywordChange = (keyword: string) => {
-    navigate(`/reports/keyword/${encodeURIComponent(keyword)}`);
+    navigate(`/reports/keyword/${encodeURIComponent(keyword)}${search}`);
   };
 
   if (keywords.length === 0) {
@@ -100,14 +103,14 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
     );
   }
 
-  const mentions = {
-    mentions: data.mentions,
-    loading: data.mentionsLoading,
-    error: data.mentionsError,
-  };
+  // A keyword no engine answered yet: one notice instead of nine empty or failed sections.
+  // `/brand-mentions` says so directly (no run for the keyword), even before visibility settles.
+  const unanswered = data.mentionsNoData
+    || (!data.visibilityLoading && data.visibility !== null && data.visibility.keywords_with_data === 0);
   return (
     <ReportLayout
       title={`Keyword Deep Dive: ${selectedKeyword}`}
+      name="Keyword Deep Dive"
       subtitle="KPIs and their history, brand rankings, persona impact, KPIs per AI engine, provider differences, top sources, and recommended actions for this keyword."
       actions={
         <ReportKeywordSelector
@@ -117,6 +120,30 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
         />
       }
     >
+      {unanswered ? <NoAnswersNotice keyword={selectedKeyword} /> : (
+        <KeywordSections data={data} keyword={selectedKeyword} />
+      )}
+      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
+    </ReportLayout>
+  );
+}
+
+interface SectionsProps {
+  readonly data: ReturnType<typeof useKeywordDeepDive>;
+  readonly keyword: string;
+}
+
+/** Every section of the report, for a keyword with at least one answer (or still loading). */
+function KeywordSections({
+  data, keyword
+}: SectionsProps) {
+  const mentions = {
+    mentions: data.mentions,
+    loading: data.mentionsLoading,
+    error: data.mentionsError,
+  };
+  return (
+    <>
       <VisibilityHeadlineSection
         {...headlineSlice(data)}
         emptyMessage="No visibility data found for this keyword. Run an analysis to populate the report."
@@ -139,11 +166,10 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
       <SentimentExamplesSection {...mentions} />
       <RecommendationsSection
         recommendations={data.recommendations}
-        keyword={selectedKeyword}
+        keyword={keyword}
         loading={data.recommendationsLoading}
         error={data.recommendationsError}
       />
-      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
-    </ReportLayout>
+    </>
   );
 }

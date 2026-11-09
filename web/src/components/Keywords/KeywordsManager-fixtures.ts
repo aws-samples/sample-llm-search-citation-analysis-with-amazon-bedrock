@@ -1,4 +1,6 @@
-import { vi } from 'vitest';
+import {
+  expect, vi
+} from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiRequestError } from '../../infrastructure';
@@ -94,48 +96,66 @@ export function createTransportError(): Error {
   return new FixtureTransportError();
 }
 
+/** Asserts that the mocked API call (`apiPost`, `apiPut`) was never sent with a body and options. */
+export function expectNoRequest(apiMock: unknown): void {
+  expect(apiMock).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+}
+
+/** The single-entry field of the add bar. */
+export function getNewKeywordInput(): HTMLElement {
+  return screen.getByRole('textbox', { name: 'New keyword' });
+}
+
 export async function submitCreate(keyword = createdKeywordFixture.keyword) {
   const user = userEvent.setup();
-  const input = screen.getByPlaceholderText('Enter new keyword...');
+  const input = getNewKeywordInput();
   await user.type(input, keyword);
   await user.click(screen.getByRole('button', { name: 'Add' }));
   return input;
 }
 
-function getKeywordActionButtons() {
-  return [
-    screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }),
-    screen.getByRole('button', { name: `Delete ${existingKeywordFixture.keyword}` }),
-  ];
+/** Opens the "⋯" menu named `menuLabel` and picks the item named `action`. */
+export async function chooseMenuAction(menuLabel: string, action: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: menuLabel }));
+  await user.click(screen.getByRole('menuitem', { name: action }));
 }
 
-export async function submitUpdate() {
+/** Opens the "⋯" menu of `keyword`'s row and picks the item named `action`. */
+export async function chooseKeywordAction(keyword: string, action: string): Promise<void> {
+  await chooseMenuAction(`Actions for ${keyword}`, action);
+}
+
+/** Picks `label` in the table's status filter. */
+export async function chooseStatusFilter(label: 'All statuses' | 'Active keywords' | 'Paused keywords'): Promise<void> {
+  await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: 'Filter by status' }), label);
+}
+
+/** Edit the existing keyword, rename it to `newKeyword` and save. */
+export async function submitUpdate(newKeyword = updatedKeywordFixture.keyword) {
   const user = userEvent.setup();
-  const [editButton] = getKeywordActionButtons();
-  await user.click(editButton);
+  await chooseKeywordAction(existingKeywordFixture.keyword, 'Edit');
 
   const input = screen.getByDisplayValue(existingKeywordFixture.keyword);
   await user.clear(input);
-  await user.type(input, updatedKeywordFixture.keyword);
+  await user.type(input, newKeyword);
   await user.click(screen.getByRole('button', { name: 'Save' }));
   return input;
 }
 
 export async function submitDelete(): Promise<void> {
-  const user = userEvent.setup();
-  const [, deleteButton] = getKeywordActionButtons();
-  await user.click(deleteButton);
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
+  await chooseKeywordAction(existingKeywordFixture.keyword, 'Delete');
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Delete' }));
 }
 
 export async function submitBulk() {
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: 'Bulk Entry' }));
+  await user.click(screen.getByRole('button', { name: 'Paste a list' }));
   const input = screen.getByPlaceholderText('Enter multiple keywords (one per line)');
   await user.type(
     input,
     `${bulkCreatedKeywordFixture.keyword}\n${FAILED_BULK_KEYWORD}`
   );
-  await user.click(screen.getByRole('button', { name: 'Add All' }));
+  await user.click(screen.getByRole('button', { name: 'Add all' }));
   return input;
 }

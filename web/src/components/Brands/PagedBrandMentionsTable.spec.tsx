@@ -42,7 +42,7 @@ const SECOND_PAGE = {
 };
 
 function renderFirstPage(data: BrandMentionsResponse = FIRST_PAGE): void {
-  render(<PagedBrandMentionsTable data={data} request={REQUEST} keyword="Hotel Coruña" onBrandClick={vi.fn()} config={null} />);
+  render(<PagedBrandMentionsTable data={data} request={REQUEST} keyword="Hotel Coruña" onBrandClick={vi.fn()} />);
 }
 
 describe('PagedBrandMentionsTable', () => {

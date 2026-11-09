@@ -26,6 +26,7 @@ const STABILITY_COLUMNS: ReadonlyArray<ReportTableColumn<KeywordStabilityRow>> =
   },
   {
     header: 'Runs',
+    numeric: true,
     info: 'The runs of the period in which an answer placed your brand.',
     render: (row) => String(row.runs),
   },

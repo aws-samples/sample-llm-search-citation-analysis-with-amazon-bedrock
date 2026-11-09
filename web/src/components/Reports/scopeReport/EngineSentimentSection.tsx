@@ -30,6 +30,7 @@ export function EngineSentimentSection({
 
   return (
     <LatestRunSection
+      loadingShape="chart"
       report={report}
       title="Sentiment per engine"
       subtitle="Each AI engine's mentions of your brand in its latest runs, by sentiment: positive, neutral, mixed and negative."

@@ -80,7 +80,7 @@ export function ReportCanvas({
       <div
         onDragOver={overEnd}
         onDrop={drop}
-        className={`rounded-lg border-2 border-dashed p-6 text-center text-sm ${dragging ? 'border-cyan-500 bg-cyan-50 text-gray-700' : 'border-gray-200 text-gray-500'}`}
+        className={`rounded-lg border-2 border-dashed p-6 text-center text-sm ${dragging ? 'border-gray-500 bg-gray-50 text-gray-700' : 'border-gray-200 text-gray-500'}`}
       >
         {items.length === 0 ? 'Your report is empty. Add blocks from the list, or drag them here.' : 'Drop a block here to add it at the end.'}
       </div>

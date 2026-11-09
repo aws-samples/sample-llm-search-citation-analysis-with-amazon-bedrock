@@ -25,8 +25,8 @@ const STATUS_CLASSES: Record<ResearchStatus, string> = {
   pending: 'bg-gray-100 text-gray-600',
   running: 'bg-blue-100 text-blue-700',
   processing: 'bg-blue-100 text-blue-700',
-  completed: 'bg-emerald-100 text-emerald-700',
-  partial: 'bg-amber-100 text-amber-700',
+  completed: 'bg-gray-100 text-emerald-700',
+  partial: 'bg-gray-100 text-amber-700',
   failed: 'bg-red-100 text-red-700',
 };
 

@@ -16,7 +16,7 @@ const CHART_INFO = `Each keyword with a Google result and AI answers. Left of po
 /** The scatter of the scope's keywords by quadrant. */
 export function SeoGeoChartSection({ state }: SeoGeoSectionProps) {
   return (
-    <SeoGeoSectionFrame title={TITLE} untitled state={state}>
+    <SeoGeoSectionFrame title={TITLE} untitled loadingShape="chart" state={state}>
       {({ rows }) => (
         <ChartPanel title={TITLE} info={CHART_INFO} subtitle="Bubble size: search volume.">
           <SeoGeoChart rows={rows} />

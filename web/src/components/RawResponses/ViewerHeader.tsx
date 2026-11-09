@@ -26,7 +26,7 @@ export const ViewerHeader = ({
 /** Centred spinner a viewer shows while its file loads. */
 export const ViewerLoading = ({ label }: { readonly label: string }) => (
   <div className="flex items-center justify-center py-12">
-    <Spinner size="lg" className="text-blue-600" />
+    <Spinner size="lg" className="text-blue-600 dark:text-blue-400" />
     <span className="ml-3 text-gray-600">{label}</span>
   </div>
 );

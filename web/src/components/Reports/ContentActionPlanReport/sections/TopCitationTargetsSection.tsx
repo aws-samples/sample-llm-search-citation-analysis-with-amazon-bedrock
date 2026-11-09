@@ -41,10 +41,12 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<CitationGap>> = [
   },
   {
     header: 'Cites',
+    numeric: true,
     render: (source) => source.citation_count,
   },
   {
     header: 'Providers',
+    numeric: true,
     render: (source) => source.provider_count,
   },
   {
@@ -73,6 +75,7 @@ export function TopCitationTargetsSection({
     title: 'Top citation targets',
     loading,
     loadingMessage: 'Loading citation gaps…',
+    loadingShape: 'table',
     loadingSubtitle: 'Where to focus PR / outreach effort, ordered by impact.',
     error,
   });

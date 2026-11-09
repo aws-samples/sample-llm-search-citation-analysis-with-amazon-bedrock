@@ -116,9 +116,12 @@ How spending is kept in check (there are no spend caps):
 - Paid lookups run only when you press the button; opening a page, switching tabs or focusing a field costs nothing.
 - Batch and recurring work (rank checks and schedules, snapshots, audits, the rank grid, Lighthouse batches) asks
   for confirmation first, naming the paid calls it starts when the count is known.
-- The dashboard shows no prices, except in the paid export dialog: no cost captions, estimates or charged amounts
-  on the SEO screens, the Keyword Explorer or the SEO vs GEO report. The figures in these docs are for reference;
-  the DataForSEO card in Settings › AI Providers shows the account balance.
+- Prices are shown before money is spent where the dashboard can work them out: the Keyword Explorer shows the
+  ceiling of one search under the Search button (`Seo/seoPrices.ts`, which mirrors
+  `lambda/shared/dataforseo_pricing.py`), the Backlinks **Snapshot now** confirmation shows the price the API
+  estimates (`estimated_run_cost_usd`), and the paid export dialog shows its price ceiling. Other SEO screens show
+  call counts, not prices. The figures in these docs are for reference; the DataForSEO card in Settings › AI
+  Providers shows the account balance.
 - Answers are cached (keyword research 24 h, a seed with no ideas 1 h, results pages and domain lookups 12 h,
   backlinks 6 h), so a repeat is free until the entry expires; an empty answer never replaces cached data.
 - DataForSEO bills a call when it is made, so a billed call that timed out or failed is never re-sent automatically,

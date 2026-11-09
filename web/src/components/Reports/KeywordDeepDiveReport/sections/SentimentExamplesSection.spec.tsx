@@ -55,7 +55,7 @@ describe('SentimentExamplesSection', () => {
     renderExamples(HOTEL_SOL);
 
     expect(screen.getByText('Hotel Sol')).toBeInTheDocument();
-    expect(screen.getByText('on openai')).toBeInTheDocument();
+    expect(screen.getByText('on OpenAI')).toBeInTheDocument();
     expect(screen.getByText('Ranking context: a cheaper but dated option')).toBeInTheDocument();
   });
 
@@ -98,7 +98,7 @@ describe('SentimentExamplesSection', () => {
 
   it.each([
     ['negative', 'border-red-200'],
-    ['positive', 'border-emerald-200'],
+    ['positive', 'border-gray-200'],
     ['neutral', 'border-gray-200'],
   ])('tints a %s example with %s', (sentiment, border) => {
     renderExamples(mentionsOf({ 'Hotel Sol': [buildAppearance({ sentiment })] }));

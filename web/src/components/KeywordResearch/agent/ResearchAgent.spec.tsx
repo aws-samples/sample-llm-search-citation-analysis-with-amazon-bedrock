@@ -36,6 +36,15 @@ describe('ResearchAgent', () => {
     expect(within(dialog).getByRole('heading', { name: /3 proposed keywords/ })).toBeInTheDocument();
   });
 
+  it.each([
+    ['ana', true],
+    ['f831b360-b0f1-70a9-19d7-2bc1aeace86f', false],
+  ])('names the starter %s in the run origin: %s', async (createdBy, named) => {
+    const dialog = await renderAndOpenRun(buildAgentJob({ created_by: createdBy }), /^View results/);
+
+    expect(within(dialog).getByText(/^Hotels · started /).textContent?.endsWith(` by ${createdBy}`)).toBe(named);
+  });
+
   it('keeps the reasoning trace collapsed behind the proposal', async () => {
     const dialog = await renderAndOpenRun(buildAgentJob(), /^View results/);
 

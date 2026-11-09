@@ -11,11 +11,12 @@ interface SettingsSectionHeaderProps {
 export const SettingsSectionHeader = ({
   title, description, children
 }: SettingsSectionHeaderProps) => (
-  <div className="flex items-center justify-between">
-    <div>
-      <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-      <p className="text-xs text-gray-500 mt-1">{description}</p>
+  // Same scale as the Keywords, Personas and Alerts headers (design system §3, section title).
+  <div className="flex items-start justify-between gap-4">
+    <div className="min-w-0">
+      <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+      <p className="text-sm text-gray-500 mt-1">{description}</p>
     </div>
-    {children}
+    <div className="flex shrink-0 items-center gap-2">{children}</div>
   </div>
 );

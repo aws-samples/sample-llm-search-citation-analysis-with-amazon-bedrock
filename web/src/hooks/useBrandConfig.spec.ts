@@ -82,26 +82,21 @@ describe('useBrandConfig', () => {
   });
 
   describe('saveConfig', () => {
-    it.each([
-      {
-        name: 'replaces the local config with the config the API returns',
-        options: {},
-        expectedIndustry: 'hospitality',
-      },
-      {
-        name: 'keeps the locally saved config when the API save fails',
-        options: { shouldFailSave: true },
-        expectedIndustry: 'retail',
-      },
-    ])('$name', async ({
-      options, expectedIndustry
-    }) => {
-      const { result } = await runOnLoadedBrandConfig(
-        (hook) => hook.saveConfig({ industry: 'retail' }),
-        options
-      );
+    it('replaces the local config with the config the API returns', async () => {
+      const { result } = await runOnLoadedBrandConfig((hook) => hook.saveConfig({ industry: 'retail' }));
 
-      expect(result.current.config?.industry).toBe(expectedIndustry);
+      expect(result.current.config?.industry).toBe('hospitality');
+    });
+
+    it('restores the config and rethrows when the API save fails', async () => {
+      const { result } = await renderLoadedBrandConfig({ shouldFailSave: true });
+      const before = result.current.config?.industry;
+
+      await act(async () => {
+        await expect(result.current.saveConfig({ industry: 'retail' })).rejects.toThrow('HTTP 500: Request failed');
+      });
+
+      expect(result.current.config?.industry).toBe(before);
     });
 
     it('calls API saveConfig with new config', async () => {

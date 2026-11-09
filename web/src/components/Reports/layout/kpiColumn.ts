@@ -16,6 +16,7 @@ export function kpiColumn<Row>(
   return {
     header,
     info: KPI_DEFINITIONS[id].definition,
+    numeric: true,
     render,
   };
 }

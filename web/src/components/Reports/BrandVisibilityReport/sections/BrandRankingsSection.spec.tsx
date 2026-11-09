@@ -84,7 +84,7 @@ describe('BrandRankingsSection rows', () => {
   ])('%s the row of %s by whether it is first-party', (_label, brand, tinted) => {
     renderRankings();
 
-    expect(tableRow(TITLE, brand).classList.contains('bg-emerald-50')).toBe(tinted);
+    expect(tableRow(TITLE, brand).classList.contains('bg-violet-50')).toBe(tinted);
   });
 
   it('labels an other brand as other', () => {

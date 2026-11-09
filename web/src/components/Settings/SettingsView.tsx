@@ -141,8 +141,9 @@ export const SettingsView = ({
 
   return (
     <div className="space-y-6">
-      {/* A floor height keeps the footer from jumping while a section loads. */}
-      <section className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 min-h-112">
+      {/* A floor height keeps the footer from jumping while a section loads. The AI assistants guide draws its
+        own cards, so it skips this one rather than nesting cards in a card. */}
+      <section className={section === 'ai-assistants' ? 'min-h-112' : 'bg-white rounded-lg border border-gray-200 p-4 sm:p-6 min-h-112'}>
         <SectionContent
           section={section}
           keywords={keywords}
@@ -154,7 +155,7 @@ export const SettingsView = ({
         />
       </section>
 
-      <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+      <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
         Version {import.meta.env.VITE_APP_VERSION ?? 'dev'}
       </p>
     </div>

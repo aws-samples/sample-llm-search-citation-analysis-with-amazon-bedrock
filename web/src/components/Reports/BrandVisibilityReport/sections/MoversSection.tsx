@@ -42,6 +42,7 @@ export function MoversSection({
     title: 'Top movers',
     loading,
     loadingMessage: 'Loading movers…',
+    loadingShape: 'table',
     error,
     trends,
   });

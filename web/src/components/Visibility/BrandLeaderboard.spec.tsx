@@ -2,15 +2,17 @@ import {
   describe, it, expect
 } from 'vitest';
 import {
-  render, within
+  render, screen, within
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BrandLeaderboard } from './BrandLeaderboard';
 import {
   COMPETITOR_ROW, buildBrandRow
 } from './visibilityOverview-fixtures';
 import {
-  aboutButton, bodyRowCells, columnHeadingTexts, panelTable, panelTitled
+  OVER_LIMIT_COUNT, aboutButton, bodyRowCells, columnHeadingTexts, numberedBrandRows, panelTable, panelTitled
 } from './visibilityTables-fixtures';
+import { VISIBILITY_ROW_LIMIT } from './useRowLimit';
 import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
 
 const LEADERBOARD = 'Brand leaderboard';
@@ -54,7 +56,7 @@ describe('BrandLeaderboard', () => {
     renderLeaderboard();
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
-      ['Hotel Sol', '52.4', '60.0%', '25.0%', '1.80', '1', 'geminiopenai', '2', 'first-party'],
+      ['Hotel Sol', '52.4', '60.0%', '25.0%', '1.80', '1', 'Google GeminiOpenAI', '2', 'first-party'],
     ]);
   });
 
@@ -62,7 +64,7 @@ describe('BrandLeaderboard', () => {
     renderLeaderboard([COMPETITOR_ROW]);
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
-      ['Hotel Luna', '33.1', '40.0%', '16.7%', '2.50', '2', 'perplexity', '1', 'competitor'],
+      ['Hotel Luna', '33.1', '40.0%', '16.7%', '2.50', '2', 'Perplexity', '1', 'competitor'],
     ]);
   });
 
@@ -82,11 +84,11 @@ describe('BrandLeaderboard', () => {
     ]);
   });
 
-  it('shows each engine as its own chip', () => {
+  it('shows each engine as its own neutral chip, named', () => {
     renderLeaderboard();
 
-    expect(within(panelTitled(LEADERBOARD)).getByText('gemini')).toHaveClass('bg-blue-100');
-    expect(within(panelTitled(LEADERBOARD)).getByText('openai')).toHaveClass('bg-blue-100');
+    expect(within(panelTitled(LEADERBOARD)).getByText('Google Gemini')).toHaveClass('bg-gray-100');
+    expect(within(panelTitled(LEADERBOARD)).getByText('OpenAI')).toHaveClass('bg-gray-100');
   });
 
   it('highlights first-party rows only', () => {
@@ -94,7 +96,7 @@ describe('BrandLeaderboard', () => {
 
     const [, tracked, competitor] = within(panelTitled(LEADERBOARD)).getAllByRole('row');
 
-    expect(tracked).toHaveClass('bg-green-50');
+    expect(tracked).toHaveClass('bg-violet-50');
     expect(competitor.className).toBe('');
   });
 
@@ -103,5 +105,15 @@ describe('BrandLeaderboard', () => {
 
     expect(within(panelTitled(LEADERBOARD)).getByText('No brand data available.')).toBeInTheDocument();
     expect(within(panelTitled(LEADERBOARD)).queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('lists the top brands until the reader opens the full leaderboard', async () => {
+    renderLeaderboard(numberedBrandRows(OVER_LIMIT_COUNT));
+
+    expect(bodyRowCells(panelTable(LEADERBOARD))).toHaveLength(VISIBILITY_ROW_LIMIT);
+
+    await userEvent.click(screen.getByRole('button', { name: `Show all ${OVER_LIMIT_COUNT} brands` }));
+
+    expect(bodyRowCells(panelTable(LEADERBOARD))).toHaveLength(OVER_LIMIT_COUNT);
   });
 });

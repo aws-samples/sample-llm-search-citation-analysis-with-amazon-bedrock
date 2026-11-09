@@ -61,7 +61,7 @@ export const SETTINGS_NAV: readonly SettingsNavEntry[] = [
     id: 'markets',
     label: 'Markets',
     iconPaths: GLOBE_PATHS,
-    iconColor: 'text-cyan-500',
+    iconColor: 'text-gray-500',
   },
   {
     id: 'brand-config',
@@ -73,19 +73,19 @@ export const SETTINGS_NAV: readonly SettingsNavEntry[] = [
     id: 'query-prompts',
     label: 'Personas',
     iconPaths: ['M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z'],
-    iconColor: 'text-fuchsia-500',
+    iconColor: 'text-gray-500',
   },
   {
     id: 'providers',
     label: 'AI providers',
     iconPaths: ['M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01'],
-    iconColor: 'text-sky-500',
+    iconColor: 'text-gray-500',
   },
   {
     id: 'bedrock-models',
     label: 'Bedrock models',
     iconPaths: ['M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z'],
-    iconColor: 'text-teal-500',
+    iconColor: 'text-gray-500',
   },
   {
     id: 'alerts',
@@ -103,7 +103,7 @@ export const SETTINGS_NAV: readonly SettingsNavEntry[] = [
     id: 'ai-assistants',
     label: 'AI assistants',
     iconPaths: CHAT_BUBBLES_PATHS,
-    iconColor: 'text-indigo-500',
+    iconColor: 'text-blue-500',
   },
 ];
 

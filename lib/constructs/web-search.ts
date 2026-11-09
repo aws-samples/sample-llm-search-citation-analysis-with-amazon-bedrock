@@ -3,7 +3,7 @@ import { Construct } from 'constructs';
 
 /**
  * Amazon Bedrock Web Search (provider `agentcore`) runs through an AgentCore
- * Gateway that only exists in three regions, so it lives in its own stack
+ * Gateway that only exists in some regions, so it lives in its own stack
  * (`lib/web-search-stack.ts`). The main stack never references that stack
  * through CloudFormation: both sides share these constants, and the search
  * Lambdas read the gateway URL from SSM at run time.
@@ -18,7 +18,7 @@ export const WEB_SEARCH_CONNECTOR_ID = 'web-search';
 /** The connector's one tool configuration; its name is the tool (`WebSearch`). */
 export const WEB_SEARCH_TOOL_CONFIGURATION = 'WebSearch';
 
-export const WEB_SEARCH_ALLOWED_REGIONS: readonly string[] = ['us-east-1', 'eu-west-1', 'ap-northeast-1'];
+export const WEB_SEARCH_ALLOWED_REGIONS: readonly string[] = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-northeast-1'];
 
 export const WEB_SEARCH_DEFAULT_REGION = 'us-east-1';
 

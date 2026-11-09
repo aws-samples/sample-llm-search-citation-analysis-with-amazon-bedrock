@@ -4,7 +4,7 @@ import {
 import { InfoTooltip } from '../../ui/InfoTooltip';
 
 interface Props {
-  /** Small uppercase caption above the figure (e.g. "Share of voice"). */
+  /** The caption above the figure (e.g. "Share of voice"), set like the dashboard's StatCard. */
   readonly label: string;
   /** The headline figure. Numbers render exactly like their string form. */
   readonly value: string | number;
@@ -31,12 +31,12 @@ export function ReportStatCard({
 }: Props) {
   const accentClass = accentTextClass(accent);
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
-      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+    <div className="avoid-break-inside rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
+      <p className="flex items-center text-sm text-gray-500 dark:text-gray-400">
         {label}
         {info !== undefined && <InfoTooltip label={label} text={info} />}
       </p>
-      <p className={`text-2xl font-semibold mt-1 ${accentClass}`}>{value}</p>
+      <p className={`mt-1 text-3xl font-semibold tabular-nums ${accentClass}`}>{value}</p>
       {footnote !== undefined && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{footnote}</p>
       )}

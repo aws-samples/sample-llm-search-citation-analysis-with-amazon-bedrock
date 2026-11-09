@@ -12,7 +12,7 @@ import './index.css';
 const RootErrorFallback = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8 max-w-md text-center">
-      <div className="w-12 h-12 mx-auto mb-4 text-gray-400 dark:text-gray-500">
+      <div className="w-12 h-12 mx-auto mb-4 text-gray-500 dark:text-gray-400">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"

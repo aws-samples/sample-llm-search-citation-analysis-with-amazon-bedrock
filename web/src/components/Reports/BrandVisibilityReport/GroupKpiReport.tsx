@@ -109,6 +109,7 @@ export function gateGroupHistory({
     loading,
     computing,
     loadingMessage: 'Loading the group KPI history…',
+    loadingShape: 'stats',
     error,
     value: history !== null && history.runs.length > 0 ? history : null,
     emptyMessage: `No analysis run of this group in the last ${days} days. Run an analysis or choose a longer period.`,

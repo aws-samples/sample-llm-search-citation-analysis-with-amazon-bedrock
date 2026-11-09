@@ -36,7 +36,7 @@ export function KeywordTrackBar({ tracking }: { readonly tracking: KeywordExplor
       </div>
       <output className="block space-y-1 text-sm">
         {promotion.limitMessage && <span className="block text-amber-700">{promotion.limitMessage}</span>}
-        {promotion.outcome && <span className="block text-green-700">{promotionSuccessMessage(promotion.outcome)}</span>}
+        {promotion.outcome && <span className="block text-emerald-700">{promotionSuccessMessage(promotion.outcome)}</span>}
       </output>
       <ErrorAlert message={promotion.error} />
     </div>

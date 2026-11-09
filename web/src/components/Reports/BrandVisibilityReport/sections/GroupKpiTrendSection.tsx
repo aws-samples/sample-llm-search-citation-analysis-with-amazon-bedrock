@@ -3,6 +3,7 @@ import {
 } from 'react';
 import type { GroupRun } from '../../../../types/domain/groupKpiHistory';
 import { formatDateOnly } from '../../../../formatting/dateFormatter';
+import { providerName } from '../../../../constants/providers';
 import { useThemedChart } from '../../../Dashboard/useThemedChart';
 import { ReportSection } from '../../layout';
 import {
@@ -22,7 +23,7 @@ interface Props {
 }
 
 function describeModelChange(change: ModelChange): string {
-  return `${formatDateOnly(change.timestamp)} · ${change.provider}: ${change.from.join(', ')} → ${change.to.join(', ')}`;
+  return `${formatDateOnly(change.timestamp)} · ${providerName(change.provider)}: ${change.from.join(', ')} → ${change.to.join(', ')}`;
 }
 
 /**

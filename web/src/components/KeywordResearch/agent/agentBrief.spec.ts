@@ -4,6 +4,7 @@ import {
 import {
   AGENT_MAX_QUERIES_PER_ROUND,
   briefProblems,
+  dimensionHint,
   dimensionLabel,
   estimateAgentCost,
   formatAgentCost,
@@ -70,6 +71,29 @@ describe('dimensionLabel', () => {
 
   it('reads as Other when the catalogue is empty', () => {
     expect(dimensionLabel('destination', [])).toBe('Other');
+  });
+});
+
+describe('dimensionHint', () => {
+  it.each([
+    ['the exact label', 'Destination', 'Destination — the city as a travel destination', 'The city as a travel destination'],
+    ['a longer form of the label', 'Audience', 'Audience type — who is travelling', 'Who is travelling'],
+  ])('drops a lead that repeats %s', (_case, label, description, hint) => {
+    expect(dimensionHint({
+      label,
+      description 
+    })).toBe(hint);
+  });
+
+  it.each([
+    ['has no separator', 'Destination', 'The city as a travel destination'],
+    ['leads with other words', 'Audience', 'Who travels — families, couples'],
+    ['is only the label', 'Audience', 'Audience — '],
+  ])('keeps a description that %s', (_case, label, description) => {
+    expect(dimensionHint({
+      label,
+      description 
+    })).toBe(description);
   });
 });
 

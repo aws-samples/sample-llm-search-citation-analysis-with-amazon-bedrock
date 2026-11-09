@@ -5,21 +5,22 @@ import {
   render, screen 
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { expectRunAnalysisLink } from '../ui/NoDataYet-fixtures';
 import { CitationGaps } from './CitationGaps';
 
 vi.mock('../../hooks/useCitationGaps', () => ({useCitationGaps: vi.fn(),}));
-vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
+vi.mock('../../hooks/useKeywordGroups');
 
 import { useCitationGaps } from '../../hooks/useCitationGaps';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
-import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import { ANALYZE_SCOPE_OPTIONS } from '../ui/useKeywordScopeOptions-fixtures';
 import {
   MARRIOTT_ARTICLE_GAP, MARRIOTT_GAP_RESPONSE, buildCitationGapsHookResult, buildCitationGapsResponse, buildProps 
 } from './CitationGaps-fixtures';
+import { mockCorunaKeywordGroups } from './useScopeSelection-fixtures';
 
 const mockUseCitationGaps = vi.mocked(useCitationGaps);
-const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 
 /** Renders the view with the hook answering `overrides`; returns its `fetchCitationGaps` spy. */
 function renderWithGaps(overrides: Parameters<typeof buildCitationGapsHookResult>[0] = {}) {
@@ -32,7 +33,7 @@ function renderWithGaps(overrides: Parameters<typeof buildCitationGapsHookResult
 describe('CitationGaps', () => {
   beforeEach(() => {
     mockUseCitationGaps.mockReturnValue(buildCitationGapsHookResult());
-    mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult());
+    mockCorunaKeywordGroups();
   });
 
   describe('initial render', () => {
@@ -40,13 +41,13 @@ describe('CitationGaps', () => {
       renderWithGaps();
 
       expect(screen.getByText('Citation Gap Analysis')).toBeInTheDocument();
-      expect(screen.getByText(/Discover sources that AI cites/)).toBeInTheDocument();
+      expect(screen.getByText(/Sources the AI engines cite in answers that name your competitors/)).toBeInTheDocument();
     });
 
     it('renders all available scopes when keywords and groups exist', () => {
       renderWithGaps();
 
-      expect(renderedScopeOptionLabels('Filter by keyword or group')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
+      expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(ANALYZE_SCOPE_OPTIONS);
     });
 
     it('fetches all-keyword gaps when the component mounts', () => {
@@ -76,6 +77,16 @@ describe('CitationGaps', () => {
       expect(screen.queryByText('Test Article')).not.toBeInTheDocument();
       expect(screen.queryByText('Total Gaps')).not.toBeInTheDocument();
       expect(screen.queryByText(/Great coverage/)).not.toBeInTheDocument();
+    });
+
+    it('shows a neutral "no AI answers yet" state, not an error, for a keyword with no stored answers', async () => {
+      mockUseCitationGaps.mockReturnValue(buildCitationGapsHookResult({ noData: true }));
+      render(<MemoryRouter><CitationGaps {...buildProps()} /></MemoryRouter>);
+
+      await userEvent.selectOptions(screen.getByRole('combobox'), 'keyword:hotels');
+
+      expect(screen.getByText(/No AI engine has answered for “hotels” yet/)).toBeInTheDocument();
+      expectRunAnalysisLink();
     });
 
     it('does not claim great coverage when a request fails without prior data', () => {

@@ -28,6 +28,7 @@ export function EngineKpisSection({
     title: TITLE,
     loading,
     loadingMessage: 'Loading AI engine KPIs…',
+    loadingShape: 'chart',
     error,
     value: visibility,
   });

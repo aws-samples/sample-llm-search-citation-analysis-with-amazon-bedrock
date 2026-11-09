@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CHART_FRAME_CONTEXT } from '../charts/chartFrame';
 
 interface Props {
   /**
@@ -21,7 +22,9 @@ interface Props {
 }
 
 /**
- * Standard wrapper for a report section.
+ * Standard wrapper for a report section: an H2, a one-line subtitle, then
+ * the content (cards, tables and charts, each in its own neutral card; a
+ * chart placed straight in a section frames itself, see `ChartFigure`).
  *
  * Two print concerns are baked in:
  * - `avoid-break-inside` keeps a section's heading attached to its body when
@@ -51,18 +54,18 @@ export function ReportSection({
   return (
     <section className={wrapperClass}>
       {title && (
-        <header className="mb-3">
+        <header className="mb-4">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white">
             {title}
           </h2>
           {subtitle && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="mt-1 max-w-4xl text-sm text-gray-500 dark:text-gray-400">
               {subtitle}
             </p>
           )}
         </header>
       )}
-      {children}
+      <CHART_FRAME_CONTEXT.Provider value="section">{children}</CHART_FRAME_CONTEXT.Provider>
     </section>
   );
 }

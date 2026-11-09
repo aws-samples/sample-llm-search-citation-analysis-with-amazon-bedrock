@@ -59,7 +59,7 @@ function RecordOutcomeMessage({ outcome }: RecordOutcomeMessageProps) {
     <output
       role={outcome.success ? undefined : 'alert'}
       className={`mt-3 block rounded-lg border p-3 text-sm ${outcome.success
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        ? 'border-gray-200 bg-gray-50 text-emerald-700'
         : 'border-red-200 bg-red-50 text-red-700'}`}
     >
       {outcome.message}
@@ -149,12 +149,12 @@ export function ContentChangeForm({
         <fieldset disabled={controlsDisabled} className="space-y-4">
           <legend className="sr-only">Content change marker details</legend>
           <label htmlFor="content-change-group" className="block">
-            <span className="text-sm font-medium text-gray-800">Keyword group</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Keyword group</span>
             <select
               id="content-change-group"
               value={values.groupId}
               onChange={(event) => updateValue('groupId', event.target.value)}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500 dark:disabled:bg-gray-800 dark:disabled:text-gray-400"
             >
               <option value="">Select a keyword group</option>
               {groups.map((group) => (
@@ -164,7 +164,7 @@ export function ContentChangeForm({
           </label>
 
           <label htmlFor="content-change-description" className="block">
-            <span className="text-sm font-medium text-gray-800">Description</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Description</span>
             <textarea
               id="content-change-description"
               required
@@ -172,12 +172,12 @@ export function ContentChangeForm({
               rows={3}
               value={values.description}
               onChange={(event) => updateValue('description', event.target.value)}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500 dark:disabled:bg-gray-800 dark:disabled:text-gray-400"
             />
           </label>
 
           <label htmlFor="content-change-url" className="block">
-            <span className="text-sm font-medium text-gray-800">URL (optional)</span>
+            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">URL (optional)</span>
             <input
               id="content-change-url"
               type="url"
@@ -185,7 +185,7 @@ export function ContentChangeForm({
               value={values.url}
               onChange={(event) => updateValue('url', event.target.value)}
               placeholder="https://example.com/page"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500 dark:disabled:bg-gray-800 dark:disabled:text-gray-400"
             />
           </label>
 

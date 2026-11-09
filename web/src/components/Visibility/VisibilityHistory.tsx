@@ -36,7 +36,7 @@ function RangeButton({
       onClick={() => onSelect(days)}
       aria-pressed={pressed}
       // Stryker disable next-line StringLiteral,ConditionalExpression: Tailwind-only styling; aria-pressed carries the selected range
-      className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${pressed ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'}`}
+      className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${pressed ? 'bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'}`}
     >
       {days} days
     </button>

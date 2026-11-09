@@ -78,7 +78,7 @@ export function LocalTable({
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
           <tr>{headers.map((header) => <th key={header} className="px-3 py-2">{header}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">{children}</tbody>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">{children}</tbody>
       </table>
     </div>
   );

@@ -17,6 +17,7 @@ export function domainFigureColumns(info: DomainColumnInfo): ReadonlyArray<Repor
   return [
     {
       header: 'Citations',
+      numeric: true,
       info: info.citations,
       render: (source) => source.citations,
     },

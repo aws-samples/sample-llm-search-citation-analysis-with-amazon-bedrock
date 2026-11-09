@@ -94,9 +94,22 @@ export function buildProps(
 }
 
 export async function openCreateForm(): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: /New Schedule/i }));
+  // The button sits in the empty state or the header, once the first list has answered.
+  await userEvent.click(await screen.findByRole('button', { name: /New schedule/i }));
+}
+
+/** Opens the ⋯ menu of the schedule named `displayName` and picks `item`. */
+export async function chooseScheduleAction(displayName: string, item: 'Edit' | 'Run now' | 'Delete'): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: `Actions for ${displayName}` }));
+  await userEvent.click(screen.getByRole('menuitem', { name: item }));
 }
 
 export async function openEditForm(displayName: string): Promise<void> {
   await userEvent.click(screen.getByRole('button', { name: `Edit schedule ${displayName}` }));
+}
+
+/** Sets the open form to run every Friday. */
+export async function chooseWeeklyOnFriday(): Promise<void> {
+  await userEvent.selectOptions(screen.getByLabelText('Repeat'), 'weekly');
+  await userEvent.selectOptions(screen.getByLabelText('Day of week'), 'FRI');
 }

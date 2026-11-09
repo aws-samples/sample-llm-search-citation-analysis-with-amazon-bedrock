@@ -20,7 +20,7 @@ const STATUS_LABELS: Record<ExportStatus, string> = {
 const STATUS_CLASSES: Record<ExportStatus, string> = {
   queued: 'bg-gray-100 text-gray-700',
   running: 'bg-blue-50 text-blue-700',
-  ready: 'bg-green-50 text-green-700',
+  ready: 'bg-gray-100 text-emerald-700',
   failed: 'bg-red-50 text-red-700',
   cancelled: 'bg-gray-100 text-gray-500',
 };

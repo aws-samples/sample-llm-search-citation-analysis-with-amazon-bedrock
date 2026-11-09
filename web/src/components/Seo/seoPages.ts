@@ -41,14 +41,14 @@ export const SEO_PAGES: readonly SeoPage[] = [
     label: 'Domain Overview',
     summary: 'Organic traffic, ranking keywords, top pages and competitors of any domain.',
     iconPaths: GLOBE_PATHS,
-    iconColor: 'text-indigo-500',
+    iconColor: 'text-blue-500',
   }, () => import('./DomainOverview/DomainOverviewView').then((module) => module.DomainOverviewView)),
   seoPage({
     slug: 'backlinks',
     label: 'Backlinks',
     summary: 'Links pointing to a domain or page: referring domains, anchors and new or lost links.',
     iconPaths: LINK_PATHS,
-    iconColor: 'text-purple-500',
+    iconColor: 'text-violet-500',
   }, () => import('./Backlinks/BacklinksView').then((module) => module.BacklinksView)),
   seoPage({
     slug: 'rank-tracking',
@@ -69,14 +69,14 @@ export const SEO_PAGES: readonly SeoPage[] = [
     label: 'Performance',
     summary: 'Lighthouse scores, Core Web Vitals and IndexNow submissions.',
     iconPaths: BOLT_PATHS,
-    iconColor: 'text-green-500',
+    iconColor: 'text-emerald-500',
   }, () => import('./Performance/PerformanceView').then((module) => module.PerformanceView)),
   seoPage({
     slug: 'local',
     label: 'Local SEO',
     summary: 'Google Maps results, business profiles and a local rank grid around an address.',
     iconPaths: MAP_PIN_PATHS,
-    iconColor: 'text-orange-500',
+    iconColor: 'text-amber-500',
   }, () => import('./LocalSeo/LocalSeoView').then((module) => module.LocalSeoView)),
 ];
 

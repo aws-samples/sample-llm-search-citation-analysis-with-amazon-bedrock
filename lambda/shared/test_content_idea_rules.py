@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import patch
 
 from shared.brand_visibility import classify_brand, tracked_brand_names
+from shared.config import LLM_PROVIDERS
 from shared.content_idea_rules import (
     MAX_IDEAS,
     configuration_idea,
@@ -64,7 +65,8 @@ def _oracle_ideas(keyword: str, latest: list[dict[str, Any]], config: Config) ->
             'type': 'leadership_maintenance', 'priority': 'low', 'keyword': keyword, 'current_rank': best,
             'competitor_brands': comp[:3], 'content_angle': 'thought_leadership',
         })
-    if fp_found and providers - fp_providers:
+    # 2.54.0: answer engines only (web-search providers write no answer).
+    if fp_found and (providers - fp_providers) & set(LLM_PROVIDERS):
         ideas.append({'type': 'provider_gap', 'priority': 'medium', 'keyword': keyword, 'content_angle': 'provider_optimization'})
     if fp_found and 'negative' in sentiments:
         ideas.append({'type': 'sentiment_improvement', 'priority': 'high', 'keyword': keyword, 'current_rank': best, 'content_angle': 'reputation_management'})

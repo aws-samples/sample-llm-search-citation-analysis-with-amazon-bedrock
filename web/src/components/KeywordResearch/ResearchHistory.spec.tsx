@@ -10,7 +10,9 @@ import { ResearchHistory } from './ResearchHistory';
 import type {
   ExpandedKeywordWithSource, KeywordResearchItem
 } from '../../types';
-import { buildHistoryItem } from './ResearchHistory-fixtures';
+import {
+  buildHistoryItem, isoDaysAgo
+} from './ResearchHistory-fixtures';
 import {
   buildCreatedKeywordItem,
   buildPromotionWire,
@@ -152,7 +154,8 @@ const promotionWireFixture = buildPromotionWire([createdKeywordItemFixture]);
 /**
  * The five stranded production rows this covers were failed by the timeout
  * sweep long after they were queued, so the message carries a raw second count
- * (4434821 == 51 days).
+ * (4434821 == 51 days). Created a day ago so the default view, which hides
+ * failures older than a week, still lists it.
  */
 const strandedRunFixture: KeywordResearchItem = {
   id: 'item-stranded',
@@ -160,7 +163,7 @@ const strandedRunFixture: KeywordResearchItem = {
   seed_keyword: 'hotels',
   industry: 'hospitality',
   keyword_count: 0,
-  created_at: '2026-06-29T10:30:00Z',
+  created_at: isoDaysAgo(1),
   status: 'failed',
   error_message: 'Research timed out after 4434821 seconds. Please try again.',
 };

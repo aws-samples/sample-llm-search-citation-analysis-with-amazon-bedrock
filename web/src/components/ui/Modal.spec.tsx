@@ -73,6 +73,35 @@ describe('Modal', () => {
     expect(document.querySelector('dialog')).toHaveClass('max-w-xl');
   });
 
+  it.each(['5xl', '6xl'] as const)('applies the wide %s size', (size) => {
+    renderModal({ size });
+
+    expect(document.querySelector('dialog')).toHaveClass(`max-w-${size}`);
+  });
+
+  it('wraps the children in a padded, scrolling body by default', () => {
+    renderModal();
+
+    expect(screen.getByText('Content').parentElement).toHaveClass('px-6', 'py-4');
+    expect(document.querySelector('dialog')).toHaveClass('overflow-y-auto');
+  });
+
+  it('renders the children edge to edge in a non-scrolling column with the flush layout', () => {
+    renderModal({ layout: 'flush' });
+
+    expect(screen.getByText('Content').parentElement).toBe(document.querySelector('dialog'));
+    expect(document.querySelector('dialog')).toHaveClass('overflow-hidden', 'flex', 'flex-col');
+  });
+
+  it('is named by the element given in labelledBy when there is no title', () => {
+    renderModal({
+      labelledBy: 'own-heading',
+      children: <h2 id="own-heading">Own heading</h2>,
+    });
+
+    expect(screen.getByRole('dialog', { name: 'Own heading' })).toBeInTheDocument();
+  });
+
   it('sets body overflow to hidden when open', () => {
     renderModal();
     

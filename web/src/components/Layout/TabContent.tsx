@@ -97,7 +97,7 @@ function DashboardMarketNote({ marketId }: { readonly marketId: MarketChoice }) 
   const { catalog } = useMarketSelection();
   if (marketId === null) return null;
   return (
-    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
       Totals and charts · {marketName(marketId, catalog.markets)}
     </p>
   );

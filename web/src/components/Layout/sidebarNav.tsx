@@ -72,7 +72,7 @@ export function buildNavSections({
           path: '/visibility',
           label: 'Visibility',
           icon: <EyeIcon />,
-          iconColor: 'text-indigo-500',
+          iconColor: 'text-blue-500',
         },
         {
           id: 'brands',
@@ -86,21 +86,21 @@ export function buildNavSections({
           path: '/citations',
           label: 'Citations',
           icon: navIcon(LINK_PATHS),
-          iconColor: 'text-purple-500',
+          iconColor: 'text-violet-500',
         },
         {
           id: 'prompt-insights',
           path: '/prompt-insights',
           label: 'Prompt Insights',
           icon: navIcon(PROMPT_PATHS),
-          iconColor: 'text-fuchsia-500',
+          iconColor: 'text-gray-500',
         },
         {
           id: 'citation-gaps',
           path: '/citation-gaps',
           label: 'Citation Gaps',
           icon: navIcon(GAPS_PATHS),
-          iconColor: 'text-rose-500',
+          iconColor: 'text-gray-500',
         },
         {
           id: 'recommendations',
@@ -127,7 +127,7 @@ export function buildNavSections({
           label: 'SEO',
           // A rising trend line, for Google organic positions and traffic.
           icon: navIcon(TREND_UP_PATHS),
-          iconColor: 'text-lime-600',
+          iconColor: 'text-gray-600',
           children: SEO_CHILDREN,
         },
       ],
@@ -139,7 +139,7 @@ export function buildNavSections({
         path: '/content-studio',
         label: 'Content Studio',
         icon: navIcon(PENCIL_ALT_PATHS),
-        iconColor: 'text-teal-500',
+        iconColor: 'text-gray-500',
       }],
     },
     {
@@ -151,7 +151,7 @@ export function buildNavSections({
         path: '/reports',
         label: 'Reports',
         icon: navIcon(REPORTS_PATHS),
-        iconColor: 'text-cyan-500',
+        iconColor: 'text-gray-500',
       }],
     },
     {
@@ -162,14 +162,14 @@ export function buildNavSections({
           path: '/searches',
           label: 'Recent Searches',
           icon: navIcon(SEARCH_PATHS),
-          iconColor: 'text-sky-500',
+          iconColor: 'text-gray-500',
         },
         {
           id: 'raw-responses',
           path: '/raw-responses',
           label: 'Raw Responses',
           icon: navIcon(ARCHIVE_PATHS),
-          iconColor: 'text-slate-500',
+          iconColor: 'text-gray-500',
         },
         {
           id: 'exports',
@@ -189,14 +189,14 @@ export function buildNavSections({
           path: '/execution',
           label: 'Run Analysis',
           icon: <PlayIcon />,
-          iconColor: 'text-green-500',
+          iconColor: 'text-emerald-500',
         },
         {
           id: 'schedule',
           path: '/schedule',
           label: 'Schedule',
           icon: <ClockIcon />,
-          iconColor: 'text-orange-500',
+          iconColor: 'text-amber-500',
           badge: schedulesCount,
         },
       ],
@@ -213,4 +213,12 @@ export function buildNavSections({
       }],
     },
   ];
+}
+
+/**
+ * Classes of a sidebar icon: neutral grey, and blue for the open page, in both themes (design-system §2.2).
+ * `iconColor` is kept on the items for other uses but no longer tints the sidebar.
+ */
+export function navIconClass(_iconColor: string | undefined, active: boolean): string {
+  return active ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400';
 }

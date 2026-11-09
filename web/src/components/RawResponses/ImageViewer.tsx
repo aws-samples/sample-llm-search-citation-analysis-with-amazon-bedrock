@@ -36,7 +36,7 @@ export const ImageViewer = ({
           <div className="relative">
             {!imageLoaded && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <Spinner size="lg" className="text-gray-400" />
+                <Spinner size="lg" className="text-gray-500" />
               </div>
             )}
             <img

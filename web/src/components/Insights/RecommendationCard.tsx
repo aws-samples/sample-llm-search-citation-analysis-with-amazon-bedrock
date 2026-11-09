@@ -1,5 +1,5 @@
-import type {
-  JSX, ReactNode
+import {
+  useId, type JSX, type ReactNode
 } from 'react';
 import type { Recommendation } from '../../types';
 import {
@@ -24,21 +24,10 @@ const getPriorityColor = (priority: string): string => {
   return colors[priority] ?? 'bg-green-500';
 };
 
-const getTypeBorderColor = (type: string): string => {
-  const colors: Record<string, string> = {
-    visibility_gap: 'border-purple-500',
-    ranking: 'border-blue-500',
-    provider_gap: 'border-orange-500',
-    competitive: 'border-red-500',
-    configuration: 'border-gray-500',
-    data: 'border-emerald-500',
-    best_practice: 'border-indigo-500',
-    aio_missing_you: 'border-lime-600',
-    aio_competitor_cited: 'border-lime-600',
-    ai_gap: 'border-lime-600',
-    seo_gap: 'border-lime-600',
-  };
-  return colors[type] ?? 'border-gray-500';
+const PRIORITY_LABELS: Record<string, string> = {
+  high: 'High priority',
+  medium: 'Medium priority',
+  low: 'Low priority',
 };
 
 const RankingIcon = () => (
@@ -111,7 +100,7 @@ const ExpandedContent = ({ rec }: { rec: Recommendation }) => (
 
 /** Marks a recommendation drawn from Google organic data rather than from the AI answers. */
 const SeoSourceBadge = () => (
-  <span className="px-1.5 py-0.5 rounded-sm bg-lime-50 text-lime-800 text-xs font-semibold" title="From Google organic (SEO) data">
+  <span className="px-1.5 py-0.5 rounded-sm bg-gray-50 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300 text-xs font-semibold" title="From Google organic (SEO) data">
     SEO
   </span>
 );
@@ -125,34 +114,55 @@ interface RecommendationCardProps {
   fromSeo?: boolean;
 }
 
+/**
+ * A rule-based or AI recommendation. The title is the keyboard and screen-reader
+ * toggle; a mouse click anywhere else on the card toggles it too, while the status
+ * control stops its own clicks.
+ */
 export const RecommendationCard = ({
   rec, isExpanded, onClick, statusControl, fromSeo = false
-}: RecommendationCardProps) => (
-  <div
-    className={`bg-white rounded-lg shadow-sm border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
-    onClick={onClick}
-  >
-    <div className="p-5">
-      <div className="flex items-start gap-4">
-        <div className="text-gray-400 mt-0.5">{getTypeIcon(rec.type)}</div>
-        <div className="flex-1">
-          <div className="flex justify-between items-start mb-2">
-            <h4 className="font-semibold text-gray-900 flex items-center gap-2">
-              {fromSeo && <SeoSourceBadge />}
-              {rec.title}
-            </h4>
-            <div className="flex items-center gap-2">
-              {statusControl}
-              <span className={`w-2.5 h-2.5 rounded-full ${getPriorityColor(rec.priority)}`} />
-              <StrokeIcon className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} />
+}: RecommendationCardProps) => {
+  const detailsId = useId();
+  return (
+    <div
+      className={`bg-white rounded-lg shadow-sm border border-gray-200 cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
+      onClick={onClick}
+    >
+      <div className="p-5">
+        <div className="flex items-start gap-4">
+          <div className="text-gray-500 mt-0.5" aria-hidden="true">{getTypeIcon(rec.type)}</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between items-start gap-3 mb-2">
+              <h4 className="font-semibold text-gray-900 flex items-center gap-2 min-w-0 break-words">
+                {fromSeo && <SeoSourceBadge />}
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  aria-controls={detailsId}
+                  onClick={(event) => { event.stopPropagation(); onClick(); }}
+                  className="text-left rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
+                >
+                  {rec.title}
+                </button>
+              </h4>
+              <div className="flex items-center gap-2 shrink-0">
+                {statusControl}
+                <span title={PRIORITY_LABELS[rec.priority] ?? PRIORITY_LABELS.low} className="inline-flex">
+                  <span aria-hidden="true" className={`w-2.5 h-2.5 rounded-full ${getPriorityColor(rec.priority)}`} />
+                  <span className="sr-only">{PRIORITY_LABELS[rec.priority] ?? PRIORITY_LABELS.low}</span>
+                </span>
+                <StrokeIcon className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} aria-hidden="true" />
+              </div>
+            </div>
+
+            <p className="text-gray-600 text-sm">{rec.description}</p>
+
+            <div id={detailsId}>
+              {isExpanded && <ExpandedContent rec={rec} />}
             </div>
           </div>
-
-          <p className="text-gray-600 text-sm">{rec.description}</p>
-
-          {isExpanded && <ExpandedContent rec={rec} />}
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};

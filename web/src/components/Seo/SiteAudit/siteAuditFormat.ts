@@ -15,7 +15,7 @@ export const SEVERITY_LABELS: Record<IssueSeverity, string> = {
 
 export const SEVERITY_BADGES: Record<IssueSeverity, string> = {
   critical: 'bg-red-50 text-red-700 border-red-200',
-  warning: 'bg-amber-50 text-amber-800 border-amber-200',
+  warning: 'bg-gray-50 text-amber-800 border-gray-200',
   info: 'bg-gray-50 text-gray-700 border-gray-200',
 };
 
@@ -49,8 +49,8 @@ export const ACCESS_LABELS: Record<BotAccessLevel, string> = {
 };
 
 export const ACCESS_BADGES: Record<BotAccessLevel, string> = {
-  allowed: 'bg-green-50 text-green-700 border-green-200',
-  partial: 'bg-amber-50 text-amber-800 border-amber-200',
+  allowed: 'bg-gray-50 text-emerald-700 border-gray-200',
+  partial: 'bg-gray-50 text-amber-800 border-gray-200',
   blocked: 'bg-red-50 text-red-700 border-red-200',
 };
 

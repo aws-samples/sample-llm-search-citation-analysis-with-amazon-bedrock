@@ -52,13 +52,13 @@ const VARIANTS: Record<TabBarVariant, VariantStyle> = {
     frame: '',
     list: 'flex flex-wrap items-center gap-2',
     tab: 'rounded-lg px-3 py-2',
-    active: 'bg-gray-900 text-white',
-    idle: 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900',
+    active: 'bg-gray-900 text-white dark:bg-white dark:text-gray-900',
+    idle: 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900 dark:hover:text-white',
   },
 };
 
 const TAB_BASE = 'inline-flex shrink-0 items-center whitespace-nowrap text-sm font-medium transition-colors '
-  + 'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500';
+  + 'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 dark:focus-visible:ring-gray-400';
 
 /** A tab's element id, derived from the panel (or list) id so `TabPanel` can name its tab without a lookup. */
 const tabElementId = (scope: string, id: string): string => `${scope}-tab-${id}`;

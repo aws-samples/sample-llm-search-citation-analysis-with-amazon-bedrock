@@ -17,12 +17,10 @@ import userEvent from '@testing-library/user-event';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import { ANALYZE_SCOPE_OPTIONS } from '../ui/useKeywordScopeOptions-fixtures';
 import {
   ALL_SCOPE, groupScope
 } from '../ui/reportScope-fixtures';
-
-/** Every option the "Analyze" picker offers for `SCOPE_KEYWORDS` and the Coruña group. */
-const ANALYZE_SCOPE_OPTIONS = ['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts'];
 
 /** Makes the mocked keyword-groups hook answer the Coruña group. */
 export function mockCorunaKeywordGroups(): void {

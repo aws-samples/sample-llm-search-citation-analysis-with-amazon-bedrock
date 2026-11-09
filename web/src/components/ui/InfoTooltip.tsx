@@ -95,7 +95,7 @@ export function InfoTooltip({
         onKeyDown={(event) => {
           if (event.key === 'Escape') setOpen(false);
         }}
-        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-400 text-[10px] font-semibold leading-none text-gray-500 hover:border-gray-600 hover:text-gray-700 focus:outline-hidden focus:ring-2 focus:ring-gray-900 dark:border-gray-500 dark:text-gray-400"
+        className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-400 text-[10px] font-semibold leading-none text-gray-500 hover:border-gray-600 hover:text-gray-700 focus:outline-hidden focus:ring-2 focus:ring-gray-900 dark:border-gray-500 dark:text-gray-400 dark:hover:border-gray-300 dark:hover:text-gray-200 dark:focus:ring-gray-300"
       >
         i
       </button>

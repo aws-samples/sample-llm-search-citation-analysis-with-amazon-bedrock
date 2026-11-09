@@ -12,6 +12,7 @@ import {
 } from '../../exporters/citationParser';
 import { VideoBadge } from './VideoBadge';
 import { ExportAllButton } from '../ui/ExportAllButton';
+import { providerName } from '../../constants/providers';
 
 interface CitationRowProps {
   citation: TopUrl;
@@ -57,7 +58,7 @@ export const CitationRow = ({
         className="hover:bg-gray-50 cursor-pointer"
         onClick={() => onToggleRow(idx, citation.url)}
       >
-        <td className="px-6 py-4 text-sm text-gray-400">
+        <td className="px-6 py-4 text-sm text-gray-500">
           {globalRank}
         </td>
         <td className="px-6 py-4 text-sm">
@@ -74,8 +75,9 @@ export const CitationRow = ({
             </a>
             {isVideoCitation(citation) && <VideoBadge />}
             <button
+              type="button"
               onClick={(e) => onViewDetails(citation.url, e)}
-              className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded-sm hover:bg-blue-100 transition-colors"
+              className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded-sm hover:bg-blue-100 transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
               title="View crawled content and screenshot"
             >
               View
@@ -91,10 +93,20 @@ export const CitationRow = ({
           </span>
         </td>
         <td className="px-6 py-4">
-          <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium inline-flex items-center gap-1">
+          {/* The keyboard and screen-reader toggle of the row's breakdown; a click anywhere on the row toggles it too. */}
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-label={`${citation.citation_count} citations: show keywords and AI engines`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleRow(idx, citation.url);
+            }}
+            className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium inline-flex items-center gap-1 hover:bg-gray-200 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
+          >
             {citation.citation_count}
-            <StrokeIcon className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} strokeWidth={2} />
-          </span>
+            <StrokeIcon className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} strokeWidth={2} aria-hidden="true" />
+          </button>
         </td>
       </tr>
       {isExpanded && (
@@ -111,7 +123,7 @@ export const CitationRow = ({
                   <div className="text-sm">
                     <div className="flex items-center justify-between gap-2 mb-3">
                       <span className="font-medium text-gray-700">
-                        Ranking for {keywordCount} keyword{keywordText}
+                        Cited for {keywordCount} keyword{keywordText}
                       </span>
                       <ExportAllButton view="url-breakdown" params={{
                         url: citation.url,
@@ -124,31 +136,32 @@ export const CitationRow = ({
                         const providerText = providerCount === 1 ? '' : 's';
                         
                         return (
-                          <div 
-                            key={keyword} 
-                            className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
+                          <button
+                            type="button"
+                            key={keyword}
+                            className="w-full text-left flex items-center justify-between gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
                             onClick={(e) => {
                               e.stopPropagation();
                               onKeywordClick(keyword);
                             }}
                           >
-                            <div className="flex items-center gap-3">
-                              <span className="font-medium text-gray-900 hover:text-gray-600">{keyword}</span>
-                              <div className="flex gap-1">
+                            <span className="flex flex-wrap items-center gap-3 min-w-0">
+                              <span className="font-medium text-gray-900 break-words">{keyword}</span>
+                              <span className="flex flex-wrap gap-1">
                                 {[...new Set(items.map(item => item.provider))].map((provider) => (
                                   <span key={provider} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm text-xs">
-                                    {provider}
+                                    {providerName(provider)}
                                   </span>
                                 ))}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
+                              </span>
+                            </span>
+                            <span className="flex items-center gap-2 shrink-0">
                               <span className="text-xs text-gray-500">
                                 {providerCount} provider{providerText}
                               </span>
-                              <StrokeIcon className="w-4 h-4 text-gray-400" paths={CHEVRON_RIGHT_PATHS} />
-                            </div>
-                          </div>
+                              <StrokeIcon className="w-4 h-4 text-gray-500" paths={CHEVRON_RIGHT_PATHS} aria-hidden="true" />
+                            </span>
+                          </button>
                         );
                       })}
                     </div>

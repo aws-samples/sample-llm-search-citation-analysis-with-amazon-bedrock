@@ -65,15 +65,19 @@ export function withBorrowedCredentials(providers: readonly ProviderConfig[]): P
 }
 
 export interface ProviderGroups {
-  /** AI engines and search providers, in the server's order. */
+  /** Answer engines (`type: 'llm'`), which count in the KPIs, in the server's order. */
   readonly engines: ProviderConfig[];
+  /** Web-search providers (`type: 'search'`): cited links, no answer. */
+  readonly search: ProviderConfig[];
   /** The SEO data credentials (`type: 'seo'`), shown in their own group below. */
   readonly seo: ProviderConfig[];
 }
 
 export function groupProviders(providers: readonly ProviderConfig[]): ProviderGroups {
   return {
-    engines: providers.filter((provider) => provider.type !== 'seo'),
+    // A row without a type predates the field and is an answer engine.
+    engines: providers.filter((provider) => provider.type === undefined || provider.type === 'llm'),
+    search: providers.filter((provider) => provider.type === 'search'),
     seo: providers.filter((provider) => provider.type === 'seo'),
   };
 }

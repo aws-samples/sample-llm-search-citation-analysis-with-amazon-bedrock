@@ -95,12 +95,3 @@ export async function saveRole(role: 'Admin' | 'Member', container: HTMLElement 
 export function typeInviteEmail(email: string, container: HTMLElement = document.body): void {
   fireEvent.change(within(container).getByLabelText('Email address'), { target: { value: email } });
 }
-
-/** A focused button outside any dialog, standing in for the control that opened it. */
-export function setupFocusedOpener(): HTMLButtonElement {
-  const opener = document.createElement('button');
-  opener.textContent = 'Opener';
-  document.body.append(opener);
-  opener.focus();
-  return opener;
-}

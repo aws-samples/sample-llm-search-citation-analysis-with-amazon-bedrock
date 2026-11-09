@@ -187,10 +187,10 @@ export function BusinessSearchTab({
         <div onFocus={categories.load}>
           <TextField label="Category" value={category} onChange={setCategory} placeholder="e.g. coffee_shop" />
         </div>
-        <PointFields point={point} onChange={setPoint} market={market} />
-        <TextField label="Radius (km)" inputMode="numeric" value={radius} onChange={setRadius} />
         <SelectField label="Sort by" value={sort} options={SORTS} onChange={setSort} />
         <SelectField label="Results" value={limit} options={LIMITS} onChange={setLimit} />
+        <PointFields point={point} onChange={setPoint} market={market} />
+        <TextField label="Radius (km)" inputMode="numeric" value={radius} onChange={setRadius} />
       </LocalForm>
       <RequestOutcome state={request.state} loadingLabel="Loading businesses" columns={8}>
         {(response) => {

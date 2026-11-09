@@ -53,7 +53,7 @@ export function ClientPicker({ config }: { readonly config: McpConfig }) {
           );
         })}
       </div>
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(selected)} tabIndex={0} className="focus:outline-hidden">
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(selected)} tabIndex={0} className="rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500">
         <ClientGuidePanel guide={client.guide(config)} />
       </div>
     </div>

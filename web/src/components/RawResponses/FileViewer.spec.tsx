@@ -76,7 +76,7 @@ describe('FileViewer', () => {
 
   describe('document content display', () => {
     it.each([
-      ['provider badge', 'openai'],
+      ['provider badge', 'OpenAI'],
       ['keyword', 'test keyword'],
       ['latency', '150ms'],
     ])('displays %s for document content', (_field, text) => {
@@ -86,15 +86,15 @@ describe('FileViewer', () => {
     });
 
     it.each([
-      ['openai', 'bg-green-100'],
-      ['perplexity', 'bg-orange-100'],
-      ['gemini', 'bg-blue-100'],
-      ['claude', 'bg-purple-100'],
-      ['mistral', 'bg-gray-100'],
-    ])('tints the %s provider badge %s, the colour the provider has across the dashboard', (provider, tint) => {
+      ['openai', 'OpenAI', 'bg-gray-100'],
+      ['perplexity', 'Perplexity', 'bg-gray-100'],
+      ['gemini', 'Google Gemini', 'bg-gray-100'],
+      ['claude', 'Anthropic Claude', 'bg-gray-100'],
+      ['mistral', 'mistral', 'bg-gray-100'],
+    ])('names the %s provider badge %s and gives it the neutral %s chip, as across the dashboard', (provider, name, tint) => {
       renderFileViewer({ content: buildDocumentContent(provider) });
 
-      expect(screen.getByText(provider)).toHaveClass(tint);
+      expect(screen.getByText(name)).toHaveClass(tint);
     });
   });
 });

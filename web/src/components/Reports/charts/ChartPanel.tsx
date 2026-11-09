@@ -2,6 +2,7 @@ import {
   useId, type ReactNode
 } from 'react';
 import { InfoTooltip } from '../../ui/InfoTooltip';
+import { CHART_FRAME_CONTEXT } from './chartFrame';
 
 interface Props {
   readonly title: string;
@@ -33,7 +34,7 @@ export function ChartPanel({
         {info && <InfoTooltip label={title} text={info} />}
       </div>
       {subtitle && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>}
-      <div className="mt-3">{children}</div>
+      <div className="mt-3"><CHART_FRAME_CONTEXT.Provider value="panel">{children}</CHART_FRAME_CONTEXT.Provider></div>
     </section>
   );
 }

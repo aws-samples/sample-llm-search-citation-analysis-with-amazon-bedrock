@@ -17,7 +17,7 @@ import {
 } from './TabContent-fixtures';
 import { IDLE_PANEL_STATES } from '../../hooks/dashboardPanels';
 import { APPROXIMATE_COUNT_NOTE } from '../Dashboard/StatCard';
-import { queryLoadOlderSearchesElement } from '../Searches/SearchesView-fixtures';
+import { queryLoadMoreElement } from '../Searches/SearchesView-fixtures';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
 import {
   buildMarketSelectionMock, renderWithMarketSelection
@@ -154,14 +154,14 @@ describe('TabContent recent searches', () => {
     renderSearchesTab({ searchesNextToken: 'older-searches' });
     await screen.findByText(RECENT_SEARCH.keyword);
 
-    expect(queryLoadOlderSearchesElement()).toBeInTheDocument();
+    expect(queryLoadMoreElement()).toBeInTheDocument();
   });
 
   it('offers no older searches when the dashboard load holds the last page', async () => {
     renderSearchesTab();
     await screen.findByText(RECENT_SEARCH.keyword);
 
-    expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument();
+    expect(queryLoadMoreElement()).not.toBeInTheDocument();
   });
 
   it('shows the searches failure above Recent Searches when /searches failed', async () => {

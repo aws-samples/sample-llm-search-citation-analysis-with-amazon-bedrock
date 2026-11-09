@@ -5,8 +5,8 @@ The gateway (``lib/web-search-stack.ts``) is a plain MCP server with one
 ``tools/call`` answers one search, with no session handshake. There is no API
 key; the caller's IAM role needs ``bedrock-agentcore:InvokeGateway``.
 
-The gateway lives in a region other than the stacks' own (Web Search exists in
-us-east-1, eu-west-1 and ap-northeast-1), so its URL is read at run time from
+The gateway may live in a region other than the stacks' own (Web Search exists in
+us-east-1, us-west-2, eu-west-1 and ap-northeast-1), so its URL is read at run time from
 the SSM parameter the gateway stack writes, not passed through CloudFormation.
 """
 

@@ -10,11 +10,17 @@ import {
 } from '../content/contentBlocks';
 import type { ReportDraft } from './useReportDraft';
 
+/** What the server would refuse in the report's name, as a sentence; `null` when it would save. */
+export function titleProblemOf(title: string): string | null {
+  const name = title.trim();
+  if (name === '') return 'Give the report a name.';
+  return name.length > MAX_REPORT_TITLE_LENGTH ? `Keep the name under ${MAX_REPORT_TITLE_LENGTH} characters.` : null;
+}
+
 /** The first thing the server would refuse in `draft`, as a sentence; `null` when it would save. */
 export function draftProblem(draft: ReportDraft): string | null {
-  const title = draft.title.trim();
-  if (title === '') return 'Give the report a name.';
-  if (title.length > MAX_REPORT_TITLE_LENGTH) return `Keep the name under ${MAX_REPORT_TITLE_LENGTH} characters.`;
+  const titleProblem = titleProblemOf(draft.title);
+  if (titleProblem !== null) return titleProblem;
   if (draft.items.length === 0) return 'Add at least one block.';
   if (draft.items.length > MAX_REPORT_BLOCKS) return `A report holds at most ${MAX_REPORT_BLOCKS} blocks.`;
   for (const [index, { block }] of draft.items.entries()) {

@@ -87,7 +87,7 @@ describe('BrandOverviewTab', () => {
   it('lists the first page in place of the preview and says how many are shown', async () => {
     await setupShowMore();
 
-    expect(await screen.findByText('CLAUDE')).toBeInTheDocument();
+    expect(await screen.findByText('Anthropic Claude')).toBeInTheDocument();
     expect(screen.getByText('Showing 3 of 7 appearances')).toBeInTheDocument();
     expect(queryShowMoreElement()).not.toBeInTheDocument();
   });
@@ -98,7 +98,7 @@ describe('BrandOverviewTab', () => {
 
     await clickLoadMore('appearances');
 
-    expect(await screen.findByText('PERPLEXITY')).toBeInTheDocument();
+    expect(await screen.findByText('Perplexity')).toBeInTheDocument();
     const { searchParams } = new URL(String(mockAuthenticatedFetch.mock.calls[0][0]));
     expect([searchParams.get('brand'), searchParams.get('view'), searchParams.get('next_token')]).toStrictEqual(['Hotel Coruña', 'appearances', 'tok-2']);
   });

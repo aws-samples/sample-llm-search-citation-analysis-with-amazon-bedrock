@@ -19,6 +19,7 @@ export function HeadlineSection({
     ...fetch,
     title: 'Headline',
     loadingMessage: 'Loading content plan…',
+    loadingShape: 'stats',
   });
   if (pending) return pending;
 

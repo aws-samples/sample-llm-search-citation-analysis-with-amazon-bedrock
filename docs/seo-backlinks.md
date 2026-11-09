@@ -66,7 +66,7 @@ Weekly snapshots record the overview metrics of every owned and competitor domai
 
 Admins can:
 
-- **Snapshot now**: takes one snapshot of every tracked domain, after a confirmation that names the paid calls (one per domain; no price is shown).
+- **Snapshot now**: takes one snapshot of every tracked domain, after a confirmation that names the paid calls (one per domain) and their estimated price.
 - **Schedule weekly snapshots**: the link opens Operations > Schedule, where a **Backlink snapshots** schedule (paid) runs them on the day, time and zone the Admin picks. Saving an enabled one asks first and names its paid calls (one per domain). Nothing runs until such a schedule exists, and a disabled one costs nothing.
 
 A run skips domains that were snapshotted less than 20 hours ago. It does not store empty answers. A failed domain is not retried, because DataForSEO bills the call even when it fails. A low-balance or login error stops the run.

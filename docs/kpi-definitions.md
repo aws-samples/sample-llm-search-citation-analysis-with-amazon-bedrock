@@ -35,7 +35,7 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 
 **Position (rank).** The order in which brands first appear in an answer: 1 is the first brand named. For the tracked brand, it is the best position of any first-party brand in that answer. The extractor stores 999 when it could not place a brand; that counts as "position unknown".
 
-**Owned domains.** The website domains of the tracked brand, set in Settings › Brand Tracking under Owned Domains (`first_party_domains`). Hosts are compared lower-case, without `www.` or a port. A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
+**Owned domains.** The website domains of the tracked brand, set in Settings › Brand tracking under Your brand › Websites (`first_party_domains`). Hosts are compared lower-case, without `www.` or a port. A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
 
 **Pooling.** A value for several answers is computed from counts added up over all of them, then divided once. This applies to a keyword group, a period, a run, or all keywords. Every answer weighs the same. Percentages are never averaged. The per-keyword view stays available in the keyword drill-down.
 

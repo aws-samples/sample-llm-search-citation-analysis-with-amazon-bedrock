@@ -16,13 +16,14 @@ import { KEYWORD_RECONCILIATION_CONTEXT } from './hooks/usePromoteKeywords';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TabContent } from './components/Layout/TabContent';
 import { DashboardGate } from './components/Layout/DashboardGate';
+import { AppHeader } from './components/Layout/AppHeader';
+import { pageTitle } from './components/Layout/pageTitle';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { SEO_BASE_PATH } from './components/Seo/seoPages';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
 import { OnboardingModal } from './components/Onboarding';
 import { ProviderHealthBanner } from './components/ProviderHealth';
-import { AppHeader } from './components/Layout/AppHeader';
 import { ExportsProvider } from './components/Exports/ExportsProvider';
 import { MarketSelectionProvider } from './components/Markets/MarketSelectionProvider';
 import { Spinner } from './components/ui/Spinner';
@@ -129,32 +130,12 @@ function Loading() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="text-center">
-        <Spinner size="lg" className="mx-auto mb-4 text-gray-400" />
+        <Spinner size="lg" className="mx-auto mb-4 text-gray-500" />
         <p className="text-gray-600 dark:text-gray-400">Loading...</p>
       </div>
     </div>
   );
 }
-
-const PAGE_TITLES: Record<TabType, string> = {
-  dashboard: 'Dashboard',
-  visibility: 'Visibility Dashboard',
-  brands: 'Brand Mentions',
-  citations: 'Citations',
-  'prompt-insights': 'Prompt Insights',
-  'citation-gaps': 'Citation Gap Analysis',
-  recommendations: 'Action Center',
-  'content-studio': 'Content Studio',
-  reports: 'Reports',
-  execution: 'Run Analysis',
-  schedule: 'Schedule',
-  'keyword-research': 'Keyword Research',
-  seo: 'SEO',
-  settings: 'Settings',
-  searches: 'Recent Searches',
-  'raw-responses': 'Raw Responses',
-  exports: 'Exports',
-};
 
 function MainApp() {
   const navigate = useNavigate();
@@ -256,9 +237,10 @@ function MainApp() {
             <main className={`${isPrintMode ? '' : 'lg:ml-64 lg:peer-data-[collapsed=true]:ml-16 transition-[margin] duration-300'} min-h-screen`}>
               <AppHeader
                 isPrintMode={isPrintMode}
-                title={PAGE_TITLES[activeTab]}
+                title={pageTitle(activeTab, location.pathname)}
                 lastUpdate={lastUpdate}
                 refreshing={loading}
+                sidebarOpen={sidebarOpen}
                 onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
                 onShowAbout={() => setShowAbout(true)}
               />
@@ -307,8 +289,8 @@ function MainApp() {
               isOpen={showLeaveConfirm}
               onClose={() => { setShowLeaveConfirm(false); setPendingPath(null); }}
               onConfirm={confirmLeaveExecution}
-              title="Leave Execution Page"
-              message="An analysis is currently running. Are you sure you want to leave this page? (The analysis will continue in the background)"
+              title="Leave Run Analysis?"
+              message="A run is in progress. It keeps running if you leave, and its results appear on the other pages as they arrive."
               confirmText="Leave"
               confirmVariant="primary"
             />

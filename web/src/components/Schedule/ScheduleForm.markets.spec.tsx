@@ -12,8 +12,11 @@ import {
 
 const WITH_MARKETS = { wrapper: marketSelectionWrapper(buildMarketSelectionMock()) };
 
-function renderForm(scope: AnalysisScope) {
-  return renderScheduleForm(scope, {}, WITH_MARKETS).updateFormField;
+/** Renders the form and opens "Limit to markets", which starts collapsed. */
+async function renderForm(scope: AnalysisScope) {
+  const { updateFormField } = renderScheduleForm(scope, {}, WITH_MARKETS);
+  await userEvent.click(screen.getByRole('button', { name: /^Limit to markets/u }));
+  return updateFormField;
 }
 
 describe('ScheduleForm markets', () => {
@@ -27,7 +30,7 @@ describe('ScheduleForm markets', () => {
       market_ids: ['br-pt'],
     }, { mode: 'all' }],
   ])('%s', async (_description, scope, expected) => {
-    const updateFormField = renderForm(scope);
+    const updateFormField = await renderForm(scope);
 
     await userEvent.click(screen.getByRole('checkbox', { name: 'Brazil (Portuguese)' }));
 
@@ -35,7 +38,7 @@ describe('ScheduleForm markets', () => {
   });
 
   it('keeps the markets when the scope mode changes', async () => {
-    const updateFormField = renderForm({
+    const updateFormField = await renderForm({
       mode: 'all',
       market_ids: ['cl-es'],
     });
@@ -50,7 +53,7 @@ describe('ScheduleForm markets', () => {
   });
 
   it('keeps the markets when a group is picked', async () => {
-    const updateFormField = renderForm({
+    const updateFormField = await renderForm({
       mode: 'groups',
       group_ids: [],
       market_ids: ['global'],
@@ -65,12 +68,13 @@ describe('ScheduleForm markets', () => {
     });
   });
 
-  it('shows the ticked markets as checked', () => {
-    renderForm({
+  it('shows the ticked markets as checked, and counts them while collapsed', async () => {
+    await renderForm({
       mode: 'all',
       market_ids: ['cl-es'],
     });
 
     expect(screen.getByRole('checkbox', { name: 'Chile (Spanish)' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Limit to markets (1 selected)' })).toBeInTheDocument();
   });
 });

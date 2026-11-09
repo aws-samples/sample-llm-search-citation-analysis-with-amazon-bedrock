@@ -82,6 +82,7 @@ function caveatColumns({ insights }: ReportInsightsResponse, loaded: readonly Ca
     },
     {
       header: 'Mentions',
+      numeric: true,
       info: 'Answers of the latest runs naming the competitor.',
       render: (row) => String(row.mentions),
     },

@@ -1,6 +1,10 @@
+import {
+  useId, useState
+} from 'react';
 import type {
   ContentBriefTemplate, GroupBriefMode
 } from '../../types';
+import { ChevronDownIcon } from '../ui/Icons';
 import { Spinner } from '../ui/Spinner';
 import {
   GROUP_BRIEF_ALLOWED_PLACEHOLDERS,
@@ -36,7 +40,7 @@ interface GroupBriefPromptEditorProps {
   readonly onDelete: () => Promise<void>;
 }
 
-const INPUT_CLASS = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-500';
+const INPUT_CLASS = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-500 dark:disabled:bg-gray-800 dark:disabled:text-gray-400';
 
 function TemplateSelector({
   templates,
@@ -54,7 +58,7 @@ function TemplateSelector({
   return (
     <div>
       <label htmlFor="content-brief-saved-template" className="block text-sm font-medium text-gray-900">
-        Saved template
+        Template
       </label>
       <select
         id="content-brief-saved-template"
@@ -250,10 +254,15 @@ export function GroupBriefPromptEditor({
   onUpdate,
   onDelete,
 }: GroupBriefPromptEditorProps) {
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
   const compatibleTemplates = templates.filter((template) => template.content_angle === mode);
   const editorDisabled = disabled || saving;
+  // The editor also opens by itself when it holds something the user must see: edits, a problem, or a save
+  // result. A button (not a native <details>) keeps that forced state from latching the editor open.
+  const open = expanded || dirty || issue !== undefined || notice !== undefined;
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+    <div className="space-y-3 border-t border-gray-200 pt-4">
       <TemplateSelector
         templates={compatibleTemplates}
         loading={templatesLoading}
@@ -261,35 +270,50 @@ export function GroupBriefPromptEditor({
         disabled={editorDisabled}
         onSelect={onSelect}
       />
-      <TemplateMetadata
-        name={templateName}
-        description={templateDescription}
-        disabled={editorDisabled}
-        onNameChange={onNameChange}
-        onDescriptionChange={onDescriptionChange}
-      />
-      <PromptField
-        prompt={promptTemplate}
-        dirty={dirty}
-        disabled={editorDisabled}
-        issue={issue}
-        onPromptChange={onPromptChange}
-        onReset={onReset}
-      />
-      <TemplateActions
-        selectedTemplate={selectedTemplate}
-        dirty={dirty}
-        disabled={disabled}
-        saving={saving}
-        onSaveAsNew={onSaveAsNew}
-        onUpdate={onUpdate}
-        onDelete={onDelete}
-      />
-      {notice && (
-        <output className={`block text-sm ${notice.success ? 'text-green-700' : 'text-red-700'}`}>
-          {notice.message}
-        </output>
-      )}
+      <div>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={contentId}
+          onClick={() => setExpanded(!open)}
+          className="inline-flex items-center gap-2 rounded-sm text-sm font-medium text-gray-700 hover:text-gray-900 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-900"
+        >
+          <ChevronDownIcon className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} />
+          Customize the prompt
+          <span className="font-normal text-gray-500">(optional{dirty ? ', edited' : ''})</span>
+        </button>
+        <div id={contentId} hidden={!open} className="mt-4 space-y-4">
+          <TemplateMetadata
+            name={templateName}
+            description={templateDescription}
+            disabled={editorDisabled}
+            onNameChange={onNameChange}
+            onDescriptionChange={onDescriptionChange}
+          />
+          <PromptField
+            prompt={promptTemplate}
+            dirty={dirty}
+            disabled={editorDisabled}
+            issue={issue}
+            onPromptChange={onPromptChange}
+            onReset={onReset}
+          />
+          <TemplateActions
+            selectedTemplate={selectedTemplate}
+            dirty={dirty}
+            disabled={disabled}
+            saving={saving}
+            onSaveAsNew={onSaveAsNew}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+          />
+          {notice && (
+            <output className={`block text-sm ${notice.success ? 'text-emerald-700' : 'text-red-700'}`}>
+              {notice.message}
+            </output>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   type AlertItem, type AlertMetricValue, type AlertSeverity, type AlertType, type Market
 } from '../../types';
 import { MarketBadge } from '../Markets/MarketBadge';
+import { Button } from '../ui/Button';
 import { formatDate } from '../../formatting/dateFormatter';
 
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
@@ -21,7 +22,7 @@ const SEVERITY_LABELS: Record<AlertSeverity, string> = {
 
 const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
-  warning: 'border-amber-200 bg-amber-50 text-amber-800',
+  warning: 'border-gray-200 bg-gray-50 text-amber-800',
 };
 
 function metricValueLabel(metricValue: AlertMetricValue): string {
@@ -87,14 +88,14 @@ export function AlertRow({
             {formatDate(alertItem.run_timestamp)}
           </time>
           {isAdmin && alertItem.status === 'open' && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => { void onAcknowledge(alertItem.id); }}
               disabled={acknowledging}
-              className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {acknowledging ? 'Acknowledging…' : 'Acknowledge'}
-            </button>
+            </Button>
           )}
         </div>
       </div>

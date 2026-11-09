@@ -24,6 +24,8 @@ const citationGapsEndpoint = {
   logMessage: '[citationGaps] Error fetching citation gaps:',
   isValidResponse: isCitationGapsResponse,
   ...apiRequestErrors('Failed to fetch citation gaps'),
+  // One keyword with no stored answers comes back as 200 `{error: "No data found for keyword: …"}`.
+  noData: { errorMessage: /^No data found for keyword/ },
   buildRequest: (marketId: string | null, scope: ReportScope, limit = 10) => {
     const params = new URLSearchParams({
       ...reportScopeParams(scope, marketId),
@@ -59,7 +61,7 @@ const citationGapsEndpoint = {
  */
 export function useCitationGaps() {
   const {
-    data, loading, error, computing, request, fetchData
+    data, loading, error, computing, request, noData, fetchData
   } = useAnalysisEndpoint(citationGapsEndpoint);
   const fetchCitationGaps = useMarketScopedFetch(fetchData);
 
@@ -69,6 +71,8 @@ export function useCitationGaps() {
     data,
     loading,
     error,
+    /** The keyword has no stored answers yet (`data` and `error` are null). */
+    noData,
     fetchCitationGaps 
   };
 }

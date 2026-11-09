@@ -273,10 +273,12 @@ describe('BacklinksView snapshots', () => {
     expect(screen.queryByRole('button', { name: 'Snapshot now' })).not.toBeInTheDocument();
   });
 
-  it('asks to confirm the paid call count, without a price, before a snapshot', async () => {
+  it('asks to confirm the paid call count and the price ceiling before a snapshot', async () => {
     await setupSnapshotConfirmation();
 
-    expect(screen.getByRole('dialog')).toHaveTextContent('This starts 2 paid DataForSEO calls, one per domain. Continue?');
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'This starts 2 paid DataForSEO calls, one per domain. Price: up to $0.05. Continue?',
+    );
   });
 
   it('starts a snapshot only after the admin confirms', async () => {

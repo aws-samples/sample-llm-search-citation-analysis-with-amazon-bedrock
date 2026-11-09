@@ -5,6 +5,9 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import { ExtractionOptions } from './ExtractionOptions';
+import {
+  fieldIdentity, labelledFieldIdentity
+} from '../../test/fieldIdentity';
 
 describe('ExtractionOptions', () => {
   it('associates every extraction field with a brands-specific identity', () => {
@@ -20,13 +23,8 @@ describe('ExtractionOptions', () => {
     );
 
     const checkboxes = screen.getAllByRole<HTMLInputElement>('checkbox');
-    const maxBrands = screen.getByLabelText<HTMLInputElement>('Max brands per response:');
 
-    expect(checkboxes.map((checkbox) => ({
-      id: checkbox.id,
-      labelFor: checkbox.labels?.[0]?.htmlFor,
-      name: checkbox.name,
-    }))).toStrictEqual([
+    expect(checkboxes.map(fieldIdentity)).toStrictEqual([
       {
         id: 'brands-extraction-include-sentiment',
         labelFor: 'brands-extraction-include-sentiment',
@@ -38,11 +36,7 @@ describe('ExtractionOptions', () => {
         name: 'brands-extraction-include-ranking-context',
       },
     ]);
-    expect({
-      id: maxBrands.id,
-      labelFor: maxBrands.labels?.[0]?.htmlFor,
-      name: maxBrands.name,
-    }).toStrictEqual({
+    expect(labelledFieldIdentity('Max brands per response:')).toStrictEqual({
       id: 'brands-extraction-max-brands',
       labelFor: 'brands-extraction-max-brands',
       name: 'brands-extraction-max-brands',

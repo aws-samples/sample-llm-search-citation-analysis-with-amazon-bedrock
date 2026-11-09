@@ -29,7 +29,7 @@ const getStatusIcon = (item: ContentStudioHistory) => {
 
   if (!item.viewed) {
     return (
-      <StrokeIcon className="w-5 h-5 text-orange-600" paths={DOCUMENT_TEXT_PATHS} />
+      <StrokeIcon className="w-5 h-5 text-amber-700 dark:text-amber-300" paths={DOCUMENT_TEXT_PATHS} />
     );
   }
 
@@ -46,15 +46,15 @@ const getIconContainerClass = (item: ContentStudioHistory): string => {
     return 'bg-red-100';
   }
   if (!item.viewed) {
-    return 'bg-orange-100';
+    return 'bg-gray-100';
   }
   return 'bg-gray-100';
 };
 
 const getContainerClass = (item: ContentStudioHistory): string => {
-  const baseClass = 'bg-white rounded-lg border p-4 cursor-pointer hover:shadow-xs transition-all';
+  const baseClass = 'relative bg-white rounded-lg border p-4 cursor-pointer hover:shadow-xs transition-all focus-within:ring-2 focus-within:ring-gray-500';
   if (!item.viewed && item.status === 'generated') {
-    return `${baseClass} border-orange-300 bg-orange-50/30`;
+    return `${baseClass} border-gray-300 bg-gray-50/30`;
   }
   return `${baseClass} border-gray-200 hover:border-gray-300`;
 };
@@ -62,10 +62,7 @@ const getContainerClass = (item: ContentStudioHistory): string => {
 export const HistoryListItem = ({
   item, deletingId, onSelect, onDelete
 }: HistoryListItemProps) => (
-  <div
-    onClick={() => onSelect(item)}
-    className={getContainerClass(item)}
-  >
+  <div className={getContainerClass(item)}>
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
       <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
         <div className={`p-2 rounded-lg shrink-0 ${getIconContainerClass(item)}`}>
@@ -73,8 +70,15 @@ export const HistoryListItem = ({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-medium text-gray-900 truncate text-sm sm:text-base">
-              {getContentTitle(item)}
+            <h3 className="font-medium text-gray-900 truncate text-sm sm:text-base min-w-0">
+              {/* The title button covers the whole card (`after:inset-0`), so the card opens on click and from the keyboard. */}
+              <button
+                type="button"
+                onClick={() => onSelect(item)}
+                className="text-left focus:outline-hidden after:absolute after:inset-0 after:rounded-lg after:content-['']"
+              >
+                {getContentTitle(item)}
+              </button>
             </h3>
             <StatusBadge item={item} />
           </div>
@@ -82,13 +86,13 @@ export const HistoryListItem = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 self-end sm:self-auto">
+      <div className="relative z-10 flex items-center gap-2 self-end sm:self-auto">
         <DeleteButton
           itemId={item.id}
           deletingId={deletingId}
           onDelete={onDelete}
         />
-        <StrokeIcon className="w-5 h-5 text-gray-400 hidden sm:block" paths={CHEVRON_RIGHT_PATHS} />
+        <StrokeIcon className="w-5 h-5 text-gray-500 hidden sm:block" paths={CHEVRON_RIGHT_PATHS} />
       </div>
     </div>
 
@@ -99,7 +103,7 @@ export const HistoryListItem = ({
 const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
   if (!item.viewed && item.status === 'generated') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-orange-500 text-white rounded-sm font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-orange-700 text-white rounded-sm font-medium">
         NEW
       </span>
     );
@@ -107,7 +111,7 @@ const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
 
   if (item.status === 'generating') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-blue-500 text-white rounded-sm font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-sm font-medium">
         GENERATING
       </span>
     );
@@ -115,7 +119,7 @@ const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
 
   if (item.status === 'failed') {
     return (
-      <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-sm font-medium">
+      <span className="px-1.5 py-0.5 text-xs bg-red-600 text-white rounded-sm font-medium">
         FAILED
       </span>
     );
@@ -153,8 +157,10 @@ const DeleteButton = ({
   <button
     onClick={(event) => onDelete(itemId, event)}
     disabled={deletingId === itemId}
-    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+    type="button"
+    className="p-2 text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
     title="Delete"
+    aria-label="Delete content"
   >
     {deletingId === itemId ? (
       <Spinner size="sm" />
@@ -179,13 +185,13 @@ const ItemPreview = ({ item }: { item: ContentStudioHistory }) => (
     )}
 
     {item.status === 'failed' && item.error_message && (
-      <p className="text-sm text-red-600 mt-3">
+      <p className="text-sm text-red-700 mt-3">
         Error: {item.error_message}
       </p>
     )}
 
     {(item.status === 'pending' || item.status === 'generating') && (
-      <p className="text-sm text-blue-600 mt-3">
+      <p className="text-sm text-blue-700 mt-3">
         Content is being generated. This may take up to a minute...
       </p>
     )}

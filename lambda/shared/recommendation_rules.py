@@ -7,7 +7,7 @@ competitor mentions); the rules then read the findings of a whole scope:
 
 - ``visibility_gap`` (high): keywords whose run never names the brand;
 - ``ranking`` (medium): keywords where its best rank is below 3rd;
-- ``provider_gap`` (medium): one per provider omitting it on 3+ keywords;
+- ``provider_gap`` (medium): one per AI engine omitting it on 3+ keywords;
 - ``competitive`` (high): keywords where competitors out-mention its rank;
 - ``best_practice`` (low) when the rules found fewer than three things to say.
 
@@ -26,6 +26,7 @@ from typing import Any
 
 from shared import scope_order
 from shared.brand_visibility import classify_brand, tracked_brand_names
+from shared.config import LLM_PROVIDERS, provider_display_name
 from shared.constants import priority_rank
 
 #: Keywords each rule names (the counts in its title cover them all).
@@ -160,18 +161,29 @@ def _low_rank_rule(findings: _ScopeFindings) -> list[dict[str, Any]]:
 
 
 def _provider_gap_rule(findings: _ScopeFindings) -> list[dict[str, Any]]:
+    """One recommendation per AI engine that omits the brand on ``PROVIDER_GAP_MIN_KEYWORDS`` keywords or more.
+
+    Only answer engines (``LLM_PROVIDERS``) count: web-search providers return
+    links, not answers, so a brand cannot appear in them (and they are not in
+    the KPIs). Engines with the most gaps come first, then by id, so the cards
+    keep one order between page loads.
+    """
+    gaps = sorted(
+        ((provider, keywords) for provider, keywords in findings.provider_gaps.items()
+         if provider in LLM_PROVIDERS and len(keywords) >= PROVIDER_GAP_MIN_KEYWORDS),
+        key=lambda gap: (-len(gap[1]), gap[0]),
+    )
     return [
         {
             'type': 'provider_gap',
             'priority': 'medium',
-            'title': f'Not Appearing on {provider.title()}',
-            'description': f'Your brand doesn\'t appear in {provider.title()} responses for {len(keywords)} keywords.',
-            'action': f'Research what sources {provider.title()} prefers and ensure your brand is mentioned there.',
+            'title': f'Not Appearing on {provider_display_name(provider)}',
+            'description': f'Your brand doesn\'t appear in {provider_display_name(provider)} answers for {len(keywords)} keywords.',
+            'action': f'Research what sources {provider_display_name(provider)} prefers and ensure your brand is mentioned there.',
             'keywords': keywords[:_LISTED],
-            'impact': f'Expand visibility to {provider.title()} users',
+            'impact': f'Expand visibility to {provider_display_name(provider)} users',
         }
-        for provider, keywords in findings.provider_gaps.items()
-        if len(keywords) >= PROVIDER_GAP_MIN_KEYWORDS
+        for provider, keywords in gaps
     ]
 
 

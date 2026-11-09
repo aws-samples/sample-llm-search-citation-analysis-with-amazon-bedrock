@@ -117,7 +117,10 @@ function TrackerList(props: TrackerListProps) {
   );
 }
 
-/** The domains of Settings › Brand Tracking, and the competitors' not yet tracked among `trackers`. */
+/**
+ * The domains of Settings › Brand Tracking, the competitors' not yet tracked among `trackers`, and whether the
+ * one-click card's "Track your rankings" (shown while the market has no tracker) already opens the form.
+ */
 function useTrackableDomains(list: RankTrackerList | null, trackers: readonly RankTracker[]) {
   return useMemo(() => {
     const competitors = competitorsOf(list);
@@ -125,6 +128,7 @@ function useTrackableDomains(list: RankTrackerList | null, trackers: readonly Ra
       ownedDomains: list?.owned_domains ?? [],
       competitors,
       untrackedCompetitors: competitors.filter((competitor) => !trackers.some((tracker) => tracker.domain === competitor.domain)),
+      cardOffersForm: trackers.length === 0 && (list?.owned_domains ?? []).length > 0,
     };
   }, [list, trackers]);
 }
@@ -149,7 +153,7 @@ function ConfiguredRankTracking() {
   // A new tracker goes to the header market; "every market combined" creates it for the keywords without one.
   const marketLabel = nameOf(selectedMarketId ?? GLOBAL_MARKET_ID);
   const {
-    ownedDomains, competitors, untrackedCompetitors
+    ownedDomains, competitors, untrackedCompetitors, cardOffersForm
   } = useTrackableDomains(list.data, trackers);
 
   const archive = (tracker: RankTracker) => {
@@ -162,10 +166,10 @@ function ConfiguredRankTracking() {
   return (
     <div className="space-y-4">
       <PageHeaderCard title="Rank Tracking" relaxed={false}
-        description="Where your domains and your competitors' rank in Google for the Settings keywords of the header market, per device, over time.">
-        {isAdmin && (
+        description="Where your domains and your competitors' rank in Google for your Settings keywords, in the market selected at the top of the page, per device, over time.">
+        {isAdmin && !cardOffersForm && (
           <div>
-            <Button variant={trackers.length === 0 ? 'secondary' : 'primary'} onClick={() => setEditing({ tracker: null })}>
+            <Button onClick={() => setEditing({ tracker: null })}>
               Track a domain
             </Button>
           </div>

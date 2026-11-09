@@ -30,7 +30,7 @@ function CheckResult({ check }: { readonly check: ActionState<KeyFileCheck> | un
     <ul className="text-sm" aria-label={`Key file check of ${check.value.domain}`}>
       {check.value.hosts.map((host) => (
         <li key={host.host} className="py-1">
-          <span className="font-medium text-gray-800">{host.host}</span>: {KEY_FILE_LABELS[host.status]}
+          <span className="font-medium text-gray-800 dark:text-gray-200">{host.host}</span>: {KEY_FILE_LABELS[host.status]}
           {host.problem !== null && <span className="block text-xs text-red-700">{host.problem}</span>}
         </li>
       ))}
@@ -49,16 +49,16 @@ function SiteKey({
   if (site.key === null) {
     return (
       <li className="py-3 space-y-2">
-        <p className="text-sm text-gray-800"><span className="font-medium">{site.domain}</span> has no IndexNow key yet.</p>
+        <p className="text-sm text-gray-800 dark:text-gray-200"><span className="font-medium">{site.domain}</span> has no IndexNow key yet.</p>
         {isAdmin
-          ? <Button size="sm" onClick={() => { void controller.createKey(site.domain); }}>Create key for {site.domain}</Button>
+          ? <Button variant="secondary" size="sm" onClick={() => { void controller.createKey(site.domain); }}>Create key for {site.domain}</Button>
           : <p className="text-xs text-gray-500">An Admin can create it.</p>}
       </li>
     );
   }
   return (
     <li className="py-3 space-y-2">
-      <p className="text-sm text-gray-800">
+      <p className="text-sm text-gray-800 dark:text-gray-200">
         <span className="font-medium">{site.domain}</span> key <code className="rounded-sm bg-gray-100 px-1">{site.key}</code>
       </p>
       <p className="text-xs text-gray-600">
@@ -92,7 +92,7 @@ export function IndexNowKeys({
           <SettingsHint section="brand-config">IndexNow submits the brand&apos;s own domains; add them first.</SettingsHint>
         </div>
       )}
-      <ul className="divide-y divide-gray-100">
+      <ul className="divide-y divide-gray-100 dark:divide-gray-700">
         {sites.map((site) => <SiteKey key={site.domain} site={site} controller={controller} isAdmin={isAdmin} />)}
       </ul>
       {keyAction.status === 'error' && <ErrorAlert message={keyAction.message} />}

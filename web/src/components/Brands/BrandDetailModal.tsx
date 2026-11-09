@@ -9,7 +9,7 @@ import type { BrandAppearancesRequest } from '../../api/brandMentions';
 import { ProviderResponsesTab } from './ProviderResponsesTab';
 import { BrandOverviewTab } from './BrandOverviewTab';
 import { SelfReflectionPanel } from '../SelfReflection/SelfReflectionPanel';
-import { CloseIcon } from '../ui';
+import { Modal } from '../ui/Modal';
 import { classificationLabel } from './brandPresentation';
 import { ModalCloseFooter } from '../ui/ModalCloseFooter';
 import {
@@ -25,6 +25,11 @@ interface BrandDetailModalProps {
   appearancesRequest?: BrandAppearancesRequest | null;
   providerData: ProviderBrandData[];
   keyword: string;
+  /**
+   * Whether `keyword` names one keyword. For a group or "All keywords" there is
+   * no single answer per engine and nothing to analyse, so only the overview shows.
+   */
+  singleKeyword?: boolean;
   queryPromptId?: string | null;
   onClose: () => void;
 }
@@ -57,12 +62,14 @@ export const BrandDetailModal = ({
   appearancesRequest = null,
   providerData,
   keyword,
+  singleKeyword = true,
   queryPromptId,
   onClose,
 }: BrandDetailModalProps) => {
   const [activeTab, setActiveTab] = useState<ModalTab>('overview');
   const [mounted, setMounted] = useState(false);
   const panelId = useId();
+  const titleId = useId();
 
   useEffect(() => {
     setMounted(true);
@@ -72,7 +79,7 @@ export const BrandDetailModal = ({
   const getClassificationStyle = (classification: string) => {
     switch (classification) {
       case 'first_party':
-        return 'bg-emerald-100 text-emerald-700';
+        return 'bg-violet-100 text-violet-700';
       case 'competitor':
         return 'bg-red-100 text-red-700';
       default:
@@ -81,66 +88,69 @@ export const BrandDetailModal = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg border border-gray-200 max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h2 className="text-lg sm:text-xl font-semibold text-gray-900">{brand.name}</h2>
-              <span
-                className={`px-2 py-0.5 rounded-full text-xs font-medium ${getClassificationStyle(
-                  brand.classification
-                )}`}
-              >
-                {classificationLabel(brand.classification)}
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-gray-500 mt-1">
-              Keyword: <span className="font-medium text-gray-700">{keyword}</span> • Rank #
-              {brand.overall_rank} • Score: {brand.aggregate_score}
-            </p>
-            {brand.parent_company && (
-              <p className="text-xs sm:text-sm text-gray-400 mt-1">Parent: {brand.parent_company}</p>
-            )}
+    <Modal isOpen onClose={onClose} size="6xl" layout="flush" labelledBy={titleId}>
+      {/* Header; `pr-12` keeps the text clear of the dialog's close button. */}
+      <div className="pl-4 sm:pl-6 pr-12 py-4 border-b border-gray-200">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <h2 id={titleId} className="text-lg sm:text-xl font-semibold text-gray-900 break-words min-w-0">{brand.name}</h2>
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-medium ${getClassificationStyle(
+                brand.classification
+              )}`}
+            >
+              {classificationLabel(brand.classification)}
+            </span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors self-end sm:self-start"
-          >
-            <CloseIcon />
-          </button>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+            {singleKeyword ? 'Keyword' : 'Scope'}: <span className="font-medium text-gray-700 break-words">{keyword}</span> • Rank #
+            {brand.overall_rank} • Score: {brand.aggregate_score}
+          </p>
+          {brand.parent_company && (
+            <p className="text-xs sm:text-sm text-gray-500 mt-1">Parent: {brand.parent_company}</p>
+          )}
         </div>
-
-        <TabBar
-          tabs={modalTabs(providerData.length)}
-          activeId={activeTab}
-          onChange={setActiveTab}
-          label={`${brand.name} details`}
-          panelId={panelId}
-          className="px-4 sm:px-6"
-        />
-
-        <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {activeTab === 'overview' && (
-            <BrandOverviewTab brand={brand} appearancesRequest={appearancesRequest} />
-          )}
-          {activeTab === 'responses' && (
-            <ProviderResponsesTab brand={brand} providerData={providerData} />
-          )}
-          {activeTab === 'ranking-analysis' && (
-            <SelfReflectionPanel
-              keyword={keyword}
-              brand={brand.name}
-              queryPromptId={queryPromptId ?? ''}
-            />
-          )}
-        </TabPanel>
-
-        {/* Footer */}
-        <ModalCloseFooter onClose={onClose} paddingClassName="px-4 sm:px-6" />
       </div>
-    </div>
+
+      {singleKeyword ? (
+        <>
+          <TabBar
+            tabs={modalTabs(providerData.length)}
+            activeId={activeTab}
+            onChange={setActiveTab}
+            label={`${brand.name} details`}
+            panelId={panelId}
+            className="px-4 sm:px-6"
+          />
+
+          <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-4 sm:p-6">
+            {activeTab === 'overview' && (
+              <BrandOverviewTab brand={brand} appearancesRequest={appearancesRequest} />
+            )}
+            {activeTab === 'responses' && (
+              <ProviderResponsesTab brand={brand} providerData={providerData} />
+            )}
+            {activeTab === 'ranking-analysis' && (
+              <SelfReflectionPanel
+                keyword={keyword}
+                brand={brand.name}
+                queryPromptId={queryPromptId ?? ''}
+              />
+            )}
+          </TabPanel>
+        </>
+      ) : (
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          <p className="text-sm text-gray-500">
+            To read each AI engine&apos;s answer and analyse this ranking, pick one keyword as the scope.
+          </p>
+          <BrandOverviewTab brand={brand} appearancesRequest={appearancesRequest} />
+        </div>
+      )}
+
+      {/* Footer */}
+      <ModalCloseFooter onClose={onClose} paddingClassName="px-4 sm:px-6" />
+    </Modal>
   );
 
   if (!mounted) return null;

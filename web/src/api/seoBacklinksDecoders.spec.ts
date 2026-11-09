@@ -93,6 +93,10 @@ describe('isBacklinkSnapshotsResponse', () => {
     expect(isBacklinkSnapshotsResponse(buildSnapshots())).toBe(true);
   });
 
+  it('rejects an answer without the run estimate', () => {
+    expect(isBacklinkSnapshotsResponse({ domains: buildSnapshots().domains })).toBe(false);
+  });
+
   it('rejects a tracked domain with an unknown role', () => {
     const payload = {
       ...buildSnapshots(),

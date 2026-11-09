@@ -81,7 +81,9 @@ function ConfiguredBacklinks() {
         <CenteredEmpty
           icon={<LinkIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />}
           title={domains.ownDomain === null ? 'Enter a domain or URL to get started' : `Analyze ${domains.ownDomain} or enter another domain`}
-          hint="See its authority, backlinks, referring domains and top pages, or pick one of your or your competitors' domains."
+          hint={domains.ownDomain === null
+            ? 'Type a domain or a URL, then press Search.'
+            : 'Leave the field empty to analyze your own domain, or click one of the domains under it. Each lookup is a paid DataForSEO call.'}
         />
       )}
       {state.status === 'loading' && (

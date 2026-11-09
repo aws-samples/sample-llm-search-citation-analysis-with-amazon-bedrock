@@ -65,7 +65,7 @@ function MarketRow({
     <li className="flex items-start gap-3 p-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-gray-900">
-          {market.name} <span className="text-xs font-normal text-gray-400">{market.market_id}</span>
+          {market.name} <span className="text-xs font-normal text-gray-500">{market.market_id}</span>
         </p>
         <p className="text-xs text-gray-500 mt-0.5">{describeMarket(market)}</p>
         {brands !== null && <p className="text-xs text-gray-500 mt-0.5">{brands}</p>}
@@ -138,7 +138,7 @@ function MarketList({
   }
   if (catalog.markets.length === 0) return <MarketsEmpty isAdmin={isAdmin} />;
   return (
-    <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200">
+    <ul className="divide-y divide-gray-200 dark:divide-gray-700 rounded-lg border border-gray-200">
       {catalog.markets.map((market) => (
         <MarketRow key={market.market_id} market={market} isAdmin={isAdmin} busy={busy}
           onEdit={() => onEdit(market)} onRemove={() => onRemove(market)} />

@@ -2,23 +2,22 @@ import {
   useState, useMemo 
 } from 'react';
 import type {
-  AnalysisScope, Execution, Keyword, KeywordGroup 
+  AnalysisScope, Execution, Keyword
 } from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
-import { calculateDuration } from '../../formatting/dateFormatter';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { isKeywordActive } from '../Keywords/keywordEntry';
-import { withMarketIds } from '../Markets/marketScope';
 import { AlertModal } from '../ui/Modal';
 import { processExecutionData } from '../../formatting/executionProcessor';
+import { RunStatusPanel } from './RunStatusPanel';
+import { TriggerSection } from './TriggerSection';
 import {
-  TriggerSection,
-  ExecutionStatus,
-} from './ExecutionMonitorComponents';
+  EVERY_KEYWORD_RUN, runSelectionScope, type RunSelection
+} from './runSelection';
 
 interface ExecutionMonitorProps {
   execution: Execution | null;
@@ -68,8 +67,7 @@ export const ExecutionMonitor = ({
   keywordsCount,
   keywords,
 }: ExecutionMonitorProps) => {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [marketIds, setMarketIds] = useState<string[]>([]);
+  const [selection, setSelection] = useState<RunSelection>(EVERY_KEYWORD_RUN);
   const [isStarting, setIsStarting] = useState(false);
   const {
     alertModal, showAlert, closeAlert
@@ -90,8 +88,8 @@ export const ExecutionMonitor = ({
         console.warn('[preflight] Provider check failed, proceeding anyway');
       } else if (!preflight.anyReady) {
         showAlert(
-          'No Providers Ready',
-          'No LLM providers are enabled and configured. Go to Settings > AI Providers to add at least one API key.',
+          'No AI engine is ready',
+          'No AI engine is enabled with an API key. Add one in Settings › AI providers, then start the run again.',
           'error'
         );
         return;
@@ -110,27 +108,13 @@ export const ExecutionMonitor = ({
     }
   };
 
-  const handleTriggerAnalysis = () => {
-    const keywordScope: AnalysisScope | undefined = selectedIds.length > 0 ? {
-      mode: 'keywords',
-      keyword_ids: selectedIds
-    } : undefined;
-    // A market filter needs a scope; without one the classic run covers every keyword.
-    if (marketIds.length === 0) return runWithPreflight(keywordScope);
-    return runWithPreflight(withMarketIds(keywordScope ?? { mode: 'all' }, marketIds));
-  };
-
-  const handleRunGroup = (group: KeywordGroup) => runWithPreflight(withMarketIds({
-    mode: 'groups',
-    group_ids: [group.id] 
-  }, marketIds));
+  const handleTriggerAnalysis = () => runWithPreflight(runSelectionScope(selection));
 
   const processedExecution = useMemo(
     () => processExecutionData(execution),
     [execution]
   );
 
-  const duration = execution ? calculateDuration(execution.start_date, execution.stop_date) : null;
   const isRunning = execution?.status === 'RUNNING';
   const {
     isAdmin, loading: adminLoading
@@ -141,30 +125,21 @@ export const ExecutionMonitor = ({
   return (
     <>
       <div className="space-y-6">
+        {/* The run started here comes first: it is what the user came back to see. */}
+        {execution && <RunStatusPanel execution={execution} processedExecution={processedExecution} />}
+
         <TriggerSection
-          selectedIds={selectedIds}
+          selection={selection}
+          onSelectionChange={setSelection}
           keywordsCount={keywordsCount}
           activeKeywords={activeKeywords}
           groups={groups}
           isRunning={isRunning}
           isStarting={isStarting}
-          onSelectionChange={setSelectedIds}
-          marketIds={marketIds}
-          onMarketIdsChange={(next) => { setMarketIds(next); setSelectedIds([]); }}
           onTriggerAnalysis={() => { void handleTriggerAnalysis(); }}
-          onRunGroup={(group) => { void handleRunGroup(group); }}
           isAdmin={isAdmin}
           loading={triggerLoading}
         />
-
-        {execution && (
-          <ExecutionStatus
-            execution={execution}
-            processedExecution={processedExecution}
-            duration={duration}
-            isRunning={isRunning}
-          />
-        )}
       </div>
 
       <AlertModal

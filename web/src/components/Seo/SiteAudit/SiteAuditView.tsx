@@ -53,9 +53,9 @@ function AuditHistory({
           type="button"
           aria-pressed={audit.audit_id === selectedId}
           onClick={() => onSelect(audit.audit_id)}
-          className={`rounded-lg border px-3 py-1.5 text-left text-xs ${audit.audit_id === selectedId ? 'border-gray-900 bg-gray-50' : 'border-gray-200 bg-white'}`}
+          className={`rounded-lg border px-3 py-1.5 text-left text-xs ${audit.audit_id === selectedId ? 'border-gray-900 dark:border-gray-300 bg-gray-50' : 'border-gray-200 bg-white'}`}
         >
-          <span className="block font-medium text-gray-900">{audit.start_url}</span>
+          <span className="block break-all font-medium text-gray-900">{audit.start_url}</span>
           <span className="text-gray-500">{STATUS_LABELS[audit.status]} · {formatAuditDate(audit.started_at)}</span>
         </button>
       ))}

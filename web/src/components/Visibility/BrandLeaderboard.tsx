@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
-import type {
-  BrandClassification, BrandLeaderboardRow
-} from '../../types';
+import type { BrandLeaderboardRow } from '../../types';
 import { EMPTY_KPI } from '../../formatting/kpiFormatter';
 import {
   ReportTable, type ReportTableColumn
@@ -9,17 +7,13 @@ import {
 import {
   BRAND_CLASSIFICATION_LABELS, brandKpiColumns, brandReachColumns
 } from '../Reports/layout/brandColumns';
+import {
+  providerColor, providerName
+} from '../../constants/providers';
+import { BRAND_TYPE_BADGE } from '../../constants/brandTypeBadge';
 import { OverviewPanel } from './OverviewPanel';
-
-// Stryker disable next-line ObjectLiteral: the badge palette is Tailwind-only; the classification label carries the meaning
-const CLASSIFICATION_BADGES: Readonly<Record<BrandClassification, string>> = {
-  // Stryker disable next-line StringLiteral: first-party badge colors are presentation-only
-  first_party: 'bg-green-100 text-green-800',
-  // Stryker disable next-line StringLiteral: competitor badge colors are presentation-only
-  competitor: 'bg-red-100 text-red-800',
-  // Stryker disable next-line StringLiteral: other-brand badge colors are presentation-only
-  other: 'bg-gray-100 text-gray-800',
-};
+import { RowLimitToggle } from './RowLimitToggle';
+import { useRowLimit } from './useRowLimit';
 
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
@@ -39,7 +33,8 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
     ...brandReachColumns((brand) => (
       <div className="flex flex-wrap gap-1">
         {brand.engines.map((engine) => (
-          <span key={engine} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-sm text-xs">{engine}</span>
+          // Each engine in its own hue, the one its badges use across the dashboard.
+          <span key={engine} className={`px-2 py-0.5 rounded-sm text-xs ${providerColor(engine)?.badge ?? 'bg-gray-100 text-gray-800'}`}>{providerName(engine)}</span>
         ))}
       </div>
     )),
@@ -47,7 +42,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
       header: 'Type',
       render: (brand) => (
         // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the label below names the classification
-        <span className={`px-2 py-1 rounded-sm text-xs ${CLASSIFICATION_BADGES[brand.classification]}`}>
+        <span className={`px-2 py-1 rounded-sm text-xs ${BRAND_TYPE_BADGE[brand.classification]}`}>
           {BRAND_CLASSIFICATION_LABELS[brand.classification]}
         </span>
       ),
@@ -56,7 +51,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
 }
 
 function firstPartyHighlight(brand: BrandLeaderboardRow): string {
-  return brand.classification === 'first_party' ? 'bg-green-50' : '';
+  return brand.classification === 'first_party' ? 'bg-violet-50' : '';
 }
 
 /** Where the Share of voice panel's "See all brands" points. */
@@ -73,20 +68,22 @@ interface BrandLeaderboardProps {
 /**
  * Every brand the scope's answers name, with the tracked-brand formulas
  * applied to each alone, best visibility score first. First-party rows are
- * highlighted.
+ * highlighted; the top rows show until the reader opens the full list, and
+ * the paged list's footer (Load more) shows once it is open.
  */
 export function BrandLeaderboard({
   brands, footer, actions
 }: BrandLeaderboardProps) {
+  const rowLimit = useRowLimit(brands);
   return (
     <OverviewPanel title="Brand leaderboard" id={BRAND_LEADERBOARD_ANCHOR} actions={actions}>
       {brands.length === 0 ? (
         <p className="py-6 text-center text-sm text-gray-500">No brand data available.</p>
       ) : (
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-        <ReportTable columns={leaderboardColumns()} rows={brands} rowKey={(brand) => brand.name} rowClassName={firstPartyHighlight} />
+        <ReportTable columns={leaderboardColumns()} rows={rowLimit.visible} rowKey={(brand) => brand.name} rowClassName={firstPartyHighlight} />
       )}
-      {footer}
+      <RowLimitToggle rowLimit={rowLimit} total={brands.length} noun="brands" footer={footer} />
     </OverviewPanel>
   );
 }

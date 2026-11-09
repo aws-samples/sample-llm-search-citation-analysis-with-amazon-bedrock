@@ -4,7 +4,7 @@ import { VideoBadge } from '../Citations/VideoBadge';
 
 const PRIORITY_STYLES: Record<string, string> = {
   high: 'bg-red-100 text-red-800',
-  medium: 'bg-yellow-100 text-yellow-800',
+  medium: 'bg-gray-100 text-amber-800',
   low: 'bg-gray-100 text-gray-800'
 };
 
@@ -17,16 +17,17 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
             href={safeHref(gap.url)}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:underline text-sm font-medium truncate block"
+            className="text-blue-700 hover:underline text-sm font-medium truncate block focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 rounded-sm"
+            title={gap.url}
           >
             {gap.title ?? gap.url}
           </a>
-          <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
+          <div className="flex items-center gap-2 text-xs text-gray-500 min-w-0">
             <span className="truncate">{gap.domain}</span>
             {gap.content_type === 'video' && <VideoBadge />}
           </div>
         </div>
-        <span className={`px-2 py-1 rounded-sm text-xs ml-2 ${PRIORITY_STYLES[gap.priority] ?? PRIORITY_STYLES.low}`}>
+        <span title="Priority" className={`shrink-0 capitalize px-2 py-1 rounded-sm text-xs ml-2 ${PRIORITY_STYLES[gap.priority] ?? PRIORITY_STYLES.low}`}>
           {gap.priority}
         </span>
       </div>
@@ -56,7 +57,7 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
       )}
 
       {gap.keyword && (
-        <div className="mt-2 text-xs text-gray-400">
+        <div className="mt-2 text-xs text-gray-500">
           Keyword: {gap.keyword}
         </div>
       )}

@@ -134,23 +134,6 @@ export function sectionHeaderState(name: string) {
   };
 }
 
-/** The id, label target and form name of a picker input, for asserting its page-specific identity. */
-export function inputIdentity(input: HTMLInputElement) {
-  return {
-    id: input.id,
-    labelFor: input.labels?.[0]?.htmlFor,
-    name: input.name,
-  };
-}
-
-/** `inputIdentity` plus the submitted value, for picker checkboxes. */
-export function checkboxIdentity(checkbox: HTMLInputElement) {
-  return {
-    ...inputIdentity(checkbox),
-    value: checkbox.value,
-  };
-}
-
 export async function typeScopePickerSearch(text: string): Promise<void> {
   await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Search keywords' }), text);
 }

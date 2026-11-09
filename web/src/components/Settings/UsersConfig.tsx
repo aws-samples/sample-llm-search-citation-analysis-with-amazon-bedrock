@@ -33,8 +33,8 @@ interface PageNotice {
 }
 
 const NOTICE_CLASS: Readonly<Record<PageNotice['tone'], string>> = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  warning: 'border-amber-200 bg-amber-50 text-amber-800',
+  success: 'border-gray-200 bg-gray-50 text-emerald-700',
+  warning: 'border-gray-200 bg-gray-50 text-amber-800',
 };
 
 /** How long a page notice stays before it clears itself. */

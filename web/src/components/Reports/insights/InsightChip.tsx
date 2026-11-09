@@ -2,8 +2,8 @@
 export type ChipTone = 'good' | 'watch' | 'bad';
 
 const TONE_CLASSES: Readonly<Record<ChipTone, string>> = {
-  good: 'bg-emerald-100 text-emerald-800',
-  watch: 'bg-amber-100 text-amber-800',
+  good: 'bg-gray-100 text-emerald-800',
+  watch: 'bg-gray-100 text-amber-800',
   bad: 'bg-red-100 text-red-800',
 };
 

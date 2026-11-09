@@ -113,8 +113,8 @@ export function statusOf(user: Pick<CognitoUser, 'status' | 'enabled'>): StatusP
 }
 
 export const STATUS_BADGE_CLASS: Readonly<Record<StatusKind, string>> = {
-  active: 'bg-emerald-50 text-emerald-700',
-  pending: 'bg-amber-50 text-amber-700',
+  active: 'bg-gray-50 text-emerald-700',
+  pending: 'bg-gray-50 text-amber-700',
   disabled: 'bg-red-50 text-red-700',
   attention: 'bg-gray-100 text-gray-700',
 };

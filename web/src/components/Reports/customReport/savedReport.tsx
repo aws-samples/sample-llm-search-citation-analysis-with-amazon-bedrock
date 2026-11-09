@@ -35,7 +35,7 @@ export function useSavedReport(id: string): SavedReportState {
 /** The way back from a custom report page that has nothing to show. */
 export function BackToReportsLink() {
   return (
-    <Link to="/reports" className="text-sm font-medium text-gray-700 underline hover:text-gray-900">
+    <Link to="/reports" className="text-sm font-medium text-gray-700 underline hover:text-gray-900 dark:hover:text-white">
       Back to Reports
     </Link>
   );

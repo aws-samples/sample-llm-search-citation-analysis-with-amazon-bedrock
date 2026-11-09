@@ -31,6 +31,7 @@ describe('useAnalysisEndpoint', () => {
     ...idleEndpointState('fetchData', 'reset'),
     computing: null,
     request: null,
+    noData: false,
   };
 
   describe('initial state', () => {

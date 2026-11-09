@@ -24,6 +24,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
     {
       header: 'Engines',
       info: 'The AI engines whose answers name the brand.',
+      cellClassName: 'min-w-[16rem]',
       render: (brand) => brand.engines.map(providerName).join(', '),
     },
     {

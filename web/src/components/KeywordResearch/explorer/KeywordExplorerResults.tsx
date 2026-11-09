@@ -40,7 +40,7 @@ function ResearchNotes({ response }: { readonly response: KeywordResearchRespons
   return (
     <div className="space-y-1 text-sm text-gray-600">
       {response.data_source === 'google_ads' && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">{GOOGLE_ADS_NOTE}</p>
+        <p className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-amber-800">{GOOGLE_ADS_NOTE}</p>
       )}
       {notes.length > 0 && <p>{notes.join(' · ')}</p>}
     </div>

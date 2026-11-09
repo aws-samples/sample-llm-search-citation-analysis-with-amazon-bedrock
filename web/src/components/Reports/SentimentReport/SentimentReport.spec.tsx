@@ -183,7 +183,7 @@ describe('Sentiment per brand', () => {
   it('highlights your brand\'s row', () => {
     renderSentiment();
 
-    expect(within(sectionTitled('Net sentiment per brand')).getAllByRole('row')[1]).toHaveClass('bg-emerald-50');
+    expect(within(sectionTitled('Net sentiment per brand')).getAllByRole('row')[1]).toHaveClass('bg-violet-50');
   });
 
   it('says so when the answers name no brand', () => {

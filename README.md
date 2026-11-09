@@ -393,7 +393,7 @@ DeduplicateCitations writes the row and the keyword's `KeywordLatest` object bes
 
    With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use. Then switch on **Google AI Overviews** there. It is part of every deployment, and it is off until you switch it on, so saving the login alone starts no per-keyword spend. Steps: [docs/seo.md](docs/seo.md#setup).
 
-3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your **First Party Brands** and competitors (**Expand Brand** and **Find Competitors** suggest more with Bedrock), and add your **Owned Domains**. Each competitor can list its own domains too (**Find Competitors** suggests them, unticked until you confirm), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
+3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your brand names and websites under **Your brand** and your competitors with their websites under **Competitors** (**Suggest sub-brands** and **Find competitors** suggest more with Bedrock; suggested competitor websites are saved only once you pick them), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
 4. **Settings > Keywords.** Add the queries your customers ask (for example "best hotels in Barcelona"). Keyword groups work like folders, one per property or product line; a keyword can be in several groups. Tick keywords and use **Add to group**, or filter the list by group. Deleting a group keeps its keywords.
 
@@ -460,7 +460,7 @@ The `agentcore` provider (Amazon Bedrock Web Search) queries an Amazon-operated 
 
 | Context | Default | Effect |
 |---|---|---|
-| `webSearchRegion` | `us-east-1` | Region of the gateway; allowed values `us-east-1`, `eu-west-1`, `ap-northeast-1` |
+| `webSearchRegion` | `us-east-1` | Region of the gateway; allowed values `us-east-1`, `us-west-2`, `eu-west-1`, `ap-northeast-1` |
 
 Until the stack is deployed the provider shows **Gateway not deployed** in **Settings > AI Providers** and cannot be enabled. AWS terms for the web search tool: show the source citations and links, and do not extract results in bulk or build a competing index.
 

@@ -7,197 +7,30 @@ import { BrandConfigPanel } from './BrandConfigPanel';
 import {
   countTrackedBrands, describeIndustry
 } from './brandConfigSummary';
-import { PersonaSelector } from '../Personas/PersonaSelector';
 import { BrandMentionsSkeleton } from './BrandMentionsSkeleton';
 import { ComputingState } from '../ui/ComputingState';
-import { ExportAllButton } from '../ui/ExportAllButton';
 import { ScopeCoverageNote } from '../ui/ScopeCoverageNote';
 import type { ComputingResponse } from '../../types/domain/scopeCoverage';
-import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
-import { describeReportScope } from '../ui/reportScope';
+import {
+  AnalysisRunContext, BrandReportControls, ClassificationFilter, getFilterCounts, Header, ScopePanel
+} from './BrandsPageControls';
+import {
+  ALL_SCOPE, describeReportScope
+} from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import type {
-  Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
+  Keyword, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
-import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { NoDataYet } from '../ui/NoDataYet';
 import { useSelectedMarketId } from '../Markets/marketSelectionContext';
-import {
-  brandMentionsExportParams, brandMentionSummaryExportParams, type BrandAppearancesRequest
-} from '../../api/brandMentions';
+import type { BrandAppearancesRequest } from '../../api/brandMentions';
 import type { ListRequest } from '../../api/scopedListPages';
 
 interface BrandsViewProps {keywords: Keyword[];}
 
-const ScopePanel = ({
-  keywords, groups, scope, onChange
-}: {
-  keywords: Keyword[];
-  groups: KeywordGroup[];
-  scope: ReportScope | null;
-  onChange: (scope: ReportScope) => void;
-}) => (
-  <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-    <h3 className="text-sm font-medium text-gray-900 mb-1">What to look at</h3>
-    <p className="text-xs text-gray-500 mb-4">One keyword shows each AI engine&apos;s answer; groups and all keywords aggregate the chosen analysis context.</p>
-    <KeywordScopeSelector
-      keywords={keywords}
-      groups={groups}
-      value={scope ?? { kind: 'all' }}
-      onChange={onChange}
-      label="Scope"
-    />
-    {keywords.length === 0 && (
-      <p className="text-gray-400 text-center py-8 text-sm">No keywords available.</p>
-    )}
-  </div>
-);
-
-const FilterButton = ({
-  active, onClick, activeClass, inactiveClass, children
-}: {
-  active: boolean;
-  onClick: () => void;
-  activeClass: string;
-  inactiveClass: string;
-  children: React.ReactNode;
-}) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${active ? activeClass : inactiveClass}`}
-  >
-    {children}
-  </button>
-);
-
-const ClassificationFilter = ({
-  filter, onFilterChange, counts
-}: {
-  filter: string | null;
-  onFilterChange: (filter: string | null) => void;
-  counts: {
-    total: number;
-    firstParty: number;
-    competitor: number;
-    other: number
-  };
-}) => (
-  <div className="flex gap-2 flex-wrap">
-    <FilterButton active={filter === null} onClick={() => onFilterChange(null)} activeClass="bg-gray-900 text-white" inactiveClass="bg-gray-100 text-gray-700 hover:bg-gray-200">
-      All ({counts.total})
-    </FilterButton>
-    <FilterButton active={filter === 'first_party'} onClick={() => onFilterChange('first_party')} activeClass="bg-emerald-600 text-white" inactiveClass="bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
-      First Party ({counts.firstParty})
-    </FilterButton>
-    <FilterButton active={filter === 'competitor'} onClick={() => onFilterChange('competitor')} activeClass="bg-red-600 text-white" inactiveClass="bg-red-50 text-red-700 hover:bg-red-100">
-      Competitors ({counts.competitor})
-    </FilterButton>
-    <FilterButton active={filter === 'other'} onClick={() => onFilterChange('other')} activeClass="bg-gray-600 text-white" inactiveClass="bg-gray-100 text-gray-700 hover:bg-gray-200">
-      Other ({counts.other})
-    </FilterButton>
-  </div>
-);
-
-const EmptyState = () => (
-  <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-    <p className="text-sm text-gray-500">Pick a scope above to view brand mentions</p>
-  </div>
-);
-
-const Header = ({
-  industryName, firstPartyCount, competitorCount, onConfigClick
-}: {
-  industryName: string;
-  firstPartyCount: number;
-  competitorCount: number;
-  onConfigClick: () => void;
-}) => (
-  <PageHeaderCard
-    title="Brand Mentions"
-    description="See which brands AI search engines mention."
-    relaxed={false}
-    footer={(
-      <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2 text-sm">
-        <span className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg">{industryName}</span>
-        {firstPartyCount > 0 && <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg">{firstPartyCount} first-party</span>}
-        {competitorCount > 0 && <span className="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg">{competitorCount} competitors</span>}
-      </div>
-    )}
-  >
-    <button onClick={onConfigClick} className="px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 self-start">
-      Configure Brands
-    </button>
-  </PageHeaderCard>
-);
-
-const getFilterCounts = (data: BrandMentionsResponse | null) => ({
-  total: data?.aggregated.total_unique_brands ?? 0,
-  firstParty: data?.aggregated.summary.first_party_count ?? 0,
-  competitor: data?.aggregated.summary.competitor_count ?? 0,
-  other: data?.aggregated.summary.other_count ?? 0,
-});
-
-const BrandReportControls = ({
-  data, exportRequest, selectedTimestamp, onTimestampChange
-}: {
-  data: BrandMentionsResponse;
-  exportRequest: BrandAppearancesRequest;
-  selectedTimestamp: string | null;
-  onTimestampChange: (timestamp: string | null) => void;
-}) => {
-  return (
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <label htmlFor="brands-analysis-run" className="block text-xs font-medium text-gray-500 mb-1.5">Analysis run</label>
-        <select
-          id="brands-analysis-run"
-          name="brands-analysis-run"
-          value={selectedTimestamp ?? ''}
-          onChange={(event) => onTimestampChange(event.target.value || null)}
-          className="min-w-64 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
-        >
-          <option value="">Latest</option>
-          {data.available_runs.map((run) => <option key={run} value={run}>{run}</option>)}
-        </select>
-      </div>
-      <div className="flex flex-wrap items-start gap-2">
-        <ExportAllButton view="brand-mention-summary" params={brandMentionSummaryExportParams(exportRequest)} />
-        <ExportAllButton view="brand-appearances" params={brandMentionsExportParams(exportRequest)} label="Export all mentions" />
-      </div>
-    </div>
-  );
-};
-
-const AnalysisRunContext = ({
-  data, scopeLabel, selectedTimestamp
-}: {
-  data: BrandMentionsResponse;
-  scopeLabel: string;
-  selectedTimestamp: string | null;
-}) => {
-  if (data.keyword !== null) {
-    return selectedTimestamp === null ? null : (
-      <p className="text-xs text-gray-500 px-1">Showing analysis run {selectedTimestamp} for {scopeLabel}.</p>
-    );
-  }
-
-  if (selectedTimestamp !== null) {
-    return (
-      <p className="text-xs text-gray-500 px-1">
-        Analysis run {selectedTimestamp} includes data for {data.keywords_with_data ?? 0} of {data.keywords_analyzed ?? 0} keywords in {scopeLabel}.
-      </p>
-    );
-  }
-
-  return (
-    <p className="text-xs text-gray-500 px-1">
-      Aggregated over each keyword&apos;s latest run; {data.keywords_with_data ?? 0} of {data.keywords_analyzed ?? 0} keywords in {scopeLabel} have data.
-    </p>
-  );
-};
-
 const BrandContent = ({
-  data, loading, error, computing, request, appearancesRequest, scopeLabel, classificationFilter, selectedTimestamp,
-  onFilterChange, onTimestampChange, onBrandClick, config
+  data, loading, error, computing, noData, request, appearancesRequest, scopeLabel, classificationFilter, selectedTimestamp,
+  onFilterChange, onTimestampChange, onBrandClick
 }: {
   data: BrandMentionsResponse | null;
   loading: boolean;
@@ -206,6 +39,7 @@ const BrandContent = ({
   computing: ComputingResponse | null;
   /** The GET `data` answered: the brand list's next pages repeat it. */
   request: ListRequest | null;
+  noData: boolean;
   appearancesRequest: BrandAppearancesRequest | null;
   scopeLabel: string;
   classificationFilter: string | null;
@@ -213,15 +47,17 @@ const BrandContent = ({
   onFilterChange: (filter: string | null) => void;
   onTimestampChange: (timestamp: string | null) => void;
   onBrandClick: (brand: AggregatedBrand) => void;
-  config: BrandConfig | null;
 }) => {
   // The first answer gets a placeholder; a refetch (filter, run, persona)
   // keeps the previous results on screen, dimmed, so nothing collapses.
   // A view job (an older run of a large scope) replaces the figures of the previous choice.
   if (loading && computing !== null) return <ComputingState subject="brand mentions" />;
   if (loading && !data) return <BrandMentionsSkeleton />;
+  // A keyword with no analysis run yet: what to do next, not a red error.
+  if (noData) return <NoDataYet keyword={scopeLabel} />;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm text-red-700">{error}</p></div>;
-  if (appearancesRequest === null) return <EmptyState />;
+  // No keywords: the scope panel already says what to do.
+  if (appearancesRequest === null) return null;
   if (!data) return null;
 
   const counts = getFilterCounts(data);
@@ -241,33 +77,9 @@ const BrandContent = ({
         counts={counts}
       />
       <ScopeCoverageNote response={data} />
-      <PagedBrandMentionsTable data={data} request={request} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
+      <PagedBrandMentionsTable data={data} request={request} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} />
     </div>
   );
-};
-
-const useViewState = () => {
-  const [scope, setScope] = useState<ReportScope | null>(null);
-  const [selectedBrand, setSelectedBrand] = useState<AggregatedBrand | null>(null);
-  const [showConfig, setShowConfig] = useState(false);
-  const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
-  const [selectedTimestamp, setSelectedTimestamp] = useState<string | null>(null);
-
-  return {
-    scope,
-    setScope,
-    selectedBrand,
-    setSelectedBrand,
-    showConfig,
-    setShowConfig,
-    classificationFilter,
-    setClassificationFilter,
-    selectedPersonaId,
-    setSelectedPersonaId,
-    selectedTimestamp,
-    setSelectedTimestamp
-  };
 };
 
 const renderModals = (props: {
@@ -293,6 +105,7 @@ const renderModals = (props: {
         appearancesRequest={props.appearancesRequest}
         providerData={props.data.by_provider}
         keyword={props.data.keyword ?? props.scopeLabel}
+        singleKeyword={props.data.keyword !== null}
         queryPromptId={props.selectedPersonaId}
         onClose={() => props.setSelectedBrand(null)}
       />
@@ -312,18 +125,22 @@ const renderModals = (props: {
 );
 
 export const BrandsView = ({ keywords }: BrandsViewProps) => {
-  const {
-    scope, setScope, selectedBrand, setSelectedBrand,
-    showConfig, setShowConfig, classificationFilter, setClassificationFilter,
-    selectedPersonaId, setSelectedPersonaId, selectedTimestamp, setSelectedTimestamp
-  } = useViewState();
+  const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
+  const [selectedBrand, setSelectedBrand] = useState<AggregatedBrand | null>(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [selectedTimestamp, setSelectedTimestamp] = useState<string | null>(null);
   const {
     activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
-  const scopeLabel = scope === null ? '' : describeReportScope(scope, groups);
+  // "All keywords" is the default, so the page shows totals on arrival; with
+  // no keywords there is nothing to ask for.
+  const activeScope = activeKeywords.length > 0 ? scope : null;
+  const scopeLabel = describeReportScope(scope, groups);
   const marketId = useSelectedMarketId();
-  const appearancesRequest: BrandAppearancesRequest | null = scope === null ? null : {
-    scope,
+  const appearancesRequest: BrandAppearancesRequest | null = activeScope === null ? null : {
+    scope: activeScope,
     marketId,
     filters: {
       classification: classificationFilter,
@@ -333,8 +150,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
   };
 
   const {
-    data, loading, error, computing, request
-  } = useBrandMentions(scope, classificationFilter, selectedPersonaId, selectedTimestamp);
+    data, loading, error, computing, request, noData
+  } = useBrandMentions(activeScope, classificationFilter, selectedPersonaId, selectedTimestamp);
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors
   } = useBrandConfig();
@@ -357,21 +174,20 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         competitorCount={countTrackedBrands(config, 'competitors')}
         onConfigClick={() => setShowConfig(true)}
       />
-      <ScopePanel keywords={activeKeywords} groups={groups} scope={scope} onChange={handleScopeChange} />
-      <PersonaSelector
-        id="brands-persona-filter"
-        name="brands-persona-filter"
+      <ScopePanel
+        keywords={activeKeywords}
+        groups={groups}
+        scope={scope}
+        onChange={handleScopeChange}
         selectedPersonaId={selectedPersonaId}
         onPersonaChange={handlePersonaChange}
       />
-      {selectedPersonaId && (
-        <div className="text-xs text-gray-500 px-1">Filtering by persona</div>
-      )}
       <BrandContent
         data={data}
         loading={loading}
         error={error}
         computing={computing}
+        noData={noData}
         request={request}
         appearancesRequest={appearancesRequest}
         scopeLabel={scopeLabel}
@@ -380,7 +196,6 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         onFilterChange={setClassificationFilter}
         onTimestampChange={setSelectedTimestamp}
         onBrandClick={setSelectedBrand}
-        config={config}
       />
       {renderModals({
         selectedBrand,

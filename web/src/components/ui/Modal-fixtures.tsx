@@ -1,5 +1,7 @@
 import type { ComponentProps } from 'react';
-import { render } from '@testing-library/react';
+import {
+  fireEvent, render
+} from '@testing-library/react';
 import { vi } from 'vitest';
 import {
   AlertModal, ConfirmModal, Modal
@@ -66,5 +68,44 @@ export function renderAlertModal(overrides: Partial<AlertModalProps> = {}) {
         {...overrides}
       />
     ),
+  };
+}
+
+/** A focused button outside any dialog, standing in for the control that opened it. */
+export function setupFocusedOpener(): HTMLButtonElement {
+  const opener = document.createElement('button');
+  opener.textContent = 'Opener';
+  document.body.append(opener);
+  opener.focus();
+  return opener;
+}
+
+/** Dialog content with three buttons; the header close button follows them as the last control. */
+export const THREE_BUTTONS = (
+  <>
+    <button type="button">First</button>
+    <button type="button">Middle</button>
+    <button type="button">Last</button>
+  </>
+);
+
+/** Presses Tab (or Shift+Tab) on the document, where the dialog's focus trap listens. */
+export function pressTab(shiftKey = false): void {
+  fireEvent.keyDown(document, {
+    key: 'Tab',
+    shiftKey,
+  });
+}
+
+/**
+ * Renders a dialog with `THREE_BUTTONS` and a closed "Confirm" dialog after it, and
+ * returns functions that open and close the Confirm dialog stacked over the first.
+ */
+export function renderStackedDialogs() {
+  const lower = modalElement({ children: THREE_BUTTONS });
+  const { rerender } = render(<>{lower}{modalElement({ isOpen: false })}</>);
+  return {
+    openTop: () => rerender(<>{lower}{modalElement({ title: 'Confirm' })}</>),
+    closeTop: () => rerender(<>{lower}{modalElement({ isOpen: false })}</>),
   };
 }

@@ -8,14 +8,13 @@ import type { Keyword } from '../../../types';
 import {
   Button, PencilIcon
 } from '../../ui';
-import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import { describeReportScope } from '../../ui/reportScope';
 import { CompetitorSwitcher } from '../CompetitorGapReport/CompetitorGapReport';
 import {
   ReportLayout, SectionPlaceholder
 } from '../layout';
 import {
-  PeriodSelector, scopeLabelOf
+  ScopeAndPeriodSelectors, scopeLabelOf
 } from '../scopeReport/ScopeReport';
 import { scopeFromSearch } from '../scopeReport/scopeReportRoute';
 import { MARKET_SEARCH_PARAM } from '../../Markets/marketSelection';
@@ -131,21 +130,23 @@ function ReportPage({
     <ReportLayout
       title={report.title}
       subtitle={`${scopeLabel} · last ${view.days} days`}
+      headerActions={(
+        <Button variant="secondary" size="sm" leadingIcon={<PencilIcon className="h-4 w-4" />} onClick={() => navigate(customReportEditPath(report.id))}>
+          Edit report
+        </Button>
+      )}
       actions={(
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <KeywordScopeSelector
-            keywords={[...keywords]}
+        <>
+          <ScopeAndPeriodSelectors
+            keywords={keywords}
             groups={groups}
-            value={view.scope}
-            onChange={(scope) => show({ scope })}
-            className="min-w-[16rem]"
+            scope={view.scope}
+            days={view.days}
+            onScopeChange={(scope) => show({ scope })}
+            onDaysChange={(days) => show({ days })}
           />
-          <PeriodSelector days={view.days} onChange={(days) => show({ days })} />
           <CompetitorPicker competitor={competitor} onChange={(selected) => show({ competitor: selected })} />
-          <Button variant="secondary" leadingIcon={<PencilIcon className="h-4 w-4" />} onClick={() => navigate(customReportEditPath(report.id))}>
-            Edit report
-          </Button>
-        </div>
+        </>
       )}
     >
       {keyedBlocks(report.blocks).map(({

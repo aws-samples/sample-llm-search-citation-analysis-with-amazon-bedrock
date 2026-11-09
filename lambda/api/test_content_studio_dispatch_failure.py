@@ -278,9 +278,19 @@ class TestGenerateContentIdeasFromBrandVisibility:
         ideas = _ideas(items)
 
         assert _type_and_priority(ideas) == [('provider_gap', 'medium')]
-        assert ideas[0]['title'] == 'Target Gemini for "kw"'
+        assert ideas[0]['title'] == 'Target Google Gemini for "kw"'
         assert ideas[0]['providers_missing'] == ['gemini']
         assert ideas[0]['providers_present'] == ['openai']
+
+    def test_ignores_web_search_providers_when_looking_for_a_provider_gap(self):
+        items = [
+            _search_result('kw', provider='openai', brands=[_first_party(rank=1)]),
+            _search_result('kw', provider='brave'),
+        ]
+
+        ideas = _ideas(items)
+
+        assert 'provider_gap' not in [idea['type'] for idea in ideas]
 
     def test_flags_negative_sentiment_when_first_party_is_mentioned_negatively(self):
         items = [_search_result('kw', brands=[_first_party(rank=5, sentiment='negative')])]

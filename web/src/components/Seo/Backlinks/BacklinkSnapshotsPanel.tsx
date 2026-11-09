@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { priceText } from '../../../exporters/paidExport';
 import type { BacklinkSnapshotsState } from '../../../hooks/useBacklinkSnapshots';
 import { Button } from '../../ui/Button';
 import { ErrorAlert } from '../../ui/ErrorAlert';
@@ -15,10 +16,12 @@ function callCount(domains: number): string {
 }
 
 function AdminControls({
-  snapshots, domains
+  snapshots, domains, runCostUsd
 }: {
   readonly snapshots: BacklinkSnapshotsState;
   readonly domains: number;
+  /** The API's list-price ceiling of one run. */
+  readonly runCostUsd: number;
 }) {
   const [confirming, setConfirming] = useState(false);
   const closeConfirm = () => setConfirming(false);
@@ -32,7 +35,7 @@ function AdminControls({
         onClose={closeConfirm}
         onConfirm={() => void snapshots.snapshotNow()}
         title="Snapshot now?"
-        message={`This starts ${callCount(domains)}, one per domain. Continue?`}
+        message={`This starts ${callCount(domains)}, one per domain. Price: ${priceText(runCostUsd)}. Continue?`}
         confirmText="Snapshot"
       />
     </div>
@@ -53,7 +56,6 @@ export function BacklinkSnapshotsPanel({
         <h3 className="text-base font-semibold text-gray-900">Authority over time</h3>
         <p className="text-xs text-gray-500">
           DataForSEO rank (0-100) of your domains and your competitors&apos;, with subdomains, from weekly snapshots.
-          {' Weekly runs are a Schedule (Operations > Schedule).'}
         </p>
       </div>
       {snapshots.loading && (
@@ -65,7 +67,7 @@ export function BacklinkSnapshotsPanel({
       )}
       {data !== null && data.domains.length > 0 && <AuthorityChart domains={data.domains} />}
       {isAdmin && data !== null && (
-        <AdminControls snapshots={snapshots} domains={data.domains.length} />
+        <AdminControls snapshots={snapshots} domains={data.domains.length} runCostUsd={data.estimated_run_cost_usd} />
       )}
     </section>
   );

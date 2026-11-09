@@ -28,6 +28,21 @@ function renderContentDetailModal(
 }
 
 describe('ContentDetailModal', () => {
+  it('opens a modal dialog named after the content title', () => {
+    renderContentDetailModal(whitespaceGeneratedTitleOverrides);
+
+    expect(screen.getByRole('dialog', { name: 'Useful idea title' })).toHaveAttribute('aria-modal', 'true');
+  });
+
+  it('marks the active view in the Preview/Markdown toggle', async () => {
+    renderContentDetailModal(whitespaceGeneratedTitleOverrides);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Markdown' }));
+
+    expect(screen.getByRole('button', { name: 'Markdown' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Preview' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('renders trimmed idea title when generated title contains only whitespace', () => {
     renderContentDetailModal(whitespaceGeneratedTitleOverrides);
 

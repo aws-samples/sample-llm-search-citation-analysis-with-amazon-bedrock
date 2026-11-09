@@ -15,7 +15,7 @@ export function buildProps(overrides: Partial<CitationFiltersProps> = {}): Citat
     setMinCitations: vi.fn(),
     contentType: 'all',
     setContentType: vi.fn(),
-    setCurrentPage: vi.fn(),
+    onFilterChange: vi.fn(),
     exportButton: createElement('button', { type: 'button' }, 'Export all'),
     ...overrides,
   };

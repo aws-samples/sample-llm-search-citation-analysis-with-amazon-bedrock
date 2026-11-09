@@ -68,6 +68,14 @@ export const KeywordDetail = ({
     fetchKeywordStats();
   }, [keyword]);
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
   const showRuns = (searches: Search[]) => {
     const {
       sorted, latestTimestamp, ...totals
@@ -134,7 +142,7 @@ export const KeywordDetail = ({
 
   return (
     <div className="fixed top-0 left-0 right-0 bottom-0 bg-black/50 flex items-center justify-center z-100 p-4 overflow-y-auto">
-      <div className="bg-gray-50 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+      <dialog open aria-modal="true" aria-label={keyword} className="relative bg-gray-50 text-gray-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
         <DetailHeader keyword={keyword} stats={stats} onClose={onClose} />
 
         <div className="p-4 sm:p-6 space-y-6">
@@ -156,7 +164,7 @@ export const KeywordDetail = ({
             label="Load older runs"
           />
         </div>
-      </div>
+      </dialog>
     </div>
   );
 };

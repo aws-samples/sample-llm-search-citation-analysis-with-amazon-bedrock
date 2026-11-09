@@ -67,6 +67,7 @@ export function CoverageMapSection({
     ...fetch,
     title: 'Coverage map',
     loadingMessage: 'Building coverage map…',
+    loadingShape: 'table',
   });
   if (pending) return pending;
 
