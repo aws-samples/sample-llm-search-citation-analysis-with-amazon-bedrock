@@ -1,10 +1,12 @@
-# Citation Analysis System: track your brand's visibility in AI search (GEO / AEO)
+# Citation Analysis System: AI search visibility and generative engine optimization (GEO / AEO) on Amazon Bedrock
 
-An open-source, self-hosted AI visibility tracker for generative engine optimization (GEO) and answer engine optimization (AEO), built on AWS. It shows how OpenAI (the models behind ChatGPT), Perplexity, Gemini, Claude and, optionally, Google AI Overviews mention and cite your brand, which sources they cite for your competitors but not for you, and what content to create next. It accompanies the AWS Builder Center article [Track your brand's visibility in AI search with a citation analysis tool](https://builder.aws.com/content/39o3JtrRqnsKKyKF0r5ZODrP751/track-your-brands-visibility-in-ai-search-with-a-citation-analysis-tool).
+An open-source, self-hosted AI search visibility tracker for generative engine optimization (GEO) and answer engine optimization (AEO), built on AWS with Amazon Bedrock. It asks OpenAI (the GPT models behind ChatGPT), Perplexity, Google Gemini, Anthropic Claude and Google AI Overviews your keywords, records the brand mentions and cited sources in every answer, and turns repeated runs into citation analysis, share-of-voice KPIs, competitor benchmarks and content gaps for marketing, SEO and content teams. It accompanies the AWS Builder Center article [Track your brand's visibility in AI search with a citation analysis tool](https://builder.aws.com/content/39o3JtrRqnsKKyKF0r5ZODrP751/track-your-brands-visibility-in-ai-search-with-a-citation-analysis-tool).
 
 > **Important:** This is sample code for demonstration and educational purposes. It is not intended for production use without additional security review and testing. You should work with your security and compliance teams to meet your organizational requirements before deploying to production environments.
 
-A serverless system that tracks how AI engines (OpenAI, Perplexity, Gemini, Claude and, optionally, Google AI Overviews) mention and cite brands. It sends your keywords to each engine with web search enabled, stores every answer and its citations, extracts the brands named, crawls the cited pages with Amazon Bedrock AgentCore, and reports visibility KPIs, competitor benchmarks and content gaps in a React dashboard. An optional SEO stack puts Google organic data from DataForSEO (rankings, domains, backlinks, local results, site audits) next to the AI-visibility figures. It is deployed with AWS CDK (TypeScript) as five CloudFormation stacks; the backend is Python 3.12 Lambda functions orchestrated by AWS Step Functions.
+A serverless system that tracks how AI engines (OpenAI, Perplexity, Gemini, Claude and Google AI Overviews, which stays off until an Admin switches it on) mention and cite brands. It sends your keywords to each engine with web search enabled, stores every answer and its citations, extracts the brands named, crawls the cited pages with Amazon Bedrock AgentCore, and reports visibility KPIs, competitor benchmarks and content gaps in a React dashboard. The SEO stack, deployed with the others, puts Google organic data from DataForSEO (rankings, domains, backlinks, local results, site audits) next to the AI-visibility figures once you save a DataForSEO login. It is deployed with AWS CDK (TypeScript) as six CloudFormation stacks; the backend is Python 3.12 Lambda functions orchestrated by AWS Step Functions, and the dashboard is told about job changes through EventBridge and AWS AppSync Events instead of polling.
+
+**Contents:** [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Project structure](#project-structure) · [Prerequisites](#prerequisites) · [Deployment](#deployment) · [Getting started](#getting-started) · [Configuration](#configuration) · [Security](#security) · [Cost](#cost) · [Development](#development) · [FAQ](#faq) · [License](#license)
 
 Further documentation: [KPI definitions](docs/kpi-definitions.md), [SEO](docs/seo.md) (with one page per SEO feature), [GEO KPI corrections](docs/geo-corrections.md), [MCP server](docs/mcp.md), [design system](docs/design-system.md) and the [changelog](CHANGELOG.md), which has the upgrade notes of every release.
 
@@ -15,53 +17,117 @@ The dashboard sidebar has these sections:
 | Section | Pages |
 |---|---|
 | Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs, cited domains and the scope's three most pressing insights; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown; YouTube videos are counted once per video whatever link was cited, tagged *Video* and filterable, and their title, channel and thumbnail come from YouTube oEmbed instead of a browser crawl), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track); the last three take the same keyword, group or all-keywords scope as Visibility |
-| Research | **Keyword Research**: Related Keywords, Keyword Explorer (search volume, difficulty, CPC and intent from DataForSEO; SEO stack), Competitor Analysis (analyse a competitor website), Research Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History. **SEO** (SEO stack): Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance and Local SEO; see [docs/seo.md](docs/seo.md) |
+| Research | **Keyword Research**: Related Keywords, Keyword Explorer (search volume, difficulty, CPC and intent from DataForSEO, with the price of one search shown before you search), Competitor Analysis (analyse a competitor website), History (type and status filters) and Research Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates). **SEO** (`CitationAnalysisSeoStack`, Google data from DataForSEO): an overview, Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance and Local SEO; see [docs/seo.md](docs/seo.md) |
 | Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
-| Reporting | **Reports**: ten print-ready reports (below), plus custom reports you build from their sections |
-| Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3), **Exports** (your Excel and CSV exports of the last 7 days) |
+| Reporting | **Reports**: ten print-ready reports (below), grouped by the question they answer, plus custom reports you build from their sections |
+| Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3, newest first), **Exports** (your Excel and CSV exports of the last 7 days) |
 | Operations | **Run Analysis**, **Schedule** (EventBridge Scheduler runs) |
-| Configuration | **Settings**: Keywords (with keyword groups), Markets, Brand Tracking, Personas, AI Providers (with the DataForSEO login under SEO data), Bedrock Models, Alerts, Users (admins only), AI Assistants (MCP connection guide) |
+| Configuration | **Settings** (`web/src/components/Settings/settingsSections.ts`): Keywords (with keyword groups), Markets, Brand tracking, Personas, AI providers (answer engines, web-search providers, and the DataForSEO login and daily call limit under SEO data), Bedrock models (admins only), Alerts, Users (admins only), AI assistants (MCP connection guide) |
 
-Every data view has **Export all** (Excel or CSV), which exports the view's full data with its current filters. The export runs on the server, however large it is, and the file appears on the **Exports** page; a header badge, a toast and, if you allow it, a browser notification say when it is ready. Content Studio's DOCX is the only file built in the browser. The header's PDF button prints the current view (print mode, `?print=1`), and the UI has light, dark and system themes. A first-run guide walks through setup, and a banner flags a provider that is failing.
-
-![AI visibility dashboard: total searches, citations, pages crawled and keywords, citations by AI engine (OpenAI, Perplexity, Gemini, Claude) and brand mentions](docs/dashboard.png)
-
-![Brand Mentions view: the brands AI engines name for a keyword, ranked by position and score, with each brand's classification and the engines that mentioned it](docs/brandmentions.png)
-
-![Citation Gap Analysis view: domains AI engines cite for competitors but not for your brand, with gap counts and coverage](docs/citationgapanalysis.png)
-
-![Content Studio view: AI-generated content ideas based on visibility gaps and competitor analysis](docs/contentstudio.png)
+Every data view has **Export all** (Excel or CSV), which exports the view's full data with its current filters. The export runs on the server, however large it is, and the file appears on the **Exports** page; a header badge, a toast and, if you allow it, a browser notification say when it is ready. Content Studio's DOCX is the only file built in the browser. Citations, Brand Mentions and Recent Searches load the next rows as you scroll (a **Load more** button stays for keyboard users). Job views (runs, research, Content Studio, exports, SEO jobs) update when the job changes, through [live events](#live-updates-appsync-events). The header's PDF button prints the current view (print mode, `?print=1`, always in the light theme). The UI has light, dark and system themes with one palette: grey by default, blue for interaction and violet for your own brand ([docs/design-system.md](docs/design-system.md)). A first-run guide walks through setup, and a banner flags a provider that is failing. Screenshots are in [Screenshots](#screenshots).
 
 ### Reports
 
-Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingView.tsx`), routed by `ReportsRouter.tsx`:
+Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingView.tsx`, catalogue in `reportCatalog.ts`), routed by `ReportsRouter.tsx`:
 
 | Report | Route | For |
 |---|---|---|
 | Executive Summary | `/reports/executive-summary` | CMO, VP Marketing |
-| Brand Visibility Report | `/reports/visibility` (`/reports/visibility/:keyword`) | Marketing lead |
+| Brand Visibility | `/reports/visibility` (`/reports/visibility/:keyword`) | Marketing lead |
 | Competitor Benchmark | `/reports/benchmark` | Brand manager, competitive intelligence |
 | AI Engines | `/reports/engines` | AI search specialist |
 | Sources | `/reports/sources` | SEO and digital PR |
 | Sentiment | `/reports/sentiment` | Brand / communications lead |
-| SEO vs GEO | `/reports/seo-geo` | SEO and AI search lead (needs the SEO stack; see [docs/seo-metrics.md](docs/seo-metrics.md)) |
-| Competitor Gap Report | `/reports/competitor` (`/reports/competitor/:competitor`) | Content / PR strategist |
+| SEO vs GEO | `/reports/seo-geo` | SEO and AI search lead (needs the SEO stack and DataForSEO data; see [docs/seo-metrics.md](docs/seo-metrics.md)) |
+| Competitor Gap | `/reports/competitor` (`/reports/competitor/:competitor`) | Content / PR strategist |
 | Content Action Plan | `/reports/content-action-plan` | Content strategist |
 | Keyword Deep Dive | `/reports/keyword` (`/reports/keyword/:keyword`) | SEO / AI search lead |
 
 **Custom reports** (`/reports/custom/new`, `/reports/custom/:id`, `/reports/custom/:id/edit`; `web/src/components/Reports/customReport/`): any signed-in user can name a report, pick blocks from a list sorted into categories (one per report above, an *Insights* category, plus their own headings, Markdown text, https images and YouTube or Vimeo videos), drag or add them into one ordered list and save it. Every user sees every saved report (at most 50). A saved report opens on every keyword and its saved period (30, 90 or 180 days); the reader can narrow it to a keyword group or one keyword and change the period in the URL, like the scope reports. Each data source is fetched once however many blocks read it. A block that needs a particular scope (a single keyword for the Keyword Deep Dive blocks, a keyword group for the group KPI and Run stability blocks) says so instead of showing the wrong data. The catalogue and the stored block types live in `customReport/blockCatalog.ts`.
 
-**Insights** (`GET /api/reports/insights`, rules in `lambda/shared/insights_engine.py` and `insights_citations.py`) are derived from the KPI engine's figures for a scope by fixed rules with named thresholds: the *play* each AI engine calls for (get cited, get ranked first, both, or defend), the brand's best position per keyword and engine (a keyword every engine places outside the top 3 is a *prompt gap*), who the engines cite (your domains, each competitor's domains from Brand Tracking, third parties) and which of your pages (documents told apart from web pages), competitors the answers word mixed or negative (at least 30% of 5 or more mentions, with the reasons given), the first-party brands measured against the best of them and, for a keyword group, how far each keyword's position swung across the runs of the window. Each insight carries a severity and the numbers it rests on. The Visibility tab reads out the top three; the custom-report *Insights* blocks show the facts behind them. After every run, for each keyword group the run fully covers, a **GenerateInsights** step asks Bedrock (the `ANALYSIS` role) for up to three written insights and six recommendations from those computed insights and KPIs only, in the language of the group's keywords; a validator drops any item that cites an unknown insight or a number not in its evidence, and the result is stored in `CitationAnalysis-ReportInsights`, so reading a report never calls Bedrock. The *Written insights* block shows it; admins can regenerate it (`POST /api/reports/insights/regenerate`).
+**Insights** (`GET /api/reports/insights`, rules in `lambda/shared/insights_engine.py` and `insights_citations.py`) are derived from the KPI engine's figures for a scope by fixed rules with named thresholds: the *play* each AI engine calls for (get cited, get ranked first, both, or defend), the brand's best position per keyword and engine (a keyword every engine places outside the top 3 is a *prompt gap*), who the engines cite (your domains, each competitor's domains from Brand tracking, third parties) and which of your pages (documents told apart from web pages), competitors the answers word mixed or negative (at least 30% of 5 or more mentions, with the reasons given), the first-party brands measured against the best of them and, for a keyword group, how far each keyword's position swung across the runs of the window. Each insight carries a severity and the numbers it rests on. The Visibility tab reads out the top three; the custom-report *Insights* blocks show the facts behind them. After every run, for each keyword group the run fully covers, a **GenerateInsights** step asks Bedrock (the `ANALYSIS` role) for up to three written insights and six recommendations from those computed insights and KPIs only, in the language of the group's keywords; a validator drops any item that cites an unknown insight or a number not in its evidence, and the result is stored in `CitationAnalysis-ReportInsights`, so reading a report never calls Bedrock. The *Written insights* block shows it; admins can regenerate it (`POST /api/reports/insights/regenerate`).
 
 ### KPIs
 
-The Visibility tab, the per-group report, the Executive Summary, Brand Visibility, Competitor Benchmark, AI Engines, Sources, Sentiment and Keyword Deep Dive reports, their exports and the KPI alerts use one set of KPIs, counted per AI-engine answer and pooled across a scope: answers, mentions, mention rate, share of voice, average position, top-1 and top-3 share, visibility score (position-weighted, 0–100), citations, citation rate, citation share, net sentiment, engine coverage and keyword coverage. Definitions, formulas and edge cases are in [docs/kpi-definitions.md](docs/kpi-definitions.md). The Dashboard, Brand Mentions, Personas, Prompt Insights, Citation Gaps, Action Center and the Competitor Gap and Content Action Plan reports still compute their own figures.
+The Visibility tab, the per-group report, the Executive Summary, Brand Visibility, Competitor Benchmark, AI Engines, Sources, Sentiment and Keyword Deep Dive reports, their exports and the KPI alerts use one set of KPIs, counted per AI-engine answer and pooled across a scope: answers, mentions, mention rate, share of voice, average position, top-1 and top-3 share, visibility score (position-weighted, 0–100), citations, citation rate, citation share, net sentiment, engine coverage and keyword coverage. Definitions, formulas and edge cases are in [docs/kpi-definitions.md](docs/kpi-definitions.md). Every KPI also says which citation rule its answers were stored under (`citation_versions`; rows from before 2.43.0 count every source an engine returned, later rows only the sources the answer cites), and the dashboard shows a note above a figure that mixes the two. The Dashboard, Brand Mentions, Personas, Prompt Insights, Citation Gaps, Action Center and the Competitor Gap and Content Action Plan reports still compute their own figures.
+
+## Screenshots
+
+The screenshots are in the light theme, taken from a deployed dashboard with demo data.
+
+![Dashboard page: total searches, total citations, pages crawled and unique keywords, citations by provider and by brand, and the SEO vs GEO and Rankings cards](docs/dashboard.png)
+
+![Visibility Dashboard page for a keyword group: insights per AI engine, the headline mention rate, share of voice, visibility score and citation rate, and the KPI table with each KPI's change and trend](docs/visibility.png)
+
+![Brand Mentions page for one keyword: the Brands mentioned table ranking each brand with its classification, the AI engines that named it, mentions, best rank and score, filterable by first party, competitors and other](docs/brandmentions.png)
+
+![Citation Gap Analysis page: total gaps, high-priority gaps, covered sources and coverage, and the gaps per keyword for sources AI engines cite for competitors but not for the tracked brand](docs/citationgapanalysis.png)
+
+<details>
+<summary>More screenshots</summary>
+
+<table>
+<tr>
+<td><img src="docs/brandleaderboard.png" alt="Visibility Dashboard brand leaderboard: first-party and competitor brands ranked by visibility score, with mention rate, share of voice, average and best position, engines and keywords"></td>
+<td><img src="docs/aiengines.png" alt="Visibility Dashboard AI engines section: a chart of mention rate, visibility score and citation rate per engine, and a table of every KPI for each AI engine"></td>
+</tr>
+<tr>
+<td><img src="docs/branddetails.png" alt="Brand detail dialog for a competitor on one keyword: overall rank, AI providers, total mentions, aggregate score and classification, and each engine's rank, sentiment and context"></td>
+<td><img src="docs/citations.png" alt="Citations page: total URLs, citations and citations per URL, URL search and filters, and the cited URLs ranked by citations with their domain and keyword count"></td>
+</tr>
+<tr>
+<td><img src="docs/seoanalysis.png" alt="Cited page dialog, SEO Analysis tab: an 8 out of 10 relevance score for one cited page, with the strengths and weaknesses of its content"></td>
+<td><img src="docs/citationscreenshot.png" alt="Cited page dialog, Screenshot tab: the screenshot the AgentCore Browser crawler took of a cited page"></td>
+</tr>
+<tr>
+<td><img src="docs/promptinsights.png" alt="Prompt Insights page: win rate and the winning, losing and opportunity queries, with a card per query comparing the tracked brand's mentions and rank with the competitors'"></td>
+<td><img src="docs/actioncenter.png" alt="Action Center page: recommendations counted by high, medium and low priority, each with a status to track, and the AI Enhanced option"></td>
+</tr>
+<tr>
+<td><img src="docs/keywordresearch.png" alt="Keyword Research page, History tab: a finished keyword expansion opened to its suggested keywords with intent, competition and relevance, ready to add to Keywords"></td>
+<td><img src="docs/researchagent.png" alt="Keyword Research page, Research Agent tab: the brief for an agent run, with an industry template, market, language and the dimensions to expand by"></td>
+</tr>
+<tr>
+<td><img src="docs/seo.png" alt="SEO overview page: a card for each SEO page (Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance, Local SEO) and links to Keyword Explorer and the SEO vs GEO report"></td>
+<td><img src="docs/seoperformance.png" alt="SEO › Performance page, Lighthouse tab: one measured page with its four category scores and Core Web Vitals rated against their limits"></td>
+</tr>
+<tr>
+<td><img src="docs/contentstudio.png" alt="Content Studio page, Content Ideas tab: prioritised content ideas from visibility gaps, each naming the engines where the tracked brand is missing, with Create Content and Open in Content Brief"></td>
+<td><img src="docs/generatedcontent.png" alt="Content Studio generated article: the meta description and content of a draft, with Preview and Markdown views, DOCX export and Copy All"></td>
+</tr>
+<tr>
+<td><img src="docs/reports.png" alt="Executive Summary report: the headline mention rate, share of voice, visibility score and citation rate, and the KPI table with each KPI's change and trend for the selected scope"></td>
+<td><img src="docs/report-benchmark.png" alt="Competitor Benchmark report for a keyword group: the tracked brand's share of voice and rank, the leading brand, the number of brands named and the share of voice chart"></td>
+</tr>
+<tr>
+<td><img src="docs/report-engines.png" alt="AI Engines report for a keyword group: engine coverage, engines answering, engines naming the tracked brand, the strongest engine and the KPIs per engine chart"></td>
+<td><img src="docs/report-sentiment.png" alt="Sentiment report for a keyword group: net sentiment, positive, negative and neutral or mixed mentions, and the sentiment split across all engines"></td>
+</tr>
+<tr>
+<td><img src="docs/report-contentactionplan.png" alt="Content Action Plan report: citation gaps, high-priority gaps, briefs ready and suggested topics, and the top citation targets with their keyword, providers and the competitors they name"></td>
+<td><img src="docs/report-custom.png" alt="Custom report: an Executive Summary block with the KPIs over time and each brand's share of voice, with Edit report and Save as PDF"></td>
+</tr>
+<tr>
+<td><img src="docs/analysis.png" alt="Run Analysis page, Start a run card: which keywords to run, the AI engines and personas they are sent to, and how many answers the run will request"></td>
+<td><img src="docs/settings.png" alt="Settings, Keywords section: the keyword groups list and the keyword table with each keyword's market, groups, status and date added"></td>
+</tr>
+<tr>
+<td><img src="docs/brandtracking.png" alt="Settings, Brand tracking section: the industry, the tracked brand's names and websites, and competitors with their websites"></td>
+<td><img src="docs/markets.png" alt="Settings, Markets section: markets as country and language pairs with city, currency, time zone, local competitors and local brand names"></td>
+</tr>
+<tr>
+<td><img src="docs/aiassistants.png" alt="Settings, AI assistants section: steps to connect Kiro, Claude, ChatGPT and other MCP clients to the MCP server"></td>
+<td></td>
+</tr>
+</table>
+
+</details>
 
 ## Architecture
 
 ![Architecture of release 2.45.0: the main, API, MCP, SEO and Web Search CDK stacks](architecture-diagram.png)
 
-The editable source is [docs/architecture.drawio](docs/architecture.drawio).
+The editable source is [docs/architecture.drawio](docs/architecture.drawio). The diagram predates `CitationAnalysisEventsStack` (2.53.0), described in [Live updates](#live-updates-appsync-events).
 
 ### Workflows (Step Functions)
 
@@ -82,7 +148,7 @@ All functions run Python 3.12. Lambda allocates CPU in proportion to memory. The
 - **1,769 MB (one vCPU):** API-StatsInsights, API-CitationsContent, API-GetBrandMentions and ReportInsights (they deserialize thousands of rows per request, and the live window row cap scales with memory); KpiAlerts (300 s); ExportWorker (900 s); GenerateSummary (900 s), which builds the run summary and, in process, a citation rollup of up to 100,000 Citations rows and a snapshot build within one 450 MB unit; ScopeSnapshotWorker (900 s), whose fold units, series turns, rollup shards and merges peaked at about 606 MB of heap and under 600 CPU s at 10x.
 - **1,024 MB:** API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-ManageBrandConfig, API-GetPersonaRankings, ParseKeywords, Crawler, and Deduplication (300 s), which also records each keyword run's KPI counts and `KeywordLatest` object.
 - **512 MB:** API-Health, API-ManageUsers, API-SelfReflection, API-ContentStudio, API-Exports, Mcp, the Search functions, ResearchWorker and ContentStudioWorker.
-- **256 MB:** KpiWriteFailureRelay.
+- **256 MB:** KpiWriteFailureRelay, LiveEventsRelay (15 s) and SeoCallbacks (10 s).
 
 API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
 
@@ -98,6 +164,8 @@ API functions stop at API Gateway's 29 s; inside it, every request carries a tim
 | KpiWriteFailureRelay | inline (`lib/constructs/kpi-write-failure-alarm.ts`) | Publishes the KPI write-failure alarm to the KPI alerts topic |
 | Mcp (stack `CitationAnalysisMcpStack`) | `lambda/mcp/` | MCP server: JSON-RPC over Streamable HTTP, tool catalogue, replays tool calls against the API handler Lambdas |
 | SeoRouter, SeoJobs, Search-google_ai_overview (stack `CitationAnalysisSeoStack`) | `lambda/seo/`, `lambda/seo-jobs/`, `lambda/search/` | The SEO API's one router (512 MB), every step of the SEO state machines (1,024 MB, 15 minutes), and the Google AI Overviews engine |
+| SeoCallbacks (stack `CitationAnalysisSeoStack`) | `lambda/seo-callbacks/` | Public function URL that DataForSEO calls when a queued task is ready; it resumes the waiting SEO state machine and holds no DataForSEO credentials |
+| LiveEventsRelay (stack `CitationAnalysisEventsStack`) | `lambda/live-events/` | Forwards EventBridge change events to AppSync Events channels (see [Live updates](#live-updates-appsync-events)) |
 
 Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `bs4` and `tzdata`) used by every function except the crawler (the SEO stack builds its own version, `CitationAnalysis-SeoSharedLayer`, and the MCP stack `CitationAnalysis-McpSharedLayer`, from the same directory), and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
 
@@ -166,7 +234,7 @@ Every state an event announces stays readable through its REST route and MCP; cl
 
 ### MCP server (preview)
 
-A second stack, `CitationAnalysisMcpStack`, holds an MCP server for AI assistants (Kiro, Claude.ai and Claude Code, ChatGPT, Amazon Quick): a Streamable HTTP endpoint, `POST /mcp` on its own REST API (`CitationAnalysis-McpApi`) behind its own CloudFront distribution, which gives the server a host root so clients find the OAuth discovery documents where RFC 9728 and RFC 8414 put them (`https://<dist>.cloudfront.net/mcp`, `https://<dist>.cloudfront.net/.well-known/...`), and one Lambda (`CitationAnalysis-Mcp`, reserved concurrency 10) that replays every tool call against the existing API handler Lambdas as the signed-in user, so permissions and figures are the dashboard's. `tools/list` advertises eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools` → `describe_tool` → `call_tool` over a catalogue of 44 more (`lambda/mcp/catalogue.py`; among them the SEO reads and the DataForSEO spend tools, which need the SEO stack), and two prompts (`geo_audit`, `setup_brand_tracking`); `-c mcpPinnedTools` promotes catalogue entries to the direct list. Operations that spend money take two steps: `estimate_run` / `estimate_research` / `estimate_content_brief` return a call count and a single-use confirmation token (5 minutes, bound to the caller and the exact request), which `start_run` (admin only, as on the dashboard) / `start_research` / `generate_content_brief` must present (the DataForSEO operations work the same way: `estimate_seo_*` then `run_seo_*` or, for admins, `start_seo_job`). Per-caller limits default to 1 run in flight, 5 runs and 20 research or content jobs per UTC day, and 50 keywords per run (`-c mcpLimits='{"runsPerDay":10}'`); DataForSEO lookups draw on the one daily limit of paid DataForSEO calls per user that an Admin sets in Settings › AI Providers › SEO data (default 100), shared with the dashboard and the REST API; tokens, counters and an audit record of every write and spend call live in the on-demand `CitationAnalysis-McpState` table. User management, provider keys, brand-configuration and schedule writes and deletes are not exposed. Clients sign in with OAuth 2.1 and PKCE through a Cognito Managed Login domain (`citation-analysis-<account>`) and a public `mcp` app client (1-hour access tokens, 90-day refresh tokens). The protected-resource metadata (at `/.well-known/oauth-protected-resource/mcp`) names the distribution's base URL as the authorization server, and the API serves its metadata at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, pointing at Cognito's endpoints and advertising PKCE S256 (Cognito's own discovery document omits `code_challenge_methods_supported`, which makes Claude and ChatGPT refuse to connect). The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run` and a client that sends the endpoint as the RFC 8707 `resource` parameter gets an access token whose `aud` is the endpoint. Behind the Cognito authorizer the Lambda checks the token's issuer, client, use and audience; an anonymous call gets `401` with a `WWW-Authenticate` pointer to the protected-resource metadata (RFC 9728). Register each client's callback URL with `-c mcpRedirectUris`; the stack outputs `McpUrl`, `McpClientId`, `McpAuthorizeUrl`, `McpTokenUrl` and `McpResourceMetadataUrl` are what a client's connection form asks for. Per-client steps are in [docs/mcp.md](docs/mcp.md) and, for signed-in users, on the dashboard's Settings › AI assistants section (`/settings/ai-assistants`), which takes the URL and client id from the stack outputs at build time. The stack lives in `lib/mcp-stack.ts` and can be destroyed on its own. Dynamic client registration is not offered; clients use the pre-registered `McpClientId`.
+A second stack, `CitationAnalysisMcpStack`, holds an MCP server for AI assistants (Kiro, Claude.ai and Claude Code, ChatGPT, Amazon Quick): a Streamable HTTP endpoint, `POST /mcp` on its own REST API (`CitationAnalysis-McpApi`) behind its own CloudFront distribution, which gives the server a host root so clients find the OAuth discovery documents where RFC 9728 and RFC 8414 put them (`https://<dist>.cloudfront.net/mcp`, `https://<dist>.cloudfront.net/.well-known/...`), and one Lambda (`CitationAnalysis-Mcp`, reserved concurrency 10) that replays every tool call against the existing API handler Lambdas as the signed-in user, so permissions and figures are the dashboard's. `tools/list` advertises eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools` → `describe_tool` → `call_tool` over a catalogue of 44 more (`lambda/mcp/catalogue.py`; among them the SEO reads and the DataForSEO spend tools, which need the SEO stack), and two prompts (`geo_audit`, `setup_brand_tracking`); `-c mcpPinnedTools` promotes catalogue entries to the direct list. Operations that spend money take two steps: `estimate_run` / `estimate_research` / `estimate_content_brief` return a call count and a single-use confirmation token (5 minutes, bound to the caller and the exact request), which `start_run` (admin only, as on the dashboard) / `start_research` / `generate_content_brief` must present (the DataForSEO operations work the same way: `estimate_seo_*` then `run_seo_*` or, for admins, `start_seo_job`). Per-caller limits default to 1 run in flight, 5 runs and 20 research or content jobs per UTC day, and 50 keywords per run (`-c mcpLimits='{"runsPerDay":10}'`); DataForSEO lookups draw on the one daily limit of paid DataForSEO calls per user that an Admin sets in Settings › AI providers › SEO data (default 100), shared with the dashboard and the REST API; tokens, counters and an audit record of every write and spend call live in the on-demand `CitationAnalysis-McpState` table. User management, provider keys, brand-configuration and schedule writes and deletes are not exposed. Clients sign in with OAuth 2.1 and PKCE through a Cognito Managed Login domain (`citation-analysis-<account>`) and a public `mcp` app client (1-hour access tokens, 90-day refresh tokens). The protected-resource metadata (at `/.well-known/oauth-protected-resource/mcp`) names the distribution's base URL as the authorization server, and the API serves its metadata at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, pointing at Cognito's endpoints and advertising PKCE S256 (Cognito's own discovery document omits `code_challenge_methods_supported`, which makes Claude and ChatGPT refuse to connect). The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run` and a client that sends the endpoint as the RFC 8707 `resource` parameter gets an access token whose `aud` is the endpoint. Behind the Cognito authorizer the Lambda checks the token's issuer, client, use and audience; an anonymous call gets `401` with a `WWW-Authenticate` pointer to the protected-resource metadata (RFC 9728). Register each client's callback URL with `-c mcpRedirectUris`; the stack outputs `McpUrl`, `McpClientId`, `McpAuthorizeUrl`, `McpTokenUrl` and `McpResourceMetadataUrl` are what a client's connection form asks for. Per-client steps are in [docs/mcp.md](docs/mcp.md) and, for signed-in users, on the dashboard's Settings › AI assistants section (`/settings/ai-assistants`), which takes the URL and client id from the stack outputs at build time. The stack lives in `lib/mcp-stack.ts` and can be destroyed on its own. Dynamic client registration is not offered; clients use the pre-registered `McpClientId`.
 
 Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or an agent's `mcpServers`), after `http://localhost:5173/oauth/callback` (the default `mcpRedirectUris` value) is registered; Kiro opens the Managed Login page in the browser and stores the token:
 
@@ -202,7 +270,7 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 │   ├── search/              # Provider queries, brand extraction, web-search providers
 │   ├── deduplication/  crawler/  parse-keywords/  generate-summary/  kpi-alerts/  report-insights/
 │   ├── export-worker/       # Export service steps (CitationAnalysis-Export)
-│   ├── seo/  seo-jobs/      # SEO API router handlers; SEO state machine steps
+│   ├── seo/  seo-jobs/  seo-callbacks/   # SEO API router handlers; SEO state machine steps; DataForSEO pingbacks
 │   ├── research-worker/     # Keyword research state machine steps
 │   ├── live-events/         # Relay: EventBridge change events to AppSync Events channels
 │   ├── shared/              # Shared modules (KPI engine, scope snapshots, export sources, DataForSEO client, clients, decorators, config)
@@ -221,7 +289,7 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 
 ## Prerequisites
 
-- Node.js 22.12+ and npm (the lint and test toolchain needs 22.12)
+- Node.js 22 (22.13 or later) or 24, and npm. This branch pins no version (no `.nvmrc`, no `engines` field); CI runs Node 24 (`.github/workflows/quality-gates.yml`). ESLint 10 needs 22.13+, and Vitest 5 refuses Node 23 and 25.
 - Python 3.12 and pip. The layer builds, `cdk synth` and `npm test` compile every shipped module to CPython 3.12 bytecode (Lambda's read-only `/var/task` and `/opt` would otherwise make each cold start recompile ~430 modules). They need a CPython 3.12 (`$PYTHON312`, `python3.12` on `PATH`, or `uv python install 3.12`) or a running Docker, and fail on any other Python version. See [Python bytecode in the assets](#python-bytecode-in-the-assets).
 - AWS CLI with credentials and a default region (`aws configure`, or `AWS_REGION`)
 - AWS CDK CLI (`npm install -g aws-cdk`)
@@ -378,7 +446,7 @@ DeduplicateCitations writes the row and the keyword's `KeywordLatest` object bes
      --username user@example.com --group-name Admin
    ```
 
-2. **Settings > AI Providers.** Use **Add Key** and enable each provider you want. Keys are stored in Secrets Manager as `citation-analysis/<provider>-key`. Only enabled providers with a key are queried; a provider that fails three times in a row with an invalid key or no credit is disabled automatically and flagged in the dashboard banner.
+2. **Settings > AI providers.** Use **Add Key** and enable each provider you want. Keys are stored in Secrets Manager as `citation-analysis/<provider>-key`. Only enabled providers with a key are queried; a provider that fails three times in a row with an invalid key or no credit is disabled automatically and flagged in the dashboard banner.
 
    | Provider | Default model | Web search |
    |---|---|---|
@@ -391,9 +459,9 @@ DeduplicateCitations writes the row and the keyword's `KeywordLatest` object bes
 
    The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl, Amazon Bedrock Web Search). They add cited links to a run but write no answer, so they do not count towards the KPIs. Amazon Bedrock Web Search needs no key: see [Web search gateway](#web-search-gateway). A SerpAPI key also enables the research agent's Google signals step.
 
-   With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use. Then switch on **Google AI Overviews** there. It is part of every deployment, and it is off until you switch it on, so saving the login alone starts no per-keyword spend. Steps: [docs/seo.md](docs/seo.md#setup).
+   With the SEO stack deployed, the same page has an **SEO data** section: an Admin enters the DataForSEO API login and password (stored as `citation-analysis/dataforseo-key`), which the SEO pages, the Keyword Explorer and the Google AI Overviews engine use, and sets the daily limit of paid DataForSEO calls per user (default 100, `0` turns paid lookups off; it covers the dashboard, the REST API, MCP and server exports). Then switch on **Google AI Overviews** there. It is part of every deployment, and it is off until you switch it on, so saving the login alone starts no per-keyword spend. Steps: [docs/seo.md](docs/seo.md#setup).
 
-3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your brand names and websites under **Your brand** and your competitors with their websites under **Competitors** (**Suggest sub-brands** and **Find competitors** suggest more with Bedrock; suggested competitor websites are saved only once you pick them), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
+3. **Settings > Brand tracking.** Pick an industry preset or Custom, add your brand names and websites under **Your brand** and your competitors with their websites under **Competitors** (**Suggest sub-brands** and **Find competitors** suggest more with Bedrock; suggested competitor websites are saved only once you pick them), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
 4. **Settings > Keywords.** Add the queries your customers ask (for example "best hotels in Barcelona"). Keyword groups work like folders, one per property or product line; a keyword can be in several groups. Tick keywords and use **Add to group**, or filter the list by group. Deleting a group keeps its keywords.
 
@@ -401,9 +469,9 @@ DeduplicateCitations writes the row and the keyword's `KeywordLatest` object bes
 
 5. **Settings > Personas** (optional). Each persona is a prompt template with a `{keyword}` placeholder, for example "As a parent travelling with 3 young kids, what are the best options for {keyword}?". A run sends every enabled persona × keyword × provider. Filter the Visibility and Brand Mentions pages by persona to compare.
 
-6. **Operations > Run Analysis.** Pick a keyword group, tick keywords, or leave everything unticked to run all active keywords, then **Start Analysis**.
+6. **Operations > Run Analysis.** Under **Which keywords**, keep **All active keywords** (the default) or pick **Keyword groups** or **Specific keywords**, optionally narrow to markets under **Limit to markets (optional)**, check the **Will run** line (keywords and billed answers) and press **Start analysis**. The run card then shows its progress live.
 
-7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, with **Run now**. An analysis run is scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection. With the SEO stack deployed, a schedule can instead take paid **domain traffic** or **backlink snapshots** of every owned and competitor domain; saving or running one asks first and names its paid calls. The page also lists each rank tracker's next check, read-only (a tracker's frequency is set on the tracker).
+7. **Operations > Schedule.** **New schedule** opens a dialog for named daily, weekly or monthly schedules in any IANA timezone (the browser's by default); each schedule's **⋯** menu has Edit, **Run now** and Delete. An analysis run is scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection. With the SEO stack deployed, a schedule can instead take paid **domain traffic** or **backlink snapshots** of every owned and competitor domain; saving or running one asks first and names its paid calls. The page also lists each rank tracker's next check, read-only (a tracker's frequency is set on the tracker).
 
 8. **Settings > Alerts** (optional). After every run the KpiAlerts step compares each keyword group's KPIs with its previous complete run and raises alerts for a mention-rate drop, a loss of average position, a competitor entering the top positions, a keyword that stops naming you, and a visibility gain after a content change you recorded. Alerts appear on the Dashboard and can be emailed.
 
@@ -448,11 +516,11 @@ If model access is managed elsewhere, skip all of this with `cdk deploy -c skipM
 | `dev` | off | `-c dev=true` lets `http://localhost:5173` call the API (`cd web && npm run dev`) |
 | `mcpRedirectUris` | `["http://localhost:5173/oauth/callback","http://localhost:5173/callback"]` (Kiro, Claude Code) | OAuth callback URLs of the MCP clients (exact match in Cognito), as a JSON array or a comma-separated string |
 | `mcpPinnedTools` | none | Catalogue operations the MCP server also lists as direct tools, e.g. `-c mcpPinnedTools=get_prompt_insights,list_providers` |
-| `mcpLimits` | `{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}` | Per-caller limits of the MCP spend tools; override any subset as a JSON object; `0` turns that spend off. DataForSEO lookups use the daily limit set in Settings › AI Providers › SEO data instead (default 100 calls per user) |
+| `mcpLimits` | `{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}` | Per-caller limits of the MCP spend tools; override any subset as a JSON object; `0` turns that spend off. DataForSEO lookups use the daily limit set in Settings › AI providers › SEO data instead (default 100 calls per user) |
 
 ### Secrets
 
-The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemini,claude,brave,tavily,exa,serpapi,firecrawl}-key`. The tenth provider, `agentcore` (Amazon Bedrock Web Search), has no secret: it uses IAM. **Settings > AI Providers** creates or updates a secret when you save a key; `aws secretsmanager create-secret --name citation-analysis/<provider>-key --secret-string <key>` works too. The SEO stack imports `citation-analysis/dataforseo-key` (`login:password`), which **Settings > AI Providers > SEO data** creates.
+The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemini,claude,brave,tavily,exa,serpapi,firecrawl}-key`. The tenth provider, `agentcore` (Amazon Bedrock Web Search), has no secret: it uses IAM. **Settings > AI providers** creates or updates a secret when you save a key; `aws secretsmanager create-secret --name citation-analysis/<provider>-key --secret-string <key>` works too. The SEO stack imports `citation-analysis/dataforseo-key` (`login:password`), which **Settings > AI providers > SEO data** creates.
 
 ### Web search gateway
 
@@ -462,7 +530,7 @@ The `agentcore` provider (Amazon Bedrock Web Search) queries an Amazon-operated 
 |---|---|---|
 | `webSearchRegion` | `us-east-1` | Region of the gateway; allowed values `us-east-1`, `us-west-2`, `eu-west-1`, `ap-northeast-1` |
 
-Until the stack is deployed the provider shows **Gateway not deployed** in **Settings > AI Providers** and cannot be enabled. AWS terms for the web search tool: show the source citations and links, and do not extract results in bulk or build a competing index.
+Until the stack is deployed the provider shows **Gateway not deployed** in **Settings > AI providers** and cannot be enabled. AWS terms for the web search tool: show the source citations and links, and do not extract results in bulk or build a competing index.
 
 ## Security
 
@@ -541,10 +609,10 @@ With the infrastructure above, this workload costs roughly $75–110 a month. An
 
 - Disable providers and personas you do not need: each multiplies the call count.
 - Run weekly rather than daily for about a seventh of the cost.
-- Pick a cheaper model for any engine in **Settings > AI Providers** (for example Claude Haiku over Sonnet).
+- Pick a cheaper model for any engine in **Settings > AI providers** (for example Claude Haiku over Sonnet).
 - Lower the crawl concurrency (`-c crawlConcurrency=N`, default 10) to spread AgentCore usage.
 - `SearchResults`, `Citations` and `CrawledContent` have no TTL; add one if you do not need full history.
-- Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `Application = CitationAnalysis` tag (set on all five stacks) once it is activated as a cost allocation tag.
+- Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `Application = CitationAnalysis` tag (set on all six stacks) once it is activated as a cost allocation tag.
 
 ## Development
 
@@ -598,6 +666,32 @@ Mutation testing is not part of `validate` (one module takes minutes). Run it on
 npm run mutation:python -- lambda/shared/scope_params.py lambda/shared/test_scope_params.py
 (cd web && npm run mutation -- --mutate src/hooks/useAnalysisEndpoint.ts)
 ```
+
+## FAQ
+
+### What is GEO?
+
+Generative engine optimization (GEO), also called answer engine optimization (AEO), is work aimed at getting a brand or page into the answers AI engines write, either named in the text or cited as a source. The term comes from [GEO: Generative Engine Optimization](https://arxiv.org/abs/2311.09735) (Aggarwal et al., KDD 2024). Google's guide [Optimizing your website for generative AI features on Google Search](https://developers.google.com/search/docs/fundamentals/ai-optimization-guide) says that, for Google Search, optimizing for AI Overviews and AI Mode is still SEO. This project does not change your content; it measures where you stand, so you can see whether your changes help.
+
+### How is this different from an SEO rank tracker?
+
+An SEO rank tracker records where a page ranks in a list of search results. An AI engine writes an answer instead: it names some brands in some order and cites some sources, and the answer can change from one run to the next and from one engine to another. This project stores every answer and computes per-answer KPIs over them, such as mention rate, share of voice, average position within the answer, visibility score and citation rate ([docs/kpi-definitions.md](docs/kpi-definitions.md)). The survey [Optimizing Visibility in Generative Engines](https://arxiv.org/abs/2607.14035v1) reports large run-to-run variation and little source overlap between engines, and recommends repeated measurement; scheduled runs across several engines are how this project measures. The SEO stack also tracks Google organic rankings through DataForSEO, and the SEO vs GEO report sets the two side by side.
+
+### Which AI engines does it track?
+
+OpenAI, Perplexity, Google Gemini and Anthropic Claude, each called through its API with web search on (models and search tools are in [Getting started](#getting-started)), and Google AI Overviews through DataForSEO once an Admin saves the DataForSEO login and switches the engine on. The engines are queried through their APIs, not the consumer apps, so answers can differ from what the ChatGPT, Perplexity, Gemini or Claude apps show a signed-in user. Brave, Tavily, Exa, SerpAPI, Firecrawl and Amazon Bedrock Web Search can add cited links to a run, but they write no answer and do not count towards the KPIs.
+
+### What does it cost to run?
+
+There is no fixed monthly charge apart from Secrets Manager's $0.40 per stored key: every AWS service is pay-per-use. You pay AWS for the infrastructure and Bedrock, and each AI provider directly; AI calls scale with keywords × providers × personas × runs. The [Cost](#cost) section works through 100 keywords run weekly on four providers with three personas: AWS about $12–50 a month and roughly $75–110 a month in total, measured on the model defaults before 2.37.0. DataForSEO list prices are in [docs/seo.md](docs/seo.md#prices). Check each vendor's pricing page before sizing a workload.
+
+### Can AI assistants query the data?
+
+Yes. The [MCP server](#mcp-server-preview) (`CitationAnalysisMcpStack`) lets Kiro, Claude, ChatGPT, Amazon Quick and other MCP clients read keywords, KPIs, reports and citations as the signed-in user, and start runs or paid lookups after a cost estimate and a confirmation token. Its catalogue has 52 operations (`lambda/mcp/catalogue.py`). See [docs/mcp.md](docs/mcp.md).
+
+### Is it production ready?
+
+No. It is sample code for demonstration and education, as the notice at the top says. It has no AWS WAF and no MFA by default, and you should review security, compliance and cost with your own teams before using it for production work. See [Security](#security).
 
 ## License
 

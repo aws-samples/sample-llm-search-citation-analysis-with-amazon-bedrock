@@ -1,4 +1,8 @@
-# Why citation numbers changed in 2.43
+# Why AI citation numbers changed in 2.43 (cited vs retrieved sources)
+
+Version 2.43 changed how the Citation Analysis System counts the sources that ChatGPT (OpenAI), Perplexity, Claude, Google Gemini and Google AI Overviews cite, along with three other AI search visibility (GEO) figures. This page says what moved, in which direction, and how to compare runs from before and after the change.
+
+![Citations page listing the URLs AI engines cite in their answers, ranked by citations, with their domain and keyword count](citations.png)
 
 2.43 changes how four AI-visibility figures are measured. The definitions are in [KPI definitions](kpi-definitions.md#conventions); this note says what moves and in which direction.
 
@@ -10,7 +14,7 @@
    - **Claude**: the citations attached to its text (`web_search_result_location`). The search results it does not cite were only read. Claude's web search runs in direct mode (`allowed_callers: ["direct"]`): Claude reads the search results itself and cites them on the text they back. In the tool's default dynamic filtering mode, where code filters the results first, answers carry almost no text citations, so 2.43 does not use it.
 2. **Empty replies are no answers.** An engine call that returned no answer text used to count as an answer that did not mention you. It now counts as *no answer*, like a Google results page without an AI Overview, and is left out of every KPI.
 3. **Branded queries are flagged.** A query that names your brand or one of your domains ("is Hotel Example good?") gets answers that mention you almost by construction. Each answer now records whether its query was branded. The Visibility tab has a **Queries** filter (all / without your brand / naming your brand), which defaults to all queries, so your existing views keep their numbers.
-4. **Alerts compare like for like.** KPI alerts now compare only the answers that are present in both runs for the same keyword, persona, AI engine and market, and only answers to queries that do not name your brand. A run where fewer than 90 % of the queries were answered raises no alerts. Each snapshot records why it was or was not compared (`comparable`, `scope_changed`, `incomplete` or `no_previous`).
+4. **Alerts compare like for like.** KPI alerts now compare only the answers that are present in both runs for the same keyword, persona, AI engine and market, and only answers to queries that do not name your brand. A run that answered fewer than 90 % of its planned answers (`MIN_ANSWERED_SHARE` in `lambda/shared/kpi_comparison.py`) raises no alerts. Each snapshot records why it was or was not compared (`comparable`, `scope_changed`, `incomplete` or `no_previous`).
 
 ## Which numbers move
 
@@ -30,4 +34,6 @@ Mentions, share of voice, average position and sentiment are measured as before.
 
 ## History
 
-Results stored before 2.43 keep the citations they were stored with; the change applies to runs from 2.43 on. Because the definitions changed, the KPI definition version moved to 4: the first run after the upgrade sets a new alert baseline and raises no alert. Expect a step in citation trends at the upgrade date; compare runs from before and after it with care.
+Results stored before 2.43 keep the citations they were stored with; the change applies to runs from 2.43 on. Because the definitions changed, the KPI definition version moved to 4: the first run after the upgrade sets a new alert baseline and raises no alert. Expect a step in citation trends at the upgrade date.
+
+Since 2.43.0 every answer row records the citation rule it was stored under (`citations_version` `2`); rows from before carry none and are named `unversioned (pre-2.43.0)`. Since 2.52.0 every KPI object lists the rules of its answers (`citation_versions`) and flags a mix (`citation_versions_mixed`), and the dashboard shows a note above a view whose citation figures mix the two rules. Stored rows are never rewritten. Compare citation figures within one rule ([Citation versions](kpi-definitions.md#conventions)).

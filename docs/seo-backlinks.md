@@ -1,6 +1,8 @@
 # Backlinks
 
-Shows who links to a site, what changed recently, and which pages get the most links. It also shows how your domains' authority compares with your competitors' over time. Data comes from DataForSEO's Backlinks API through the SEO stack. The page needs the SEO stack to be deployed and a DataForSEO login saved in Settings › AI Providers.
+The Backlinks page (SEO › Backlinks, `/seo/backlinks`) shows who links to a site, what changed recently and which pages get the most links, and how your domains' authority compares with your competitors' over time. Data comes from DataForSEO's Backlinks API.
+
+The page needs the SEO stack to be deployed and a DataForSEO login saved in Settings › AI providers.
 
 ## Looking up a target
 
@@ -13,7 +15,7 @@ Enter a domain or URL and choose a scope. The scope follows what you type until 
 | Subfolder (default for a URL with a path) | The path and everything under it | `example.com/blog/*` |
 | Exact URL | One page only | `example.com/pricing` |
 
-The page starts from Settings › Brand Tracking. With the input empty, the button reads **Analyze &lt;own domain&gt;** (the first owned domain; nothing is fetched until it is clicked), and the quick-pick buttons search your own domains (green, first) and your competitors' domains (amber) from Brand Tracking, plus any other domain with stored snapshots, with their subdomains. Without an owned domain the page links to Settings › Brand Tracking.
+The page starts from Settings › Brand tracking. With the input empty, the button reads **Analyze &lt;own domain&gt;** (the first owned domain; nothing is fetched until it is clicked), and the quick-pick buttons search your own domains (green, first) and your competitors' domains (amber) from Brand tracking, plus any other domain with stored snapshots, with their subdomains. Without an owned domain the page links to Settings › Brand tracking.
 
 Some targets are refused before anything is billed:
 
@@ -62,12 +64,12 @@ The filter panel shows how many conditions you have used. If the filters go over
 
 ## Authority over time
 
-Weekly snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept, never expired. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
+Snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept, never expired. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
 
 Admins can:
 
 - **Snapshot now**: takes one snapshot of every tracked domain, after a confirmation that names the paid calls (one per domain) and their estimated price.
-- **Schedule weekly snapshots**: the link opens Operations > Schedule, where a **Backlink snapshots** schedule (paid) runs them on the day, time and zone the Admin picks. Saving an enabled one asks first and names its paid calls (one per domain). Nothing runs until such a schedule exists, and a disabled one costs nothing.
+- **Schedule weekly snapshots**: the link opens Operations › Schedule, where a **Backlink snapshots** schedule (paid) runs them daily, weekly or monthly, at the time and zone the Admin picks. Saving an enabled one asks first and names its paid calls (one per domain). Nothing runs until such a schedule exists, and a disabled one costs nothing.
 
 A run skips domains that were snapshotted less than 20 hours ago. It does not store empty answers. A failed domain is not retried, because DataForSEO bills the call even when it fails. A low-balance or login error stops the run.
 

@@ -1,14 +1,20 @@
-# Connecting AI assistants (MCP server)
+# MCP server: connect Claude, ChatGPT, Kiro or Amazon Quick to your AI search visibility data
+
+The Citation Analysis System includes a Model Context Protocol (MCP) server on AWS, so AI assistants such as Claude, ChatGPT, Kiro and Amazon Quick can read your GEO (generative engine optimization) data: brand mentions, citations, visibility KPIs and reports. Sign-in is OAuth 2.1 with PKCE through the deployment's Amazon Cognito user pool.
+
+![Settings › AI assistants page with the MCP server URL, the client picker and per-client setup steps](aiassistants.png)
 
 The `CitationAnalysisMcpStack` stack serves the Citation Analysis API as an MCP server, so an assistant can read keywords, reports and citations, set up keyword groups and, with your approval, start runs, research jobs and content briefs. Every tool call is replayed against the dashboard's own API handlers as the signed-in user: you get the same permissions and the same figures as in the browser.
 
 The endpoint speaks MCP over Streamable HTTP (JSON responses, no SSE stream) and is protected with OAuth 2.1 + PKCE by the deployment's Cognito user pool. Dynamic client registration is not offered. Every client uses the pre-registered public client id (no secret).
 
+Access and ID tokens are valid for 1 hour, like the dashboard's; the refresh token is valid for 90 days, so an assistant is not asked to sign in again every week. Token revocation is on (`lib/constructs/mcp-server.ts`, `oauthClient`). API Gateway throttles the MCP stage at 20 requests per second with a burst of 40, ahead of the per-user limits below.
+
 The server sits behind its own CloudFront distribution (`https://<dist>.cloudfront.net`), which maps the host root onto the API Gateway stage. Clients discover the authorization server from well-known URLs at the host root: RFC 9728's `/.well-known/oauth-protected-resource/mcp`, RFC 8414's `/.well-known/oauth-authorization-server` and OIDC's `/.well-known/openid-configuration`. On an execute-api URL the stage (`/prod`) is a path segment, so none of those locations exist and clients such as Claude Code fail to sign in. The distribution caches nothing and passes every request through to the API, `Authorization` header included.
 
 ## What you need
 
-The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys every stack before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
+The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, a client picker (Claude (claude.ai / Desktop), Claude Code, ChatGPT, Kiro, Amazon Quick, Other / Codex) with per-client steps and copyable values (and a `mcp.json` download for Kiro), "What you can ask" (example questions), "Teach your assistant" (instructions to paste into the assistant) and "Tools" (`web/src/components/AiAssistants/`). It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys every stack before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
 
 From the `CitationAnalysisMcpStack` outputs (`aws cloudformation describe-stacks --stack-name CitationAnalysisMcpStack`):
 
@@ -25,10 +31,10 @@ Scopes are named after the server URL:
 
 | Scope | Grants |
 |---|---|
-| `openid` | Sign-in |
+| `openid` | Sign-in; still accepted, but left out of the metadata's `scopes_supported` so strict clients don't ask for an ID token |
 | `<McpUrl>/read` | Every read tool |
 | `<McpUrl>/write` | Keyword and group changes; keyword research and Content Studio (estimate and start) |
-| `<McpUrl>/run` | Analysis runs (estimate and start), which are also admin-only |
+| `<McpUrl>/run` | Analysis runs (estimate and start, Admins only) and the paid DataForSEO operations (`*_seo_keywords`, `*_seo_domain`, `*_seo_backlinks`, `*_seo_local`, and `*_seo_job` for Admins); see [Spending credit](#spending-credit-estimate-then-confirm) |
 
 Cognito matches callback URLs exactly. Allow each client's callback when you deploy, as a JSON array or a comma-separated list. The value replaces the defaults (`http://localhost:5173/oauth/callback` for Kiro, `http://localhost:5173/callback` for Claude Code), so keep those entries if you use them:
 
@@ -88,15 +94,21 @@ Integrations › MCP › add, server URL `<McpUrl>`, then configure OAuth manual
 | Scopes | `openid <McpUrl>/read <McpUrl>/write <McpUrl>/run` |
 | Redirect URL | Shown on the form, `https://<region>.quicksight.aws.amazon.com/sn/oauthcallback`; add it to `mcpRedirectUris` |
 
+The dashboard's Amazon Quick steps take the two URLs from the authorization server metadata (`<McpUrl host>/.well-known/openid-configuration`, `authorization_endpoint` and `token_endpoint`); they are the same values as `McpAuthorizeUrl` and `McpTokenUrl`.
+
 Read tools carry `readOnlyHint: true`, so Quick's scheduled agents can run them unattended.
 
 ### Amazon Quick Desktop
 
 Not verified yet. If it offers the same OAuth form as Quick web, use the same values and the redirect URL it shows. If it accepts only a static header, it cannot connect: personal access keys are designed but not built.
 
+### Other clients
+
+Any client that supports remote MCP servers over Streamable HTTP with OAuth 2.1 and PKCE can connect: enter `<McpClientId>` with an empty secret, let it discover the authorization server from `/.well-known/oauth-protected-resource/mcp`, and allow its callback URL in `mcpRedirectUris`. OpenAI Codex CLI is not supported yet (openai/codex#30460).
+
 ## Tools
 
-`tools/list` shows eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools`, `describe_tool` and `call_tool`. Every other operation is in the catalogue: find it with `search_tools`, read its schema with `describe_tool`, and run it with `call_tool`. To list some catalogue operations directly, pin them with `-c mcpPinnedTools=get_report_insights,estimate_run`. Add `?tools=full` to the URL to list everything.
+`tools/list` shows eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools`, `describe_tool` and `call_tool`. The catalogue (`OPERATIONS` in `lambda/mcp/catalogue.py`) holds 52 operations; the 8 direct tools are `list_keyword_groups`, `list_keywords`, `get_brand_config`, `get_visibility`, `get_report`, `get_citations`, `list_recommendations` and `manage_keywords`. Every other operation is in the catalogue: find it with `search_tools`, read its schema with `describe_tool`, and run it with `call_tool`. To list some catalogue operations directly, pin them with `-c mcpPinnedTools=get_report_insights,estimate_run`. Add `?tools=full` to the URL to list everything.
 
 Catalogue reads include providers, personas, engine answers, persona rankings, prompt insights, report insights (`get_report_insights`), recent searches, crawled pages, sentiment examples, custom reports (list and one by id), schedules, KPI alerts, run status (`get_run_status`), research jobs and templates, and Content Studio items.
 

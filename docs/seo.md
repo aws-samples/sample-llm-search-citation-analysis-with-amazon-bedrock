@@ -1,26 +1,30 @@
 # SEO
 
-The SEO features put Google organic data next to the AI-visibility numbers: where you rank, what a domain ranks
-for, who links to it, how a business shows on Google Maps, and whether your site is technically fit for search
-engines and answer engines. Search data comes from [DataForSEO](https://dataforseo.com/), a pay-per-use API.
+The SEO features put Google organic data next to the AI search visibility (GEO / AEO) numbers: where you rank, what
+a domain ranks for, who links to it, how a business shows on Google Maps, and whether your site is technically fit
+for search engines and answer engines. Search data comes from [DataForSEO](https://dataforseo.com/), a pay-per-use
+API.
+
+![SEO overview page with one card per SEO page (Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance, Local SEO) and links to Keyword Explorer and the SEO vs GEO report](seo.png)
 
 Everything lives in its own stack, `CitationAnalysisSeoStack` (`lib/seo-stack.ts`), with its own API
 (`CitationAnalysis-SeoApi`, Cognito-protected, routes under `/api/seo/`), so it can be deployed and removed without
 touching the main stack. It imports only the user pool and the `CitationAnalysis-CorsOrigin` export from
-`CitationAnalysisStack`; the [README](../README.md#stacks-and-deploy-order) lists the five stacks and their deploy
+`CitationAnalysisStack`; the [README](../README.md#stacks-and-deploy-order) lists the six stacks and their deploy
 order.
 
 ## Where to find it
 
-The sidebar's **SEO** section opens `/seo`. The page is laid out like Settings: a section list on the left (Overview,
-then **Research**: Domain Overview, Backlinks; **Your site**: Rank Tracking, Site Audit, Performance, Local SEO; a
-scrollable row on phones) and the open page on the right. The overview has one card per page and, when
-something is missing, the setup step to do next. Each page has its own URL (`/seo/<page>`), so it can be bookmarked
-and the browser's back button works.
+**SEO** is an item in the sidebar's Research group and opens the SEO overview at `/seo`. Its pages are listed under
+it in the sidebar, in this order: Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance, Local SEO
+(`web/src/components/Seo/seoPages.ts`); the collapsed sidebar shows them in a pop-out beside the icon. The header
+names the open page ("SEO › Backlinks"). The overview has one card per page and, when something is missing, the
+setup step to do next. Each page has its own URL (`/seo/<page>`), so it can be bookmarked and the browser's back
+button works.
 
 | Page | Path | What it does | Details |
 |---|---|---|---|
-| Rank Tracking | `/seo/rank-tracking` | Google positions of a domain (from Settings › Brand Tracking) for the Settings keywords of the header market or of one keyword group, desktop and/or mobile, checked on a schedule or on demand, with history and the position distribution per check. Admins create trackers, add and remove keywords and start checks. | [seo-rank-tracking.md](seo-rank-tracking.md) |
+| Rank Tracking | `/seo/rank-tracking` | Google positions of a domain (from Settings › Brand tracking) for the Settings keywords of the header market or of one keyword group, desktop and/or mobile, checked on a schedule or on demand, with history and the position distribution per check. Admins create trackers, add and remove keywords and start checks. | [seo-rank-tracking.md](seo-rank-tracking.md) |
 | Domain Overview | `/seo/domain` | Organic traffic estimate, ranking keywords, top pages and Google competitors of any domain; traffic snapshots of your and your competitors' domains, run by a schedule on Operations › Schedule. | [seo-domain.md](seo-domain.md) |
 | Backlinks | `/seo/backlinks` | Links pointing to a domain, subdomain, subfolder or page: referring domains, anchors, new and lost links, authority over time. | [seo-backlinks.md](seo-backlinks.md) |
 | Local SEO | `/seo/local` | Google Maps and Local Finder results, Google Business Profiles (reviews, questions, posts) and a local rank grid around a point. | [seo-local.md](seo-local.md) |
@@ -54,6 +58,10 @@ Elsewhere in the dashboard:
 The header market selector applies to every SEO page: lookups run in the selected market (the global market when
 every market is combined).
 
+Pages with a running job (a rank check, a local SEO job, a Lighthouse run, a site audit) update when the job
+changes, without polling: each step of the SEO jobs Lambda publishes a `seo-job.changed` event, which reaches the
+open page through EventBridge and AppSync Events (`web/src/hooks/useSeoJobRefresh.ts`; see the README, [Live updates](../README.md#live-updates-appsync-events)).
+
 ## Setup
 
 1. Create a DataForSEO account and open **API Access** in its dashboard (https://app.dataforseo.com/api-access) for
@@ -63,10 +71,10 @@ every market is combined).
    `CitationAnalysis-Search-google_ai_overview` by name); the engine is off until step 5, so it makes no paid call before then.
 3. Rebuild the dashboard (`./scripts/build-web.sh` reads `SeoApiUrl` into `VITE_SEO_API_URL`). Without the SEO stack
    the SEO pages say "SEO data is not set up" and the SEO overview says the stack is not deployed.
-4. As an Admin, open **Settings › AI Providers › SEO data › DataForSEO**, enter the login and password and save. The
+4. As an Admin, open **Settings › AI providers › SEO data › DataForSEO**, enter the login and password and save. The
    login is checked with DataForSEO's free account endpoint, which also shows the balance on the card. The secret is
    stored as `citation-analysis/dataforseo-key`. Until then the SEO overview shows a "Set up SEO data" panel.
-5. Switch on **Google AI Overviews** in Settings › AI Providers. It uses the DataForSEO login and has no key of its own.
+5. Switch on **Google AI Overviews** in Settings › AI providers. It uses the DataForSEO login and has no key of its own.
    It stays off until you do, even with the login saved, because it bills one DataForSEO call per keyword and run.
 
 ## Who can do what
@@ -75,8 +83,8 @@ Every signed-in user can read every SEO page and run one-off lookups (a domain o
 results page, a business profile). Anything that creates, changes, deletes or schedules recurring paid work (rank
 trackers and their keywords, snapshot schedules, site audits, batches) is for Admins.
 
-Each user may make at most 100 paid DataForSEO calls per UTC day for one-off lookups. An Admin changes the number in
-**Settings › AI Providers › SEO data** (`0` turns paid lookups off). It is one limit for every client: the dashboard, a
+By default each user may make at most 100 paid DataForSEO calls per UTC day for one-off lookups. An Admin changes the
+number, 0 to 100,000, in **Settings › AI providers › SEO data** (`0` turns paid lookups off; `lambda/shared/seo_spend_limit.py`). It is one limit for every client: the dashboard, a
 script on the REST API, AI assistants through MCP and the server exports all go through `CitationAnalysis-SeoRouter`,
 which counts each billed DataForSEO call (a lookup that makes three calls uses three; a cached answer uses none).
 The call that would pass the limit is not sent, and the request answers 429 `DAILY_LIMIT`. A paid lookup whose
@@ -111,7 +119,7 @@ with; check DataForSEO's own pricing for current values. Each page's document ha
 | Performance | see [seo-performance.md](seo-performance.md) |
 | Account balance, SEO vs GEO, recommendations, stored results | free |
 
-How spending is kept in check (there are no spend caps):
+How spending is kept in check (besides the daily call limit above, there is no cap in dollars):
 
 - Paid lookups run only when you press the button; opening a page, switching tabs or focusing a field costs nothing.
 - Batch and recurring work (rank checks and schedules, snapshots, audits, the rank grid, Lighthouse batches) asks
@@ -128,7 +136,8 @@ How spending is kept in check (there are no spend caps):
   and every call is cut off before the API's 29-second limit.
 - Scheduled work uses DataForSEO's queued mode, which costs less than live calls.
 
-The SEO API's stage throttle (20 requests a second) is the only rate limit.
+Besides the daily call limit, the SEO API's stage throttle (20 requests a second, bursts of 40) is the only rate
+limit (`lib/constructs/seo-api.ts`).
 
 ## Exports
 
