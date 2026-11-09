@@ -40,8 +40,9 @@ Every KPI says which citation rule its answers were stored under, and a figure t
   The scope's KPIs, each engine's, each trend period's and the KPI history carry it. A trend also carries both
   fields at the top for its whole window (`combined_citation_versions`): periods that each hold one rule, but not
   the same one, mix two definitions over the window. REST and MCP answer it unchanged.
-- The tallies count `citations_current` (answers under the current rule), so a pooled figure knows its mix without
-  reading the answers. `KeywordRunKpis` rows, KeywordLatest objects and scope series move to format 2 (see Upgrade
+- The tallies count the answers of each rule (`citations_v2`, `citations_unversioned`), so a pooled figure knows its
+  mix without reading the answers. Each rule keeps its own name: a future `CITATIONS_VERSION` needs its own count
+  and a format bump, and `test_kpi_tally.py` fails until it has one. `KeywordRunKpis` rows, KeywordLatest objects and scope series move to format 2 (see Upgrade
   notes).
 - **The dashboard shows a note** above a view whose citation figures mix the two rules, with the answers of each
   (`ScopeCoverageNote`, `CitationVersionsNote`). It reads the server's `citation_versions_mixed`: a trend's own,

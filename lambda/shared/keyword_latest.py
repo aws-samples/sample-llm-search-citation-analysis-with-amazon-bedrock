@@ -56,7 +56,7 @@ from shared.snapshot_store import decode_json, encode_json, is_missing_object, i
 
 logger = logging.getLogger(__name__)
 
-#: 2 (2.52.0): the counts carry ``citations_current`` (``shared.kpi_tally.COUNT_FIELDS``); a version-1 object is read
+#: 2 (2.52.0): the counts carry ``citations_v2`` and ``citations_unversioned`` (``shared.kpi_tally.COUNT_FIELDS``); a version-1 object is read
 #: as absent and rebuilt from the answers (the ``latest`` backfill rewrites every object).
 KEYWORD_LATEST_VERSION = 2
 KEYWORDS_PREFIX = 'scope-snapshots/keywords/'

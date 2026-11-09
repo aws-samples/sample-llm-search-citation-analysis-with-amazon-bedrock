@@ -5,8 +5,10 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from shared.kpi_engine import answers_from_rows, brand_kpis, brand_table
+from shared.kpi_engine import CITATIONS_VERSION, answers_from_rows, brand_kpis, brand_table, citation_rule
 from shared.kpi_tally import (
+    COUNT_FIELDS,
+    TALLIED_CITATION_RULES,
     RunTally,
     brands_truncated,
     run_tallies,
@@ -139,3 +141,17 @@ class TestOwnedFingerprint:
 
     def test_any_tally_answers_when_no_owned_domain_is_configured(self):
         assert run_tally('k', 't', [], ['hotel-sol.com']).matches_owned('') is True
+
+
+def test_the_tallies_count_the_citation_rule_the_search_lambda_writes():
+    """A new ``CITATIONS_VERSION`` needs its own count (and a format bump), or every pooled figure would mislabel it."""
+    assert (citation_rule(CITATIONS_VERSION) in TALLIED_CITATION_RULES,
+            set(TALLIED_CITATION_RULES.values()) <= set(COUNT_FIELDS)) == (True, True)
+
+
+def test_the_engine_names_each_stored_rule_by_its_own_number():
+    rows = [{'provider': 'openai', 'keyword': 'k', 'citations_version': version} for version in (2, 3)]
+
+    assert brand_kpis(answers_from_rows(rows))['citation_versions'] == [
+        {'version': '2', 'answers': 1}, {'version': '3', 'answers': 1},
+    ]

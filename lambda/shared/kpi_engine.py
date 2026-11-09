@@ -18,7 +18,7 @@ same. Percentages are never averaged.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -82,6 +82,9 @@ ANSWER_PROJECTION = (
 #: the sources the answer cites count (``citations``), the pages an engine only read are ``retrieved_urls``, and
 #: Perplexity and Claude are asked to cite. A row without the field predates it and counted every source the engine
 #: returned: it is "unversioned", a definition of its own. The search Lambda writes this value on every answer.
+#: Changing it is a new rule: add its ``citations_v<n>`` count to ``shared.kpi_tally.COUNT_FIELDS`` (and to
+#: ``TALLIED_CITATION_RULES`` there) and bump the three stored count formats, so every older answer keeps its own
+#: label. ``test_kpi_tally.py`` fails until the tallies count this version.
 CITATIONS_VERSION = 2
 #: How a citation version is named in ``citation_versions`` (``docs/kpi-definitions.md``, Conventions).
 UNVERSIONED_CITATIONS = 'unversioned (pre-2.43.0)'
@@ -282,14 +285,22 @@ def _citations_version(value: object) -> int | None:
     return int(value)
 
 
-def citation_versions(answers: int, current: int) -> dict[str, Any]:
+def citation_rule(version: int | None) -> str:
+    """How one stored ``citations_version`` is named in ``citation_versions``: its number, or the pre-2.43.0 label."""
+    return UNVERSIONED_CITATIONS if version is None else str(version)
+
+
+def citation_versions(answers_by_rule: Mapping[str, int]) -> dict[str, Any]:
     """Which citation rules the answers of a figure were stored under, and whether it mixes them (tenet 2).
 
-    ``current`` of ``answers`` carry ``CITATIONS_VERSION``; the rest are unversioned. A citation KPI over a mix
-    adds up two definitions, so the figure says so (``citation_versions_mixed``) with the answers of each.
+    ``answers_by_rule``: answers per rule name (``citation_rule``). Each rule keeps its own name, so a figure over
+    rule 2 and a later rule says so too. A citation KPI over a mix adds up two definitions, so the figure says so
+    (``citation_versions_mixed``) with the answers of each, numbered rules first, in order.
     """
-    counted = [(str(CITATIONS_VERSION), current), (UNVERSIONED_CITATIONS, answers - current)]
-    versions = [{'version': version, 'answers': count} for version, count in counted if count > 0]
+    def order(rule: str) -> tuple[int, int]:
+        return (0, int(rule)) if rule.isdigit() else (1, 0)
+
+    versions = [{'version': rule, 'answers': count} for rule, count in sorted(answers_by_rule.items(), key=lambda item: order(item[0])) if count > 0]
     return {'citation_versions': versions, 'citation_versions_mixed': len(versions) > 1}
 
 
@@ -298,12 +309,11 @@ def combined_citation_versions(kpi_objects: Iterable[Mapping[str, Any]]) -> dict
 
     Periods that each hold one rule, but not the same one, mix two definitions over the window.
     """
-    answers = current = 0
+    by_rule: dict[str, int] = defaultdict(int)
     for kpis in kpi_objects:
         for entry in kpis.get('citation_versions') or ():
-            answers += int(entry['answers'])
-            current += int(entry['answers']) if entry['version'] == str(CITATIONS_VERSION) else 0
-    return citation_versions(answers, current)
+            by_rule[str(entry['version'])] += int(entry['answers'])
+    return citation_versions(by_rule)
 
 
 def answers_from_rows(rows: Iterable[Mapping[str, Any]]) -> list[Answer]:
@@ -423,7 +433,7 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
         'top_3_share': percent(sum(rank <= 3 for rank in ranks), len(pool)),
         'visibility_score': visibility_percent(visibility, len(pool)),
         **_citation_kpis(pool, domains),
-        **citation_versions(len(pool), sum(answer.citations_version == CITATIONS_VERSION for answer in pool)),
+        **citation_versions(Counter(citation_rule(answer.citations_version) for answer in pool)),
         **_net_sentiment(sighting for answer in mentioning for sighting in answer.first_party()),
         'engine_coverage': percent(len({answer.provider for answer in mentioning}), len(engines)),
         'keyword_coverage': percent(len({answer.keyword for answer in mentioning}), len(keywords)),
@@ -629,6 +639,7 @@ __all__ = [
     'answers_from_rows',
     'brand_kpis',
     'brand_table',
+    'citation_rule',
     'citation_versions',
     'engine_breakdown',
     'engines_not_covered',

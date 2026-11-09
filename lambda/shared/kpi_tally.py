@@ -32,10 +32,11 @@ from typing import Any, NamedTuple
 
 from shared.brand_names import FIRST_PARTY, normalize_brand_key
 from shared.kpi_engine import (
-    CITATIONS_VERSION,
     SPLIT_LABELS,
+    UNVERSIONED_CITATIONS,
     Answer,
     Sighting,
+    citation_rule,
     citation_versions,
     is_owned_domain,
     leaderboard,
@@ -61,9 +62,13 @@ COUNT_FIELDS: tuple[str, ...] = (
     'citing',
     'owned_pairs',
     'all_pairs',
-    # Answers stored under the current citation rule (``kpi_engine.CITATIONS_VERSION``); the rest are unversioned.
-    'citations_current',
+    # Answers per citation rule they were stored under (``kpi_engine.citation_rule``), one count per rule.
+    'citations_v2',
+    'citations_unversioned',
 )
+#: The citation rules the tallies count, each by its ``COUNT_FIELDS`` entry. A rule a tally cannot name (a version
+#: no count exists for) would be wrong in every pooled figure, so ``CITATIONS_VERSION`` must be one of these.
+TALLIED_CITATION_RULES: Mapping[str, str] = {'2': 'citations_v2', UNVERSIONED_CITATIONS: 'citations_unversioned'}
 _INDEX = {name: index for index, name in enumerate(COUNT_FIELDS)}
 _SPLIT = tuple(_INDEX[label] for label in SPLIT_LABELS)
 _TOTAL_MENTIONS = _INDEX['total_mentions']
@@ -129,7 +134,9 @@ def _answer_counts(answer: Answer, domains: Sequence[str]) -> list[int]:
     counts = [0] * len(COUNT_FIELDS)
     first_party = answer.first_party()
     counts[_INDEX['answers']] = 1
-    counts[_INDEX['citations_current']] = int(answer.citations_version == CITATIONS_VERSION)
+    rule_count = TALLIED_CITATION_RULES.get(citation_rule(answer.citations_version))
+    if rule_count is not None:
+        counts[_INDEX[rule_count]] = 1
     counts[_INDEX['first_party_mentions']] = len(first_party)
     counts[_INDEX['total_mentions']] = len(answer.sightings)
     if first_party:
@@ -371,7 +378,7 @@ def pooled_kpis(pooled: PooledCounts, citations_configured: bool) -> dict[str, A
         'top_3_share': percent(pool.count('top_3'), answers),
         'visibility_score': visibility_percent(pool.count('points'), answers),
         **_citation_fields(pool, citations_configured),
-        **citation_versions(answers, pool.count('citations_current')),
+        **citation_versions({rule: pool.count(field) for rule, field in TALLIED_CITATION_RULES.items()}),
         **sentiment_fields({label: pool.counts[index] for label, index in zip(SPLIT_LABELS, _SPLIT, strict=True)}),
         'engine_coverage': percent(pooled.engines_naming, pooled.engines),
         'keyword_coverage': percent(pooled.keywords_naming, pooled.keywords),
@@ -475,6 +482,7 @@ def tally_mentions(tallies: Iterable[RunTally]) -> int:
 
 __all__ = [
     'COUNT_FIELDS',
+    'TALLIED_CITATION_RULES',
     'BrandPool',
     'BrandTally',
     'PooledCounts',
