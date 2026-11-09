@@ -9,7 +9,7 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
-## [2.51.0] - 2026-11-09
+## [2.53.0] - 2026-11-09
 
 The dashboard is told when a job changes instead of polling for it (#208, TENETS.md tenet 8). Job and alert state
 changes go to EventBridge, a new `CitationAnalysisEventsStack` relays them to AWS AppSync Events channels, and every

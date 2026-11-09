@@ -14,7 +14,7 @@ import { synthesizeMainTemplate } from './web-search-stack-fixtures';
 import { LIVE_EVENTS_PARAMETERS, STATE_MACHINE_TOPICS, WORKFLOW_STATE_MACHINE_NAME } from './constructs/live-events';
 
 /**
- * CitationAnalysisEventsStack (2.51.0, TENETS.md tenet 8): the AppSync Events API the dashboard subscribes to,
+ * CitationAnalysisEventsStack (2.53.0, TENETS.md tenet 8): the AppSync Events API the dashboard subscribes to,
  * the relay from EventBridge, and the grants that let each producer announce only its own changes.
  */
 const template = synthesizeEventsTemplate();
