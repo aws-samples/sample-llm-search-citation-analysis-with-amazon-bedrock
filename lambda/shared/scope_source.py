@@ -22,14 +22,14 @@ from __future__ import annotations
 
 from typing import Final
 
-from shared.config import LLM_PROVIDERS, PLAIN_KEYWORD_PROVIDERS
+from shared.config import LLM_PROVIDERS, asks_plain_keyword
 from shared.scope_params import ReportScope
 from shared.snapshot_artifacts import SOURCE_LIVE, SOURCE_SNAPSHOT, ScopeSource
 
 #: The AI engines a run asks once per persona (an upper bound: an engine an administrator disabled
-#: only makes the estimate safer), and those it asks once per keyword (``PLAIN_KEYWORD_PROVIDERS``).
-PERSONA_ENGINES: Final = sum(provider not in PLAIN_KEYWORD_PROVIDERS for provider in LLM_PROVIDERS)
-PLAIN_ENGINES: Final = len(PLAIN_KEYWORD_PROVIDERS)
+#: only makes the estimate safer), and those it asks once per keyword (``asks_plain_keyword``).
+PERSONA_ENGINES: Final = sum(not asks_plain_keyword(provider) for provider in LLM_PROVIDERS)
+PLAIN_ENGINES: Final = sum(asks_plain_keyword(provider) for provider in LLM_PROVIDERS)
 
 #: Rows a live request may read: about 100 keywords x 40 answers (10 personas x 4 engines) x 2 runs; the
 #: Google AI Overviews answer of each keyword (``PLAIN_ENGINES``) counts on top, so 97 such keywords go live.

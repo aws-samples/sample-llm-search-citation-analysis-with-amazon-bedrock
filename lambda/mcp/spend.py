@@ -38,6 +38,7 @@ from invoke import (
 from seo_spend import seo_calls
 
 from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN
+from shared.config import asks_plain_keyword
 from shared.markets import keyword_market_id
 from shared.request_deadline import current_deadline
 from shared.research_agent import AGENT_DEFAULT_ROUNDS, AGENT_MAX_QUERIES_PER_ROUND
@@ -49,9 +50,6 @@ logger.setLevel(logging.INFO)
 #: ``shared.ai_clients.WEB_SEARCH_PROVIDERS``: the providers keyword research fans out to (checked by a test).
 RESEARCH_PROVIDERS = ('perplexity', 'openai', 'gemini')
 
-#: Engines a run asks the plain keyword once per keyword, whatever the personas (``search/handler.py``
-#: ``PLAIN_KEYWORD_PROVIDERS``): Google takes no persona wording.
-PLAIN_KEYWORD_ENGINES = frozenset({'google_ai_overview'})
 SIGNALS_PROVIDER = 'serpapi'
 #: Keyword pages (1,000 rows scanned each) an estimate reads before it gives up counting.
 MAX_KEYWORD_PAGES = 20
@@ -197,7 +195,8 @@ def estimate_run(caller: Caller, route: Route, _arguments: JsonObject) -> Estima
     providers = _providers(caller)
     engines, search = _active(providers, 'llm'), _active(providers, 'search')
     personas = _enabled_personas(caller)
-    plain = [engine for engine in engines if engine in PLAIN_KEYWORD_ENGINES]
+    # Engines asked the plain keyword once per keyword, whatever the personas (``ProviderDefinition``).
+    plain = [engine for engine in engines if asks_plain_keyword(engine)]
     prompted = len(engines) - len(plain) + len(search)
     calls = keywords * (max(1, personas) * prompted + len(plain))
     counts = {

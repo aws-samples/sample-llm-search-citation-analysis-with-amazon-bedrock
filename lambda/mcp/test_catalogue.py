@@ -737,3 +737,13 @@ class TestPageSizes:
     def test_rejects_a_page_over_100_items(self, name):
         with pytest.raises(InvalidArguments, match='limit must be between 1 and 100'):
             _route(name, {'limit': 101})
+
+
+def test_no_operation_writes_a_provider_so_its_definition_cannot_change_through_mcp():
+    """``asks_plain_keyword`` and every other provider field are only read (``list_providers``)."""
+    writes = [
+        tool.name for tool in OPERATIONS for example in tool.examples
+        if (route := build_route(tool, example)[1]).path.startswith('/api/providers') and route.method != 'GET'
+    ]
+
+    assert writes == []

@@ -238,6 +238,33 @@ class TestOverviewsHasNoKey:
         assert _put(providers_api, 'google_ai_overview', {'model': 'gemini-3.6-flash'})[0] == 400
 
 
+class TestPlainKeywordField:
+    """``asks_plain_keyword`` is set in code (``shared.config.PROVIDER_DEFINITIONS``): listed, never written."""
+
+    def test_lists_overviews_as_asking_the_plain_keyword(self, providers_api, aws):
+        assert _listed(providers_api, 'google_ai_overview')['asks_plain_keyword'] is True
+
+    @pytest.mark.parametrize('provider_id', ['openai', 'brave', 'dataforseo'])
+    def test_lists_other_providers_as_asking_each_persona(self, providers_api, aws, provider_id):
+        assert _listed(providers_api, provider_id)['asks_plain_keyword'] is False
+
+    def test_lists_the_code_value_when_the_config_row_carries_another(self, providers_api, aws):
+        aws.table.get_item.return_value = {'Item': {'provider_id': 'google_ai_overview', 'asks_plain_keyword': False}}
+
+        assert _listed(providers_api, 'google_ai_overview')['asks_plain_keyword'] is True
+
+    @pytest.mark.parametrize('value', [False, True])
+    def test_refuses_to_change_it_when_put(self, providers_api, aws, value):
+        status, body = _put(providers_api, 'google_ai_overview', {'asks_plain_keyword': value, 'enabled': True})
+
+        assert (status, 'cannot be changed' in body['error']) == (400, True)
+
+    def test_writes_nothing_when_put_tries_to_change_it(self, providers_api, aws):
+        _put(providers_api, 'google_ai_overview', {'asks_plain_keyword': False, 'enabled': True})
+
+        assert (aws.table.update_item.call_count, aws.table.put_item.call_count) == (0, 0)
+
+
 def test_enables_dataforseo_without_probe_when_switched_on(providers_api, aws, probe):
     _store_credential(aws)
 

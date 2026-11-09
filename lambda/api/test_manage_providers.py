@@ -154,6 +154,7 @@ class TestGetProvidersSurfacesHealth:
             'model_configurable': True,
             'docs_url': 'https://aistudio.google.com/apikey',
             'type': 'llm',
+            'asks_plain_keyword': False,
             'enabled': True,
             'configured': False,
             'masked_key': None,
