@@ -18,7 +18,8 @@
  * - When live events cannot tell a view about changes, the view is told to read once instead, so it never keeps
  *   a state it cannot see change: every listener gets `onConnected` when the client gives up reconnecting, a
  *   subscription added while it waits for the page to wake gets it at once, and AppSync refusing a subscription
- *   (`subscribe_error`) gives its listeners one read. A `connection_error` closes the socket and reconnects.
+ *   (`subscribe_error`) gives its listeners one read, and any listener that joins it on that connection one at
+ *   once. A `connection_error` closes the socket and reconnects.
  */
 import type { LiveEventsEndpoints } from '../config/runtimeConfig';
 import {
@@ -64,6 +65,8 @@ interface Entry {
   readonly path: string;
   readonly listeners: Set<LiveListener>;
   active: boolean;
+  /** AppSync refused the subscription on this connection; the next connection asks again. */
+  refused: boolean;
 }
 
 interface ServerMessage {
@@ -149,7 +152,8 @@ export class LiveEventsClient {
     const existing = this.entries.get(path);
     const entry = existing ?? this.newEntry(path);
     entry.listeners.add(listener);
-    if (entry.active) queueMicrotask(() => listener.onConnected());
+    // Active, or refused on this connection (nothing will report it active): the view reads once now.
+    if (entry.active || entry.refused) queueMicrotask(() => listener.onConnected());
     else if (existing === undefined && this.acknowledged) void this.sendSubscribe(entry);
     else if (this.stopWaking === null) this.ensureConnected();
     // Gave up until the page wakes: nothing will report this subscription active, so the view reads once now.
@@ -163,7 +167,8 @@ export class LiveEventsClient {
       id: `live-${this.nextId}`,
       path,
       listeners: new Set(),
-      active: false 
+      active: false,
+      refused: false
     };
     this.entries.set(path, entry);
     return entry;
@@ -226,6 +231,7 @@ export class LiveEventsClient {
     console.error('[live events] AppSync Events refused a subscription');
     const entry = this.entryById(id);
     if (entry === undefined) return;
+    entry.refused = true;
     for (const listener of [...entry.listeners]) listener.onConnected();
   }
 
@@ -295,7 +301,10 @@ export class LiveEventsClient {
     this.socket = null;
     this.acknowledged = false;
     this.clearTimer('keepAlive');
-    for (const entry of this.entries.values()) entry.active = false;
+    for (const entry of this.entries.values()) {
+      entry.active = false;
+      entry.refused = false;
+    }
     if (this.entries.size > 0) this.scheduleReconnect();
   }
 

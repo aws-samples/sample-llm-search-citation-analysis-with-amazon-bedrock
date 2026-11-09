@@ -243,18 +243,21 @@ describe('LiveEventsClient when live events cannot tell a view', () => {
       .toStrictEqual([1, 1, MAX_RECONNECT_ATTEMPTS + 1]);
   });
 
-  it('has the views of a subscription AppSync refused read once', async () => {
+  it('has the views of a subscription AppSync refused read once, a view that joins it later included', async () => {
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
     const {
-      socket, listener
+      client, socket, listener
     } = await setupAccepted();
 
     socket.frame({
       type: 'subscribe_error',
       id: socket.sentOfType('subscribe')[0].id
     });
+    const later = spyListener();
+    client.subscribe(deploymentChannel('runs'), later);
+    await vi.advanceTimersByTimeAsync(0);
 
-    expect(listener.onConnected).toHaveBeenCalledTimes(1);
+    expect([listener.onConnected.mock.calls.length, later.onConnected.mock.calls.length]).toStrictEqual([1, 1]);
   });
 
   it('closes a connection AppSync refused and connects again', async () => {
