@@ -3,18 +3,25 @@ import type {
   Keyword, KeywordGroup
 } from '../../types';
 import type { MutationOutcome } from '../../hooks/useKeywordGroups';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import {
-  PENCIL_PATHS, TRASH_PATHS 
-} from '../ui/iconPaths';
+import { PlusIcon } from '../ui';
+import { Button } from '../ui/Button';
 import {
   Skeleton, SkeletonRegion
 } from '../ui/Skeleton';
 import { ConfigListExport } from '../ui/ConfigListExport';
+import {
+  GroupMenu, GroupNameForm, KeywordGroupFilterItem
+} from './KeywordGroupFilterItem';
 
-/** Placeholder filter buttons while the groups load, so the row does not reflow. */
-const GROUP_PILL_IDS = ['group-pill-a', 'group-pill-b', 'group-pill-c'] as const;
-/** Which keywords the list below shows: everything, the ungrouped ones, or one group. */
+/** The group name field that is open, if any. */
+type OpenNameForm = { readonly kind: 'create' } | {
+  readonly kind: 'rename';
+  readonly groupId: string
+} | null;
+
+/** Placeholder filter rows while the groups load, so the column does not reflow. */
+const GROUP_ROW_IDS = ['group-row-a', 'group-row-b', 'group-row-c'] as const;
+/** Which keywords the list shows: everything, the ungrouped ones, or one group. */
 export type GroupFilter = 'all' | 'ungrouped' | { groupId: string };
 
 export function isGroupFilterFor(filter: GroupFilter, groupId: string): boolean {
@@ -44,157 +51,76 @@ interface KeywordGroupsPanelProps {
 }
 
 /**
- * Creates, renames and deletes reusable keyword groups, and selects which
- * group filters the keyword list. Deleting a group only detaches its keywords.
+ * The group filter beside the keyword table: All, Ungrouped and every group
+ * with its count. "New group" opens a name field; each group's ⋯ renames or
+ * deletes it. Deleting a group only detaches its keywords.
  */
 export const KeywordGroupsPanel = ({
   groups, loading, totalKeywords, ungroupedCount, filter,
   onFilterChange, onCreate, onRename, onDelete, onNotify,
 }: KeywordGroupsPanelProps) => {
-  const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
+  // One name field at a time: the new group's, or the rename of one group.
+  const [openForm, setOpenForm] = useState<OpenNameForm>(null);
 
-  const submitName = async (
-    rawName: string,
-    mutate: (name: string) => Promise<MutationOutcome>,
-    onSuccess: () => void,
-    failureTitle: string,
-  ) => {
-    const name = rawName.trim();
-    if (!name || busy) return;
+  /** Runs a create or rename; resolves whether it saved, and reports a refusal. */
+  const submitName = async (mutate: () => Promise<MutationOutcome>, failureTitle: string): Promise<boolean> => {
     setBusy(true);
     try {
-      const outcome = await mutate(name);
-      if (outcome.success) {
-        onSuccess();
-      } else {
-        onNotify(failureTitle, outcome.message, 'error');
-      }
+      const outcome = await mutate();
+      if (!outcome.success) onNotify(failureTitle, outcome.message, 'error');
+      return outcome.success;
     } finally {
       setBusy(false);
     }
   };
 
-  const submitCreate = () => submitName(newName, onCreate, () => setNewName(''), 'Could not create group');
-
-  const submitRename = (id: string) => submitName(
-    editName,
-    (name) => onRename(id, name),
-    () => setEditingId(null),
-    'Could not rename group',
-  );
-
-  const filterButtonClass = (active: boolean) =>
-    `px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-      active ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-    }`;
-
   return (
-    <div className="p-6 border-b border-gray-200 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Keyword Groups</h2>
-          <p className="text-sm text-gray-500">
-            {'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'}
-          </p>
-        </div>
-        <ConfigListExport list="keyword_groups" />
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Groups</h3>
+        <Button variant="ghost" size="sm" className="-mr-2" leadingIcon={<PlusIcon className="w-4 h-4" />}
+          onClick={() => setOpenForm({ kind: 'create' })}>
+          New group
+        </Button>
       </div>
-
-      <div className="flex gap-3">
-        <input
-          type="text"
-          aria-label="New group name"
-          value={newName}
-          onChange={(event) => setNewName(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') void submitCreate(); }}
-          placeholder={'New group name (e.g. Spring campaign)'}
-          disabled={busy}
-          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-gray-900 text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => { void submitCreate(); }}
-          disabled={busy || !newName.trim()}
-          className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          Create group
-        </button>
-      </div>
-
-      <fieldset className="flex flex-wrap items-center gap-2 border-0 p-0 m-0">
-        <legend className="sr-only">Filter keywords by group</legend>
-        <button type="button" className={filterButtonClass(filter === 'all')} onClick={() => onFilterChange('all')}>
-          All <span className="text-xs opacity-70">({totalKeywords})</span>
-        </button>
-        <button type="button" className={filterButtonClass(filter === 'ungrouped')} onClick={() => onFilterChange('ungrouped')}>
-          Ungrouped <span className="text-xs opacity-70">({ungroupedCount})</span>
-        </button>
-        {loading && groups.length === 0 && (
-          <SkeletonRegion label="Loading groups" className="flex items-center gap-2">
-            {GROUP_PILL_IDS.map((id) => <Skeleton key={id} className="h-[34px] w-28 rounded-lg" />)}
-          </SkeletonRegion>
+      <ul aria-label="Filter keywords by group" className="flex flex-wrap gap-1 lg:flex-col lg:flex-nowrap">
+        {openForm?.kind === 'create' && (
+          <GroupNameForm label="New group name" placeholder="e.g. Spring campaign" submitLabel="Create group" busy={busy}
+            onSubmit={(name) => submitName(() => onCreate(name), 'Could not create group')}
+            onCancel={() => setOpenForm(null)} />
         )}
-        {groups.map((group) => (
-          <div key={group.id} className="flex items-center gap-1">
-            {editingId === group.id ? (
-              <span className="flex items-center gap-1">
-                <input
-                  type="text"
-                  aria-label={`Rename group ${group.name}`}
-                  value={editName}
-                  onChange={(event) => setEditName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') void submitRename(group.id);
-                    if (event.key === 'Escape') setEditingId(null);
-                  }}
-                  autoFocus
-                  className="px-2 py-1 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
-                />
-                <button type="button" onClick={() => { void submitRename(group.id); }} className="px-2 py-1 text-sm bg-gray-900 text-white rounded-lg">Save</button>
-                <button type="button" onClick={() => setEditingId(null)} className="px-2 py-1 text-sm bg-gray-100 text-gray-700 rounded-lg">Cancel</button>
-              </span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className={filterButtonClass(isGroupFilterFor(filter, group.id))}
-                  onClick={() => onFilterChange({ groupId: group.id })}
-                  title={group.description || group.name}
-                >
-                  {group.name} <span className="text-xs opacity-70">({group.keyword_count})</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Rename group ${group.name}`}
-                  onClick={() => { setEditingId(group.id); setEditName(group.name); }}
-                  className="p-1 text-gray-400 hover:text-gray-700 rounded-sm"
-                >
-                  <PencilGlyph />
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Delete group ${group.name}`}
-                  onClick={() => onDelete(group)}
-                  className="p-1 text-gray-400 hover:text-red-600 rounded-sm"
-                >
-                  <TrashGlyph />
-                </button>
-              </>
-            )}
-          </div>
-        ))}
-      </fieldset>
+        <KeywordGroupFilterItem name="All" count={totalKeywords} active={filter === 'all'} onSelect={() => onFilterChange('all')} />
+        <KeywordGroupFilterItem name="Ungrouped" count={ungroupedCount} active={filter === 'ungrouped'}
+          onSelect={() => onFilterChange('ungrouped')} />
+        {loading && groups.length === 0 && (
+          <li className="lg:w-full">
+            <SkeletonRegion label="Loading groups" className="space-y-1">
+              {GROUP_ROW_IDS.map((id) => <Skeleton key={id} className="h-8 w-full rounded-lg" />)}
+            </SkeletonRegion>
+          </li>
+        )}
+        {groups.map((group) => {
+          const active = isGroupFilterFor(filter, group.id);
+          return openForm?.kind === 'rename' && openForm.groupId === group.id ? (
+            <GroupNameForm key={group.id} label={`Rename group ${group.name}`} initialName={group.name} submitLabel="Save" busy={busy}
+              onSubmit={(name) => submitName(() => onRename(group.id, name), 'Could not rename group')}
+              onCancel={() => setOpenForm(null)} />
+          ) : (
+            <KeywordGroupFilterItem key={group.id} name={group.name} count={group.keyword_count} active={active}
+              title={group.description || group.name} onSelect={() => onFilterChange({ groupId: group.id })}
+              menu={<GroupMenu group={group} active={active}
+                onRename={() => setOpenForm({
+                  kind: 'rename',
+                  groupId: group.id
+                })} onDelete={() => onDelete(group)} />} />
+          );
+        })}
+      </ul>
+      <p className="text-xs text-gray-500">
+        Group keywords by brand, market, campaign or location. A keyword can belong to several groups.
+      </p>
+      <div className="flex justify-end"><ConfigListExport list="keyword_groups" /></div>
     </div>
   );
 };
-
-const PencilGlyph = () => (
-  <StrokeIcon className="w-3.5 h-3.5" paths={PENCIL_PATHS} aria-hidden="true" />
-);
-
-const TrashGlyph = () => (
-  <StrokeIcon className="w-3.5 h-3.5" paths={TRASH_PATHS} aria-hidden="true" />
-);

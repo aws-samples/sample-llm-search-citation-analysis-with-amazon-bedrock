@@ -45,19 +45,19 @@ describe('Content Brief options', () => {
   it('keeps all three generation mode labels and descriptions available', () => {
     expect(GROUP_BRIEF_MODE_OPTIONS).toStrictEqual([
       {
+        value: 'create_new_landing_page',
+        label: 'Create a new landing page',
+        description: 'Write a complete page from what the keywords ask for.',
+      },
+      {
         value: 'improve_current_url',
-        label: 'Improve current URL',
-        description: 'Fetch the current page securely, then rewrite and improve it.',
+        label: 'Improve an existing page',
+        description: 'Give the page URL; it is read securely, then rewritten and improved.',
       },
       {
         value: 'rewrite_pasted_copy',
-        label: 'Rewrite pasted copy',
-        description: 'Turn supplied copy into a stronger complete landing page.',
-      },
-      {
-        value: 'create_new_landing_page',
-        label: 'Create new landing page',
-        description: 'Create a complete page from the selected keyword intent.',
+        label: 'Rewrite copy you paste',
+        description: 'Paste your current copy; it becomes a stronger complete page.',
       },
     ]);
   });

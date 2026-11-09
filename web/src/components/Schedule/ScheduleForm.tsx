@@ -1,17 +1,22 @@
 import type {
-  AnalysisScope, Keyword, KeywordGroup, ScheduleFormData
+  Keyword, KeywordGroup, ScheduleFormData
 } from '../../types';
-import { KeywordScopePicker } from '../ui/KeywordScopePicker';
-import { MarketScopeFilter } from '../Markets/MarketScopeFilter';
+import { Button } from '../ui/Button';
+import { Spinner } from '../ui/Spinner';
 import {
-  keywordsInMarkets, scopeMarketIds, withMarketIds
-} from '../Markets/marketScope';
-import {
-  DAYS_OF_WEEK, MAX_DAY_OF_MONTH, isScheduleFrequency, timezoneOptions, type UpdateScheduleField
+  suggestScheduleName, type UpdateScheduleField
 } from './scheduleFormModel';
 import { ScheduleKindField } from './ScheduleKindField';
+import {
+  SCHEDULE_INPUT_CLASS, ScheduleTimingFields
+} from './ScheduleTimingFields';
+import { ScheduleScopeField } from './ScheduleScopeField';
+import { ScheduleSwitch } from './ScheduleSwitch';
 
 export type ScheduleFormMode = 'create' | 'edit';
+
+/** Id of the form's title, which names the dialog around it. */
+export const SCHEDULE_FORM_TITLE_ID = 'schedule-form-title';
 
 interface ScheduleFormProps {
   mode: ScheduleFormMode;
@@ -25,128 +30,89 @@ interface ScheduleFormProps {
   groups: KeywordGroup[];
   /** Shown when editing a schedule from before 2.3.0 whose keyword texts cannot be mapped to a scope. */
   legacyNotice?: string | null;
+  /** Why the last save was refused, shown above the buttons. */
+  error?: string | null;
 }
 
-const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900';
-const TIMEZONE_LIST_ID = 'schedule-timezone-options';
+const SECTION_GAP = 'space-y-6';
+
+const NameField = ({
+  formData, updateFormField, suggestion
+}: Pick<ScheduleFormProps, 'formData' | 'updateFormField'> & { readonly suggestion: string }) => (
+  <div>
+    <div className="flex items-baseline justify-between mb-1">
+      <label htmlFor="schedule-display-name" className="text-sm font-medium text-gray-900">Schedule name</label>
+      <span className="text-xs text-gray-500">Optional</span>
+    </div>
+    <input
+      id="schedule-display-name"
+      name="schedule-display-name"
+      type="text"
+      value={formData.display_name}
+      maxLength={100}
+      placeholder={suggestion}
+      aria-describedby="schedule-display-name-hint"
+      onChange={(e) => updateFormField('display_name', e.target.value)}
+      className={SCHEDULE_INPUT_CLASS}
+    />
+    <p id="schedule-display-name-hint" className="mt-1 text-xs text-gray-500">
+      Left blank, it is saved with the name shown.
+    </p>
+  </div>
+);
+
+const FormFooter = ({
+  mode, formData, updateFormField, onCancel, saving, error
+}: Pick<ScheduleFormProps, 'mode' | 'formData' | 'updateFormField' | 'onCancel' | 'saving' | 'error'>) => (
+  <div className="px-6 py-4 border-t border-gray-200">
+    {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <ScheduleSwitch id="schedule-enabled" checked={formData.enabled}
+          onChange={(checked) => updateFormField('enabled', checked)}>
+          Enabled
+        </ScheduleSwitch>
+        <p className="text-xs text-gray-500 mt-0.5">{formData.enabled ? 'Runs on its own.' : 'Saved, but never runs.'}</p>
+      </div>
+      <div className="flex gap-2">
+        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={saving} leadingIcon={saving ? <Spinner size="sm" /> : undefined}>
+          {submitLabel(mode, saving)}
+        </Button>
+      </div>
+    </div>
+  </div>
+);
 
 /**
- * Create / edit form for a schedule. The same form serves both modes: the
- * caller pre-fills `formData` from the schedule being edited and saves with
- * PUT instead of POST.
+ * Create / edit form for a schedule, drawn as the content of a flush dialog:
+ * a title, a scrolling body in the order the user decides (what, when, which
+ * keywords, then an optional name) and one footer with the Enabled switch,
+ * Cancel and the save button. The caller pre-fills `formData` when editing
+ * and saves with PUT instead of POST.
  */
 export const ScheduleForm = ({
-  mode, formData, updateFormField, onSubmit, onCancel, saving, keywords, groups, legacyNotice = null
+  mode, formData, updateFormField, onSubmit, onCancel, saving, keywords, groups, legacyNotice = null, error = null
 }: ScheduleFormProps) => (
   <form
-    className="p-4 sm:p-6 border-b border-gray-200 bg-gray-50"
+    className="flex flex-col min-h-0"
     aria-label={mode === 'create' ? 'Create schedule' : 'Edit schedule'}
     onSubmit={(event) => {
       event.preventDefault();
       onSubmit();
     }}
   >
-    <h3 className="font-medium text-gray-900 mb-4">{mode === 'create' ? 'Create New Schedule' : `Edit "${formData.display_name}"`}</h3>
-    {legacyNotice && (
-      <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2">{legacyNotice}</p>
-    )}
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <ScheduleKindField editable={mode === 'create'} formData={formData} updateFormField={updateFormField}
-        inputClassName={INPUT_CLASS} />
-      <FormField label="Schedule name" htmlFor="schedule-display-name">
-        <input
-          id="schedule-display-name"
-          name="schedule-display-name"
-          type="text"
-          value={formData.display_name}
-          maxLength={100}
-          placeholder={'e.g. Weekly brand analysis'}
-          onChange={(e) => updateFormField('display_name', e.target.value)}
-          className={INPUT_CLASS}
-        />
-      </FormField>
-      <FormField label="Frequency" htmlFor="schedule-frequency">
-        <select
-          id="schedule-frequency"
-          name="schedule-frequency"
-          value={formData.frequency}
-          onChange={(e) => {
-            if (isScheduleFrequency(e.target.value)) updateFormField('frequency', e.target.value);
-          }}
-          className={INPUT_CLASS}
-        >
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-      </FormField>
-      <FormField label="Time" htmlFor="schedule-time">
-        <input
-          id="schedule-time"
-          name="schedule-time"
-          type="time"
-          value={formData.time}
-          onChange={(e) => updateFormField('time', e.target.value)}
-          className={INPUT_CLASS}
-        />
-      </FormField>
-      <FormField label="Timezone" htmlFor="schedule-timezone">
-        <input
-          id="schedule-timezone"
-          name="schedule-timezone"
-          type="text"
-          list={TIMEZONE_LIST_ID}
-          value={formData.timezone}
-          placeholder="Europe/Madrid"
-          onChange={(e) => updateFormField('timezone', e.target.value)}
-          className={INPUT_CLASS}
-        />
-        <datalist id={TIMEZONE_LIST_ID}>
-          {timezoneOptions(formData.timezone).map((zone) => <option key={zone} value={zone} />)}
-        </datalist>
-      </FormField>
-      {formData.frequency === 'weekly' && (
-        <FormField label="Day of week" htmlFor="schedule-day-of-week">
-          <select
-            id="schedule-day-of-week"
-            name="schedule-day-of-week"
-            value={formData.day_of_week}
-            onChange={(e) => updateFormField('day_of_week', e.target.value)}
-            className={INPUT_CLASS}
-          >
-            {DAYS_OF_WEEK.map((day) => <option key={day.value} value={day.value}>{day.label}</option>)}
-          </select>
-        </FormField>
+    <div className="px-6 py-4 pr-14 border-b border-gray-200">
+      <h3 id={SCHEDULE_FORM_TITLE_ID} className="text-lg font-semibold text-gray-900 break-words">
+        {mode === 'create' ? 'New schedule' : `Edit “${formData.display_name}”`}
+      </h3>
+    </div>
+    <div className={`px-6 py-5 overflow-y-auto ${SECTION_GAP}`}>
+      {legacyNotice && (
+        <p className="text-xs text-amber-700 bg-gray-50 border border-gray-200 rounded-sm px-3 py-2">{legacyNotice}</p>
       )}
-      {formData.frequency === 'monthly' && (
-        <FormField label={`Day of month (1-${MAX_DAY_OF_MONTH})`} htmlFor="schedule-day-of-month">
-          <input
-            id="schedule-day-of-month"
-            name="schedule-day-of-month"
-            type="number"
-            min="1"
-            max={MAX_DAY_OF_MONTH}
-            value={formData.day_of_month}
-            onChange={(e) => updateFormField('day_of_month', e.target.value)}
-            className={INPUT_CLASS}
-          />
-        </FormField>
-      )}
-      <div className="sm:col-span-2">
-        <label
-          htmlFor="schedule-enabled"
-          className="flex items-center gap-2 text-sm text-gray-700"
-        >
-          <input
-            id="schedule-enabled"
-            name="schedule-enabled"
-            type="checkbox"
-            checked={formData.enabled}
-            onChange={(e) => updateFormField('enabled', e.target.checked)}
-          />
-          Enabled (a disabled schedule keeps its settings but never runs)
-        </label>
-      </div>
+      <ScheduleKindField editable={mode === 'create'} formData={formData} updateFormField={updateFormField} />
+      <ScheduleTimingFields formData={formData} updateFormField={updateFormField} />
       {formData.kind === 'analysis' && (
         <ScheduleScopeField
           scope={formData.scope}
@@ -155,203 +121,14 @@ export const ScheduleForm = ({
           groups={groups}
         />
       )}
+      <NameField formData={formData} updateFormField={updateFormField} suggestion={suggestScheduleName(formData, groups)} />
     </div>
-    <div className="mt-4 flex flex-wrap gap-2">
-      <button
-        type="submit"
-        disabled={saving}
-        className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {submitLabel(mode, saving)}
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
+    <FormFooter mode={mode} formData={formData} updateFormField={updateFormField} onCancel={onCancel}
+      saving={saving} error={error} />
   </form>
 );
 
 function submitLabel(mode: ScheduleFormMode, saving: boolean): string {
   if (saving) return 'Saving…';
-  return mode === 'create' ? 'Create Schedule' : 'Save Changes';
+  return mode === 'create' ? 'Create schedule' : 'Save changes';
 }
-
-const FormField = ({
-  label, htmlFor, children
-}: {
-  label: string;
-  htmlFor: string;
-  children: React.ReactNode
-}) => (
-  <div>
-    <label htmlFor={htmlFor} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-    {children}
-  </div>
-);
-
-type ScopeMode = AnalysisScope['mode'];
-
-interface ScheduleScopeFieldProps {
-  scope: AnalysisScope;
-  onChange: (scope: AnalysisScope) => void;
-  keywords: Keyword[];
-  groups: KeywordGroup[];
-}
-
-function scopeForMode(mode: ScopeMode, previous: AnalysisScope): AnalysisScope {
-  const markets = scopeMarketIds(previous);
-  if (mode === 'groups') return withMarketIds({
-    mode,
-    group_ids: previous.mode === 'groups' ? previous.group_ids : []
-  }, markets);
-  if (mode === 'keywords') return withMarketIds({
-    mode,
-    keyword_ids: previous.mode === 'keywords' ? previous.keyword_ids : []
-  }, markets);
-  return withMarketIds({ mode: 'all' }, markets);
-}
-
-/**
- * What the schedule runs: every active keyword, whole keyword groups, or a
- * hand-picked set. Groups are resolved when the schedule fires, so keywords
- * added to a group later are included automatically.
- */
-const ScheduleScopeField = ({
-  scope, onChange, keywords, groups
-}: ScheduleScopeFieldProps) => {
-  const options: {
-    mode: ScopeMode;
-    label: string;
-    hint: string
-  }[] = [
-    {
-      mode: 'all',
-      label: 'All keywords',
-      hint: 'every active keyword at run time'
-    },
-    {
-      mode: 'groups',
-      label: 'Keyword groups',
-      hint: 'whatever is in the selected groups when it runs'
-    },
-    {
-      mode: 'keywords',
-      label: 'Specific keywords',
-      hint: 'a fixed selection'
-    },
-  ];
-
-  return (
-    <fieldset className="sm:col-span-2">
-      <legend className="block text-sm font-medium text-gray-700 mb-1">Keywords to analyse</legend>
-      <div className="flex flex-col gap-2">
-        {options.map((option) => {
-          const optionId = `schedule-scope-mode-${option.mode}`;
-          return (
-            <label
-              key={option.mode}
-              htmlFor={optionId}
-              className="flex items-center gap-2 text-sm text-gray-700"
-            >
-              <input
-                id={optionId}
-                type="radio"
-                name="schedule-scope-mode"
-                value={option.mode}
-                checked={scope.mode === option.mode}
-                onChange={() => onChange(scopeForMode(option.mode, scope))}
-              />
-              {option.label}
-              <span className="text-xs text-gray-500">({option.hint})</span>
-            </label>
-          );
-        })}
-      </div>
-      {scope.mode === 'groups' && (
-        <GroupPicker
-          groups={groups}
-          selectedIds={scope.group_ids}
-          onChange={(groupIds) => onChange(withMarketIds({
-            mode: 'groups',
-            group_ids: groupIds
-          }, scopeMarketIds(scope)))}
-        />
-      )}
-      {scope.mode === 'keywords' && (
-        <div className="mt-2">
-          <KeywordScopePicker
-            idPrefix="schedule-keyword-scope"
-            name="schedule-keyword-ids"
-            keywords={keywordsInMarkets(keywords, scopeMarketIds(scope))}
-            groups={groups}
-            selectedIds={scope.keyword_ids}
-            onChange={(keywordIds) => onChange(withMarketIds({
-              mode: 'keywords',
-              keyword_ids: keywordIds
-            }, scopeMarketIds(scope)))}
-          />
-        </div>
-      )}
-      <div className="mt-3">
-        <MarketScopeFilter idPrefix="schedule" selectedIds={scopeMarketIds(scope)}
-          onChange={(marketIds) => onChange(withMarketIds(scope, marketIds))} />
-      </div>
-    </fieldset>
-  );
-};
-
-interface GroupPickerProps {
-  groups: KeywordGroup[];
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-}
-
-const GroupPicker = ({
-  groups, selectedIds, onChange
-}: GroupPickerProps) => {
-  if (groups.length === 0) {
-    return (
-      <p className="mt-2 text-xs text-amber-600">
-        No keyword groups yet. Create them in Settings → Keywords first.
-      </p>
-    );
-  }
-
-  const toggle = (id: string) => {
-    onChange(selectedIds.includes(id) ? selectedIds.filter((selected) => selected !== id) : [...selectedIds, id]);
-  };
-
-  return (
-    <div className="mt-2">
-      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white p-3 grid grid-cols-1 sm:grid-cols-2 gap-1">
-        {groups.map((group) => {
-          const groupId = `schedule-group-${group.id}`;
-          return (
-            <label
-              key={group.id}
-              htmlFor={groupId}
-              className="flex items-center gap-2 text-sm text-gray-700 py-0.5"
-            >
-              <input
-                id={groupId}
-                name="schedule-group-ids"
-                value={group.id}
-                type="checkbox"
-                checked={selectedIds.includes(group.id)}
-                onChange={() => toggle(group.id)}
-                aria-label={`Include group ${group.name}`}
-              />
-              <span className="truncate">{group.name}</span>
-              <span className="text-xs text-gray-400">({group.keyword_count})</span>
-            </label>
-          );
-        })}
-      </div>
-      <p className="mt-1 text-xs text-gray-500">{selectedIds.length} group(s) selected</p>
-    </div>
-  );
-};

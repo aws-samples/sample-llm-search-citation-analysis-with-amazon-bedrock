@@ -4,6 +4,8 @@ import {
 import {
   fireEvent, render, screen, within
 } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { expectRunAnalysisLink } from '../ui/NoDataYet-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 import {
   computingLabel, COMPUTING_JOB
@@ -41,6 +43,7 @@ import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtu
 import {
   chooseExportFormat, mockStartExport
 } from '../../test/exportsApiMock';
+import { labelledFieldIdentity } from '../../test/fieldIdentity';
 
 vi.mock('../Personas/PersonaSelector', () => ({
   PersonaSelector: ({
@@ -88,6 +91,21 @@ describe('BrandsView', () => {
     });
   });
 
+  it('shows a neutral "no AI answers yet" state with a Run Analysis link, not an error, for a keyword with no run', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      noData: true,
+    });
+
+    render(<MemoryRouter><BrandsView keywords={brandKeywordsFixture} /></MemoryRouter>);
+
+    expect(screen.getByText(/No AI engine has answered for .* yet/)).toBeInTheDocument();
+    expectRunAnalysisLink();
+    expect(screen.queryByText(/No brand data found/)).not.toBeInTheDocument();
+  });
+
   it('renders the Brand Mentions heading when there are no keywords', () => {
     render(<BrandsView keywords={[]} />);
 
@@ -106,16 +124,28 @@ describe('BrandsView', () => {
     expect(renderedScopeOptionLabels()).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels']);
   });
 
-  it('asks for a scope when no scope has been selected', () => {
+  it('loads all keywords on arrival, matching the scope the selector shows', () => {
     render(<BrandsView keywords={brandKeywordsFixture} />);
 
-    expect(screen.getByText('Pick a scope above to view brand mentions')).toBeInTheDocument();
+    expect({
+      selected: screen.getByLabelText('Scope'),
+      lastCall: mocks.useBrandMentions.mock.lastCall,
+    }).toStrictEqual({
+      selected: expect.objectContaining({ value: 'all' }),
+      lastCall: [{ kind: 'all' }, null, null, null],
+    });
   });
 
-  it('shows the empty-keyword message when no keywords are available', () => {
+  it('asks for nothing and says what to do when no keywords are available', () => {
     render(<BrandsView keywords={[]} />);
 
-    expect(screen.getByText('No keywords available.')).toBeInTheDocument();
+    expect({
+      message: screen.getByText(/^No keywords available\./).textContent,
+      lastScope: mocks.useBrandMentions.mock.lastCall?.[0],
+    }).toStrictEqual({
+      message: 'No keywords available. Add keywords in Settings › Keywords, then run an analysis.',
+      lastScope: null,
+    });
   });
 
   it('supplies a brands-specific identity to the persona selector', () => {
@@ -198,13 +228,7 @@ describe('BrandsView', () => {
   it('associates the analysis-run label with a brands-specific identity', () => {
     renderWithBrandScope();
 
-    const runSelector = screen.getByLabelText<HTMLSelectElement>('Analysis run');
-
-    expect({
-      id: runSelector.id,
-      labelFor: runSelector.labels?.[0]?.htmlFor,
-      name: runSelector.name,
-    }).toStrictEqual({
+    expect(labelledFieldIdentity('Analysis run')).toStrictEqual({
       id: 'brands-analysis-run',
       labelFor: 'brands-analysis-run',
       name: 'brands-analysis-run',

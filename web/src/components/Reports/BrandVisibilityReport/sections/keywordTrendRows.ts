@@ -1,12 +1,13 @@
 import type { ReactElement } from 'react';
 import type { KeywordTrend } from '../../../../types';
 import {
-  gateSection, type TrendSectionProps
+  gateSection, type SectionShape, type TrendSectionProps
 } from '../../layout';
 
 interface KeywordTrendRowsOptions extends TrendSectionProps {
   readonly title: string;
   readonly loadingMessage: string;
+  readonly loadingShape?: SectionShape;
 }
 
 export type KeywordTrendRowsGate =

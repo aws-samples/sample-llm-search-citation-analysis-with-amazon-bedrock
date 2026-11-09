@@ -25,3 +25,19 @@ export function buildHistoryItem(overrides: Partial<KeywordResearchItem> = {}): 
     ...overrides,
   };
 }
+
+/** An ISO timestamp `days` before `now`, for runs on either side of the stale-failure cut-off. */
+export function isoDaysAgo(days: number, now: number = Date.now()): string {
+  return new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** A run the backend marked failed, created `days` ago. */
+export function buildFailedRun(id: string, days: number, overrides: Partial<KeywordResearchItem> = {}): KeywordResearchItem {
+  return buildHistoryItem({
+    id,
+    status: 'failed',
+    keywords: [],
+    created_at: isoDaysAgo(days),
+    ...overrides,
+  });
+}

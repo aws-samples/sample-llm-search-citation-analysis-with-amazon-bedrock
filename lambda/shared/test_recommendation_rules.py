@@ -14,6 +14,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from shared.brand_visibility import classify_brand, tracked_brand_names
+from shared.config import LLM_PROVIDERS
 from shared.constants import priority_rank
 from shared.dynamo_decimal import to_int
 from shared.recommendation_rules import (
@@ -64,7 +65,8 @@ def _oracle_recommendations(keyword_data: dict[str, list[dict[str, Any]]], confi
         recs.append({'type': 'ranking', 'keywords': [f"{k['keyword']} (rank {k['rank']})" for k in found['low'][:5]], 'count': len(found['low'])})
     recs.extend(
         {'type': 'provider_gap', 'keywords': keywords[:5], 'count': len(keywords), 'provider': provider}
-        for provider, keywords in found['gaps'].items() if len(keywords) >= 3
+        # 2.54.0: answer engines only (web-search providers write no answer).
+        for provider, keywords in found['gaps'].items() if provider in LLM_PROVIDERS and len(keywords) >= 3
     )
     if found['dominated']:
         top = sorted(found['dominated'], key=lambda x: -x['competitor_mentions'])[:3]

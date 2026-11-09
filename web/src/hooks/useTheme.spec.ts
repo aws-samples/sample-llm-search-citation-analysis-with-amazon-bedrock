@@ -157,4 +157,35 @@ describe('useTheme', () => {
       expect(removeEventListenerMock).toHaveBeenCalledWith('change', expect.any(Function));
     });
   });
+
+  describe('print', () => {
+    it('renders a report preview (?print=1) light even when the theme is dark', () => {
+      localStorageMock.store['theme'] = 'dark';
+      window.history.replaceState(null, '', '/reports/benchmark?print=1');
+
+      const { result } = renderTheme();
+      window.history.replaceState(null, '', '/');
+
+      expect({
+        isDark: result.current.isDark,
+        darkClass: document.documentElement.classList.contains('dark'),
+        stored: localStorageMock.store['theme'],
+      }).toStrictEqual({
+        isDark: false,
+        darkClass: false,
+        stored: 'dark' 
+      });
+    });
+
+    it('drops the dark class while the print dialog is open and restores it afterwards', () => {
+      localStorageMock.store['theme'] = 'dark';
+      renderTheme();
+
+      window.dispatchEvent(new Event('beforeprint'));
+      const whilePrinting = document.documentElement.classList.contains('dark');
+      window.dispatchEvent(new Event('afterprint'));
+
+      expect([whilePrinting, document.documentElement.classList.contains('dark')]).toStrictEqual([false, true]);
+    });
+  });
 });

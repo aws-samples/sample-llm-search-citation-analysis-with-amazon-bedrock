@@ -35,7 +35,7 @@ function IssueCard({
         </Button>
       </div>
       <p className="text-sm text-gray-600">{entry.explanation}</p>
-      <p className="text-sm text-gray-800"><span className="font-medium">How to fix: </span>{entry.how_to_fix}</p>
+      <p className="text-sm text-gray-800 dark:text-gray-200"><span className="font-medium">How to fix: </span>{entry.how_to_fix}</p>
     </li>
   );
 }

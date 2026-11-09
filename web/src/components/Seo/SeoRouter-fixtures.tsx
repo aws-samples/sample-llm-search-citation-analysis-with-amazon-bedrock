@@ -27,7 +27,7 @@ function fakeSeoPage(slug: string, label: string, iconColor: string): SeoPage {
 
 export const FAKE_SEO_PAGES: readonly SeoPage[] = [
   fakeSeoPage('rank-tracking', 'Rank Tracking', 'text-emerald-500'),
-  fakeSeoPage('backlinks', 'Backlinks', 'text-purple-500'),
+  fakeSeoPage('backlinks', 'Backlinks', 'text-violet-500'),
 ];
 
 function CurrentPath() {

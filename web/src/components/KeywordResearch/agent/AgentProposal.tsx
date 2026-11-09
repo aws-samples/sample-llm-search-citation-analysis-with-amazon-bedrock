@@ -48,9 +48,9 @@ export function groupProposalByDimension(keywords: ResearchKeyword[], catalog: r
 }
 
 function relevanceClass(relevance: number): string {
-  if (relevance >= 8) return 'text-green-700';
+  if (relevance >= 8) return 'text-emerald-700';
   if (relevance >= 5) return 'text-gray-700';
-  return 'text-gray-400';
+  return 'text-gray-500';
 }
 
 function trackingLabel(keyword: ResearchKeyword): string {
@@ -182,7 +182,7 @@ const DestinationGroupRow = ({
         id={`agent-group-${jobId}`}
         value={groupId}
         onChange={(event) => onGroupChange(event.target.value)}
-        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-200"
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900"
       >
         <option value="">No group (just add to Keywords)</option>
         {[...groups]
@@ -224,11 +224,11 @@ const PromotionActions = ({
     <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-2">
       <p
         className="text-sm text-gray-700"
-        aria-label={`${promotion.selectedCount} selected active tracked keywords, ${inactiveCount} unselected inactive library keywords`}
+        aria-label={`${promotion.selectedCount} selected keywords are added as active, ${inactiveCount} others as paused`}
       >
-        <strong>{promotion.selectedCount}</strong> selected → active tracked keywords · <strong>{inactiveCount}</strong> unselected → inactive library keywords
+        <strong>{promotion.selectedCount}</strong> selected → added as active (sent in analysis runs) · <strong>{inactiveCount}</strong> others → added as paused (saved, skipped by runs)
       </p>
-      <p className="text-xs text-gray-500">Selection limit: {SELECTION_LIMIT}. Inactive library keywords stay in the group but are excluded from analysis runs.</p>
+      <p className="text-xs text-gray-500">Select up to {SELECTION_LIMIT}. You can pause or activate a keyword later in Settings › Keywords.</p>
       <div className="flex flex-col sm:flex-row gap-2">
         <Button type="button" disabled={!promotion.canPromote} onClick={() => void promotion.promote()}>
           {promotion.submittingAction === 'selected' ? (
@@ -244,7 +244,7 @@ const PromotionActions = ({
               <Spinner size="sm" />
               Adding full proposal…
             </>
-          ) : `Add full proposal (${promotion.selectedCount} active, ${inactiveCount} inactive)${targetText}`}
+          ) : `Add full proposal (${promotion.selectedCount} active, ${inactiveCount} paused)${targetText}`}
         </Button>
       </div>
     </div>
@@ -256,7 +256,7 @@ const PromotionFeedback = ({ promotion }: { promotion: UsePromoteKeywords }) => 
   <>
     <output className="block space-y-1">
       {promotion.limitMessage && <span className="block text-sm text-amber-700">{promotion.limitMessage}</span>}
-      {promotion.outcome && <span className="block text-sm text-green-700">{promotionSuccessMessage(promotion.outcome)}</span>}
+      {promotion.outcome && <span className="block text-sm text-emerald-700">{promotionSuccessMessage(promotion.outcome)}</span>}
     </output>
     {promotion.error && (
       <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{promotion.error}</div>
@@ -280,7 +280,7 @@ const DimensionSectionTable = ({
   return (
     <div className="p-4">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-600">{section.label} <span className="font-normal text-gray-400">({section.keywords.length})</span></h5>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-600">{section.label} <span className="font-normal text-gray-500">({section.keywords.length})</span></h5>
         <button type="button" onClick={() => onToggleSection(section, !allSelected)} className="text-xs text-gray-600 hover:text-gray-900 underline">
           {allSelected ? 'Clear section' : 'Select section'}
         </button>
@@ -299,7 +299,7 @@ const DimensionSectionTable = ({
               <th className="py-1 font-medium hidden md:table-cell" scope="col">Sources</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
             {section.keywords.map((keyword) => {
               const key = keywordSelectionKey(keyword.keyword);
               const checked = selectedKeys.has(key);
@@ -310,7 +310,7 @@ const DimensionSectionTable = ({
                   </td>
                   <td className="py-1.5 pr-3 font-medium text-gray-900">{keyword.keyword}</td>
                   <td className="py-1.5 pr-3 text-gray-600 max-w-sm">
-                    <span className={keyword.tracking === true ? 'font-medium text-green-700' : ''}>{trackingLabel(keyword)}</span>
+                    <span className={keyword.tracking === true ? 'font-medium text-emerald-700' : ''}>{trackingLabel(keyword)}</span>
                     {keyword.tracking_score !== undefined && <span className="block text-xs">Score {keyword.tracking_score}</span>}
                     {keyword.tracking_reason && <span className="block text-xs text-gray-500">{keyword.tracking_reason}</span>}
                   </td>

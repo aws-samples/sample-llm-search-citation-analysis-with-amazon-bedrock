@@ -45,7 +45,7 @@ function SignInNotes() {
 
 function NotDeployedNotice() {
   return (
-    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+    <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-amber-800">
       <p className="font-medium">The MCP server isn&apos;t deployed for this dashboard.</p>
       <p>
         An administrator can deploy it and then rebuild the dashboard, so this page shows the server URL and the client

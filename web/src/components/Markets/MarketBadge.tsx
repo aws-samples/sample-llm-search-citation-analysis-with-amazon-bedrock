@@ -14,7 +14,7 @@ export function MarketBadge({
   const label = marketName(marketId, markets);
   return (
     <span
-      className="px-1.5 py-0.5 text-xs rounded-sm border border-sky-200 bg-sky-50 text-sky-700"
+      className="px-1.5 py-0.5 text-xs rounded-sm border border-gray-200 bg-gray-50 text-gray-700"
       title={market === undefined ? `Market ${label}` : `Market ${label}: ${market.country_name}, ${market.language_name}`}
     >
       <span className="sr-only">Market: </span>

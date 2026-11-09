@@ -10,6 +10,7 @@ import { buildGroup } from '../../../api/keywordGroups-fixtures';
 import {
   screen, waitFor
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
   buildOrganicItem, buildResearchResponse, buildSerpResponse
 } from '../../../api/seo-fixtures';
@@ -88,6 +89,38 @@ describe('KeywordExplorer search', () => {
       clickstream: false,
       market_id: BRAZIL_MARKET_ID,
     }, { signal: expect.any(AbortSignal) });
+  });
+
+  it('shows the price of the default search beside Search before anything runs', () => {
+    renderExplorer();
+
+    expect(screen.getByRole('button', { name: 'Search' })).toHaveAccessibleDescription(
+      'Price: up to $0.05 per search (up to $0.09 in Google-Ads-only countries) · cached 24 h',
+    );
+  });
+
+  it('keeps the options collapsed until Options is opened', () => {
+    renderExplorer();
+
+    expect(screen.getByRole('button', { name: 'Options' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByLabelText('Mode')).not.toBeVisible();
+  });
+
+  it('reprices and researches with the options picked under Options', async () => {
+    renderExplorer();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Options' }));
+    await user.selectOptions(screen.getByLabelText('Mode'), 'related');
+    await user.selectOptions(screen.getByLabelText('Results'), '500');
+    await user.click(screen.getByRole('checkbox', { name: 'Include clickstream data' }));
+
+    expect(screen.getByRole('button', { name: 'Search' })).toHaveAccessibleDescription(/^Price: up to \$0\.15 per search/);
+    await searchAndWaitForRows('boutique hotel');
+    expect(researchKeywords).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'related',
+      limit: 500,
+      clickstream: true,
+    }), expect.anything());
   });
 
   it('shows no cost note after a fresh search', async () => {

@@ -27,6 +27,7 @@ export function RankHistorySection({
     title: TITLE,
     loading,
     loadingMessage: 'Loading trend data…',
+    loadingShape: 'chart',
     loadingSubtitle: subtitleFor(trends),
     error,
   });

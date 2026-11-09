@@ -70,7 +70,7 @@ export const ContentHistory = ({
       <CenteredEmpty
         icon={<CollectionIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />}
         title="No generated content yet."
-        hint="Generate content from the Ideas tab to see it here."
+        hint="Create content from Content Ideas or Content Brief to see it here."
       />
     );
   }

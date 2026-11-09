@@ -120,7 +120,7 @@ describe('AgentProposal', () => {
     expect(screen.getByLabelText('Select hotel coruña centro')).toBeChecked();
     expect(screen.getByLabelText('Select hotel coruña con niños')).toBeChecked();
     expect(screen.getByLabelText('Select escapada coruña')).not.toBeChecked();
-    expect(screen.getByLabelText('2 selected active tracked keywords, 1 unselected inactive library keywords')).toBeInTheDocument();
+    expect(screen.getByLabelText('2 selected keywords are added as active, 1 others as paused')).toBeInTheDocument();
   });
 
   it('explains generic ways to organise an optional keyword group', () => {
@@ -161,7 +161,7 @@ describe('AgentProposal', () => {
     const onKeywordsAdded = vi.fn();
     const job = renderProposal({ onKeywordsAdded });
 
-    await userEvent.click(screen.getByRole('button', { name: /add full proposal \(2 active, 1 inactive\) to “Hotel Gran Marino”/i }));
+    await userEvent.click(screen.getByRole('button', { name: /add full proposal \(2 active, 1 paused\) to “Hotel Gran Marino”/i }));
 
     await waitFor(() => {
       expect(onKeywordsAdded).toHaveBeenCalledWith([promotedActiveKeywordFixture]);
@@ -204,10 +204,10 @@ describe('AgentProposal', () => {
     renderProposal();
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Clear section' })[0]);
-    expect(screen.getByLabelText('1 selected active tracked keywords, 2 unselected inactive library keywords')).toBeInTheDocument();
+    expect(screen.getByLabelText('1 selected keywords are added as active, 2 others as paused')).toBeInTheDocument();
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Select section' })[0]);
-    expect(screen.getByLabelText('2 selected active tracked keywords, 1 unselected inactive library keywords')).toBeInTheDocument();
+    expect(screen.getByLabelText('2 selected keywords are added as active, 1 others as paused')).toBeInTheDocument();
   });
 
   it('explains when the proposal uses the deterministic fallback', () => {
@@ -231,7 +231,7 @@ describe('AgentProposal', () => {
 
     expect(screen.getAllByText('Not scored (legacy run)')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Reset to recommended (0)' })).toBeDisabled();
-    expect(screen.getByLabelText('0 selected active tracked keywords, 3 unselected inactive library keywords')).toBeInTheDocument();
+    expect(screen.getByLabelText('0 selected keywords are added as active, 3 others as paused')).toBeInTheDocument();
   });
 
   it('exports the run with its proposal and trace', async () => {

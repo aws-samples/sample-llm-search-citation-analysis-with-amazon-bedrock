@@ -61,6 +61,7 @@ export function buildGapsSnapshot({
     error,
     computing: null,
     request: null,
+    noData: false,
     fetchCitationGaps,
   };
 }

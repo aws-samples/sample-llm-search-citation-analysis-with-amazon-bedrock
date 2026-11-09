@@ -20,8 +20,8 @@ vi.mock('../../hooks/useIsAdmin', () => ({useIsAdmin: vi.fn(),}));
 import { useOnboardingStatus } from '../../hooks/useOnboardingStatus';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 
-const mockUseOnboardingStatus = useOnboardingStatus as ReturnType<typeof vi.fn>;
-const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
+const mockUseOnboardingStatus = vi.mocked(useOnboardingStatus);
+const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
 /** The setup status the hook resolves to, with loading finished. */
 function mockStatus(overrides: Parameters<typeof buildStatus>[0] = {}) {
@@ -163,6 +163,15 @@ describe('OnboardingModal', () => {
       expect(screen.queryByRole('button', { name: 'Configure providers' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Add keywords' })).toBeInTheDocument();
     });
+
+    it('makes only the first required step still to do the primary action', () => {
+      mockStatus();
+
+      renderOnboarding({ keywordsCount: 2 });
+
+      expect(screen.getByRole('button', { name: 'Configure brands' })).toHaveClass('bg-gray-900');
+      expect(screen.getByRole('button', { name: 'Configure providers' })).not.toHaveClass('bg-gray-900');
+    });
   });
 
   describe('step navigation', () => {
@@ -204,8 +213,8 @@ describe('OnboardingModal', () => {
       expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     });
 
-    it('persists the skip flag when set up later is clicked', async () => {
-      await renderAndClick('Set up later');
+    it("persists the skip flag when don't show again is clicked", async () => {
+      await renderAndClick("Don't show again");
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

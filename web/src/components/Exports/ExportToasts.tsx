@@ -8,7 +8,7 @@ export const TOAST_DISMISS_MS = 8_000;
 
 const TONE_CLASSES: Record<ExportToast['tone'], string> = {
   info: 'border-gray-200 bg-white text-gray-900',
-  success: 'border-green-200 bg-green-50 text-green-800',
+  success: 'border-gray-200 bg-white text-emerald-800',
   error: 'border-red-200 bg-red-50 text-red-800',
 };
 

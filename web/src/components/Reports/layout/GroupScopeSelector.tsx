@@ -20,7 +20,7 @@ export function GroupScopeSelector({
       value={value}
       onChange={onChange}
       label="Scope"
-      className="min-w-[16rem]"
+      className="w-full sm:w-80"
     />
   );
 }

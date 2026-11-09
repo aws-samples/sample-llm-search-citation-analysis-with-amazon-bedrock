@@ -18,7 +18,7 @@ export function CopyButton({
 
   return (
     <span className="print-hidden inline-flex shrink-0 items-center gap-2">
-      <output aria-live="polite" className="text-xs font-medium text-green-700">
+      <output aria-live="polite" className="text-xs font-medium text-emerald-700">
         {copied === null ? '' : 'Copied'}
       </output>
       <Button

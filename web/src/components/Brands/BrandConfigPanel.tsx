@@ -1,8 +1,9 @@
+import { useId } from 'react';
 import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
 import { BrandConfigContent } from './BrandConfigContent';
-import { CloseIcon } from '../ui';
+import { Modal } from '../ui/Modal';
 
 interface BrandConfigPanelProps {
   config: BrandConfig | null;
@@ -23,27 +24,18 @@ export const BrandConfigPanel = ({
   onExpandAllBrands,
   onFindCompetitors,
 }: BrandConfigPanelProps) => {
+  const titleId = useId();
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 mt-0!">
-      <div className="bg-white rounded-lg border border-gray-200 max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">Brand Tracking Configuration</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Configure extraction settings and customize prompts per industry
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <CloseIcon />
-          </button>
-        </div>
+    <Modal isOpen onClose={onClose} size="5xl" layout="flush" labelledBy={titleId}>
+      {/* Header; `pr-12` keeps the text clear of the dialog's close button. */}
+      <div className="pl-6 pr-12 py-4 border-b border-gray-200">
+        <h2 id={titleId} className="text-xl font-semibold text-gray-900">Brand tracking</h2>
+      </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+      {/* Content. The form's save bar sticks to the bottom of this scrolling body; the bottom padding sits on
+          an inner box because a sticky child of a padded scroller stops short of its bottom edge. */}
+      <div className="flex-1 overflow-y-auto px-6 pt-6">
+        <div className="pb-6">
           <BrandConfigContent
             config={config}
             presets={presets}
@@ -55,6 +47,6 @@ export const BrandConfigPanel = ({
           />
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };

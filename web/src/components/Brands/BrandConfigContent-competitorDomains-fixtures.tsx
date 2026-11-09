@@ -37,7 +37,7 @@ export const CONFIG_AT_DOMAIN_CAP: BrandConfig = {
   competitor_domains: { 'Borealis Air': Array.from({ length: 10 }, (_unused, index) => `site${index}.borealis.example`) },
 };
 
-/** What "Find Competitors" answers: Cielo Wings with two suggested domains. */
+/** What "Find competitors" answers: Cielo Wings with two suggested domains. */
 const DISCOVERY: CompetitorDiscoveryResult = {
   first_party_brands: ['Aurora Airways'],
   competitors: ['Cielo Wings'],
@@ -54,35 +54,60 @@ export function renderCompetitorDomainsForm(config: BrandConfig = AIRLINE_CONFIG
 
 export async function findCompetitors(): Promise<void> {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Find Competitors' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Find competitors' }));
   });
 }
 
+/** Presses Save changes in the save bar (shown once the form has changes). */
 export async function saveConfiguration(): Promise<void> {
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   });
 }
 
-/** The checkbox of `domain` in the row of `brand`. */
-export function competitorDomainCheckbox(domain: string, brand: string): HTMLElement {
-  return screen.getByRole('checkbox', { name: `${domain} for ${brand}` });
+/** The sticky save bar, or `null` while there is nothing to save. */
+export function querySaveBar(): HTMLElement | null {
+  return screen.queryByRole('region', { name: 'Save changes' });
 }
 
-/** Form edits a save test applies before saving. */
-export async function tickSuggestedCieloDomain(): Promise<void> {
-  await findCompetitors();
-  fireEvent.click(competitorDomainCheckbox('cielo-wings.example', 'Cielo Wings'));
-}
-
-export function typeCieloDomainWithSchemeAndPath(): void {
-  const input = screen.getByLabelText('New domain for Cielo Wings');
-  fireEvent.change(input, { target: { value: 'https://www.Cielo-Wings.example/routes' } });
+/** Types `value` into the box named `label` and presses Enter. */
+export function typeAndEnter(label: string, value: string): void {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value } });
   fireEvent.keyDown(input, { key: 'Enter' });
 }
 
-export function untickStoredBorealisDomain(): void {
-  fireEvent.click(competitorDomainCheckbox('borealis-air.com', 'Borealis Air'));
+/** The remove button of a saved `domain` in the row of `brand`. */
+export function savedCompetitorDomain(domain: string, brand: string): HTMLElement {
+  return screen.getByRole('button', { name: `Remove ${domain} from ${brand}` });
+}
+
+/** The dashed chip of a suggested, unsaved `domain` in the row of `brand`. */
+export function suggestedCompetitorDomain(domain: string, brand: string): HTMLElement {
+  return screen.getByRole('button', { name: `Add suggested ${domain} for ${brand}` });
+}
+
+/** Form edits a save test applies before saving. */
+export function addFirstPartyBrand(): void {
+  typeAndEnter('Add brand name', 'Aurora Express');
+}
+
+export async function findCompetitorsAndEditBrands(): Promise<void> {
+  await findCompetitors();
+  addFirstPartyBrand();
+}
+
+export async function pickSuggestedCieloDomain(): Promise<void> {
+  await findCompetitors();
+  fireEvent.click(suggestedCompetitorDomain('cielo-wings.example', 'Cielo Wings'));
+}
+
+export function typeCieloDomainWithSchemeAndPath(): void {
+  typeAndEnter('Add website for Cielo Wings', 'https://www.Cielo-Wings.example/routes');
+}
+
+export function removeStoredBorealisDomain(): void {
+  fireEvent.click(savedCompetitorDomain('borealis-air.com', 'Borealis Air'));
 }
 
 /** Renders `config`, applies `edit`, saves, and answers the `competitor_domains` that were saved. */

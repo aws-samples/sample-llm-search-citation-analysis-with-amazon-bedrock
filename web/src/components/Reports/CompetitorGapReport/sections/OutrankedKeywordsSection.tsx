@@ -1,4 +1,5 @@
 import type { CompetitorOutrankedKeyword } from '../../../../api/reports';
+import { providerName } from '../../../../constants/providers';
 import {
   emphasisColumn,
   ReportSection,
@@ -21,24 +22,27 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<CompetitorOutrankedKeyword>> = [
   emphasisColumn('Keyword', (row) => row.keyword),
   {
     header: 'Their rank',
+    numeric: true,
     render: (row) => `#${row.their_best_rank}`,
   },
   {
     header: 'Our rank',
+    numeric: true,
     render: (row) => (row.our_best_rank ? `#${row.our_best_rank}` : '—'),
   },
   {
     header: 'Delta',
-    render: (row) => (
+    numeric: true,
+    render: (row) => (row.rank_delta === null ? '—' : (
       <span className="text-red-700 dark:text-red-400 font-mono font-semibold">
-        {row.rank_delta === null ? '—' : `+${row.rank_delta}`}
+        {`+${row.rank_delta}`}
       </span>
-    ),
+    )),
   },
   {
-    header: 'Providers',
+    header: 'AI engines',
     cellClassName: 'text-xs',
-    render: (row) => row.providers.join(', ') || '—',
+    render: (row) => row.providers.map(providerName).join(', ') || '—',
   },
 ];
 

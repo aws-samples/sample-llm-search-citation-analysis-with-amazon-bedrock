@@ -16,7 +16,7 @@ import {
 } from '../../layout/reportQueries-fixtures';
 import { buildKpis } from '../../BrandVisibilityReport/groupKpiHistory-fixtures';
 import { loadedOverview } from './reportsOverview-fixtures';
-import { sectionPlaceholderCases } from '../../layout/sectionGate-fixtures';
+import { itRendersSectionPlaceholders } from '../../layout/sectionPlaceholders-fixtures';
 
 function renderHeadline(overrides: Partial<ReportsOverviewResponse> = {}): void {
   render(<HeadlineSection {...loadedOverview(overrides)} />);
@@ -81,12 +81,7 @@ describe('HeadlineSection — keyword breadth', () => {
 });
 
 describe('HeadlineSection — placeholder states', () => {
-  it.each(sectionPlaceholderCases('Loading executive summary…'))('renders the $name', ({
-    state, text
-  }) => {
-    render(<HeadlineSection data={null} {...state} />);
-    expect(screen.getByText(text)).toBeInTheDocument();
-  });
+  itRendersSectionPlaceholders(HeadlineSection, 'Loading executive summary…');
 
   it.each([
     ['there is no overview yet', null],

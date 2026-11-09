@@ -9,7 +9,7 @@ A tracker is one domain in one market (the market picked in the header when it i
 
 | Setting | Values |
 |---|---|
-| Domain | Picked from Settings › Brand Tracking: your own domains (`first_party_domains`, the first one preselected), then "Competitor: name (domain)" for each `competitor_domains` entry, or "Other domain" (free text). Stored lower-case without `https://`, path or a leading `www.`. With no domain in Brand Tracking the form links to Settings › Brand Tracking. |
+| Domain | Picked from Settings › Brand tracking: your own domains (`first_party_domains`, the first one preselected), then "Competitor: name (domain)" for each `competitor_domains` entry, or "Other domain" (free text). Stored lower-case without `https://`, path or a leading `www.`. With no domain in Brand tracking the form links to Settings › Brand tracking. |
 | Market | The header market; not asked again. |
 | Keywords | The Settings keywords (`keyword_scope`): `all` (default) = every active keyword of the tracker's market (the Global market = keywords without a market), or `group` = the active keywords of one keyword group (`group_id`, any market). Both are read at every check, so a keyword added in Settings › Keywords is tracked from the next check. |
 | Extra keywords | Optional, collapsed in the form: keywords tracked for rankings only (they are not asked of the AI engines). Keywords you want everywhere belong in Settings. |
@@ -33,7 +33,7 @@ reactivates it.
 While the header market has no tracker, Admins see a card "Track <your domain> for your N keywords in <market>"
 (N from the free estimate). Its button opens the prefilled form (all keywords of the market, mobile, top 30,
 weekly); nothing is stored or paid for until the review is confirmed. "Track competitors" creates one tracker per
-competitor domain of Brand Tracking not yet tracked in the market, with the same keywords and defaults, after one
+competitor domain of Brand tracking not yet tracked in the market, with the same keywords and defaults, after one
 confirmation naming the paid searches per tracker. Readers who are not Admins see an empty state.
 
 ## How a position is found
@@ -81,7 +81,7 @@ manual check, and at most $0.90 per scheduled check (about $3.60 a month weekly)
 
 - Each scheduled tracker has its own one-time EventBridge Scheduler schedule at its next slot (`rank-<tracker id>`
   in the `citation-analysis-seo-rank` group). Saving, archiving or switching a tracker to manual moves or deletes it;
-  each check moves it to the next slot. Nothing runs between checks. Operations > Schedule lists these schedules
+  each check moves it to the next slot. Nothing runs between checks. Operations › Schedule lists these schedules
   read-only, with a link back to the tracker.
 - The first slot of a new schedule is at a random time between 04:00 and 09:59 UTC, so checks spread over the
   morning: tomorrow (daily), in seven days (weekly), or on the last day of this month (monthly).
@@ -93,7 +93,7 @@ manual check, and at most $0.90 per scheduled check (about $3.60 a month weekly)
   (`pingback_url`, `lambda/seo-callbacks`); nothing polls the queue. If a callback has not come 35 minutes after the
   post, the check reads every queued search once anyway, and a search still running then goes to the re-check rounds.
 - One check runs per tracker at a time. A manual check answers at once and runs in the background; the page shows its
-  progress and refreshes the results when it ends.
+  progress and refreshes the results when it ends, on the check's live events (nothing polls).
 
 ## Reading the results
 

@@ -1,15 +1,8 @@
-import type {
-  ContentBriefScope,
-  ContentBriefStrategy,
-  GroupBriefMode,
-  Keyword,
-  KeywordGroup,
-} from '../../types';
+import type { GroupBriefMode } from '../../types';
 import { Modal } from '../ui/Modal';
 import { Spinner } from '../ui/Spinner';
 import type { PendingGeneration } from './GroupBriefForm-logic';
 import {
-  GROUP_BRIEF_BATCH_MAX_KEYWORDS,
   GROUP_BRIEF_MAX_COPY_LENGTH,
   GROUP_BRIEF_MAX_URL_LENGTH,
   GROUP_BRIEF_MODE_OPTIONS,
@@ -17,52 +10,16 @@ import {
   type GroupBriefValidationIssue,
 } from './GroupBriefForm-source';
 
+/** A selectable option card (radio inside a label); the selected one takes the interaction colour. */
+export const OPTION_CARD_CLASS = 'block cursor-pointer rounded-lg border p-3 transition-colors focus-within:ring-2 focus-within:ring-gray-900 dark:focus-within:ring-gray-300';
+export const OPTION_CARD_SELECTED = 'border-blue-600 bg-blue-50 ring-1 ring-blue-600 dark:border-blue-400 dark:ring-blue-400';
+export const OPTION_CARD_IDLE = 'border-gray-200 bg-white hover:border-gray-300 dark:hover:border-gray-500';
+
 export function issueMessage(
   issues: GroupBriefValidationIssue[],
   field: GroupBriefValidationField
 ): string | undefined {
   return issues.find((issue) => issue.field === field)?.message;
-}
-
-function selectedScopeName(
-  scope: ContentBriefScope,
-  groups: KeywordGroup[]
-): string {
-  if (scope.mode === 'keywords') return 'Selected keywords';
-  return groups.find((group) => group.id === scope.group_ids[0])?.name
-    ?? 'Selected group';
-}
-
-export function ScopePreview({
-  scope,
-  groups,
-  keywords,
-}: {
-  readonly scope: ContentBriefScope;
-  readonly groups: KeywordGroup[];
-  readonly keywords: Keyword[];
-}) {
-  const noun = keywords.length === 1 ? 'keyword' : 'keywords';
-  return (
-    <div
-      className="rounded-lg border border-blue-200 bg-blue-50 p-4"
-      aria-label="Target scope preview"
-    >
-      <p className="text-sm font-medium text-blue-900">
-        {selectedScopeName(scope, groups)}: {keywords.length} active {noun}
-      </p>
-      {scope.mode === 'groups' && (
-        <p className="mt-1 text-xs text-blue-700">
-          Group mode always includes every active keyword in the selected group.
-        </p>
-      )}
-      {keywords.length > 0 && (
-        <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-xs text-blue-800">
-          {keywords.map((keyword) => <li key={keyword.id}>{keyword.keyword}</li>)}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 interface GenerationModeFieldsProps {
@@ -85,7 +42,7 @@ interface SourceFieldProps {
 
 /** Validation message under a field, announced when it appears. */
 export function FieldIssue({ issue }: { readonly issue?: string }) {
-  return issue ? <p role="alert" className="mt-1 text-sm text-red-600">{issue}</p> : null;
+  return issue ? <p role="alert" className="mt-1 text-sm text-red-700">{issue}</p> : null;
 }
 
 function LandingUrlField({
@@ -156,16 +113,14 @@ export function GenerationModeFields({
 }: GenerationModeFieldsProps) {
   return (
     <>
-      <fieldset className="rounded-xl border border-gray-200 bg-white p-5">
-        <legend className="px-1 text-sm font-semibold text-gray-900">Generation mode</legend>
-        <div className="mt-2 grid gap-3 lg:grid-cols-3">
+      <fieldset className="m-0 border-0 p-0">
+        <legend className="sr-only">Generation mode</legend>
+        <div className="grid gap-3 lg:grid-cols-3">
           {GROUP_BRIEF_MODE_OPTIONS.map((option) => (
             <label
               key={option.value}
               htmlFor={`group-brief-mode-${option.value}`}
-              className={`cursor-pointer rounded-lg border p-3 ${
-                mode === option.value ? 'border-gray-900 bg-gray-50' : 'border-gray-200'
-              }`}
+              className={`${OPTION_CARD_CLASS} ${mode === option.value ? OPTION_CARD_SELECTED : OPTION_CARD_IDLE}`}
             >
               <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
                 <input
@@ -176,10 +131,11 @@ export function GenerationModeFields({
                   checked={mode === option.value}
                   onChange={() => onModeChange(option.value)}
                   disabled={disabled}
+                  className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-gray-900"
                 />
                 {option.label}
               </span>
-              <span className="mt-1 block text-xs text-gray-500">{option.description}</span>
+              <span className="mt-1 block pl-6 text-xs text-gray-500">{option.description}</span>
             </label>
           ))}
         </div>
@@ -204,89 +160,15 @@ export function GenerationModeFields({
   );
 }
 
-export function StrategyFields({
-  strategy,
-  selectedKeywordCount,
-  disabled,
-  issue,
-  onChange,
-}: {
-  readonly strategy: ContentBriefStrategy;
-  readonly selectedKeywordCount: number;
-  readonly disabled: boolean;
-  readonly issue?: string;
-  readonly onChange: (strategy: ContentBriefStrategy) => void;
-}) {
-  const estimatedCalls = strategy === 'combined' ? 1 : selectedKeywordCount;
-  return (
-    <fieldset className="rounded-xl border border-gray-200 bg-white p-5">
-      <legend className="px-1 text-sm font-semibold text-gray-900">Brief strategy</legend>
-      <div className="mt-2 grid gap-3 lg:grid-cols-2">
-        <StrategyOption
-          checked={strategy === 'combined'}
-          label="Create one brief from this selection"
-          description="One background job combines the complete selected scope into one brief."
-          disabled={disabled}
-          onChange={() => onChange('combined')}
-        />
-        <StrategyOption
-          checked={strategy === 'per_keyword'}
-          label="Create a separate brief for each keyword"
-          description={`Starts 1–${GROUP_BRIEF_BATCH_MAX_KEYWORDS} independent background jobs in one batch request.`}
-          disabled={disabled}
-          onChange={() => onChange('per_keyword')}
-        />
-      </div>
-      <p className="mt-3 text-sm font-medium text-gray-800">
-        Estimated paid model calls: {estimatedCalls}
-      </p>
-      {strategy === 'per_keyword' && selectedKeywordCount === 1 && (
-        <p className="mt-1 text-xs text-gray-500">
-          With one keyword, the combined option is equivalent: either choice starts one background job and one paid model call.
-        </p>
-      )}
-      {issue && <p role="alert" className="mt-2 text-sm text-red-600">{issue}</p>}
-    </fieldset>
-  );
-}
-
-function StrategyOption({
-  checked,
-  label,
-  description,
-  disabled,
-  onChange,
-}: {
-  readonly checked: boolean;
-  readonly label: string;
-  readonly description: string;
-  readonly disabled: boolean;
-  readonly onChange: () => void;
-}) {
-  return (
-    <label className={`cursor-pointer rounded-lg border p-3 ${checked ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
-      <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
-        <input
-          type="radio"
-          name="content-brief-strategy"
-          aria-label={label}
-          checked={checked}
-          onChange={onChange}
-          disabled={disabled}
-        />
-        {label}
-      </span>
-      <span className="mt-1 block text-xs text-gray-500">{description}</span>
-    </label>
-  );
-}
-
 export function GenerationConfirmation({
   pending,
   generating,
   onClose,
   onConfirm,
+  summary,
 }: {
+  /** What the brief writes, for which keywords and in which language. */
+  readonly summary: string;
   readonly pending: PendingGeneration | null;
   readonly generating: boolean;
   readonly onClose: () => void;
@@ -304,7 +186,8 @@ export function GenerationConfirmation({
       title="Confirm Content Brief generation"
       showCloseButton={false}
     >
-      <p className="text-sm text-gray-700">
+      <p className="break-words text-sm font-medium text-gray-900">{summary}</p>
+      <p className="mt-2 text-sm text-gray-700">
         This will start {jobCount} background {jobNoun} and make {jobCount} paid model {callNoun}.
       </p>
       <p className="mt-2 text-xs text-gray-500">

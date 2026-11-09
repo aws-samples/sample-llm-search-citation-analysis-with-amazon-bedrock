@@ -6,6 +6,7 @@ import {
   gateSection, ReportSection, ReportSectionPlaceholder
 } from '../../layout';
 import type { SectionGate } from '../../layout/sectionGate';
+import type { SectionShape } from '../../layout/SectionSkeleton';
 
 export const SEO_NOT_DEPLOYED_MESSAGE = 'The SEO stack is not deployed, so there is no Google organic data to compare. '
   + 'Deploy it and rebuild the dashboard to see this view.';
@@ -23,7 +24,7 @@ export interface SeoGeoSectionProps {
  * The opening moves of an SEO vs GEO section: "not deployed", loading,
  * error, then "no keyword" before the section renders the response.
  */
-function gateSeoGeo(title: string, state: SeoGeoState): SectionGate<SeoGeoResponse> {
+function gateSeoGeo(title: string, state: SeoGeoState, loadingShape: SectionShape): SectionGate<SeoGeoResponse> {
   if (state.notConfigured) {
     return {
       ready: false,
@@ -35,6 +36,7 @@ function gateSeoGeo(title: string, state: SeoGeoState): SectionGate<SeoGeoRespon
     loading: state.loading,
     error: state.error,
     loadingMessage: 'Loading the SEO vs GEO comparison…',
+    loadingShape,
     value: state.data !== null && state.data.rows.length > 0 ? state.data : null,
     emptyMessage: SEO_GEO_EMPTY_MESSAGE,
   });
@@ -46,14 +48,16 @@ interface SeoGeoSectionFrameProps extends SeoGeoSectionProps {
   /** Leave the heading to the content (a chart panel carries its own). */
   readonly untitled?: boolean;
   readonly subtitle?: string | ((response: SeoGeoResponse) => string);
+  /** What the section shows, so its loading skeleton takes that shape. */
+  readonly loadingShape?: SectionShape;
   readonly children: (response: SeoGeoResponse) => ReactNode;
 }
 
 /** A report section over the SEO vs GEO response, behind `gateSeoGeo`. */
 export function SeoGeoSectionFrame({
-  title, untitled = false, subtitle, state, children
+  title, untitled = false, subtitle, loadingShape = 'block', state, children
 }: SeoGeoSectionFrameProps) {
-  const gate = gateSeoGeo(title, state);
+  const gate = gateSeoGeo(title, state, loadingShape);
   if (!gate.ready) return gate.placeholder;
   return (
     <ReportSection title={untitled ? undefined : title} subtitle={typeof subtitle === 'function' ? subtitle(gate.value) : subtitle}>

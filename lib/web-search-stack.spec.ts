@@ -81,10 +81,14 @@ describe('readWebSearchRegion', () => {
     expect(readWebSearchRegion(new cdk.App())).toBe('us-east-1');
   });
 
-  it.each(['us-west-2', 'eu-central-1', ''.concat('US-EAST-1')])('rejects %s as a Web Search region', (region) => {
+  it('accepts us-west-2', () => {
+    expect(readWebSearchRegion(new cdk.App({ context: { webSearchRegion: 'us-west-2' } }))).toBe('us-west-2');
+  });
+
+  it.each(['us-east-2', 'eu-central-1', ''.concat('US-EAST-1')])('rejects %s as a Web Search region', (region) => {
     const app = new cdk.App({ context: { webSearchRegion: region } });
 
-    expect(() => readWebSearchRegion(app)).toThrow("CDK context 'webSearchRegion': must be one of us-east-1, eu-west-1, ap-northeast-1");
+    expect(() => readWebSearchRegion(app)).toThrow("CDK context 'webSearchRegion': must be one of us-east-1, us-west-2, eu-west-1, ap-northeast-1");
   });
 
   it('rejects a non-string value', () => {

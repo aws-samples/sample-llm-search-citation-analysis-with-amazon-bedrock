@@ -1,130 +1,71 @@
-import { Link } from 'react-router-dom';
+import {
+  Link, useNavigate
+} from 'react-router-dom';
+import {
+  ArrowRightIcon, Button, PlusIcon
+} from '../ui';
 import { CustomReportsPanel } from './customReport/CustomReportsPanel';
-
-interface ReportEntry {
-  readonly title: string;
-  readonly description: string;
-  readonly audience: string;
-  readonly path: string;
-}
-
-/**
- * The reports, ordered to match the marketing decision each one supports
- * (top-down strategic to bottom-up operational).
- */
-const REPORT_CATALOG: readonly ReportEntry[] = [
-  {
-    title: 'Executive Summary',
-    description:
-      'One-page rollup of overall visibility, the trend over time, top wins, top gaps, and the next three actions to take. The report a marketing lead would print before a quarterly business review.',
-    audience: 'CMO, VP Marketing',
-    path: '/reports/executive-summary',
-  },
-  {
-    title: 'Brand Visibility Report',
-    description:
-      'Mention rate, share of voice, visibility score, citation rate and every other KPI with its change and trend, the brand leaderboard and the KPIs per day, scoped to a keyword, a keyword group or the full keyword set. Highlights regressions in red.',
-    audience: 'Marketing lead',
-    path: '/reports/visibility',
-  },
-  {
-    title: 'Competitor Benchmark',
-    description:
-      'Your share of voice and rank against every brand the AI answers name: the share-of-voice donut, the leading brands over time by share of voice, mention rate or visibility score, and the full leaderboard with every KPI per brand.',
-    audience: 'Brand manager, competitive intelligence',
-    path: '/reports/benchmark',
-  },
-  {
-    title: 'AI Engines',
-    description:
-      'How each AI engine treats your brand: which engines name you, mention rate, visibility score and citation rate per engine side by side, every KPI per engine, and how each engine words its mentions.',
-    audience: 'AI search specialist',
-    path: '/reports/engines',
-  },
-  {
-    title: 'Sources',
-    description:
-      'Which websites the AI answers cite: your citations, citation rate and citation share, the most cited domains with your own highlighted, and every cited domain with its engines and keywords.',
-    audience: 'SEO and digital PR',
-    path: '/reports/sources',
-  },
-  {
-    title: 'Sentiment',
-    description:
-      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine with the answers behind every count, and the net sentiment of every brand named.',
-    audience: 'Brand / communications lead',
-    path: '/reports/sentiment',
-  },
-  {
-    title: 'SEO vs GEO',
-    description:
-      'Your Google organic position against how often the AI answers name you, per keyword of a market or keyword group: keywords per quadrant (both strong, AI gap, SEO gap, both weak), the scatter of position against AI mention rate sized by search volume, and every keyword with its AI Overview and citation overlap.',
-    audience: 'SEO and AI search lead',
-    path: '/reports/seo-geo',
-  },
-  {
-    title: 'Competitor Gap Report',
-    description:
-      'For each tracked competitor: keywords where they outrank you, citation sources unique to them, and a prioritized outreach list ranked by potential visibility lift.',
-    audience: 'Content / PR strategist',
-    path: '/reports/competitor',
-  },
-  {
-    title: 'Content Action Plan',
-    description:
-      'Prioritized citation gaps paired with AI-generated content briefs from Content Studio. Closes the loop from "we have a gap" to "here is the asset to fill it".',
-    audience: 'Content strategist',
-    path: '/reports/content-action-plan',
-  },
-  {
-    title: 'Keyword Deep Dive',
-    description:
-      'Single-keyword drill-down: every KPI with its change, KPI history, persona impact, provider differences, top sources, sentiment examples, recommended actions, and an LLM-generated narrative explaining the current ranking.',
-    audience: 'SEO / AI search lead',
-    path: '/reports/keyword',
-  },
-];
-
-export function ReportsLandingView() {
-  return (
-    <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
-        <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
-          Reports
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 leading-relaxed max-w-3xl">
-          Print-ready, narrative views of the data already on your dashboards.
-          Each report is scoped to one decision and one audience. Use the Save
-          as PDF button on any report to export it for sharing.
-        </p>
-      </div>
-
-      <CustomReportsPanel />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {REPORT_CATALOG.map((report) => (
-          <ReportCard key={report.title} report={report} />
-        ))}
-      </div>
-    </div>
-  );
-}
+import { NEW_CUSTOM_REPORT_PATH } from './customReport/customReportRoute';
+import {
+  REPORT_GROUPS, type ReportEntry, type ReportGroup
+} from './reportCatalog';
 
 // Stryker disable next-line StringLiteral: Tailwind-only card styling
-const CARD_CLASSES = 'block p-5 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-colors';
+const CARD_CLASSES = 'group flex h-full flex-col rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-gray-400 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-gray-500';
 
 function ReportCard({ report }: { readonly report: ReportEntry }) {
   return (
     <Link to={report.path} className={CARD_CLASSES}>
-      <h3 className="mb-2 text-base font-semibold text-gray-900 dark:text-white">
-        {report.title}
-      </h3>
-      <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-        {report.description}
-      </p>
-      <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
-        For: {report.audience}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="text-sm font-semibold text-gray-900 dark:text-white">{report.title}</h4>
+        <ArrowRightIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-700 dark:group-hover:text-gray-200" />
+      </div>
+      <p className="mt-1 flex-1 text-sm leading-snug text-gray-600 dark:text-gray-300">{report.question}</p>
+      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{`For ${report.audience}`}</p>
     </Link>
+  );
+}
+
+function ReportGroupSection({ group }: { readonly group: ReportGroup }) {
+  const headingId = `report-group-${group.id}`;
+  return (
+    <section aria-labelledby={headingId} className="grid grid-cols-1 gap-3 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-6">
+      <h3 id={headingId} className="text-sm font-semibold text-gray-900 dark:text-white lg:pt-4">{group.question}</h3>
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {group.reports.map((report) => (
+          <li key={report.path}><ReportCard report={report} /></li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * The Reports page: the built-in reports under the question each answers,
+ * then the saved custom reports, with "New custom report" as the one primary
+ * action.
+ */
+export function ReportsLandingView() {
+  const navigate = useNavigate();
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white sm:text-xl">Reports</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Pick the question you need answered. Every report can be printed or saved as a PDF.
+          </p>
+        </div>
+        <Button className="shrink-0" leadingIcon={<PlusIcon className="h-4 w-4" />} onClick={() => navigate(NEW_CUSTOM_REPORT_PATH)}>
+          New custom report
+        </Button>
+      </div>
+
+      <div className="space-y-6 divide-y divide-gray-200 dark:divide-gray-700 [&>*+*]:pt-6">
+        {REPORT_GROUPS.map((group) => <ReportGroupSection key={group.id} group={group} />)}
+      </div>
+
+      <CustomReportsPanel />
+    </div>
   );
 }

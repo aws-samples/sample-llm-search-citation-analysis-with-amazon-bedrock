@@ -55,7 +55,7 @@ function CoverageLine({ response }: { readonly response: ScopedResponseFields & 
   const { coverage } = response;
   if (coverage.complete) return <CompleteLine response={response} />;
   return (
-    <p role="note" className="text-sm px-3 py-2 rounded-lg border bg-yellow-50 text-yellow-800 border-yellow-200">
+    <p role="note" className="text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-amber-800">
       {`${coverageSentence(coverage.keywords_analyzed, coverage.keywords_total)}. `}
       The request ran out of time before it read the rest, so their figures are left out. Reload to try again.
     </p>

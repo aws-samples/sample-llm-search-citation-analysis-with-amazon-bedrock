@@ -85,7 +85,7 @@ export const KeywordResultsTable = ({
           <select
             value={filterIntent}
             onChange={(event) => setFilterIntent(event.target.value)}
-            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden flex-1 sm:flex-none"
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-gray-900 flex-1 sm:flex-none"
           >
             <option value="all">All Intents</option>
             <option value="informational">Informational</option>
@@ -101,7 +101,7 @@ export const KeywordResultsTable = ({
                 setSortBy(value);
               }
             }}
-            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden flex-1 sm:flex-none"
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-gray-900 flex-1 sm:flex-none"
           >
             <option value="relevance">Sort by Relevance</option>
             <option value="competition">Sort by Competition</option>

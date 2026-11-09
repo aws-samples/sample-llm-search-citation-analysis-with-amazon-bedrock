@@ -16,6 +16,7 @@ export function CrossKeywordHeadlineSection({
     title: 'Headline',
     loading,
     loadingMessage: 'Loading aggregate trends…',
+    loadingShape: 'stats',
     error,
     value: trends !== null && trends.keywords_with_data > 0 ? trends : null,
     emptyMessage: 'No aggregate trend data yet. Run an analysis to populate.',

@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from shared.brand_visibility import classify_brand, tracked_brand_names
+from shared.config import LLM_PROVIDERS, provider_display_name
 from shared.constants import priority_rank
 from shared.scope_order import UNRANKED, brand_rank, keyword_order
 from shared.search_results import latest_run
@@ -237,14 +238,16 @@ def _primary_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any
 
 
 def _provider_gap_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
-    missing = sorted(visibility.all_providers - visibility.fp_providers)
+    # Answer engines only: web-search providers return links, not answers, so they cannot "miss" the brand.
+    missing = sorted((visibility.all_providers - visibility.fp_providers) & set(LLM_PROVIDERS))
     if not visibility.fp_found or not missing:
         return None
+    missing_names = ', '.join(provider_display_name(provider) for provider in missing)
     return {
         'type': 'provider_gap',
         'priority': 'medium',
-        'title': f'Target {", ".join(missing).title()} for "{keyword}"',
-        'description': f"Your brand appears on some AI engines but not on {', '.join(missing)}.",
+        'title': f'Target {missing_names} for "{keyword}"',
+        'description': f'Your brand appears on some AI engines but not on {missing_names}.',
         'keyword': keyword,
         'source': 'provider_analysis',
         'providers_missing': missing,

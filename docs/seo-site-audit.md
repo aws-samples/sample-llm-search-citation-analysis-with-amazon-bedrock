@@ -1,6 +1,6 @@
 # Site audit
 
-The site audit crawls the brand's own website and reports technical SEO issues and **AI readiness**: whether
+The site audit (SEO › Site Audit, `/seo/site-audit`) crawls the brand's own website and reports technical SEO issues and **AI readiness**: whether
 answer engines (ChatGPT search, Claude, Perplexity, Google AI Overviews, Copilot) can reach, read and quote it.
 
 ## Cost
@@ -11,16 +11,16 @@ minutes of Lambda time.
 
 ## Who can do what
 
-- **Admins** start and cancel audits (Seo › Site audit). One audit runs at a time.
+- **Admins** start and cancel audits (SEO › Site Audit). One audit runs at a time.
 - **Every signed-in user** reads the audits, their issues and the affected pages, and exports a finished or
   cancelled audit (Excel or CSV, built on the server; the file appears on the Exports page): the issue types, the
   affected pages of every issue type in one sheet, and the AI crawler access read from robots.txt.
 
 ## What is crawled
 
-- The start URL must be on one of the brand's own domains (Settings › Brand Tracking › owned domains) or a
+- The start URL must be on one of the brand's own domains (Settings › Brand tracking › owned domains) or a
   subdomain. The start form offers exactly those domains, the first one preselected; without one it links to
-  Settings › Brand Tracking instead. An apex domain that redirects to `www` is crawled on `www`.
+  Settings › Brand tracking instead. An apex domain that redirects to `www` is crawled on `www`.
 - The crawler identifies itself as `CitationAnalysisAudit/1.0`, obeys robots.txt (its own
   `User-agent: CitationAnalysisAudit` group if there is one, else `*`) and sends **one request per second**. When
   the site answers 429 it slows down (Retry-After is honoured); after more than three 429s in a row, or 30

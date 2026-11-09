@@ -6,10 +6,13 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  MemoryRouter, Routes, Route 
+  MemoryRouter, Routes, Route
 } from 'react-router-dom';
 import { KeywordDeepDiveReport } from './KeywordDeepDiveReport';
 import { settledData } from './KeywordDeepDiveReport-fixtures';
+import { expectRunAnalysisLink } from '../../ui/NoDataYet-fixtures';
+import { buildVisibility } from '../layout/reportPayload-fixtures';
+import { CurrentLocation } from '../scopeReport/scopeReport-fixtures';
 import {
   definitionTerms, VISIBILITY_DEFINITION_TERMS, sectionTable, sectionTitles, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
@@ -34,7 +37,12 @@ const KEYWORDS: Keyword[] = ['best running shoes', 'best hiking boots'].map((key
   created_at: '2026-01-01T00:00:00Z',
 }));
 
-const REPORT = <KeywordDeepDiveReport keywords={KEYWORDS} />;
+const REPORT = (
+  <>
+    <KeywordDeepDiveReport keywords={KEYWORDS} />
+    <CurrentLocation />
+  </>
+);
 
 /** The report opened at `path`, the "best running shoes" deep dive unless given. */
 function renderDeepDive(path = '/reports/keyword/best%20running%20shoes') {
@@ -46,6 +54,15 @@ function renderDeepDive(path = '/reports/keyword/best%20running%20shoes') {
       </Routes>
     </MemoryRouter>,
   );
+}
+
+/** The deep dive of a keyword no engine answered yet. */
+function renderUnansweredDeepDive() {
+  mockUseKeywordDeepDive.mockReturnValue({
+    ...settledData(),
+    visibility: buildVisibility({ keywords_with_data: 0 }),
+  });
+  return renderDeepDive();
 }
 
 describe('KeywordDeepDiveReport', () => {
@@ -129,6 +146,41 @@ describe('KeywordDeepDiveReport', () => {
     const optionValues = Array.from(select.options).map((o) => o.value);
     expect(optionValues).toContain('best running shoes');
     expect(optionValues).toContain('best hiking boots');
+  });
+
+  it('opens the first keyword with the page query kept, so a print link still prints', () => {
+    renderDeepDive('/reports/keyword?print=1');
+
+    expect(screen.getByLabelText('Current location').textContent).toBe('/reports/keyword/best%20running%20shoes?print=1');
+  });
+
+  it('shows one notice instead of the sections for a keyword no engine answered', () => {
+    renderUnansweredDeepDive();
+
+    expect(sectionTitles()).toStrictEqual(['No AI answers yet', 'How these KPIs are measured']);
+  });
+
+  it('shows the notice when brand mentions report no run for the keyword', () => {
+    mockUseKeywordDeepDive.mockReturnValue({
+      ...settledData(),
+      mentionsNoData: true,
+    });
+    renderDeepDive();
+
+    expect(sectionTitles()).toStrictEqual(['No AI answers yet', 'How these KPIs are measured']);
+  });
+
+  it('links the no-answers notice to Run Analysis', () => {
+    renderUnansweredDeepDive();
+
+    expectRunAnalysisLink();
+  });
+
+  it('lists the keywords in the selector alphabetically', () => {
+    renderDeepDive();
+
+    const select = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toStrictEqual(['best hiking boots', 'best running shoes']);
   });
 
   it('navigates to a new keyword when the selector changes', async () => {

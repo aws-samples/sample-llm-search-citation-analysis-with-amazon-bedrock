@@ -82,7 +82,7 @@ export function SeoGeoTableSection({
   state, exportScope
 }: SeoGeoSectionProps) {
   return (
-    <SeoGeoSectionFrame title={TITLE} subtitle="Largest search volume first; keywords without metrics last." state={state}>
+    <SeoGeoSectionFrame title={TITLE} loadingShape="table" subtitle="Largest search volume first; keywords without metrics last." state={state}>
       {(response) => (
         <>
           <SeoGeoExportToolbar scope={exportScope} table="Keywords" />

@@ -9,6 +9,7 @@ import {
 import { SeeAllLink } from '../../../ui/SeeAllLink';
 import { scopeReportPath } from '../../scopeReport/scopeReportRoute';
 import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import { providerName } from '../../../../constants/providers';
 
 interface Props extends SectionFetchState {readonly mentions: BrandMentionsResponse | null;}
 
@@ -127,12 +128,12 @@ function ExampleCard({ example }: { readonly example: SentimentExample }) {
 
   return (
     <div className={`border ${accent} rounded-lg p-4`}>
-      <div className="flex items-center gap-2 mb-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 mb-2 text-xs">
         <span className="font-semibold text-gray-900 dark:text-white">
           {example.brand}
         </span>
         <span className="text-gray-500 dark:text-gray-400">
-          on {example.provider}
+          on {providerName(example.provider)}
         </span>
         <span className="px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wide text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700">
           {example.sentiment}
@@ -162,7 +163,7 @@ function accentClassFor(sentiment: string): string {
     return 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20';
   }
   if (sentiment === 'positive') {
-    return 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20';
+    return 'border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950/20';
   }
   return 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800';
 }

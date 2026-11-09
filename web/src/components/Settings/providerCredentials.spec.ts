@@ -52,4 +52,13 @@ describe('groupProviders', () => {
       ['dataforseo'],
     ]);
   });
+
+  it('separates web-search providers from the answer engines', () => {
+    const groups = groupProviders([buildProviderConfig({
+      id: 'brave',
+      type: 'search'
+    }), buildProviderConfig()]);
+
+    expect([groups.engines.map((row) => row.id), groups.search.map((row) => row.id)]).toStrictEqual([['claude'], ['brave']]);
+  });
 });

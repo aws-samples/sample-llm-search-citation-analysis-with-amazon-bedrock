@@ -55,7 +55,7 @@ function LabelledField({
         'aria-describedby': describedBy === '' ? undefined : describedBy,
       })}
       {(hint !== undefined || counter !== undefined) && (
-        <div className="mt-1 flex justify-between gap-2 text-xs text-gray-400">
+        <div className="mt-1 flex justify-between gap-2 text-xs text-gray-500">
           {hint !== undefined && <p id={hintId}>{hint}</p>}
           {counter !== undefined && <span className="ml-auto tabular-nums">{counter}</span>}
         </div>
@@ -288,7 +288,7 @@ export function ContentBlockEditor({
         onEdit={edit}
         onPick={onChange}
       />
-      <p id={messageId} aria-live="polite" className="text-xs text-red-600 empty:hidden">{issue?.message}</p>
+      <p id={messageId} aria-live="polite" className="text-xs text-red-600 dark:text-red-400 empty:hidden">{issue?.message}</p>
     </div>
   );
 }

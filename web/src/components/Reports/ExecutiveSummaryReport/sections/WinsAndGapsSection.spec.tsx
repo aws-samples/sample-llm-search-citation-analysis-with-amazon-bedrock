@@ -12,7 +12,7 @@ import {
   moverColumn, moverKeywords, sectionTitled
 } from '../../layout/reportQueries-fixtures';
 import { loadedOverview } from './reportsOverview-fixtures';
-import { sectionPlaceholderCases } from '../../layout/sectionGate-fixtures';
+import { itRendersSectionPlaceholders } from '../../layout/sectionPlaceholders-fixtures';
 
 function renderWinsAndGaps(overrides: Partial<ReportsOverviewResponse>): void {
   render(<WinsAndGapsSection {...loadedOverview(overrides)} />);
@@ -69,10 +69,5 @@ describe('WinsAndGapsSection — placeholder states', () => {
     expectRendersNothing(<WinsAndGapsSection data={null} loading={false} error={null} />);
   });
 
-  it.each(sectionPlaceholderCases(/Loading movers/i))('renders the $name', ({
-    state, text
-  }) => {
-    render(<WinsAndGapsSection data={null} {...state} />);
-    expect(screen.getByText(text)).toBeInTheDocument();
-  });
+  itRendersSectionPlaceholders(WinsAndGapsSection, /Loading movers/i);
 });

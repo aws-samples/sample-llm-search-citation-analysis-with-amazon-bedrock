@@ -47,9 +47,9 @@ describe('SentimentExampleCard', () => {
   });
 
   it.each([
-    ['positive', 'Positive', 'bg-emerald-50', 'border-emerald-300'],
+    ['positive', 'Positive', 'bg-gray-50', 'border-gray-300'],
     ['neutral', 'Neutral', 'bg-gray-100', 'border-gray-300'],
-    ['mixed', 'Mixed', 'bg-amber-50', 'border-amber-300'],
+    ['mixed', 'Mixed', 'bg-gray-50', 'border-gray-300'],
     ['negative', 'Negative', 'bg-red-50', 'border-red-300'],
   ] as const)('labels a %s example "%s" on a %s pill and borders its quote with %s', (sentiment, label, pill, quote) => {
     renderExampleCard(buildSentimentExample({ sentiment }));

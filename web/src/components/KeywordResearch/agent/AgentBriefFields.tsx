@@ -3,7 +3,7 @@ import { Spinner } from '../../ui/Spinner';
 import type { MarketOption } from './agentBrief';
 
 /** Shared input styling for every control of the research-agent brief. */
-export const BRIEF_INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
+export const BRIEF_INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-gray-900 disabled:opacity-50';
 
 interface MarketSelectProps {
   readonly id: string;
@@ -82,15 +82,35 @@ export function TemplatePicker({
             </optgroup>
           )}
         </select>
-        {loading && <Spinner size="sm" className="text-gray-400" />}
+        {loading && <Spinner size="sm" className="text-gray-500" />}
       </div>
       {description && <p className="mt-1 text-xs text-gray-500">{description}</p>}
       {promptDirty && (
         <p className="mt-1 text-xs text-amber-700">
           {'Using your edited instructions instead of the template\u2019s. '}
-          <button type="button" onClick={onResetPrompt} className="underline hover:text-amber-900">Reset to template</button>
+          <button type="button" onClick={onResetPrompt} className="underline hover:text-amber-900 dark:hover:text-amber-200">Reset to template</button>
         </p>
       )}
     </div>
+  );
+}
+
+interface MoreOptionsSummaryProps {
+  readonly targetCount: number;
+  readonly trackingCount: string;
+  readonly maxRounds: number;
+  readonly grouped: boolean;
+}
+
+/** The "More options" toggle of the brief, with the values the run will use while the options are collapsed. */
+export function MoreOptionsSummary({
+  targetCount, trackingCount, maxRounds, grouped
+}: MoreOptionsSummaryProps) {
+  const rounds = maxRounds === 1 ? '1 round' : `up to ${maxRounds} rounds`;
+  return (
+    <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-gray-900 rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500">
+      More options
+      <span className="font-normal text-gray-500">{` · ${targetCount} keywords, ${trackingCount} tracked, ${rounds}${grouped ? ', added to a group' : ''}`}</span>
+    </summary>
   );
 }

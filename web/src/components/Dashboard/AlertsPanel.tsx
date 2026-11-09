@@ -99,7 +99,7 @@ export function AlertsPanel() {
             type="button"
             onClick={() => { setShowAll(!showAll); }}
             aria-expanded={showAll}
-            className="text-sm font-medium text-blue-600 hover:text-blue-800"
+            className="rounded-sm text-sm font-medium text-blue-700 hover:text-blue-800 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-900 dark:focus-visible:ring-gray-100"
           >
             {showAll ? `Show the newest ${DASHBOARD_ALERT_PREVIEW}` : 'See all alerts'}
           </button>

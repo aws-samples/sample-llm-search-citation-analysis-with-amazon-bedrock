@@ -15,13 +15,13 @@ function renderCitationFilters(overrides: Parameters<typeof buildProps>[0] = {})
 }
 
 describe('CitationFilters', () => {
-  it('calls setSearchQuery and resets page when search input changes', () => {
+  it('calls setSearchQuery and restarts the list when search input changes', () => {
     const props = renderCitationFilters();
 
     fireEvent.change(screen.getByPlaceholderText('Filter by URL...'), { target: { value: 'example.com' } });
 
     expect(props.setSearchQuery).toHaveBeenCalledWith('example.com');
-    expect(props.setCurrentPage).toHaveBeenCalledWith(1);
+    expect(props.onFilterChange).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('calls setMinCitations with parsed number when min citations input changes', () => {
@@ -30,7 +30,7 @@ describe('CitationFilters', () => {
     fireEvent.change(screen.getByPlaceholderText('Any'), { target: { value: '5' } });
 
     expect(props.setMinCitations).toHaveBeenCalledWith(5);
-    expect(props.setCurrentPage).toHaveBeenCalledWith(1);
+    expect(props.onFilterChange).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('calls setMinCitations with empty string when input cleared', () => {
@@ -41,17 +41,23 @@ describe('CitationFilters', () => {
     expect(props.setMinCitations).toHaveBeenCalledWith('');
   });
 
-  it('clears all filters and resets page when Clear button clicked', () => {
+  it('clears all filters and restarts the list when Clear button clicked', () => {
     const props = renderCitationFilters({
       searchQuery: 'test',
       minCitations: 3 
     });
 
-    fireEvent.click(screen.getByText('Clear'));
+    fireEvent.click(screen.getByText('Clear filters'));
 
     expect(props.setSearchQuery).toHaveBeenCalledWith('');
     expect(props.setMinCitations).toHaveBeenCalledWith('');
-    expect(props.setCurrentPage).toHaveBeenCalledWith(1);
+    expect(props.onFilterChange).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('offers no Clear filters button while no filter is set', () => {
+    renderCitationFilters();
+
+    expect(screen.queryByText('Clear filters')).not.toBeInTheDocument();
   });
 
   it('renders the export button it is given', () => {
@@ -78,13 +84,13 @@ describe('CitationFilters', () => {
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toStrictEqual(['All types', 'Pages', 'Videos']);
   });
 
-  it('calls setContentType and resets page when the Type filter changes', () => {
+  it('calls setContentType and restarts the list when the Type filter changes', () => {
     const props = renderCitationFilters();
 
     fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'video' } });
 
     expect(props.setContentType).toHaveBeenCalledWith('video');
-    expect(props.setCurrentPage).toHaveBeenCalledWith(1);
+    expect(props.onFilterChange).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('displays the current Type filter value', () => {
@@ -96,7 +102,7 @@ describe('CitationFilters', () => {
   it('resets the Type filter to all types when Clear button clicked', () => {
     const props = renderCitationFilters({ contentType: 'video' });
 
-    fireEvent.click(screen.getByText('Clear'));
+    fireEvent.click(screen.getByText('Clear filters'));
 
     expect(props.setContentType).toHaveBeenCalledWith('all');
   });

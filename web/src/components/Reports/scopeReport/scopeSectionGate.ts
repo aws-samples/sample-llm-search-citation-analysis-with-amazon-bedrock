@@ -4,6 +4,7 @@ import type {
 import {
   gateSection, type SectionGate
 } from '../layout/sectionGate';
+import type { SectionShape } from '../layout/SectionSkeleton';
 import type { ScopeReportData } from './useScopeReportData';
 
 /** What a section of a scope report receives. */
@@ -25,7 +26,7 @@ export function noTrendMessage(days: number): string {
  * Gates a section on the latest runs (`/visibility`): loading, then error,
  * then empty while no keyword of the scope has an answered run.
  */
-export function gateLatestRuns(report: ScopeReportData, title: string): SectionGate<VisibilityResponse> {
+export function gateLatestRuns(report: ScopeReportData, title: string, loadingShape: SectionShape = 'table'): SectionGate<VisibilityResponse> {
   const {
     data, loading, error, computing
   } = report.visibility;
@@ -34,6 +35,7 @@ export function gateLatestRuns(report: ScopeReportData, title: string): SectionG
     loading,
     computing,
     loadingMessage: LATEST_RUNS_LOADING,
+    loadingShape,
     error,
     value: data !== null && data.keywords_with_data > 0 ? data : null,
     emptyMessage: NO_ANSWERED_RUN,
@@ -50,6 +52,7 @@ export function gateTrend(report: ScopeReportData, title: string): SectionGate<H
     loading,
     computing,
     loadingMessage: TREND_LOADING,
+    loadingShape: 'chart',
     error,
     value: data !== null && data.trend_data.length > 0 ? data : null,
     emptyMessage: noTrendMessage(report.days),

@@ -87,7 +87,7 @@ describe('CitationRow', () => {
   it('shows expanded content when isExpanded is true', () => {
     renderInTable(<CitationRow {...defaultProps} isExpanded={true} />);
     
-    expect(screen.getByText('Ranking for 1 keyword')).toBeInTheDocument();
+    expect(screen.getByText('Cited for 1 keyword')).toBeInTheDocument();
     expect(screen.getByText('test keyword')).toBeInTheDocument();
   });
 

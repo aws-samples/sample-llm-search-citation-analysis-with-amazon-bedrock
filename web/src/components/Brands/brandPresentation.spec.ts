@@ -18,8 +18,8 @@ describe('classificationLabel', () => {
 
 describe('sentimentTextColor', () => {
   it.each([
-    ['positive', 'text-green-600'],
-    ['negative', 'text-red-600'],
+    ['positive', 'text-emerald-700'],
+    ['negative', 'text-red-700'],
     ['neutral', 'text-gray-600'],
     [undefined, 'text-gray-600'],
   ])('colours the %j sentiment with %j', (sentiment, colour) => {

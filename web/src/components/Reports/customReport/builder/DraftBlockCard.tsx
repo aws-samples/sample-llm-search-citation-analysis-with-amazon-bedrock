@@ -49,7 +49,7 @@ function CardHeading({ type }: { readonly type: string }) {
   const category = entry === undefined || entry.category === 'content' ? null : categoryLabel(entry.category);
   return (
     <div className="min-w-0">
-      {category !== null && <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">{category}</p>}
+      {category !== null && <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{category}</p>}
       <p className="text-sm font-medium text-gray-900">{entry?.label ?? blockName(type)}</p>
     </div>
   );
@@ -81,7 +81,7 @@ export function DraftBlockCard({
           title="Drag to move"
           className="flex min-w-0 flex-1 cursor-grab items-start gap-2"
         >
-          <span aria-hidden="true" className="mt-0.5 select-none text-xs tabular-nums text-gray-400">{position + 1}</span>
+          <span aria-hidden="true" className="mt-0.5 select-none text-xs tabular-nums text-gray-500">{position + 1}</span>
           <CardHeading type={block.type} />
         </div>
         <Button variant="iconOnly" size="sm" aria-label={`Move ${name} up`} disabled={position === 0} onClick={() => onShift(key, -1)}>

@@ -63,7 +63,7 @@ const apiStack = new CitationAnalysisApiStack(app, 'CitationAnalysisApiStack', {
 apiStack.node.addDependency(stack);
 apiStack.node.addDependency(eventsStack);
 
-// Amazon Bedrock Web Search only exists in three regions, so its gateway has its
+// Amazon Bedrock Web Search only exists in some regions, so its gateway has its
 // own stack in a fixed region. The main stack reaches it through the SSM
 // parameter name and region constants only: no dependency, no cross-stack reference.
 const webSearchStack = new CitationAnalysisWebSearchStack(app, 'CitationAnalysisWebSearchStack', {

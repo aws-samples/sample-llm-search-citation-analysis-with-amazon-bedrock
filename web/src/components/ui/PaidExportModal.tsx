@@ -94,7 +94,7 @@ function PriceLine({
   readonly pricing: SeoExportPricing;
 }) {
   if (rows === null) {
-    return <p id={id} className="text-xs text-red-600 mt-1">Enter a number of rows from 1 to {integerText(maxRows)}.</p>;
+    return <p id={id} className="text-xs text-red-600 dark:text-red-400 mt-1">Enter a number of rows from 1 to {integerText(maxRows)}.</p>;
   }
   const plan = exportPlan(rows, pricing);
   const requests = `${plan.requests} DataForSEO ${plan.requests === 1 ? 'request' : 'requests'}`;
@@ -211,7 +211,7 @@ function PaidExportDialog({
             disabled={busy} aria-describedby={`${inputId}-hint ${inputId}-price`}
             onChange={(event) => changeRows(event.target.value)}
             className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900" />
-          <p id={`${inputId}-hint`} className="text-xs text-gray-400 mt-1">{rowsHint(maxRows, totalCount)}</p>
+          <p id={`${inputId}-hint`} className="text-xs text-gray-500 mt-1">{rowsHint(maxRows, totalCount)}</p>
           <PriceLine id={`${inputId}-price`} rows={rows} maxRows={maxRows} pricing={pricing} />
           <p className="text-xs text-gray-500 mt-1">{`Exporting the same rows again within ${pricing.cache_hours} hours is free.`}</p>
         </div>
@@ -220,7 +220,7 @@ function PaidExportDialog({
           ...params,
           ...screenPage,
         })}
-        className="text-sm font-medium text-gray-700 underline hover:text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed">
+        className="text-sm font-medium text-gray-700 underline hover:text-gray-900 dark:hover:text-white disabled:opacity-50 disabled:cursor-not-allowed">
           Export the {integerText(onScreenRows)} rows on screen (free)
         </button>
         {status.kind === 'started' && <output className="block text-sm text-gray-700">{STARTED_MESSAGE}</output>}

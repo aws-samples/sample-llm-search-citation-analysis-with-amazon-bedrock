@@ -40,7 +40,7 @@ export function CitationVersionsNote({ response }: { readonly response: unknown 
     version, answers 
   }) => `${COUNT.format(answers)} answers ${ruleLabel(version)}`);
   return (
-    <p role="note" className="text-sm px-3 py-2 rounded-lg border bg-yellow-50 text-yellow-800 border-yellow-200">
+    <p role="note" className="text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-amber-800">
       {`The citation figures here mix two definitions: ${parts.join(' and ')}. `}
       Answers stored before 2.43.0 counted every source an engine returned; later ones count only the sources the
       answer cites. Compare citation figures within one rule.

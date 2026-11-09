@@ -14,8 +14,13 @@ export interface S3BrowseResponse {
   files: S3Item[];
   total_folders: number;
   total_files: number;
-  /** Continues a folder of more than one S3 page (1,000 entries); `null` on the last page. */
+  /** Continues a folder of more than one page (1,000 entries, newest first); `null` on the last page. */
   next_token?: string | null;
+  /** Folders and files in the whole folder, not just this page (as far as it was read, see `truncated`). */
+  folder_count?: number;
+  file_count?: number;
+  /** The folder was too big to read in full, so its newest entries may be missing from the listing. */
+  truncated?: boolean;
 }
 
 export interface RawResponseDocument {

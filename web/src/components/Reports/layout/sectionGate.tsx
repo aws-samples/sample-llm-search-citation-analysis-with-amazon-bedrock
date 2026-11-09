@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
 import type { ComputingResponse } from '../../../types/domain/scopeCoverage';
+import type { SectionShape } from './SectionSkeleton';
 
 /** Whether the fetch a report section renders from is still in flight, or failed. */
 export interface SectionFetchState {
@@ -20,6 +21,8 @@ interface PendingSectionOptions extends SectionFetchState {
   /** Section heading, kept visible in every placeholder state. */
   readonly title: string;
   readonly loadingMessage: string;
+  /** What the section will show (tiles, a chart, a table), so its loading skeleton takes that shape. */
+  readonly loadingShape?: SectionShape;
   /** Subtitle shown under the heading while loading, for sections that want one. */
   readonly loadingSubtitle?: string;
 }
@@ -35,6 +38,7 @@ export function pendingSectionPlaceholder({
   title,
   loading,
   loadingMessage,
+  loadingShape,
   loadingSubtitle,
   error,
   computing = null,
@@ -46,6 +50,7 @@ export function pendingSectionPlaceholder({
         subtitle={loadingSubtitle}
         variant="loading"
         message={computing === null ? loadingMessage : COMPUTING_SECTION_MESSAGE}
+        shape={loadingShape}
       />
     );
   }

@@ -3,7 +3,7 @@ import { isAggregatedBrand } from '../../api/brandMentionsDecoders';
 import type { ListRequest } from '../../api/scopedListPages';
 import { useScopedList } from '../../hooks/useScopedList';
 import type {
-  AggregatedBrand, BrandConfig, BrandMentionsResponse
+  AggregatedBrand, BrandMentionsResponse
 } from '../../types';
 import { ScopedListFooter } from '../ui/ScopedListFooter';
 import { BrandMentionsTable } from './BrandMentionsTable';
@@ -14,22 +14,27 @@ interface PagedBrandMentionsTableProps {
   readonly request: ListRequest | null;
   readonly keyword: string;
   readonly onBrandClick: (brand: AggregatedBrand) => void;
-  readonly config: BrandConfig | null;
 }
 
 /**
  * The Brands view's brand table over every brand of the scope (2.45.0 wave 5): the summary's
- * first 100, then "Load more brands" over `view=brands` until the last.
+ * first 100, then the next page over `view=brands` as the reader scrolls to the end (the
+ * "Load more brands" button stays for keyboards), until the last.
  */
 export function PagedBrandMentionsTable({
-  data, request, keyword, onBrandClick, config
+  data, request, keyword, onBrandClick
 }: PagedBrandMentionsTableProps) {
   const list = useScopedList(data, request, BRAND_MENTIONS_BRANDS_PAGING, isAggregatedBrand);
-  const brands = list.items.length === 0 ? data.aggregated.brands : [...list.items];
+  const brands = list.items.length === 0 ? data.aggregated.brands : list.items;
   return (
-    <div>
-      <BrandMentionsTable brands={brands} keyword={keyword} onBrandClick={onBrandClick} config={config} />
-      <ScopedListFooter list={list} noun="brands" />
-    </div>
+    <BrandMentionsTable
+      brands={brands}
+      totalBrands={list.total ?? undefined}
+      moreToLoad={list.loadMore !== undefined}
+      keyword={keyword}
+      singleKeyword={data.keyword !== null}
+      onBrandClick={onBrandClick}
+      footer={<ScopedListFooter list={list} noun="brands" autoLoad />}
+    />
   );
 }

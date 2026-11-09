@@ -88,11 +88,11 @@ describe('getResearchStatusClass', () => {
   });
 
   it('styles a completed run in emerald', () => {
-    expect(getResearchStatusClass('completed')).toBe('bg-emerald-100 text-emerald-700');
+    expect(getResearchStatusClass('completed')).toBe('bg-gray-100 text-emerald-700');
   });
 
   it('styles a partial run in amber', () => {
-    expect(getResearchStatusClass('partial')).toBe('bg-amber-100 text-amber-700');
+    expect(getResearchStatusClass('partial')).toBe('bg-gray-100 text-amber-700');
   });
 });
 

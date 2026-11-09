@@ -171,7 +171,7 @@ export function BacklinksFilterPanel({
           setDraft({});
           onApply({});
         }}>Clear</Button>
-        <span className={`text-xs ${used > limit ? 'text-red-600' : 'text-gray-500'}`}>
+        <span className={`text-xs ${used > limit ? 'text-red-600 dark:text-red-400' : 'text-gray-500'}`}>
           {used} of {limit} filter conditions used
         </span>
       </div>

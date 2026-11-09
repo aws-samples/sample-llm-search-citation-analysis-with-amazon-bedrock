@@ -10,8 +10,8 @@ interface SelfReflectionPanelProps {
 
 const PRIORITY_BADGE_CLASSES: Record<ContentRecommendation['priority'], string> = {
   high: 'bg-red-100 text-red-800',
-  medium: 'bg-yellow-100 text-yellow-800',
-  low: 'bg-green-100 text-green-800',
+  medium: 'bg-gray-100 text-amber-800',
+  low: 'bg-gray-100 text-emerald-800',
 };
 
 export function SelfReflectionPanel({
@@ -68,7 +68,7 @@ export function SelfReflectionPanel({
       )}
 
       {error && (
-        <p className="text-sm text-red-600 mt-2">{error}</p>
+        <p className="text-sm text-red-600 dark:text-red-400 mt-2">{error}</p>
       )}
 
       {data && (
@@ -109,7 +109,7 @@ export function SelfReflectionPanel({
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${PRIORITY_BADGE_CLASSES[rec.priority]}`}>
                         {rec.priority}
                       </span>
-                      <span className="text-xs text-gray-400">{rec.content_type}</span>
+                      <span className="text-xs text-gray-500">{rec.content_type}</span>
                     </div>
                     <p className="text-sm text-gray-600">{rec.description}</p>
                   </li>
@@ -119,7 +119,7 @@ export function SelfReflectionPanel({
           )}
 
           <div className="pt-2">
-            <a href="/content-studio" className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            <a href="/content-studio" className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium">
               View in Content Studio
             </a>
           </div>

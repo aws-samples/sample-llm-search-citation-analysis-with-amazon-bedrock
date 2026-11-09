@@ -15,10 +15,8 @@ import {
   buildKeywordScopePickerProps,
   buildSelectedCappedKeywordScopePickerProps,
   cappedScopeSelectedIds,
-  checkboxIdentity,
   clickLegacyPickerControl,
   clickScopedPickerControl,
-  inputIdentity,
   renderLegacyKeywordScopePicker,
   renderScopedKeywordScopePicker,
   scopePickerCorunaGroup,
@@ -27,6 +25,9 @@ import {
   sectionHeaderState,
   typeScopePickerSearch
 } from './KeywordScopePicker-fixtures';
+import {
+  fieldIdentity, valuedFieldIdentity
+} from '../../test/fieldIdentity';
 
 const coruna = scopePickerCorunaGroup;
 const marino = scopePickerMarinoGroup;
@@ -66,7 +67,7 @@ describe('KeywordScopePicker', () => {
 
     const search = screen.getByLabelText<HTMLInputElement>('Search keywords');
 
-    expect(inputIdentity(search)).toStrictEqual({
+    expect(fieldIdentity(search)).toStrictEqual({
       id: 'test-keyword-scope-search',
       labelFor: 'test-keyword-scope-search',
       name: 'test-keyword-scope-search',
@@ -78,7 +79,7 @@ describe('KeywordScopePicker', () => {
 
     const section = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Select all in Hotel Coruña' });
 
-    expect(checkboxIdentity(section)).toStrictEqual({
+    expect(valuedFieldIdentity(section)).toStrictEqual({
       id: 'test-keyword-scope-section-coruna',
       labelFor: 'test-keyword-scope-section-coruna',
       name: 'test-keyword-scope-section-ids',
@@ -91,7 +92,7 @@ describe('KeywordScopePicker', () => {
 
     const repeatedKeywords = screen.getAllByRole<HTMLInputElement>('checkbox', { name: 'galicia hotels' });
 
-    expect(repeatedKeywords.map(checkboxIdentity)).toStrictEqual([
+    expect(repeatedKeywords.map(valuedFieldIdentity)).toStrictEqual([
       {
         id: 'test-keyword-scope-section-coruna-keyword-k3',
         labelFor: 'test-keyword-scope-section-coruna-keyword-k3',
@@ -333,6 +334,13 @@ describe('KeywordScopePicker scoped branch', () => {
     renderScopedKeywordScopePicker(buildGroupScopePickerProps([], { allowedModes: ['groups', 'keywords'] }));
 
     expect(screen.queryByRole('radio', { name: 'All' })).not.toBeInTheDocument();
+  });
+
+  it('shows no mode control when only one mode is allowed', () => {
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { allowedModes: ['keywords'] }));
+
+    expect(screen.queryByRole('radiogroup', { name: 'Scope mode' })).not.toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search keywords' })).toBeInTheDocument();
   });
 
   it('renders no ID picker when all scope is authoritative', () => {

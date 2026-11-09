@@ -13,17 +13,17 @@ import type {
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import {
-  ConfirmModal, AlertModal 
+  ConfirmModal, AlertModal, Modal
 } from '../ui/Modal';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import {
   ScheduleHeader, ScheduleList 
 } from './ScheduleManagerComponents';
 import {
-  ScheduleForm, type ScheduleFormMode 
+  SCHEDULE_FORM_TITLE_ID, ScheduleForm, type ScheduleFormMode
 } from './ScheduleForm';
 import {
-  defaultScheduleFormData, formDataFromSchedule, toSchedulePayload, validateScheduleFormData 
+  defaultScheduleFormData, formDataFromSchedule, toSchedulePayload, validateScheduleFormData, withResolvedName
 } from './scheduleFormModel';
 import {
   kindOf, paidRunNotice
@@ -32,7 +32,6 @@ import { RankTrackerScheduleList } from './RankTrackerScheduleList';
 import {
   PaidScheduleConfirm, type PaidConfirmation
 } from './PaidScheduleConfirm';
-import { ConfigListExport } from '../ui/ConfigListExport';
 
 interface ScheduleManagerProps {
   schedules: Schedule[];
@@ -56,6 +55,7 @@ export const ScheduleManager = ({
   const [editor, setEditor] = useState<Editor | null>(null);
   const [formData, setFormData] = useState<ScheduleFormData>(defaultScheduleFormData);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Schedule | null>(null);
   const [paidConfirmation, setPaidConfirmation] = useState<PaidConfirmation | null>(null);
@@ -94,11 +94,13 @@ export const ScheduleManager = ({
 
   const openCreate = () => {
     setFormData(defaultScheduleFormData());
+    setFormError(null);
     setEditor({ mode: 'create' });
   };
 
   const openEdit = (schedule: Schedule) => {
     setFormData(formDataFromSchedule(schedule));
+    setFormError(null);
     setEditor({
       mode: 'edit',
       schedule 
@@ -106,29 +108,37 @@ export const ScheduleManager = ({
   };
 
   const closeEditor = () => setEditor(null);
+  // Escape reaches every open dialog: while the paid confirmation is on top, it closes only that one.
+  const dismissEditor = () => {
+    if (paidConfirmation === null) closeEditor();
+  };
 
   const refreshSchedules = async () => {
     setSchedules(await fetchSchedules());
   };
 
-  /** `confirmed`: the Admin said yes to the paid confirmation, which the API requires for a paid schedule. */
-  const persistSchedule = async (target: Editor, confirmed = false) => {
+  /**
+   * Saves `data` for `target`. `confirmed`: the Admin said yes to the paid
+   * confirmation, which the API requires for a paid schedule. `quiet` skips
+   * the success dialog (the row switch, whose new state is the feedback).
+   */
+  const persistSchedule = async (target: Editor, data: ScheduleFormData, confirmed = false, quiet = false) => {
     setSaving(true);
     try {
       const payload: SchedulePayload = confirmed
         ? {
-          ...toSchedulePayload(formData),
+          ...toSchedulePayload(data),
           confirm_paid: true,
         }
-        : toSchedulePayload(formData);
+        : toSchedulePayload(data);
       if (target.mode === 'create') {
         await createSchedule(payload);
         showAlert('Success', 'Schedule created successfully', 'success');
       } else {
         await updateSchedule(target.schedule.id, payload);
-        showAlert('Success', 'Schedule updated successfully', 'success');
+        if (!quiet) showAlert('Success', 'Schedule updated successfully', 'success');
       }
-      closeEditor();
+      if (!quiet) closeEditor();
       await refreshSchedules();
     } catch (err) {
       console.error('Error saving schedule:', err);
@@ -138,24 +148,39 @@ export const ScheduleManager = ({
     }
   };
 
-  const saveSchedule = () => {
-    if (editor === null) return;
-    const problem = validateScheduleFormData(formData);
-    if (problem !== null) {
-      showAlert('Check the form', problem, 'error');
-      return;
-    }
-    const notice = paidRunNotice(formData.kind);
-    if (notice === null || !formData.enabled) {
-      void persistSchedule(editor);
+  /** Saves now, or first asks when an enabled paid schedule would start spending. */
+  const saveWithConfirmation = (target: Editor, data: ScheduleFormData, quiet = false) => {
+    const notice = paidRunNotice(data.kind);
+    if (notice === null || !data.enabled) {
+      void persistSchedule(target, data, false, quiet);
       return;
     }
     setPaidConfirmation({
       title: 'Save a paid schedule?',
-      message: `"${formData.display_name.trim()}" runs on its own until it is disabled or deleted. ${notice} Continue?`,
+      message: `"${data.display_name.trim()}" runs on its own until it is disabled or deleted. ${notice} Continue?`,
       confirmText: 'Save',
-      action: () => persistSchedule(editor, true),
+      action: () => persistSchedule(target, data, true, quiet),
     });
+  };
+
+  const saveSchedule = () => {
+    if (editor === null) return;
+    // A blank name takes the generated one the field shows as its placeholder.
+    const data = withResolvedName(formData, groups);
+    const problem = validateScheduleFormData(data);
+    setFormError(problem);
+    if (problem === null) saveWithConfirmation(editor, data);
+  };
+
+  /** The row switch: the stored schedule saved with only `enabled` changed. */
+  const toggleEnabled = (schedule: Schedule, enabled: boolean) => {
+    saveWithConfirmation({
+      mode: 'edit',
+      schedule,
+    }, {
+      ...formDataFromSchedule(schedule),
+      enabled,
+    }, true);
   };
 
   const startRun = async (schedule: Schedule, confirmed = false) => {
@@ -210,6 +235,7 @@ export const ScheduleManager = ({
       ...previous,
       [field]: value 
     }));
+    setFormError(null);
   };
 
   const formMode: ScheduleFormMode = editor?.mode === 'edit' ? 'edit' : 'create';
@@ -219,10 +245,11 @@ export const ScheduleManager = ({
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
-      <ScheduleHeader showForm={editor !== null} onNew={openCreate} onCancel={closeEditor} isAdmin={isAdmin} adminLoading={adminLoading} />
-      <div className="flex justify-end px-6 pt-4"><ConfigListExport list="schedules" /></div>
+      <ScheduleHeader onNew={openCreate} isAdmin={isAdmin} adminLoading={adminLoading}
+        showNewButton={listLoaded && schedules.length > 0} />
 
-      {isAdmin && editor !== null && (
+      <Modal isOpen={isAdmin && editor !== null} onClose={dismissEditor} size="4xl" layout="flush"
+        labelledBy={SCHEDULE_FORM_TITLE_ID}>
         <ScheduleForm
           mode={formMode}
           formData={formData}
@@ -233,14 +260,17 @@ export const ScheduleManager = ({
           keywords={activeKeywords}
           groups={groups}
           legacyNotice={legacyNotice}
+          error={formError}
         />
-      )}
+      </Modal>
 
       <ScheduleList
         loading={!listLoaded}
         schedules={schedules}
         groups={groups}
+        onNew={openCreate}
         onEdit={openEdit}
+        onToggle={toggleEnabled}
         onRun={runNow}
         onDelete={setDeleteTarget}
         runningId={runningId}

@@ -26,6 +26,7 @@ export function SeoGeoQuadrantSection({ state }: SeoGeoSectionProps) {
   return (
     <SeoGeoSectionFrame
       title={TITLE}
+      loadingShape="stats"
       subtitle={({ rows }) => `${rows.length} keywords: where you stand on Google against how often the AI answers name you.`}
       state={state}
     >

@@ -1,7 +1,8 @@
 import {
-  useState, useEffect, useCallback, useId, useMemo
+  useState, useEffect, useCallback, useId, useMemo, type ReactNode
 } from 'react';
 import { useContentStudio } from '../../hooks/useContentStudio';
+import { ConfirmGenerateModal } from './ConfirmGenerateModal';
 import { ContentHistory } from './ContentHistory';
 import { ContentIdeasPanel } from './ContentIdeasPanel';
 import { useScopeSelection } from '../Insights/useScopeSelection';
@@ -10,7 +11,6 @@ import {
 } from '../ui/reportScope';
 import { useSelectedMarketId } from '../Markets/marketSelectionContext';
 import { GroupBriefForm } from './GroupBriefForm';
-import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
 import {
@@ -24,84 +24,10 @@ import type {
   Keyword,
 } from '../../types';
 import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
-import { OverlayDialog } from './OverlayDialog';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import {
-  BOLT_PATHS, LIGHTBULB_PATHS
-} from '../ui/iconPaths';
 
 type TabType = 'ideas' | 'brief' | 'history';
 
 interface ContentStudioViewProps { readonly keywords: Keyword[]; }
-
-interface ConfirmGenerateModalProps {
-  readonly idea: ContentIdea;
-  readonly onConfirm: (outputLanguage: string) => void;
-  readonly onCancel: () => void;
-}
-
-function ConfirmGenerateModal({
-  idea, onConfirm, onCancel
-}: ConfirmGenerateModalProps) {
-  const [outputLanguage, setOutputLanguage] = useState('English');
-
-  return (
-    <OverlayDialog onDismiss={onCancel} panelClassName="max-w-md w-full p-6">
-      <div className="flex items-start gap-4">
-        <div className="p-3 bg-orange-100 rounded-full">
-          <StrokeIcon className="w-6 h-6 text-orange-600" paths={LIGHTBULB_PATHS} />
-        </div>
-        <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900">Create Content</h3>
-          <p className="text-sm text-gray-600 mt-2">
-            AI will analyze competitor content and generate optimized content for:
-          </p>
-          <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-            <p className="font-medium text-gray-900">{idea.title}</p>
-            <p className="text-sm text-gray-500 mt-1">Keyword: {idea.keyword}</p>
-            {idea.competitor_urls && idea.competitor_urls.length > 0 && (
-              <p className="text-sm text-gray-500">{idea.competitor_urls.length} competitor sources will be analyzed</p>
-            )}
-          </div>
-          <div className="mt-3">
-            <label htmlFor="output-language" className="block text-sm font-medium text-gray-700 mb-1">
-              Output Language
-            </label>
-            <select
-              id="output-language"
-              value={outputLanguage}
-              onChange={e => setOutputLanguage(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
-            >
-              {GROUP_BRIEF_LANGUAGES.map(lang => (
-                <option key={lang} value={lang}>{lang}</option>
-              ))}
-            </select>
-          </div>
-          <p className="text-xs text-gray-500 mt-3">
-            This may take up to a minute. You&apos;ll be notified when it&apos;s ready.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex gap-3 mt-6">
-        <button
-          onClick={onCancel}
-          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => onConfirm(outputLanguage)}
-          className="flex-1 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
-        >
-          <StrokeIcon className="w-4 h-4" paths={BOLT_PATHS} />
-          Generate Content
-        </button>
-      </div>
-    </OverlayDialog>
-  );
-}
 
 interface TabsProps {
   activeTab: TabType;
@@ -117,6 +43,24 @@ interface TabsProps {
   panelId: string;
 }
 
+const DOT_TONES = {
+  error: ['bg-red-600', 'text-red-700'],
+  warning: ['bg-amber-500', 'text-amber-700'],
+} as const;
+
+/** A tab's status: a dot and a word in the status colour (design system §2.2), not a filled pill. */
+const StatusDot = ({
+  tone, children
+}: {
+  readonly tone: keyof typeof DOT_TONES;
+  readonly children: ReactNode;
+}) => (
+  <span className={`ml-2 inline-flex items-center gap-1.5 text-xs font-normal ${DOT_TONES[tone][1]}`}>
+    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${DOT_TONES[tone][0]}`} />
+    {children}
+  </span>
+);
+
 /** The Content Ideas badge, or its placeholder while the count is unknown, so the tabs after it stay put. */
 const HighPriorityBadge = ({
   count, pending
@@ -126,11 +70,7 @@ const HighPriorityBadge = ({
 }) => {
   if (pending) return <TabBadgeSkeleton />;
   if (count === 0) return null;
-  return (
-    <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
-      {count} high priority
-    </span>
-  );
+  return <StatusDot tone="error">{count} high priority</StatusDot>;
 };
 
 /** The Generated Content badge: unviewed pieces pulse; otherwise the size of the history. */
@@ -142,19 +82,28 @@ const HistoryBadge = ({
   readonly historyLength: number;
 }) => {
   if (unviewedCount > 0) {
-    return (
-      <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
-        {unviewedCount}{unviewedCountCapped ? '+' : ''} new
-      </span>
-    );
+    return <StatusDot tone="warning">{unviewedCount}{unviewedCountCapped ? '+' : ''} new</StatusDot>;
   }
   if (historyLength === 0) return null;
   return (
-    <span className="ml-2 px-2 py-0.5 text-xs bg-gray-200 text-gray-600 rounded-full">
+    <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600">
       {historyLength}
     </span>
   );
 };
+
+/** Finds the active keyword a content idea is about, so the idea can open a brief with it ticked. */
+function useBriefKeywordLookup(keywords: readonly Keyword[]): (idea: ContentIdea) => string | undefined {
+  const idsByText = useMemo(() => new Map(
+    keywords
+      .filter((keyword) => keyword.status === 'active')
+      .map((keyword) => [keyword.keyword.trim().toLocaleLowerCase(), keyword.id])
+  ), [keywords]);
+  return useCallback(
+    (idea: ContentIdea) => (idea.keyword ? idsByText.get(idea.keyword.trim().toLocaleLowerCase()) : undefined),
+    [idsByText]
+  );
+}
 
 /** The ideas tab is open and its first ideas are still on their way, so their counts are unknown. */
 function ideasPending(activeTab: TabType, loading: boolean, ideas: readonly ContentIdea[]): boolean {
@@ -191,13 +140,15 @@ const Tabs = ({
 interface GeneratingIndicatorProps {keyword: string;}
 
 const GeneratingIndicator = ({ keyword }: GeneratingIndicatorProps) => (
-  <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
+  <output
+    className="fixed bottom-4 right-4 max-w-sm bg-gray-900 dark:bg-gray-700 text-white dark:text-gray-50 border border-transparent dark:border-gray-600 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50"
+  >
     <Spinner size="sm" />
-    <div>
+    <div className="min-w-0">
       <p className="text-sm font-medium">Starting content generation...</p>
-      <p className="text-xs text-gray-300">&quot;{keyword}&quot;</p>
+      <p className="text-xs text-gray-300 dark:text-gray-200 break-words">&quot;{keyword}&quot;</p>
     </div>
-  </div>
+  </output>
 );
 
 export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
@@ -205,12 +156,15 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   const [selectedIdea, setSelectedIdea] = useState<ContentIdea | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingIdea, setPendingIdea] = useState<ContentIdea | null>(null);
+  // The keyword a content idea handed to the brief; the brief mounts with it ticked.
+  const [briefKeywordIds, setBriefKeywordIds] = useState<readonly string[] | undefined>(undefined);
   const panelId = useId();
   const selection = useScopeSelection();
   const marketId = useSelectedMarketId();
   const scopeKey = encodeReportScope(selection.scope);
   // Keyed on the encoded scope, so a same-value scope keeps the same request.
   const ideasParams = useMemo(() => reportScopeParams(decodeReportScope(scopeKey), marketId), [scopeKey, marketId]);
+  const briefKeywordId = useBriefKeywordLookup(keywords);
 
   const {
     ideas,
@@ -299,6 +253,16 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
 
   const handleRefresh = () => loadTab(activeTab);
 
+  const changeTab = (tab: TabType) => {
+    setBriefKeywordIds(undefined);
+    setActiveTab(tab);
+  };
+
+  const openBrief = (keywordId: string) => {
+    setBriefKeywordIds([keywordId]);
+    setActiveTab('brief');
+  };
+
   const actionableIdeas = ideas.filter(idea => idea.actionable);
   const highPriorityCount = actionableIdeas.filter(i => i.priority === 'high').length;
 
@@ -315,7 +279,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
 
       <Tabs
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={changeTab}
         highPriorityCount={highPriorityCount}
         ideasPending={ideasPending(activeTab, loading, ideas)}
         unviewedCount={unviewedCount}
@@ -349,6 +313,8 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
             generating={generating}
             selectedIdea={selectedIdea}
             onCreateContent={handleCreateContent}
+            briefKeywordId={briefKeywordId}
+            onOpenBrief={openBrief}
           />
         )}
 
@@ -358,6 +324,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
             generating={generating}
             onGenerate={handleGenerateGroupBrief}
             onGenerateBatch={handleGenerateGroupBriefBatch}
+            initialKeywordIds={briefKeywordIds}
           />
         )}
 

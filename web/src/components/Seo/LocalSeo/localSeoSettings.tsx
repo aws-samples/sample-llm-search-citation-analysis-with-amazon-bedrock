@@ -31,9 +31,20 @@ export function useLocalSeoSettings(): LocalSeoSettings {
   };
 }
 
-/** The label of the "your business" field: left empty, the brand's own domain is matched. */
-export function targetLabel(settings: LocalSeoSettings): string {
-  return `Your business (empty: ${settings.ownedDomain === '' ? 'your domains' : settings.ownedDomain})`;
+interface TargetFieldText {
+  readonly label: string;
+  readonly placeholder: string;
+}
+
+/**
+ * The label and placeholder of the "your business" fields. Left empty, the
+ * value matches the brand's own domain, which the placeholder names.
+ */
+export function targetFieldText(settings: LocalSeoSettings): TargetFieldText {
+  return {
+    label: 'Find your business',
+    placeholder: `Empty: matches ${settings.ownedDomain === '' ? 'your domains' : settings.ownedDomain}`,
+  };
 }
 
 export function BrandNameHint({ settings }: { readonly settings: LocalSeoSettings }) {
@@ -66,8 +77,8 @@ export function MarketPointHint({ market }: { readonly market: LocalSeoMarket })
   return (
     <SettingsHint section="markets">
       {market.marketField.market_id === undefined
-        ? 'Pick a market with a city in the header, or type a latitude and longitude.'
-        : 'The header market has no city to search around: type a latitude and longitude, or give the market a city.'}
+        ? 'Pick a market with a city at the top of the page, or type a latitude and longitude.'
+        : 'The selected market has no city to search around: type a latitude and longitude, or give the market a city.'}
     </SettingsHint>
   );
 }

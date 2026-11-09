@@ -1,108 +1,101 @@
-import { Spinner } from '../ui/Spinner';
-import { BrandListBody } from './BrandListBody';
-import { CompetitorDiscoveryPanel } from './CompetitorDiscoveryPanel';
-import type {
-  BrandExpansionAllResult, CompetitorDiscoveryResult 
-} from '../../types';
+import { useState } from 'react';
+import type { CompetitorDiscoveryResult } from '../../types';
 import type { BrandListSectionProps } from './brandListSection';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import { SEARCH_PATHS } from '../ui/iconPaths';
-import { ExpandBrandLabel } from './ExpandBrandLabel';
+import type { CompetitorDomains } from '../../api/competitorDomainsDecoders';
+import { MAX_DOMAINS_PER_COMPETITOR } from '../../hooks/competitorDomains';
+import {
+  BOLT_PATHS, SEARCH_PATHS
+} from '../ui/iconPaths';
+import { BrandExpansionPanel } from './BrandExpansionPanel';
+import { CompetitorDiscoveryPanel } from './CompetitorDiscoveryPanel';
+import { CompetitorTable } from './CompetitorTable';
+import {
+  ConfigSection, SuggestButton
+} from './ConfigSection';
 
 interface CompetitorBrandsSectionProps extends BrandListSectionProps {
+  readonly domains: CompetitorDomains;
+  readonly suggestedDomains: CompetitorDomains;
+  /** A suggestion request for the competitor list is running. */
+  readonly busy: boolean;
   readonly discoveryResult: CompetitorDiscoveryResult | null;
   readonly hasFirstPartyBrands: boolean;
   readonly canFindCompetitors: boolean;
   readonly brandExists: (brand: string, list: string[]) => boolean;
+  readonly onDomainsChange: (domains: CompetitorDomains) => void;
   readonly onFindCompetitors: () => void;
+}
+
+type SuggestAction = 'find' | 'expand';
+
+function describeCompetitors(hasFirstPartyBrands: boolean, canFind: boolean): string {
+  const base = `The brands you compete with and their websites (up to ${MAX_DOMAINS_PER_COMPETITOR} each). Answers that link to these websites count as that competitor's citations.`;
+  return canFind && !hasFirstPartyBrands ? `${base} Add your brand names first to get competitor suggestions.` : base;
 }
 
 interface CompetitorActionsProps {
-  readonly hasBrands: boolean;
-  readonly expanding: boolean;
-  readonly expansionResult: BrandExpansionAllResult | null;
-  readonly discoveryResult: CompetitorDiscoveryResult | null;
+  readonly brandCount: number;
+  readonly busy: boolean;
+  readonly lastAction: SuggestAction | null;
+  readonly hasFirstPartyBrands: boolean;
   readonly canExpand: boolean;
   readonly canFindCompetitors: boolean;
-  readonly onExpandAll: () => void;
-  readonly onFindCompetitors: () => void;
+  readonly onFind: () => void;
+  readonly onExpand: () => void;
 }
 
-/** The "Find Competitors" and "Expand Brand" buttons; each spins while its own request runs. */
+/** "Find competitors" and "Suggest sub-brands"; the one whose request runs shows the spinner. */
 function CompetitorActions({
-  hasBrands, expanding, expansionResult, discoveryResult, canExpand, canFindCompetitors, onExpandAll, onFindCompetitors
+  brandCount, busy, lastAction, hasFirstPartyBrands, canExpand, canFindCompetitors, onFind, onExpand
 }: CompetitorActionsProps) {
-  const finding = expanding && !discoveryResult && !expansionResult;
-  const expandingAll = expanding && expansionResult !== null;
+  const showExpand = canExpand && brandCount > 0;
+  if (!canFindCompetitors && !showExpand) return null;
   return (
-    <div className="flex gap-2">
+    <>
       {canFindCompetitors && (
-        <button
-          onClick={onFindCompetitors}
-          disabled={expanding}
-          className="px-3 py-1.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-        >
-          {finding ? <><Spinner size="sm" />Finding...</> : (
-            <><StrokeIcon className="w-3 h-3" paths={SEARCH_PATHS} strokeWidth={2} />Find Competitors</>
-          )}
-        </button>
+        <SuggestButton label="Find competitors" busyLabel="Finding…" busy={busy && lastAction === 'find'} disabled={busy || !hasFirstPartyBrands} iconPaths={SEARCH_PATHS} onClick={onFind} />
       )}
-      {canExpand && hasBrands && (
-        <button
-          onClick={onExpandAll}
-          disabled={expanding}
-          className="px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
-        >
-          <ExpandBrandLabel expanding={expandingAll} />
-        </button>
+      {showExpand && (
+        <SuggestButton label="Suggest sub-brands" busyLabel="Suggesting…" busy={busy && lastAction === 'expand'} disabled={busy} iconPaths={BOLT_PATHS} onClick={onExpand} />
       )}
-    </div>
+    </>
   );
 }
 
-export function CompetitorBrandsSection({
-  expandingBrand, discoveryResult, hasFirstPartyBrands, canExpand, canFindCompetitors, brandExists,
-  onExpandAll, onFindCompetitors, ...list
-}: CompetitorBrandsSectionProps) {
-  if (!hasFirstPartyBrands) {
-    return (
-      <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
-        <h3 className="text-sm font-semibold text-amber-800 mb-2">Competitor Brands</h3>
-        <div className="text-center py-4">
-          <p className="text-sm text-amber-700">Add first-party brands first to discover competitors</p>
-        </div>
-      </div>
-    );
-  }
+/**
+ * "Competitors": the competitor list as a table (name, websites, remove),
+ * with "Find competitors" and "Suggest sub-brands" as secondary actions whose
+ * suggestions open above the table.
+ */
+export function CompetitorBrandsSection(props: CompetitorBrandsSectionProps) {
+  const {
+    brands, busy, hasFirstPartyBrands, canExpand, canFindCompetitors, expansionResult, discoveryResult,
+  } = props;
+  const [lastAction, setLastAction] = useState<SuggestAction | null>(null);
+  const run = (action: SuggestAction, request: () => void) => { setLastAction(action); request(); };
 
   return (
-    <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-amber-800">Competitor Brands</h3>
-        <CompetitorActions
-          hasBrands={list.brands.length > 0}
-          expanding={expandingBrand === 'competitor'}
-          expansionResult={list.expansionResult}
-          discoveryResult={discoveryResult}
-          canExpand={canExpand}
-          canFindCompetitors={canFindCompetitors}
-          onExpandAll={onExpandAll}
-          onFindCompetitors={onFindCompetitors}
-        />
-      </div>
-      <BrandListBody
-        {...list}
-        target="competitor"
-        colorScheme="amber"
-        hint='Click a competitor to select it, then use "Expand Brand" to discover their sub-brands.'
-        inputId="new-competitor-brand"
-        inputLabel="New competitor brand"
-        placeholder="Enter competitor name..."
-      >
-        {discoveryResult && list.expansionTarget === 'competitor' && (
-          <CompetitorDiscoveryPanel result={discoveryResult} existingCompetitors={list.brands} pendingBrands={list.pendingBrands} brandExists={brandExists} onToggleBrand={list.onTogglePending} onAccept={list.onAcceptExpansion} onCancel={list.onCancelExpansion} />
-        )}
-      </BrandListBody>
-    </div>
+    <ConfigSection
+      title={<>Competitors{brands.length > 0 && <span className="text-sm font-normal text-gray-500">{brands.length}</span>}</>}
+      description={describeCompetitors(hasFirstPartyBrands, canFindCompetitors)}
+      actions={<CompetitorActions brandCount={brands.length} busy={busy} lastAction={lastAction} hasFirstPartyBrands={hasFirstPartyBrands} canExpand={canExpand} canFindCompetitors={canFindCompetitors} onFind={() => run('find', props.onFindCompetitors)} onExpand={() => run('expand', props.onExpandAll)} />}
+    >
+      {discoveryResult && (
+        <CompetitorDiscoveryPanel result={discoveryResult} existingCompetitors={brands} pendingBrands={props.pendingBrands} brandExists={props.brandExists} onToggleBrand={props.onTogglePending} onAccept={props.onAcceptExpansion} onCancel={props.onCancelExpansion} />
+      )}
+      {expansionResult && (
+        <BrandExpansionPanel result={expansionResult} target="competitor" pendingBrands={props.pendingBrands} onToggleBrand={props.onTogglePending} onAccept={props.onAcceptExpansion} onCancel={props.onCancelExpansion} />
+      )}
+      <CompetitorTable
+        competitors={brands}
+        domains={props.domains}
+        suggested={props.suggestedDomains}
+        onDomainsChange={props.onDomainsChange}
+        onRemoveCompetitor={props.onRemoveBrand}
+        newCompetitor={props.newBrand}
+        onNewCompetitorChange={props.onNewBrandChange}
+        onAddCompetitor={props.onAddBrand}
+      />
+    </ConfigSection>
   );
 }

@@ -2,71 +2,60 @@ import {
   Skeleton, SkeletonLines, SkeletonRegion
 } from '../ui/Skeleton';
 
-const CHIP_IDS = ['chip-a', 'chip-b', 'chip-c'] as const;
-const OPTION_IDS = ['sentiment', 'ranking', 'max-brands'] as const;
+const CHIP_IDS = ['chip-a', 'chip-b', 'chip-c', 'chip-d'] as const;
+const ROW_IDS = ['row-a', 'row-b', 'row-c', 'row-d'] as const;
 
-interface ListSectionSkeletonProps {
-  /** The real section's surface and border, so the outline matches. */
-  readonly toneClassName: string;
-  /** Whether the real section has action buttons beside its heading. */
-  readonly withActions?: boolean;
-}
+/** A section heading with its one-line description and a secondary action on the right. */
+const SectionHeadSkeleton = () => (
+  <div className="flex items-start justify-between gap-3">
+    <div className="space-y-2">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-3.5 w-96 max-w-full" />
+    </div>
+    <Skeleton className="h-8 w-36 rounded-lg" />
+  </div>
+);
 
-/** A brand or domain list card: heading, caption, add row and a row of chips. */
-const ListSectionSkeleton = ({
-  toneClassName, withActions = false
-}: ListSectionSkeletonProps) => (
-  <div className={`rounded-lg p-4 border ${toneClassName}`}>
-    <div className="flex h-[30px] items-center justify-between mb-2">
-      <Skeleton className="h-3.5 w-40" />
-      {withActions && <Skeleton className="h-[30px] w-28 rounded-lg" />}
-    </div>
-    <div className="flex h-4 items-center mb-3"><Skeleton className="h-3 w-80 max-w-full" /></div>
-    <div className="flex gap-2 mb-3">
-      <Skeleton className="h-[38px] flex-1 rounded-lg" />
-      <Skeleton className="h-[38px] w-16 rounded-lg" />
-    </div>
-    <div className="flex flex-wrap gap-2">
-      {CHIP_IDS.map((id) => <Skeleton key={id} className="h-7 w-24 rounded-full" />)}
+/** A labelled tag field: label, then a bordered box of chips. */
+const TagFieldSkeleton = () => (
+  <div>
+    <Skeleton className="mb-2 h-3.5 w-24" />
+    <div className="flex min-h-[2.5rem] flex-wrap items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1.5">
+      {CHIP_IDS.map((id) => <Skeleton key={id} className="h-6 w-28 rounded-full" />)}
     </div>
   </div>
 );
 
 /**
- * `BrandConfigContent` while the configuration loads: the tab bar, the
- * industry picker, the four brand and domain cards, the extraction options and
- * the save bar, in the same stack and spacing as the form that replaces it.
+ * `BrandConfigContent` while the configuration loads: the intro and industry
+ * picker, "Your brand" with its two tag fields, the competitor table and the
+ * collapsed Advanced heading, in the same stack and spacing as the form.
  */
 export const BrandConfigSkeleton = () => (
   <SkeletonRegion label="Loading brand configuration" className="space-y-6">
-    <div className="flex gap-2 border-b border-gray-200 pb-3">
-      <Skeleton className="h-9 w-36 rounded-lg" />
-      <Skeleton className="h-9 w-40 rounded-lg" />
-    </div>
-    <div className="space-y-6">
-      <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-        <div className="flex h-5 items-center mb-3"><Skeleton className="h-3.5 w-20" /></div>
-        <Skeleton className="h-[46px] w-full rounded-lg" />
-        <SkeletonLines lines={2} className="mt-3" />
-      </div>
-      <ListSectionSkeleton toneClassName="bg-emerald-50 border-emerald-200" withActions />
-      <ListSectionSkeleton toneClassName="bg-emerald-50/50 border-emerald-200" />
-      <ListSectionSkeleton toneClassName="bg-amber-50 border-amber-200" withActions />
-      <ListSectionSkeleton toneClassName="bg-amber-50/50 border-amber-200" />
-      <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-        <div className="flex h-5 items-center mb-3"><Skeleton className="h-3.5 w-36" /></div>
-        <div className="space-y-3">
-          {OPTION_IDS.map((id) => (
-            <div key={id} className="flex h-[38px] items-center gap-3">
-              <Skeleton className="h-4 w-4 rounded-sm" />
-              <Skeleton className="h-3.5 w-48" />
-            </div>
-          ))}
-        </div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:justify-between">
+      <SkeletonLines lines={2} className="w-full max-w-xl" />
+      <div className="w-full space-y-2 sm:w-72">
+        <Skeleton className="h-3.5 w-16" />
+        <Skeleton className="h-9 w-full rounded-lg" />
       </div>
     </div>
-    <div className="flex justify-end pt-4 border-t border-gray-200">
-      <Skeleton className="h-10 w-44 rounded-lg" />
+    <div className="space-y-4 border-t border-gray-200 pt-6">
+      <SectionHeadSkeleton />
+      <TagFieldSkeleton />
+      <TagFieldSkeleton />
     </div>
+    <div className="space-y-4 border-t border-gray-200 pt-6">
+      <SectionHeadSkeleton />
+      <div className="divide-y divide-gray-200 rounded-lg border border-gray-200">
+        {ROW_IDS.map((id) => (
+          <div key={id} className="flex items-center gap-4 px-4 py-3">
+            <Skeleton className="h-3.5 w-40" />
+            <Skeleton className="h-6 w-32 rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="border-t border-gray-200 pt-6"><Skeleton className="h-4 w-72" /></div>
   </SkeletonRegion>
 );

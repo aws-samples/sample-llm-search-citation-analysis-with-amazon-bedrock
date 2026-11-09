@@ -1,6 +1,7 @@
 import {
   describe, expect, it
 } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import {
   render, screen
 } from '@testing-library/react';
@@ -14,9 +15,14 @@ import {
 
 function renderHistoryListItem(
   overrides: Parameters<typeof buildContentStudioHistory>[0]
-): void {
+) {
   const item = buildContentStudioHistory(overrides);
-  render(<HistoryListItem {...createHistoryListItemProps(item)} />);
+  const props = createHistoryListItemProps(item);
+  render(<HistoryListItem {...props} />);
+  return {
+    item,
+    props 
+  };
 }
 
 describe('HistoryListItem', () => {
@@ -55,5 +61,22 @@ describe('HistoryListItem', () => {
     });
 
     expect(screen.getByText('Useful generated description')).toBeInTheDocument();
+  });
+
+  it('opens the item from a keyboard-reachable title button', async () => {
+    const {
+      item, props
+    } = renderHistoryListItem({ generated_content: { title: 'Keyboard title' } });
+
+    screen.getByRole('button', { name: 'Keyboard title' }).focus();
+    await userEvent.keyboard('{Enter}');
+
+    expect(props.onSelect).toHaveBeenCalledWith(item);
+  });
+
+  it('names the icon-only delete button', () => {
+    renderHistoryListItem({});
+
+    expect(screen.getByRole('button', { name: 'Delete content' })).toBeInTheDocument();
   });
 });

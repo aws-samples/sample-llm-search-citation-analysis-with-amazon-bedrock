@@ -10,7 +10,7 @@ import type {
 import type { TemplateMutationOutcome } from '../../../hooks/useResearchTemplates';
 import { Spinner } from '../../ui/Spinner';
 import {
-  BRIEF_INPUT_CLASS, MarketSelect, TemplatePicker
+  BRIEF_INPUT_CLASS, MarketSelect, MoreOptionsSummary, TemplatePicker
 } from './AgentBriefFields';
 import { AgentTemplateEditor } from './AgentTemplateEditor';
 import {
@@ -27,6 +27,7 @@ import {
   COUNTRY_OPTIONS,
   LANGUAGE_OPTIONS,
   briefProblems,
+  dimensionHint,
   estimateAgentCost,
   formatAgentCost,
   seedPlaceholder,
@@ -274,12 +275,12 @@ export function AgentBriefForm({
               <label
                 key={option.id}
                 htmlFor={checkboxId}
-                className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${checked ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
+                className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${checked ? 'border-gray-900 dark:border-gray-300 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
               >
                 <input id={checkboxId} name="dimensions" value={option.id} type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-gray-900 focus:ring-gray-500" />
                 <span>
                   <span className="block text-sm font-medium text-gray-900">{option.label}</span>
-                  <span className="block text-xs text-gray-500">{option.description}</span>
+                  <span className="block text-xs text-gray-500">{dimensionHint(option)}</span>
                 </span>
               </label>
             );
@@ -287,63 +288,68 @@ export function AgentBriefForm({
         </div>
       </fieldset>
 
-      <div>
-        <label htmlFor={ids.instruction} className="block text-sm text-gray-600 mb-1">Extra instruction (optional)</label>
-        <textarea
-          id={ids.instruction}
-          value={instruction}
-          maxLength={AGENT_INSTRUCTION_MAX_LENGTH}
-          onChange={(event) => setInstruction(event.target.value)}
-          rows={2}
-          placeholder="e.g. also expand by events and seasons; skip branded terms"
-          className={BRIEF_INPUT_CLASS}
-        />
-      </div>
+      <details className="rounded-lg border border-gray-200">
+        <MoreOptionsSummary targetCount={targetCount} trackingCount={trackingCountText} maxRounds={maxRounds} grouped={groupId !== ''} />
+        <div className="px-4 pb-4 space-y-5">
+          <div>
+            <label htmlFor={ids.instruction} className="block text-sm text-gray-600 mb-1">Extra instruction (optional)</label>
+            <textarea
+              id={ids.instruction}
+              value={instruction}
+              maxLength={AGENT_INSTRUCTION_MAX_LENGTH}
+              onChange={(event) => setInstruction(event.target.value)}
+              rows={2}
+              placeholder="e.g. also expand by events and seasons; skip branded terms"
+              className={BRIEF_INPUT_CLASS}
+            />
+          </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div>
-          <label htmlFor={ids.target} className="block text-sm text-gray-600 mb-1">Target keywords</label>
-          <input
-            id={ids.target}
-            type="number"
-            min={AGENT_MIN_TARGET_COUNT}
-            max={AGENT_MAX_TARGET_COUNT}
-            step={10}
-            value={targetCount}
-            onChange={(event) => updateTargetCount(event.target.value)}
-            className={BRIEF_INPUT_CLASS}
-          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label htmlFor={ids.target} className="block text-sm text-gray-600 mb-1">Target keywords</label>
+              <input
+                id={ids.target}
+                type="number"
+                min={AGENT_MIN_TARGET_COUNT}
+                max={AGENT_MAX_TARGET_COUNT}
+                step={10}
+                value={targetCount}
+                onChange={(event) => updateTargetCount(event.target.value)}
+                className={BRIEF_INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label htmlFor={ids.tracking} className="block text-sm text-gray-600 mb-1">Tracking keywords</label>
+              <input
+                id={ids.tracking}
+                type="number"
+                min={AGENT_MIN_TRACKING_COUNT}
+                max={Math.min(AGENT_MAX_TRACKING_COUNT, targetCount)}
+                step={1}
+                value={trackingCountText}
+                onChange={(event) => updateTrackingCount(event.target.value)}
+                className={BRIEF_INPUT_CLASS}
+              />
+              <p className="mt-1 text-xs text-gray-500">Recommended active shortlist. This is a demand proxy, not measured search volume.</p>
+            </div>
+            <div>
+              <label htmlFor={ids.rounds} className="block text-sm text-gray-600 mb-1">Research rounds</label>
+              <select id={ids.rounds} value={maxRounds} onChange={(event) => setMaxRounds(Number(event.target.value))} className={BRIEF_INPUT_CLASS}>
+                {Array.from({ length: AGENT_MAX_ROUNDS }, (_, index) => index + 1).map((rounds) => (
+                  <option key={rounds} value={rounds}>{rounds === 1 ? '1 round (fastest)' : `up to ${rounds} rounds`}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor={ids.group} className="block text-sm text-gray-600 mb-1">Add results to group</label>
+              <select id={ids.group} value={groupId} onChange={(event) => setGroupId(event.target.value)} className={BRIEF_INPUT_CLASS}>
+                <option value="">Choose later</option>
+                {sortedGroups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.keyword_count})</option>)}
+              </select>
+            </div>
+          </div>
         </div>
-        <div>
-          <label htmlFor={ids.tracking} className="block text-sm text-gray-600 mb-1">Tracking keywords</label>
-          <input
-            id={ids.tracking}
-            type="number"
-            min={AGENT_MIN_TRACKING_COUNT}
-            max={Math.min(AGENT_MAX_TRACKING_COUNT, targetCount)}
-            step={1}
-            value={trackingCountText}
-            onChange={(event) => updateTrackingCount(event.target.value)}
-            className={BRIEF_INPUT_CLASS}
-          />
-          <p className="mt-1 text-xs text-gray-500">Recommended active shortlist. This is a demand proxy, not measured search volume.</p>
-        </div>
-        <div>
-          <label htmlFor={ids.rounds} className="block text-sm text-gray-600 mb-1">Research rounds</label>
-          <select id={ids.rounds} value={maxRounds} onChange={(event) => setMaxRounds(Number(event.target.value))} className={BRIEF_INPUT_CLASS}>
-            {Array.from({ length: AGENT_MAX_ROUNDS }, (_, index) => index + 1).map((rounds) => (
-              <option key={rounds} value={rounds}>{rounds === 1 ? '1 round (fastest)' : `up to ${rounds} rounds`}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor={ids.group} className="block text-sm text-gray-600 mb-1">Add results to group</label>
-          <select id={ids.group} value={groupId} onChange={(event) => setGroupId(event.target.value)} className={BRIEF_INPUT_CLASS}>
-            <option value="">Choose later</option>
-            {sortedGroups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.keyword_count})</option>)}
-          </select>
-        </div>
-      </div>
+      </details>
 
       <details className="rounded-lg border border-gray-200 bg-gray-50">
         <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-gray-900">Customise the instructions or create your own template</summary>
@@ -361,7 +367,7 @@ export function AgentBriefForm({
             />
           )}
           {notice && (
-            <output className={`block text-sm ${notice.success ? 'text-green-700' : 'text-red-700'}`}>{notice.message}</output>
+            <output className={`block text-sm ${notice.success ? 'text-emerald-700' : 'text-red-700'}`}>{notice.message}</output>
           )}
         </div>
       </details>

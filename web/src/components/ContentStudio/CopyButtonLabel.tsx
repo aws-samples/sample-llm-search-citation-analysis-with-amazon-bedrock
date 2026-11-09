@@ -18,7 +18,7 @@ const CopyButtonLabel = ({
 }: CopyButtonLabelProps) => (
   copied ? (
     <>
-      <StrokeIcon className={`${iconClassName} text-green-500`} paths={CHECK_PATHS} strokeWidth={2} />
+      <StrokeIcon className={`${iconClassName} text-emerald-500`} paths={CHECK_PATHS} strokeWidth={2} />
       Copied!
     </>
   ) : (
@@ -38,7 +38,7 @@ interface CopyButtonProps extends CopyButtonLabelProps {
 export const CopyButton = ({
   onCopy, className, ...labelProps
 }: CopyButtonProps) => (
-  <button onClick={onCopy} className={className}>
+  <button type="button" onClick={onCopy} className={className}>
     <CopyButtonLabel {...labelProps} />
   </button>
 );

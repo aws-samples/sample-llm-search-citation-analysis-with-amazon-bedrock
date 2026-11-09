@@ -1,5 +1,5 @@
 import {
-  act, screen
+  act, screen, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
@@ -27,15 +27,21 @@ beforeEach(() => {
 });
 
 describe('Sidebar groups while their page is open', () => {
-  it('opens the SEO group with the overview first, then every SEO page', () => {
+  it('opens the SEO group with every SEO page, the overview being the SEO entry itself', () => {
     renderSidebar('seo', '/seo/backlinks');
 
-    expect(getGroupChildIds('SEO')).toStrictEqual(['overview', 'domain', 'backlinks', 'rank-tracking', 'site-audit', 'performance', 'local']);
+    expect(getGroupChildIds('SEO')).toStrictEqual(['domain', 'backlinks', 'rank-tracking', 'site-audit', 'performance', 'local']);
+  });
+
+  it('does not mark the SEO entry as current while one of its pages is open', () => {
+    renderSidebar('seo', '/seo/backlinks');
+
+    expect(screen.getByRole('link', { name: 'SEO' })).not.toHaveAttribute('aria-current');
   });
 
   it.each<[TabType, string, RegExp]>([
     ['seo', '/seo/backlinks', /^Backlinks$/],
-    ['seo', '/seo', /^Overview$/],
+    ['seo', '/seo', /^SEO$/],
     ['settings', '/settings', /^Keywords/],
     ['settings', '/settings/alerts', /^Alerts$/],
   ])('marks the page of %s %s as current', (tab, path, name) => {
@@ -142,6 +148,12 @@ describe('Sidebar groups on the collapsed rail', () => {
     const { onNavigate } = await setupSeoEntryClicked();
 
     expect(onNavigate).not.toHaveBeenCalledWith('/seo');
+  });
+
+  it('lists the overview first in the pop-out, where the entry does not open it', async () => {
+    await setupSeoEntryClicked();
+
+    expect(within(queryFlyoutElement() ?? document.body).getAllByRole('link')[0]).toHaveTextContent('Overview');
   });
 
   it('opens the page chosen in the pop-out', async () => {

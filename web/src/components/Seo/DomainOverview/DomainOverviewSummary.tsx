@@ -37,7 +37,7 @@ function PositionDistribution({ buckets }: { readonly buckets: readonly Position
   const total = buckets.reduce((sum, bucket) => sum + bucket.keywords, 0);
   return (
     <div className="space-y-3">
-      <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Keywords per Google position</h4>
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Keywords per Google position</h4>
       {total > 0 && (
         <div aria-hidden="true" className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100">
           {buckets.map((bucket) => (

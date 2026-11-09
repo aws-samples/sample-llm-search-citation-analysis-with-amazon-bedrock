@@ -15,6 +15,7 @@ import {
   getChartTheme, themedAxis, themedTooltip, type ChartTheme
 } from '../ui/chartTheme';
 import { ExportAllButton } from '../ui/ExportAllButton';
+import { OverviewPanel } from './OverviewPanel';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -38,6 +39,9 @@ function computeAverageRank(brands: ReadonlyArray<{ rank: number }>): number | n
   return sum / brands.length;
 }
 
+/** Same card and heading as the other Visibility panels. */
+const PERSONA_PANEL_TITLE = 'Brand ranking by persona';
+
 export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
   const { isDark } = useTheme();
   const theme = getChartTheme(isDark);
@@ -48,12 +52,11 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
 
   if (personasWithResults.length < 2) {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-        <h3 className="text-sm font-medium text-gray-900 mb-4">Brand Ranking by Persona</h3>
-        <p className="text-center text-gray-500 text-sm">
+      <OverviewPanel title={PERSONA_PANEL_TITLE}>
+        <p className="py-6 text-center text-gray-500 text-sm">
           At least two personas are needed for comparison.
         </p>
-      </div>
+      </OverviewPanel>
     );
   }
 
@@ -131,13 +134,9 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-gray-900">Brand Ranking by Persona</h3>
-        <ExportAllButton view="persona-rankings" params={{ keyword: data.keyword }} />
-      </div>
+    <OverviewPanel title={PERSONA_PANEL_TITLE} actions={<ExportAllButton view="persona-rankings" params={{ keyword: data.keyword }} />}>
       <Bar data={chartData} options={options} />
-    </div>
+    </OverviewPanel>
   );
 }
 

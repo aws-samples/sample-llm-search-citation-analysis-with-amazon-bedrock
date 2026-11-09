@@ -55,7 +55,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex flex-col items-center justify-center min-h-[400px] p-8">
           <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-md text-center">
-            <div className="w-12 h-12 mx-auto mb-4 text-gray-400">
+            <div className="w-12 h-12 mx-auto mb-4 text-gray-500">
               <StrokeIcon paths={WARNING_PATHS} />
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Something went wrong</h3>

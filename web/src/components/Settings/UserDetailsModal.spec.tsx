@@ -8,8 +8,9 @@ import {
 import { buildUser } from '../../hooks/useUserManagement-fixtures';
 import {
   clickAndSettle, disableAccess, getConfirmDialogElement, mockFailedAction, mockPendingAction, pickRole,
-  renderUserDetailsModal, runConfirmedAction, saveRole, setupFocusedOpener
+  renderUserDetailsModal, runConfirmedAction, saveRole
 } from './UserModals-fixtures';
+import { setupFocusedOpener } from '../ui/Modal-fixtures';
 import type { UserDetailsModal } from './UserDetailsModal';
 
 type DetailsProps = Partial<ComponentProps<typeof UserDetailsModal>>;

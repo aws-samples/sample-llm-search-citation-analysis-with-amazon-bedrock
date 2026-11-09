@@ -41,6 +41,15 @@ describe('OutrankedKeywordsSection — content', () => {
     expect(cells.some((c) => c.textContent === '—')).toBe(true);
   });
 
+  it('shows an unknown rank delta as a plain dash, not as a red gap', () => {
+    renderOutranked(buildOutrankedKeyword({
+      our_best_rank: null,
+      rank_delta: null,
+    }));
+    const deltaCell = screen.getAllByRole('cell')[3];
+    expect([deltaCell.textContent, deltaCell.querySelector('.text-red-700')]).toStrictEqual(['—', null]);
+  });
+
   it('renders the rank delta with a + sign prefix', () => {
     renderOutranked(buildOutrankedKeyword({
       our_best_rank: 4,
@@ -49,9 +58,9 @@ describe('OutrankedKeywordsSection — content', () => {
     expect(screen.getByText('+3')).toBeInTheDocument();
   });
 
-  it('renders the providers list joined by commas', () => {
+  it('names the AI engines by their display names, joined by commas', () => {
     renderOutranked(buildOutrankedKeyword({ providers: ['openai', 'perplexity'] }));
-    expect(screen.getByText('openai, perplexity')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI, Perplexity')).toBeInTheDocument();
   });
 });
 

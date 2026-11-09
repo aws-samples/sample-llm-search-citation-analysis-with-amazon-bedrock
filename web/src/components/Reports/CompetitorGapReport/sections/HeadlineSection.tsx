@@ -27,6 +27,7 @@ export function HeadlineSection({
     loading,
     computing,
     loadingMessage: 'Loading rollup…',
+    loadingShape: 'stats',
     error,
     value: rollup,
     emptyMessage: 'No rollup data yet. Run an analysis to populate.',
@@ -39,11 +40,8 @@ export function HeadlineSection({
   const highLiftCount = gate.value.high_priority_source_count;
 
   return (
-    <ReportSection title="Headline">
+    <ReportSection title="Headline" subtitle={`Across ${keywordsAnalyzed} tracked keywords, against ${competitor}.`}>
       <ScopeCoverageNote response={response} className="mb-3" />
-      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-        Across {keywordsAnalyzed} tracked keywords, vs <strong>{competitor}</strong>:
-      </p>
       <ReportStatGrid columns={3}>
         <ReportStatCard
           label="Outranked keywords"

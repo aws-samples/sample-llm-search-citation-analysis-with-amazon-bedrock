@@ -68,7 +68,7 @@ describe('RankGridTab results', () => {
   it('colours a top-three rank green', async () => {
     await runGrid();
 
-    expect(await screen.findByLabelText('Row 1, column 1: rank 1')).toHaveClass('bg-emerald-500');
+    expect(await screen.findByLabelText('Row 1, column 1: rank 1')).toHaveClass('bg-emerald-700');
   });
 
   it('summarises how often the business was found', async () => {

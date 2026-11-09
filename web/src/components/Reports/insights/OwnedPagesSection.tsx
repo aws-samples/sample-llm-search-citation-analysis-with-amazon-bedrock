@@ -31,6 +31,7 @@ const OWNED_PAGE_COLUMNS: ReadonlyArray<ReportTableColumn<OwnedPageRow>> = [
   },
   {
     header: 'Citations',
+    numeric: true,
     info: 'Answers citing the page.',
     render: (row) => String(row.citations),
   },

@@ -14,10 +14,10 @@ import {
 import { useSettingsAttention } from './settingsAttention';
 import { activeChildId } from './sidebarChildren';
 import {
-  SidebarGroup, whenCollapsed 
+  SidebarGroup, whenCollapsed, type RowState
 } from './SidebarGroup';
 import {
-  buildNavSections, type NavItem
+  buildNavSections, type NavItem, navIconClass
 } from './sidebarNav';
 import { useSidebarCollapsed } from './useSidebarCollapsed';
 
@@ -33,11 +33,20 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-function linkClass(active: boolean, collapsed: boolean): string {
-  const state = active
-    ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
-    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-white';
-  return `w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative ${state} ${whenCollapsed(collapsed, 'lg:justify-center lg:px-0')}`;
+const HOVER_CLASSES = 'hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-white';
+
+/**
+ * A row's colours: highlighted for the open page; for a group entry while one of its pages is open, a strong label
+ * without the highlight (on the rail, where the pages are hidden, the highlight too); muted otherwise.
+ */
+function rowStateClass(state: RowState, collapsed: boolean): string {
+  if (state === 'active') return 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white';
+  if (state === 'within') return `text-gray-900 dark:text-white ${HOVER_CLASSES} ${whenCollapsed(collapsed, 'lg:bg-gray-100 lg:dark:bg-gray-700')}`;
+  return `text-gray-600 dark:text-gray-300 ${HOVER_CLASSES}`;
+}
+
+function linkClass(state: RowState, collapsed: boolean): string {
+  return `w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors relative focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500 ${rowStateClass(state, collapsed)} ${whenCollapsed(collapsed, 'lg:justify-center lg:px-0')}`;
 }
 
 /** The link's tooltip on the rail: its label and count ("Schedule (3)"). */
@@ -88,9 +97,9 @@ function NavLink({
         e.preventDefault();
         onClick();
       }}
-      className={linkClass(active, collapsed)}
+      className={linkClass(active ? 'active' : 'idle', collapsed)}
     >
-      <span className={item.iconColor ?? (active ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500')}>
+      <span className={navIconClass(item.iconColor, active)}>
         {item.icon}
       </span>
       <span className={whenCollapsed(collapsed, 'lg:sr-only')}>{item.label}</span>
@@ -182,7 +191,7 @@ export const Sidebar = ({
     return (
       <SidebarGroup label={item.label} icon={item.icon} iconColor={item.iconColor} path={item.path} items={item.children}
         activeChildId={activeTab === group ? activeChildId(group, pathname) : null} open={openGroup === group}
-        collapsed={collapsed} rowClass={(active) => linkClass(active, collapsed)}
+        collapsed={collapsed} rowClass={(state) => linkClass(state, collapsed)}
         onOpenGroup={() => setOpenGroup(group, group)}
         onToggle={() => setOpenGroup(openGroup === group ? null : group)}
         onNavigate={handlePathClick} />
@@ -194,6 +203,7 @@ export const Sidebar = ({
       {/* Mobile overlay */}
       {isOpen && (
         <div
+          aria-hidden="true"
           className="fixed inset-0 bg-gray-900/50 z-40 lg:hidden"
           onClick={onToggle}
         />
@@ -202,8 +212,8 @@ export const Sidebar = ({
       <aside
         id="app-sidebar"
         data-collapsed={collapsed}
-        className={`peer fixed left-0 top-0 h-screen w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col z-50 transform transition-[transform,width] duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`peer fixed left-0 top-0 h-screen w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col z-50 transform transition-[transform,width,visibility] duration-300 ease-in-out ${
+          isOpen ? 'translate-x-0' : '-translate-x-full max-lg:invisible'
         } lg:translate-x-0 ${whenCollapsed(collapsed, 'lg:w-16')}`}
       >
         {/* Logo / Brand */}
@@ -222,7 +232,7 @@ export const Sidebar = ({
             aria-expanded={!collapsed}
             aria-controls="app-sidebar"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="hidden lg:inline-flex p-1.5 -mr-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-200 dark:hover:bg-gray-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
+            className="hidden lg:inline-flex p-1.5 -mr-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
           >
             <StrokeIcon className={`w-4 h-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} paths={CHEVRON_DOUBLE_LEFT_PATHS} aria-hidden="true" />
           </button>
@@ -230,18 +240,18 @@ export const Sidebar = ({
           <button
             onClick={onToggle}
             aria-label="Close sidebar"
-            className="lg:hidden p-2 -mr-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="lg:hidden p-2 -mr-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-gray-500"
           >
             <CloseIcon />
           </button>
         </div>
 
         {/* Navigation */}
-        <nav aria-label="Main navigation" className={`flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden ${whenCollapsed(collapsed, 'lg:px-2')}`}>
+        <nav aria-label="Main navigation" className={`flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden dark:[color-scheme:dark] ${whenCollapsed(collapsed, 'lg:px-2')}`}>
           {navSections.map((section, sectionIdx) => (
             <div key={section.title} className={sectionIdx > 0 ? `mt-6 ${whenCollapsed(collapsed, 'lg:mt-3')}` : ''}>
               <div className={`px-3 mb-2 ${whenCollapsed(collapsed, 'lg:hidden')}`}>
-                <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   {section.title}
                 </span>
               </div>

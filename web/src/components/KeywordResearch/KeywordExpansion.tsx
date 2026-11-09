@@ -84,11 +84,11 @@ export const KeywordExpansion = ({
     <div className="space-y-6">
       {/* Input Form */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-sm font-medium text-gray-900 mb-4">Find Related Keywords</h3>
+        <h3 className="text-sm font-medium text-gray-900 mb-4">Find related keywords</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
-              <label htmlFor="keyword-expansion-seed" className="block text-sm text-gray-600 mb-1">Seed Keyword</label>
+              <label htmlFor="keyword-expansion-seed" className="block text-sm text-gray-600 mb-1">Seed keyword</label>
               <input
                 id="keyword-expansion-seed"
                 name="seed"
@@ -96,7 +96,7 @@ export const KeywordExpansion = ({
                 value={seedKeyword}
                 onChange={(e) => setSeedKeyword(e.target.value)}
                 placeholder={'e.g. project management software'}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
               />
             </div>
             <div>
@@ -106,7 +106,7 @@ export const KeywordExpansion = ({
                 name="industry"
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
               >
                 {INDUSTRIES.map((ind) => (
                   <option key={ind.value} value={ind.value}>{ind.label}</option>
@@ -117,13 +117,13 @@ export const KeywordExpansion = ({
 
           <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
             <div className="w-full sm:w-auto">
-              <label htmlFor="keyword-expansion-count" className="block text-sm text-gray-600 mb-1">Number of Keywords</label>
+              <label htmlFor="keyword-expansion-count" className="block text-sm text-gray-600 mb-1">Number of keywords</label>
               <select
                 id="keyword-expansion-count"
                 name="count"
                 value={count}
                 onChange={(e) => setCount(Number(e.target.value))}
-                className="w-full sm:w-auto px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-200"
+                className="w-full sm:w-auto px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-gray-900"
               >
                 <option value={10}>10</option>
                 <option value={20}>20</option>

@@ -1,122 +1,48 @@
 import type { BrandExpansionAllResult } from '../../types';
 import { WarningIcon } from '../ui';
-import { SuggestionPanelHeader } from './SuggestionPanelHeader';
-
-/** Ticking suggested brands, then adding the ticked ones or dismissing the panel. */
-export interface PendingBrandSelectionProps {
-  readonly pendingBrands: string[];
-  readonly onToggleBrand: (brand: string) => void;
-  readonly onAccept: () => void;
-  readonly onCancel: () => void;
-}
+import {
+  SuggestionChips, SuggestionPanel, type PendingBrandSelectionProps
+} from './SuggestionPanel';
 
 interface BrandExpansionPanelProps extends PendingBrandSelectionProps {
   readonly result: BrandExpansionAllResult;
   readonly target: 'first_party' | 'competitor';
 }
 
+/** What "Suggest sub-brands" found for one list: the parent companies, likely duplicates and the missing sub-brands. */
 export const BrandExpansionPanel = ({
-  result,
-  target,
-  pendingBrands,
-  onToggleBrand,
-  onAccept,
-  onCancel,
+  result, target, pendingBrands, onToggleBrand, onAccept, onCancel,
 }: BrandExpansionPanelProps) => {
-  const isFirstParty = target === 'first_party';
-  const colorScheme = isFirstParty
-    ? {
-      border: 'border-emerald-300',
-      text: 'text-emerald-800',
-      subtext: 'text-emerald-600',
-      bg: 'bg-emerald-600',
-      bgHover: 'hover:bg-emerald-700',
-      bgLight: 'bg-emerald-100',
-      textLight: 'text-emerald-700',
-      bgLightHover: 'hover:bg-emerald-200',
-    }
-    : {
-      border: 'border-amber-300',
-      text: 'text-amber-800',
-      subtext: 'text-amber-600',
-      bg: 'bg-amber-600',
-      bgHover: 'hover:bg-amber-700',
-      bgLight: 'bg-amber-100',
-      textLight: 'text-amber-700',
-      bgLightHover: 'hover:bg-amber-200',
-    };
-
-  const duplicatesBg = isFirstParty ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200';
-  const duplicatesText = isFirstParty ? 'text-amber-800' : 'text-red-800';
-  const duplicatesSubtext = isFirstParty ? 'text-amber-700' : 'text-red-700';
+  const owner = target === 'first_party' ? 'your brands' : 'your competitors';
+  const parents = result.parent_companies ?? [];
+  const duplicates = result.duplicates_found ?? [];
 
   return (
-    <div className={`mb-4 p-3 bg-white rounded-lg border ${colorScheme.border}`}>
-      <SuggestionPanelHeader
-        title={<>Missing sub-brands for {isFirstParty ? 'your' : 'competitor'} brands</>}
-        titleClassName={colorScheme.text}
-        notes={result.notes}
-        notesClassName="text-gray-500"
-        onDismiss={onCancel}
-      >
-        {result.parent_companies && result.parent_companies.length > 0 && (
-          <p className={`text-xs ${colorScheme.subtext} mt-1`}>
-            Parent companies: {result.parent_companies.join(', ')}
+    <SuggestionPanel title={<>Sub-brands missing from {owner}</>} notes={result.notes} error={result.error} onDismiss={onCancel}>
+      {parents.length > 0 && (
+        <p className="mb-3 text-sm text-gray-600">Parent companies: {parents.join(', ')}</p>
+      )}
+      {duplicates.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1 flex items-center gap-1.5 text-sm font-medium text-amber-700">
+            <WarningIcon className="h-4 w-4" />
+            Possible duplicates in your list
           </p>
-        )}
-      </SuggestionPanelHeader>
-
-      {result.duplicates_found && result.duplicates_found.length > 0 && (
-        <div className={`mb-3 p-2 ${duplicatesBg} border rounded-lg`}>
-          <p className={`flex items-center gap-1.5 text-xs font-medium ${duplicatesText} mb-1`}>
-            <WarningIcon className="w-3.5 h-3.5" />
-            Potential duplicates in your list:
-          </p>
-          <ul className={`text-xs ${duplicatesSubtext} space-y-1`}>
-            {result.duplicates_found.map((dup) => (
-              <li key={`${dup.brand}-${dup.duplicate_of}`}>
-                "{dup.brand}" may be duplicate of "{dup.duplicate_of}"
-              </li>
+          <ul className="space-y-0.5 text-sm text-gray-700">
+            {duplicates.map((dup) => (
+              <li key={`${dup.brand}-${dup.duplicate_of}`}>&ldquo;{dup.brand}&rdquo; may be the same as &ldquo;{dup.duplicate_of}&rdquo;</li>
             ))}
           </ul>
         </div>
       )}
-
-      {result.suggestions.length > 0 ? (
-        <>
-          <p className="text-xs text-gray-500 mb-2">Select brands to add:</p>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {result.suggestions.map((brand) => {
-              const isSelected = pendingBrands.includes(brand);
-              return (
-                <button
-                  key={brand}
-                  onClick={() => onToggleBrand(brand)}
-                  className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                    isSelected ? `${colorScheme.bg} text-white` : `${colorScheme.bgLight} ${colorScheme.textLight} ${colorScheme.bgLightHover}`
-                  }`}
-                >
-                  {brand}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={onAccept}
-              disabled={pendingBrands.length === 0}
-              className={`px-4 py-2 ${colorScheme.bg} text-white text-sm font-medium rounded-lg ${colorScheme.bgHover} transition-colors disabled:opacity-50`}
-            >
-              Add {pendingBrands.length} Selected
-            </button>
-            <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
-              Cancel
-            </button>
-          </div>
-        </>
-      ) : (
-        <p className={`text-sm ${colorScheme.subtext} italic`}>No missing sub-brands found - your list looks complete!</p>
-      )}
-    </div>
+      <SuggestionChips
+        suggestions={result.suggestions}
+        pendingBrands={pendingBrands}
+        onToggleBrand={onToggleBrand}
+        onAccept={onAccept}
+        onCancel={onCancel}
+        emptyText="No missing sub-brands found. The list looks complete."
+      />
+    </SuggestionPanel>
   );
 };

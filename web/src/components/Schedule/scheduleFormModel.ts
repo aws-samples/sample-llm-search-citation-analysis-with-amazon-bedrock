@@ -6,7 +6,9 @@ import {
   describeScopeMarkets, scopeMarketIds
 } from '../Markets/marketScope';
 import { marketName } from '../Markets/marketSelection';
-import { kindOf } from './scheduleKinds';
+import {
+  kindOf, scheduleKindInfo
+} from './scheduleKinds';
 
 /**
  * Pure helpers behind the schedule form: defaults, mapping a schedule into
@@ -80,13 +82,18 @@ export function timezoneOptions(current: string): string[] {
   return [...zones].sort((left, right) => left.localeCompare(right));
 }
 
+/** The browser's own zone, so "at 09:00" means the user's 09:00; UTC when the browser does not say. */
+export function browserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
 export function defaultScheduleFormData(): ScheduleFormData {
   return {
     kind: 'analysis',
     display_name: '',
     frequency: 'daily',
     time: '09:00',
-    timezone: 'UTC',
+    timezone: browserTimezone(),
     day_of_week: 'MON',
     day_of_month: '1',
     enabled: true,
@@ -166,14 +173,51 @@ function dayLabel(value: string): string {
   return DAYS_OF_WEEK.find((day) => day.value === value)?.label ?? value;
 }
 
-/** "Weekly on Monday at 09:00 (Europe/Madrid)" — falls back to the raw cron for hand-written schedules. */
+/** The timing fields a description needs, from a stored schedule or the form being edited. */
+export type ScheduleTiming = Pick<ScheduleForm, 'frequency' | 'time' | 'timezone' | 'day_of_week'> & {readonly day_of_month: number | string;};
+
+/** "Every Monday at 09:00 (Europe/Madrid)", "Every day at …", "Every month on day 15 at …". */
+export function describeTiming(timing: ScheduleTiming): string {
+  const when = `at ${timing.time} (${timing.timezone})`;
+  if (timing.frequency === 'weekly') return `Every ${dayLabel(timing.day_of_week)} ${when}`;
+  if (timing.frequency === 'monthly') return `Every month on day ${timing.day_of_month} ${when}`;
+  return `Every day ${when}`;
+}
+
+/** The timing in words; the raw cron for hand-written schedules without a stored form. */
 export function describeScheduleTiming(schedule: Schedule): string {
-  const form = schedule.form;
-  if (form === null) return `${schedule.schedule} (${schedule.timezone})`;
-  const when = `at ${form.time} (${form.timezone})`;
-  if (form.frequency === 'weekly') return `Weekly on ${dayLabel(form.day_of_week)} ${when}`;
-  if (form.frequency === 'monthly') return `Monthly on day ${form.day_of_month} ${when}`;
-  return `Daily ${when}`;
+  return schedule.form === null ? `${schedule.schedule} (${schedule.timezone})` : describeTiming(schedule.form);
+}
+
+const FREQUENCY_ADJECTIVE: Record<ScheduleFrequency, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+};
+
+/** The keywords part of a generated name: "all keywords", the one group's name, "3 groups", "5 keywords". */
+function scopeNamePart(scope: AnalysisScope, groups: readonly KeywordGroup[]): string {
+  if (scope.mode === 'groups') {
+    const only = scope.group_ids.length === 1 ? groups.find((group) => group.id === scope.group_ids[0]) : undefined;
+    return only?.name ?? `${scope.group_ids.length} groups`;
+  }
+  if (scope.mode === 'keywords') return `${scope.keyword_ids.length} keyword${scope.keyword_ids.length === 1 ? '' : 's'}`;
+  return 'all keywords';
+}
+
+/** The name a schedule gets when the user leaves it blank: "Weekly analysis · all keywords", "Weekly backlink snapshots". */
+export function suggestScheduleName(formData: ScheduleFormData, groups: readonly KeywordGroup[]): string {
+  const base = `${FREQUENCY_ADJECTIVE[formData.frequency]} ${scheduleKindInfo(formData.kind).nameNoun}`;
+  return formData.kind === 'analysis' ? `${base} · ${scopeNamePart(formData.scope, groups)}` : base;
+}
+
+/** The form with a blank name replaced by the generated one, which is what gets validated and saved. */
+export function withResolvedName(formData: ScheduleFormData, groups: readonly KeywordGroup[]): ScheduleFormData {
+  if (formData.display_name.trim() !== '') return formData;
+  return {
+    ...formData,
+    display_name: suggestScheduleName(formData, groups),
+  };
 }
 
 /** "All active keywords" / "Groups: Hotel A, Hotel B" / "3 selected keyword(s)", then " · Markets: Chile" when narrowed. */

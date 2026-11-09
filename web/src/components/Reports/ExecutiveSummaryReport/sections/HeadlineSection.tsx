@@ -19,6 +19,7 @@ export function HeadlineSection({
     title: 'Headline',
     loading,
     loadingMessage: 'Loading executive summary…',
+    loadingShape: 'stats',
     error,
     value: data !== null && data.keywords_with_data > 0 ? data : null,
     emptyMessage: 'No analysis data yet. Run an analysis to populate the executive summary.',

@@ -1,13 +1,16 @@
 # Domain Overview, estimated traffic snapshots and SEO recommendations
 
+The Domain Overview page (SEO › Domain Overview, `/seo/domain`) shows what any domain ranks for on Google and its
+estimated organic traffic, from DataForSEO Labs. Stored traffic snapshots of your and your competitors' domains feed
+the SEO vs GEO report and the SEO recommendations of the Action Center.
+
 ## Domain Overview
 
-What any domain ranks for on Google in the header market, from DataForSEO Labs. Enter a domain or URL and a
-scope, then **Analyze**.
+Enter a domain or URL and a scope, then **Analyze**. Lookups run in the header market.
 
-The page starts from Settings › Brand Tracking: with the input empty, the button reads **Analyze &lt;own domain&gt;**
+The page starts from Settings › Brand tracking: with the input empty, the button reads **Analyze &lt;own domain&gt;**
 (the first owned domain; nothing is fetched until it is clicked), and the own and competitor domains are quick picks.
-Without an owned domain the page links to Settings › Brand Tracking.
+Without an owned domain the page links to Settings › Brand tracking.
 
 | Scope | Covers | Example |
 |---|---|---|
@@ -44,7 +47,7 @@ or a URL with a login is refused before any call, for the same reason.
 | Analyze | overview (1 row) + first keyword page (50 rows) | $0.012 + $0.018 |
 | A keyword or page page | one Labs call at the page size | $0.018 (50) / $0.024 (100) |
 | SERP competitors | one Labs call (50 rows) | $0.018 |
-| Snapshot (Admin, or weekly per domain x market) | overview + 1,000 ranked keywords | $0.144 |
+| Snapshot (Admin, or each scheduled run per domain x market) | overview + 1,000 ranked keywords | $0.144 |
 
 Every lookup is cached 12 hours (a repeat is free and says "Free (cached)"); keyword pages cached before 2.43.0
 (without intent) are not reused. An empty overview is never cached, so
@@ -53,9 +56,9 @@ ever re-sent automatically: DataForSEO bills at request time. Nothing is fetched
 
 ## Estimated traffic snapshots
 
-Snapshots run from a **Domain traffic snapshots** schedule (paid) on Operations > Schedule, on the day, time and
-zone the Admin picks; saving an enabled one asks first and names its paid calls (two per domain and market). Each
-run snapshots every domain in Brand Tracking (your domains and your competitors' domains; a domain covered by
+Snapshots run from a **Domain traffic snapshots** schedule (paid) on Operations › Schedule, daily, weekly or monthly,
+at the time and zone the Admin picks; saving an enabled one asks first and names its paid calls (two per domain and market). Each
+run snapshots every domain in Brand tracking (your domains and your competitors' domains; a domain covered by
 another as its subdomain once) in the global market and every configured market Labs serves, at most 40 domain x
 market pairs, two at a time. Nothing runs until such a schedule exists, and a disabled one costs nothing. An Admin
 can also snapshot the analyzed domain now from the Domain Overview (a confirmation names its two paid calls, without

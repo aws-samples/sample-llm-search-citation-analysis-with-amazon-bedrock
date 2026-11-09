@@ -10,8 +10,10 @@ import type {
 export interface ScheduleKindInfo {
   readonly kind: ScheduleKind;
   readonly label: string;
-  /** Default name of a new schedule of this kind. */
-  readonly defaultName: string;
+  /** One line under the label in the "What to run" choice. */
+  readonly description: string;
+  /** What the generated name calls one run, after the frequency ("Weekly backlink snapshots"). */
+  readonly nameNoun: string;
   /** The paid calls of one run, or null for an analysis run. */
   readonly paidCalls: string | null;
 }
@@ -20,29 +22,28 @@ export const SCHEDULE_KINDS: readonly ScheduleKindInfo[] = [
   {
     kind: 'analysis',
     label: 'Analysis run',
-    defaultName: '',
+    description: 'Asks the AI engines about your keywords and records every answer and citation.',
+    nameNoun: 'analysis',
     paidCalls: null,
   },
   {
     kind: 'domain_snapshots',
     label: 'Domain traffic snapshots',
-    defaultName: 'Weekly domain snapshots',
+    description: 'Estimated Google traffic and top ranked keywords of your and your competitors\' domains.',
+    nameNoun: 'domain snapshots',
     paidCalls: 'two paid DataForSEO calls per owned and competitor domain and market',
   },
   {
     kind: 'backlink_snapshots',
     label: 'Backlink snapshots',
-    defaultName: 'Weekly backlink snapshots',
+    description: 'Backlink totals of your and your competitors\' domains.',
+    nameNoun: 'backlink snapshots',
     paidCalls: 'one paid DataForSEO call per owned and competitor domain',
   },
 ];
 
 export function scheduleKindInfo(kind: ScheduleKind | undefined): ScheduleKindInfo {
   return SCHEDULE_KINDS.find((info) => info.kind === kind) ?? SCHEDULE_KINDS[0];
-}
-
-export function isScheduleKind(value: string): value is ScheduleKind {
-  return SCHEDULE_KINDS.some((info) => info.kind === value);
 }
 
 /** A schedule's kind; answers before 2.43.0 carry none and are analysis runs. */

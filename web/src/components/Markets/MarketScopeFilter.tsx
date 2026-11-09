@@ -69,8 +69,8 @@ export function MarketScopeFilter({
           );
         })}
       </div>
-      <p className="text-xs text-gray-400 mt-1">
-        {selected.size === 0 ? 'Every market (none ticked).' : 'Only keywords of the ticked markets run.'}
+      <p className="text-xs text-gray-500 mt-1">
+        {selected.size === 0 ? 'None ticked: keywords of every market run.' : 'Only keywords of the ticked markets run.'}
       </p>
     </fieldset>
   );

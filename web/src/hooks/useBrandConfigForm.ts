@@ -1,29 +1,17 @@
 import {
-  useState, useEffect, useCallback
+  useState, useLayoutEffect, useCallback, useMemo
 } from 'react';
 import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult
 } from '../types';
+import { resolveBrandIndustryPreset } from '../constants/brandConfigDefaults';
+import type { CompetitorDomains } from '../api/competitorDomainsDecoders';
 import {
-  DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
-} from '../constants/brandConfigDefaults';
-import {
-  decodeCompetitorDomains, type CompetitorDomains
-} from '../api/competitorDomainsDecoders';
-import { domainsOfCompetitors } from './competitorDomains';
+  configFromValues, defaultPromptOf, formValuesFromConfig, initialPromptOf, normalizeBrand,
+  type BrandConfigFormValues
+} from './brandConfigFormValues';
 
-interface BrandConfigFormState {
-  industry: string;
-  firstPartyBrands: string[];
-  firstPartyDomains: string[];
-  competitorBrands: string[];
-  /** Saved (and newly confirmed) domains per competitor. */
-  competitorDomains: CompetitorDomains;
-  customEntityTypes: string[];
-  includeSentiment: boolean;
-  includeRankingContext: boolean;
-  maxBrands: number;
-  industryPrompts: Record<string, string>;
+interface BrandConfigFormState extends BrandConfigFormValues {
   currentPrompt: string;
   promptModified: boolean;
 }
@@ -36,15 +24,12 @@ interface BrandConfigFormInputs {
 }
 
 type BrandType = 'first_party' | 'competitor';
-export type ConfigTab = 'settings' | 'prompt';
 
 interface BrandConfigExpansionState {
-  selectedFirstPartyBrand: string | null;
-  selectedCompetitorBrand: string | null;
   expandingBrand: BrandType | null;
   expansionAllResult: BrandExpansionAllResult | null;
   competitorDiscoveryResult: CompetitorDiscoveryResult | null;
-  /** Domains "Find Competitors" suggested per competitor; offered unchecked until the admin ticks them. */
+  /** Domains "Find competitors" suggested per competitor; offered unsaved until the admin picks them. */
   suggestedCompetitorDomains: CompetitorDomains;
   pendingExpansionBrands: string[];
   expansionTarget: BrandType | null;
@@ -56,9 +41,10 @@ export interface UseBrandConfigFormReturn {
   inputs: BrandConfigFormInputs;
   expansion: BrandConfigExpansionState;
   ui: {
-    activeTab: ConfigTab;
     saving: boolean;
-    saved: boolean
+    saved: boolean;
+    /** The form differs from the stored config, so there is something to save or discard. */
+    dirty: boolean;
   };
 
   // Form setters
@@ -78,12 +64,7 @@ export interface UseBrandConfigFormReturn {
   setNewCompetitor: (v: string) => void;
   setNewEntityType: (v: string) => void;
 
-  // UI setters
-  setActiveTab: (v: ConfigTab) => void;
-
   // Expansion setters
-  setSelectedFirstPartyBrand: (v: string | null) => void;
-  setSelectedCompetitorBrand: (v: string | null) => void;
   setExpandingBrand: (v: BrandType | null) => void;
   setExpansionAllResult: (v: BrandExpansionAllResult | null) => void;
   setCompetitorDiscoveryResult: (v: CompetitorDiscoveryResult | null) => void;
@@ -95,6 +76,10 @@ export interface UseBrandConfigFormReturn {
   handlePromptChange: (newPrompt: string) => void;
   resetPromptToDefault: () => void;
   buildConfig: () => BrandConfig;
+  /** Puts every field back to the stored config and clears the typed drafts. */
+  discardChanges: () => void;
+  /** Takes `saved` as the new baseline for `ui.dirty`, until the stored config changes. */
+  markSaved: (saved: BrandConfig) => void;
   setSaving: (v: boolean) => void;
   setSaved: (v: boolean) => void;
 
@@ -103,62 +88,11 @@ export interface UseBrandConfigFormReturn {
   currentPreset: IndustryPresets[string] | undefined;
 }
 
-/** The stored part of the form; the prompt fields derive from it and the presets. */
-type BrandConfigFormValues = Omit<BrandConfigFormState, 'currentPrompt' | 'promptModified'>;
-
-function defaultFormValues(): BrandConfigFormValues {
-  return {
-    industry: DEFAULT_BRAND_INDUSTRY,
-    firstPartyBrands: [],
-    firstPartyDomains: [],
-    competitorBrands: [],
-    competitorDomains: {},
-    customEntityTypes: [],
-    includeSentiment: true,
-    includeRankingContext: true,
-    maxBrands: 20,
-    industryPrompts: {},
-  };
-}
-
-function trackedBrandsFromConfig(
-  config: BrandConfig,
-  defaults: BrandConfigFormValues
-): Pick<BrandConfigFormValues, 'firstPartyBrands' | 'competitorBrands'> {
-  return {
-    firstPartyBrands: config.tracked_brands?.first_party ?? defaults.firstPartyBrands,
-    competitorBrands: config.tracked_brands?.competitors ?? defaults.competitorBrands,
-  };
-}
-
-/** A brand name compared case-, accent- and surrounding-whitespace-insensitively. */
-function normalizeBrand(name: string): string {
-  return name.normalize('NFD').replaceAll(/[\u0300-\u036F]/gi, '').toLowerCase().trim();
-}
-
-/** Editable values of a stored config; gaps in a partial config fall back to the defaults. */
-function formValuesFromConfig(config: BrandConfig | null): BrandConfigFormValues {
-  const defaults = defaultFormValues();
-  if (!config) return defaults;
-  return {
-    industry: config.industry || defaults.industry,
-    ...trackedBrandsFromConfig(config, defaults),
-    firstPartyDomains: config.first_party_domains ?? defaults.firstPartyDomains,
-    competitorDomains: decodeCompetitorDomains(config.competitor_domains),
-    customEntityTypes: config.custom_entity_types ?? defaults.customEntityTypes,
-    includeSentiment: config.include_sentiment ?? defaults.includeSentiment,
-    includeRankingContext: config.include_ranking_context ?? defaults.includeRankingContext,
-    maxBrands: config.max_brands ?? defaults.maxBrands,
-    industryPrompts: config.industry_prompts ?? defaults.industryPrompts,
-  };
-}
-
 export function useBrandConfigForm(
   config: BrandConfig | null,
   presets: IndustryPresets | null
 ): UseBrandConfigFormReturn {
   // UI state
-  const [activeTab, setActiveTab] = useState<ConfigTab>('settings');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -174,7 +108,7 @@ export function useBrandConfigForm(
   const [includeRankingContext, setIncludeRankingContext] = useState(initialValues.includeRankingContext);
   const [maxBrands, setMaxBrands] = useState(initialValues.maxBrands);
   const [industryPrompts, setIndustryPrompts] = useState(initialValues.industryPrompts);
-  const [currentPrompt, setCurrentPrompt] = useState('');
+  const [currentPrompt, setCurrentPrompt] = useState(() => initialPromptOf(initialValues, presets));
   const [promptModified, setPromptModified] = useState(false);
 
   // Input fields state
@@ -184,93 +118,91 @@ export function useBrandConfigForm(
   const [newEntityType, setNewEntityType] = useState('');
 
   // Expansion state
-  const [selectedFirstPartyBrand, setSelectedFirstPartyBrand] = useState<string | null>(null);
-  const [selectedCompetitorBrand, setSelectedCompetitorBrand] = useState<string | null>(null);
-  const [expandingBrand, setExpandingBrand] = useState<'first_party' | 'competitor' | null>(null);
+  const [expandingBrand, setExpandingBrand] = useState<BrandType | null>(null);
   const [expansionAllResult, setExpansionAllResult] = useState<BrandExpansionAllResult | null>(null);
   const [competitorDiscoveryResult, setCompetitorDiscoveryResult] = useState<CompetitorDiscoveryResult | null>(null);
   const [suggestedCompetitorDomains, setSuggestedCompetitorDomains] = useState<CompetitorDomains>({});
   const [pendingExpansionBrands, setPendingExpansionBrands] = useState<string[]>([]);
-  const [expansionTarget, setExpansionTarget] = useState<'first_party' | 'competitor' | null>(null);
+  const [expansionTarget, setExpansionTarget] = useState<BrandType | null>(null);
 
   const currentPreset = resolveBrandIndustryPreset(presets, industry);
 
   const brandExists = useCallback((brand: string, brandList: string[]): boolean =>
     brandList.some(existing => normalizeBrand(existing) === normalizeBrand(brand)), []);
 
-  // Sync form state when config changes
-  useEffect(() => {
-    if (config) {
-      const values = formValuesFromConfig(config);
-      setIndustry(values.industry);
-      setFirstPartyBrands(values.firstPartyBrands);
-      setFirstPartyDomains(values.firstPartyDomains);
-      setCompetitorBrands(values.competitorBrands);
-      setCompetitorDomains(values.competitorDomains);
-      setCustomEntityTypes(values.customEntityTypes);
-      setIncludeSentiment(values.includeSentiment);
-      setIncludeRankingContext(values.includeRankingContext);
-      setMaxBrands(values.maxBrands);
-      setIndustryPrompts(values.industryPrompts);
-    }
-  }, [config]);
+  const applyValues = useCallback((values: BrandConfigFormValues) => {
+    setIndustry(values.industry);
+    setFirstPartyBrands(values.firstPartyBrands);
+    setFirstPartyDomains(values.firstPartyDomains);
+    setCompetitorBrands(values.competitorBrands);
+    setCompetitorDomains(values.competitorDomains);
+    setCustomEntityTypes(values.customEntityTypes);
+    setIncludeSentiment(values.includeSentiment);
+    setIncludeRankingContext(values.includeRankingContext);
+    setMaxBrands(values.maxBrands);
+    setIndustryPrompts(values.industryPrompts);
+  }, []);
+
+  // Sync form state when config changes. A layout effect, so the form never
+  // paints one frame of stale values (which would flash the unsaved-changes bar).
+  useLayoutEffect(() => {
+    if (config) applyValues(formValuesFromConfig(config));
+  }, [config, applyValues]);
 
   // Sync prompt when industry changes
-  useEffect(() => {
+  useLayoutEffect(() => {
     const customPrompt = industry in industryPrompts ? industryPrompts[industry] : undefined;
-    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
-    setCurrentPrompt(customPrompt ?? defaultPrompt);
+    setCurrentPrompt(customPrompt ?? defaultPromptOf(presets, industry));
     setPromptModified(customPrompt !== undefined);
   }, [industry, industryPrompts, presets]);
 
   const handlePromptChange = useCallback((newPrompt: string) => {
     setCurrentPrompt(newPrompt);
-    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
-    setPromptModified(newPrompt !== defaultPrompt);
+    setPromptModified(newPrompt !== defaultPromptOf(presets, industry));
   }, [presets, industry]);
 
   const resetPromptToDefault = useCallback(() => {
     setIndustryPrompts(prev => Object.fromEntries(Object.entries(prev).filter(([key]) => key !== industry)));
   }, [industry]);
 
-  const buildConfig = useCallback((): BrandConfig => {
-    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
-    const finalPrompts = currentPrompt === defaultPrompt ? industryPrompts : {
-      ...industryPrompts,
-      [industry]: currentPrompt
-    };
-    return {
-      industry,
-      tracked_brands: {
-        first_party: firstPartyBrands,
-        competitors: competitorBrands
-      },
-      first_party_domains: firstPartyDomains,
-      competitor_domains: domainsOfCompetitors(competitorDomains, competitorBrands),
-      custom_entity_types: customEntityTypes,
-      custom_prompt_additions: '',
-      include_sentiment: includeSentiment,
-      include_ranking_context: includeRankingContext,
-      max_brands: maxBrands,
-      extract_brands: true,
-      industry_prompts: finalPrompts,
-    };
-  }, [industry, firstPartyBrands, competitorBrands, competitorDomains, firstPartyDomains, customEntityTypes, includeSentiment, includeRankingContext, maxBrands, industryPrompts, currentPrompt, presets]);
+  const values: BrandConfigFormValues = {
+    industry,
+    firstPartyBrands,
+    firstPartyDomains,
+    competitorBrands,
+    competitorDomains,
+    customEntityTypes,
+    includeSentiment,
+    includeRankingContext,
+    maxBrands,
+    industryPrompts,
+  };
+  const built = configFromValues(values, currentPrompt, presets);
+  const buildConfig = () => built;
+
+  const pristine = useMemo(() => {
+    const stored = formValuesFromConfig(config);
+    return JSON.stringify(configFromValues(stored, initialPromptOf(stored, presets), presets));
+  }, [config, presets]);
+  // What was last saved, until the stored config catches up (or the owner never updates it).
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  useLayoutEffect(() => { setSavedSnapshot(null); }, [config]);
+  const markSaved = useCallback((savedConfig: BrandConfig) => setSavedSnapshot(JSON.stringify(savedConfig)), []);
+  const dirty = JSON.stringify(built) !== (savedSnapshot ?? pristine);
+
+  const discardChanges = () => {
+    applyValues(formValuesFromConfig(config));
+    setNewFirstParty('');
+    setNewFirstPartyDomain('');
+    setNewCompetitor('');
+    setNewEntityType('');
+  };
 
   return {
     setCompetitorDomains,
     setSuggestedCompetitorDomains,
     form: {
-      industry,
-      firstPartyBrands,
-      firstPartyDomains,
-      competitorBrands,
-      competitorDomains,
-      customEntityTypes,
-      includeSentiment,
-      includeRankingContext,
-      maxBrands,
-      industryPrompts,
+      ...values,
       currentPrompt,
       promptModified
     },
@@ -281,8 +213,6 @@ export function useBrandConfigForm(
       newEntityType
     },
     expansion: {
-      selectedFirstPartyBrand,
-      selectedCompetitorBrand,
       expandingBrand,
       expansionAllResult,
       competitorDiscoveryResult,
@@ -291,9 +221,9 @@ export function useBrandConfigForm(
       expansionTarget
     },
     ui: {
-      activeTab,
       saving,
-      saved
+      saved,
+      dirty
     },
     setIndustry,
     setFirstPartyBrands,
@@ -307,11 +237,8 @@ export function useBrandConfigForm(
     setNewFirstPartyDomain,
     setNewCompetitor,
     setNewEntityType,
-    setActiveTab,
     setSaving,
     setSaved,
-    setSelectedFirstPartyBrand,
-    setSelectedCompetitorBrand,
     setExpandingBrand,
     setExpansionAllResult,
     setCompetitorDiscoveryResult,
@@ -320,6 +247,8 @@ export function useBrandConfigForm(
     handlePromptChange,
     resetPromptToDefault,
     buildConfig,
+    discardChanges,
+    markSaved,
     brandExists,
     currentPreset,
   };

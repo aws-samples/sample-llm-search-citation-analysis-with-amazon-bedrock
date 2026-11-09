@@ -20,6 +20,7 @@ export function TrendSnapshotSection({
     title: 'Trend and share of voice',
     loading,
     loadingMessage: 'Loading the KPI trend…',
+    loadingShape: 'chart',
     error,
     value: data !== null && data.keywords_with_data > 0 ? data : null,
   });

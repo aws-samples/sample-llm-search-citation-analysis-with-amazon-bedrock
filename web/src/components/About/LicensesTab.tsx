@@ -201,7 +201,7 @@ export function LicensesTab() {
         <h4 className="text-sm font-semibold text-gray-900 mb-3">AWS Services</h4>
         <div className="flex flex-wrap gap-2">
           {AWS_SERVICES.map((service) => (
-            <span key={service} className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded-sm">
+            <span key={service} className="text-xs bg-gray-50 text-amber-800 border border-gray-200 px-2 py-1 rounded-sm">
               {service}
             </span>
           ))}

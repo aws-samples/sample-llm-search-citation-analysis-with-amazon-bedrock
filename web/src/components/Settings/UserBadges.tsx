@@ -15,7 +15,7 @@ export const UserStatusBadge = ({ user }: { readonly user: Pick<CognitoUser, 'st
 export const UserRoleBadge = ({ groups }: { readonly groups: readonly string[] }) => {
   const role = roleOf(groups);
   return role === 'admin'
-    ? <span className={`${PILL} bg-violet-50 text-violet-700`}>{roleLabel(role)}</span>
+    ? <span className={`${PILL} bg-violet-50 text-violet-700 dark:text-violet-300`}>{roleLabel(role)}</span>
     : <span className="text-sm text-gray-600">{roleLabel(role)}</span>;
 };
 

@@ -13,12 +13,9 @@ import type {
 } from '../../types';
 import { PromptCard } from './PromptCard';
 import { usePromptTabList } from './usePromptTabList';
-import { InsightsScopeSelector } from './InsightsScopeSelector';
+import { InsightsPageHeader } from './InsightsScopeSelector';
 import { useScopeSelection } from './useScopeSelection';
-import { PageHeaderCard } from '../ui/PageHeaderCard';
-import {
-  Skeleton, SkeletonRegion
-} from '../ui/Skeleton';
+import { SkeletonRegion } from '../ui/Skeleton';
 import {
   TabBar, TabPanel
 } from '../ui/TabBar';
@@ -31,7 +28,7 @@ const TABS = [
   {
     id: 'winning',
     label: 'Winning',
-    activeClassName: 'border-green-500 text-green-600',
+    activeClassName: 'border-green-500 text-emerald-700',
   },
   {
     id: 'losing',
@@ -41,7 +38,7 @@ const TABS = [
   {
     id: 'opportunities',
     label: 'Opportunities',
-    activeClassName: 'border-yellow-500 text-yellow-600',
+    activeClassName: 'border-amber-500 text-amber-700',
   }
 ] as const;
 
@@ -54,34 +51,24 @@ interface InsightsSlotProps {
   readonly pending: boolean;
 }
 
-/** The win-rate badge, or a box of its size while the answer is in flight. */
-function WinRateBadge({
-  insights, pending
-}: InsightsSlotProps) {
-  if (pending) return <Skeleton className="h-[84px] sm:h-[88px] w-24 rounded-xl self-start" />;
-  if (!insights) return null;
-  return (
-    <div className="bg-linear-to-br/srgb from-green-50 to-emerald-50 rounded-xl p-4 text-center self-start">
-      <div className="text-2xl sm:text-3xl font-bold text-green-600">{insights.summary.win_rate}%</div>
-      <div className="text-xs text-green-700 font-medium mt-1">Win Rate</div>
-    </div>
-  );
-}
-
-/** The three count tiles over the tabs, or tiles of their size while the answer is in flight. */
+/** The win rate and the three count tiles over the tabs, or tiles of their size while the answer is in flight. */
 function SummaryTiles({
   insights, pending
 }: InsightsSlotProps) {
-  if (pending) return <StatTilesSkeleton count={3} gridClassName="grid-cols-3" />;
+  if (pending) return <StatTilesSkeleton count={4} gridClassName="grid-cols-2 lg:grid-cols-4" />;
   if (!insights) return null;
   return (
-    <div className="grid grid-cols-3 gap-3 sm:gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="text-xs sm:text-sm text-gray-500">Win Rate</div>
+        <div className="text-xl sm:text-2xl font-bold text-gray-900">{insights.summary.win_rate}%</div>
+      </div>
       {([
-        ['Winning', 'border-green-500', 'text-green-600', insights.summary.winning_count],
-        ['Losing', 'border-red-500', 'text-red-600', insights.summary.losing_count],
-        ['Opportunities', 'border-yellow-500', 'text-yellow-600', insights.summary.opportunity_count],
-      ] as const).map(([label, borderClass, countClass, count]) => (
-        <div key={label} className={`bg-white p-3 sm:p-4 rounded-lg shadow-sm border-l-4 ${borderClass}`}>
+        ['Winning', 'text-emerald-700', insights.summary.winning_count],
+        ['Losing', 'text-red-700', insights.summary.losing_count],
+        ['Opportunities', 'text-amber-700', insights.summary.opportunity_count],
+      ] as const).map(([label, countClass, count]) => (
+        <div key={label} className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border border-gray-200">
           <div className="text-xs sm:text-sm text-gray-500">{label}</div>
           <div className={`text-xl sm:text-2xl font-bold ${countClass}`}>{count}</div>
         </div>
@@ -123,31 +110,29 @@ export function PromptInsights({ keywords }: Props) {
     ...tab,
     label: (
       <>
-        {/* A fixed-width count slot, so the tabs keep their place when the counts arrive. */}
-        {tab.label} (<span className="inline-block min-w-6 text-center tabular-nums">
-          {pending ? <CountSkeleton /> : getCount(tab.id)}
-        </span>)
+        {/* The count sits tight in its brackets; while loading a placeholder of about one digit holds its place. */}
+        {tab.label} (<span className="tabular-nums">{pending ? <CountSkeleton /> : getCount(tab.id)}</span>)
       </>
     ),
   }));
 
   return (
     <div className="space-y-6">
-      <PageHeaderCard
+      <InsightsPageHeader
         title="Prompt Insights"
         description={(
           <>
-            Understand which search queries work in your favor. "Winning" = top 3 rank. 
-            "Losing" = low visibility. "Opportunities" = competitors appear but you don't.
+            Which queries work in your favor. Winning: your brand ranks in the top 3. Losing: your brand is
+            seldom named. Opportunities: competitors are named and your brand is not.
           </>
         )}
-      >
-        <InsightsScopeSelector keywords={keywords} selection={selection} label="Analyze" />
-        <WinRateBadge insights={insights} pending={pending} />
-        <div>
-          <ExportAllButton view="prompt-insights" params={pending ? null : requestParams(request)} />
-        </div>
-      </PageHeaderCard>
+        keywords={keywords}
+        selection={selection}
+      />
+
+      <div className="flex justify-end">
+        <ExportAllButton view="prompt-insights" params={pending ? null : requestParams(request)} />
+      </div>
 
       <SummaryTiles insights={insights} pending={pending} />
       <ScopeCoverageNote response={insights} />

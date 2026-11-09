@@ -13,6 +13,8 @@ import {
   GROUP_MARINO,
   buildProps,
   buildSchedule,
+  chooseScheduleAction,
+  chooseWeeklyOnFriday,
   legacyKeywordSchedule,
   openCreateForm,
   openEditForm,
@@ -41,6 +43,9 @@ import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { ApiRequestError } from '../../infrastructure';
 import { isSeoApiConfigured } from '../../api/seo';
+import {
+  browserTimezone, formDataFromSchedule, toSchedulePayload
+} from './scheduleFormModel';
 
 const mockFetchSchedules = vi.mocked(fetchSchedules);
 const mockCreateSchedule = vi.mocked(createSchedule);
@@ -109,7 +114,7 @@ describe('ScheduleManager', () => {
     it('describes the timing in words instead of the raw cron', () => {
       renderManager([weeklySchedule]);
 
-      expect(screen.getByText('Weekly on Monday at 09:00 (Europe/Madrid)')).toBeInTheDocument();
+      expect(screen.getByText('Every Monday at 09:00 (Europe/Madrid)')).toBeInTheDocument();
     });
 
     it('names the groups a group-scoped schedule runs', () => {
@@ -131,10 +136,10 @@ describe('ScheduleManager', () => {
       expect(screen.getByText(/2 keyword\(s\) from the previous version: best hotels malaga, boutique hotels madrid/)).toBeInTheDocument();
     });
 
-    it('shows a disabled badge for a disabled schedule', () => {
+    it('shows a disabled schedule with its switch off', () => {
       renderManager([buildSchedule({ enabled: false })]);
 
-      expect(screen.getByText('Disabled')).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: 'Hotel Coruña — weekly enabled' })).not.toBeChecked();
     });
 
     it('shows empty state when no schedules', async () => {
@@ -164,40 +169,48 @@ describe('ScheduleManager', () => {
 
   describe('creating a schedule', () => {
     async function submitCreateForm() {
-      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
     }
 
-    it('shows a generic brand-analysis name example', async () => {
+    it('opens the form in a dialog named by its title', async () => {
       await renderCreateForm();
 
-      expect(screen.getByLabelText('Schedule name')).toHaveAttribute(
-        'placeholder',
-        'e.g. Weekly brand analysis'
-      );
+      expect(screen.getByRole('dialog', { name: 'New schedule' })).toBeInTheDocument();
     });
 
-    it('defaults to running all keywords daily at 09:00 UTC, enabled', async () => {
+    it('suggests a generated name as the placeholder', async () => {
       await renderCreateForm();
 
-      expect(screen.getByRole('radio', { name: /All keywords/i })).toBeChecked();
-      expect(screen.getByLabelText('Frequency')).toHaveValue('daily');
-      expect(screen.getByLabelText('Time')).toHaveValue('09:00');
-      expect(screen.getByLabelText('Timezone')).toHaveValue('UTC');
+      expect(screen.getByLabelText('Schedule name')).toHaveAttribute('placeholder', 'Daily analysis · all keywords');
     });
 
-    it('requires a name before saving', async () => {
+    it('defaults to running all keywords daily at 09:00 in the browser timezone, enabled', async () => {
+      await renderCreateForm();
+
+      expect(screen.getByRole('radio', { name: /All active keywords/i })).toBeChecked();
+      expect(['Repeat', 'Time', 'Timezone'].map((label) => (screen.getByLabelText(label) as HTMLInputElement).value))
+        .toStrictEqual(['daily', '09:00', browserTimezone()]);
+      expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    });
+
+    it('saves a blank name as the generated one', async () => {
       await renderCreateForm();
 
       await submitCreateForm();
 
-      expect(screen.getByText('Give the schedule a name')).toBeInTheDocument();
-      expect(mockCreateSchedule).not.toHaveBeenCalled();
+      expect(mockCreateSchedule).toHaveBeenCalledWith(expect.objectContaining({ display_name: 'Daily analysis · all keywords' }));
+    });
+
+    it('says the timing in words with the next run while the form is filled in', async () => {
+      await renderCreateForm();
+      await chooseWeeklyOnFriday();
+
+      expect(screen.getByText(new RegExp(`^Every Friday at 09:00 \\(${browserTimezone()}\\)\\.`))).toHaveTextContent(/Next run: /);
     });
 
     it('posts the display name, timing and scope', async () => {
       await renderNamedCreateForm('Hotel Coruña — weekly');
-      await userEvent.selectOptions(screen.getByLabelText('Frequency'), 'weekly');
-      await userEvent.selectOptions(screen.getByLabelText('Day of week'), 'FRI');
+      await chooseWeeklyOnFriday();
       await userEvent.clear(screen.getByLabelText('Timezone'));
       await userEvent.type(screen.getByLabelText('Timezone'), 'Europe/Madrid');
       await userEvent.click(screen.getByRole('radio', { name: /Keyword groups/i }));
@@ -242,7 +255,7 @@ describe('ScheduleManager', () => {
 
       await submitCreateForm();
 
-      expect(screen.getByText('Select at least one keyword group')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Select at least one keyword group');
       expect(mockCreateSchedule).not.toHaveBeenCalled();
     });
 
@@ -255,17 +268,12 @@ describe('ScheduleManager', () => {
       expect(screen.getByText(/No keyword groups yet/i)).toBeInTheDocument();
     });
 
-    it('refuses a day of month above 28 for monthly schedules', async () => {
+    it('offers only days 1 to 28 for monthly schedules, so every month has the day', async () => {
       await renderNamedCreateForm('Monthly');
-      await userEvent.selectOptions(screen.getByLabelText('Frequency'), 'monthly');
-      await userEvent.clear(screen.getByLabelText(/Day of month/));
-      await userEvent.type(screen.getByLabelText(/Day of month/), '31');
+      await userEvent.selectOptions(screen.getByLabelText('Repeat'), 'monthly');
 
-      await submitCreateForm();
-
-      // The input's max stops the native submit; the model check backs it up.
-      expect(screen.getByLabelText(/Day of month/)).toBeInvalid();
-      expect(mockCreateSchedule).not.toHaveBeenCalled();
+      const days = within(screen.getByLabelText('Day of month')).getAllByRole('option').map((option) => option.textContent);
+      expect([days.length, days[0], days[days.length - 1]]).toStrictEqual([28, '1', '28']);
     });
 
     it('refreshes the list and closes the form after a successful creation', async () => {
@@ -298,7 +306,7 @@ describe('ScheduleManager', () => {
 
       expect(screen.getByRole('form', { name: 'Edit schedule' })).toBeInTheDocument();
       expect(screen.getByLabelText('Schedule name')).toHaveValue('Hotel Coruña — weekly');
-      expect(screen.getByLabelText('Frequency')).toHaveValue('weekly');
+      expect(screen.getByLabelText('Repeat')).toHaveValue('weekly');
       expect(screen.getByLabelText('Timezone')).toHaveValue('Europe/Madrid');
     });
 
@@ -313,9 +321,9 @@ describe('ScheduleManager', () => {
       await renderEditForm();
       await userEvent.clear(screen.getByLabelText('Time'));
       await userEvent.type(screen.getByLabelText('Time'), '18:30');
-      await userEvent.click(screen.getByRole('checkbox', { name: /Enabled/ }));
+      await userEvent.click(screen.getByRole('switch', { name: 'Enabled' }));
 
-      await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
       expect(mockUpdateSchedule).toHaveBeenCalledWith('sch-1a2b3c4d', {
         kind: 'analysis',
@@ -338,7 +346,7 @@ describe('ScheduleManager', () => {
       await renderEditForm(legacyKeywordSchedule);
 
       expect(screen.getByText(/Choose its keywords again below/)).toBeInTheDocument();
-      expect(screen.getByRole('radio', { name: /All keywords/i })).toBeChecked();
+      expect(screen.getByRole('radio', { name: /All active keywords/i })).toBeChecked();
     });
 
     it('cancel closes the editor without saving', async () => {
@@ -353,7 +361,7 @@ describe('ScheduleManager', () => {
 
   describe('run now', () => {
     async function runScheduleNow(displayName: string) {
-      await userEvent.click(screen.getByRole('button', { name: `Run schedule ${displayName} now` }));
+      await chooseScheduleAction(displayName, 'Run now');
     }
 
     it('starts an execution for the schedule and reports it', async () => {
@@ -376,7 +384,7 @@ describe('ScheduleManager', () => {
 
   describe('deleting a schedule', () => {
     async function confirmDeleteOfWeeklySchedule() {
-      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
+      await chooseScheduleAction('Hotel Coruña — weekly', 'Delete');
       await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
     }
 
@@ -425,8 +433,9 @@ describe('ScheduleManager admin-only controls', () => {
     renderManager([weeklySchedule]);
 
     expect(screen.queryByRole('button', { name: /Edit schedule/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Run schedule/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Delete schedule/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Actions for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.getByText('Enabled')).toBeInTheDocument();
   });
 
   it('still lists existing schedules for non-admin users', () => {
@@ -442,13 +451,14 @@ describe('ScheduleManager admin-only controls', () => {
     expect(await screen.findByText(/An administrator can add a schedule/i)).toBeInTheDocument();
   });
 
-  it('shows the delete button to admin users', () => {
+  it('shows the actions menu and the switch to admin users', () => {
     /** Guards the assertions above from passing because of a renamed label. */
     mockAdmin(true);
 
     renderManager([weeklySchedule]);
 
-    expect(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actions for Hotel Coruña — weekly' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Hotel Coruña — weekly enabled' })).toBeChecked();
   });
 });
 
@@ -466,20 +476,25 @@ const backlinkSchedule: Schedule = buildSchedule({
 async function renderBacklinkCreate({ enabled = true } = {}) {
   renderManager();
   await openCreateForm();
-  await userEvent.selectOptions(screen.getByLabelText('Runs'), 'backlink_snapshots');
-  if (!enabled) await userEvent.click(screen.getByLabelText(/^Enabled/));
-  await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+  await userEvent.click(screen.getByRole('radio', { name: /^Backlink snapshots/ }));
+  if (!enabled) await userEvent.click(screen.getByRole('switch', { name: 'Enabled' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
 }
 
-/** Renders the backlink snapshot schedule and clicks its button named `<action> schedule Weekly backlink snapshots<suffix>`. */
-async function renderBacklinkCardAction(action: 'Run' | 'Edit', suffix = '') {
+/** Renders the backlink snapshot schedule and picks `action` from its ⋯ menu. */
+async function renderBacklinkCardAction(action: 'Run now' | 'Edit') {
   renderManager([backlinkSchedule]);
-  await userEvent.click(screen.getByRole('button', { name: `${action} schedule Weekly backlink snapshots${suffix}` }));
+  await chooseScheduleAction('Weekly backlink snapshots', action);
+}
+
+/** The paid confirmation, which opens on top of the schedule dialog (or alone, from a row). */
+async function findPaidConfirmationElement(): Promise<HTMLElement> {
+  return (await screen.findByText(/Continue\?$/)).closest('dialog') as HTMLElement;
 }
 
 /** Answers the paid confirmation with the button named `name`. */
 async function renderAnswerToDialog(name: string) {
-  await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name }));
+  await userEvent.click(within(await findPaidConfirmationElement()).getByRole('button', { name }));
 }
 
 describe('ScheduleManager kinds', () => {
@@ -502,24 +517,26 @@ describe('ScheduleManager kinds', () => {
       renderManager();
       await openCreateForm();
 
-      expect(within(screen.getByLabelText('Runs')).getAllByRole('option').map((option) => option.textContent)).toStrictEqual(['Analysis run']);
+      expect(screen.queryByRole('radio', { name: /^Analysis run/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /All active keywords/ })).toBeChecked();
     });
 
     it('names the paid calls and hides the keyword scope once a snapshot kind is picked', async () => {
       renderManager();
       await openCreateForm();
 
-      await userEvent.selectOptions(screen.getByLabelText('Runs'), 'domain_snapshots');
+      await userEvent.click(screen.getByRole('radio', { name: /^Domain traffic snapshots/ }));
 
-      expect(screen.getByLabelText('Schedule name')).toHaveValue('Weekly domain snapshots');
+      expect(screen.getByLabelText('Schedule name')).toHaveAttribute('placeholder', 'Weekly domain snapshots');
+      expect(screen.getByLabelText('Repeat')).toHaveValue('weekly');
       expect(screen.getByText(/two paid DataForSEO calls per owned and competitor domain and market/)).toBeInTheDocument();
-      expect(screen.queryByText('Keywords to analyse')).not.toBeInTheDocument();
+      expect(screen.queryByText('Which keywords')).not.toBeInTheDocument();
     });
 
     it('asks before saving an enabled paid schedule, naming its paid calls', async () => {
       await renderBacklinkCreate();
 
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await findPaidConfirmationElement();
       expect(within(dialog).getByText(/one paid DataForSEO call per owned and competitor domain/)).toBeInTheDocument();
       expect(mockCreateSchedule).not.toHaveBeenCalled();
     });
@@ -556,7 +573,7 @@ describe('ScheduleManager kinds', () => {
     });
 
     it('asks before running a snapshot schedule now', async () => {
-      await renderBacklinkCardAction('Run', ' now');
+      await renderBacklinkCardAction('Run now');
 
       expect(mockRunSchedule).not.toHaveBeenCalled();
       await renderAnswerToDialog('Run');
@@ -569,6 +586,49 @@ describe('ScheduleManager kinds', () => {
 
       expect(screen.queryByRole('combobox', { name: 'Runs' })).not.toBeInTheDocument();
       expect(within(screen.getByRole('form', { name: 'Edit schedule' })).getByText('Backlink snapshots')).toBeInTheDocument();
+    });
+  });
+
+  describe('row switch', () => {
+    it('switches a schedule off by saving it with only enabled changed, without a success dialog', async () => {
+      renderManager([weeklySchedule]);
+
+      await userEvent.click(screen.getByRole('switch', { name: 'Hotel Coruña — weekly enabled' }));
+
+      await waitFor(() => expect(mockUpdateSchedule).toHaveBeenCalledWith('sch-1a2b3c4d', {
+        ...toSchedulePayload(formDataFromSchedule(weeklySchedule)),
+        enabled: false,
+      }));
+      expect(screen.queryByText('Schedule updated successfully')).not.toBeInTheDocument();
+    });
+
+    it('asks before switching a paid schedule on, then confirms the spend', async () => {
+      renderManager([{
+        ...backlinkSchedule,
+        enabled: false,
+      }]);
+
+      await userEvent.click(screen.getByRole('switch', { name: 'Weekly backlink snapshots enabled' }));
+      expect(mockUpdateSchedule).not.toHaveBeenCalled();
+      await renderAnswerToDialog('Save');
+
+      await waitFor(() => expect(mockUpdateSchedule.mock.calls[0]?.[1]).toMatchObject({
+        enabled: true,
+        confirm_paid: true,
+      }));
+    });
+
+    it('offers no switch for a legacy keyword-text schedule, which must be re-scoped first', () => {
+      renderManager([legacyKeywordSchedule]);
+
+      const row = screen.getByRole('listitem');
+      expect([within(row).queryByRole('switch'), within(row).getByText('Enabled').tagName]).toStrictEqual([null, 'SPAN']);
+    });
+
+    it('shows when an enabled schedule runs next', () => {
+      renderManager([weeklySchedule]);
+
+      expect(screen.getByText(/^Next run: /)).toBeInTheDocument();
     });
   });
 

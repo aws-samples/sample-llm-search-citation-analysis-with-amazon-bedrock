@@ -46,6 +46,15 @@ describe('buildSeoGeoChartConfiguration', () => {
     ]);
   });
 
+  it('labels positions 1 to 10 and >10, leaving the padding columns blank', () => {
+    const ticks = CONFIGURATION.options?.scales?.x?.ticks as { callback: (value: number) => string };
+    expect([0, 1, 10, 11, 12].map((value) => ticks.callback(value))).toStrictEqual(['', '#1', '#10', '>10', '']);
+  });
+
+  it('draws a bubble on the edge of the plot whole', () => {
+    expect(CONFIGURATION.data.datasets.map((dataset) => dataset.clip)).toStrictEqual([18, 18, 18, 18]);
+  });
+
   it('colours the AI gap bubbles amber', () => {
     expect(CONFIGURATION.data.datasets[1].backgroundColor).toBe('rgb(245, 158, 11)');
   });

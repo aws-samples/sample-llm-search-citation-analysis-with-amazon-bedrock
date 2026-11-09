@@ -20,7 +20,7 @@ interface BlockedPageBannerProps {readonly blockReason?: BlockReason;}
 
 /** Warns that a crawl captured a bot-detection page rather than the cited content. */
 export const BlockedPageBanner = ({ blockReason }: BlockedPageBannerProps) => (
-  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
     <div className="flex items-start gap-3">
       <StrokeIcon className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" paths={WARNING_PATHS} strokeWidth={2} />
       <div>
@@ -29,7 +29,7 @@ export const BlockedPageBanner = ({ blockReason }: BlockedPageBannerProps) => (
           This site blocked automated access. The screenshot shows the block page, not the actual content.
         </p>
         {blockReason && (
-          <p className="text-sm text-amber-600 mt-2">
+          <p className="text-sm text-amber-700 mt-2">
             <span className="font-medium">Reason:</span> {BLOCK_REASON_LABELS[blockReason]}
           </p>
         )}

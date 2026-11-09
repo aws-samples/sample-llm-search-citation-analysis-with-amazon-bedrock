@@ -6,10 +6,11 @@ import type { OnboardingSetupStatus } from '../../hooks/useOnboardingStatus';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { Modal } from '../ui/Modal';
 import { CheckIcon } from '../ui';
+import { Button } from '../ui/Button';
 import type { SettingsTab } from '../Settings';
 import type { TabType } from '../../types';
 
-/** Set when the user explicitly skips onboarding ("Set up later"). */
+/** Set when the user explicitly skips onboarding ("Don't show again"). */
 export const ONBOARDING_DISMISSED_STORAGE_KEY = 'onboarding-dismissed';
 /**
  * Set once every required step has been observed complete. From then on the
@@ -51,15 +52,6 @@ function buildSteps(
 ): OnboardingStep[] {
   return [
     {
-      id: 'providers',
-      title: 'Add AI provider API keys',
-      description: 'Connect at least one provider (OpenAI, Perplexity, Gemini, or Claude) so analysis runs can query it.',
-      actionLabel: 'Configure providers',
-      complete: status.providersConfigured,
-      optional: false,
-      onAction: () => onNavigateToSettings('providers'),
-    },
-    {
       id: 'keywords',
       title: 'Add keywords to track',
       description: 'Keywords are the search queries sent to each AI provider.',
@@ -76,6 +68,15 @@ function buildSteps(
       complete: status.brandConfigured,
       optional: false,
       onAction: () => onNavigateToSettings('brand-config'),
+    },
+    {
+      id: 'providers',
+      title: 'Add AI provider API keys',
+      description: 'Connect at least one provider (OpenAI, Perplexity, Gemini, or Claude) so analysis runs can query it.',
+      actionLabel: 'Configure providers',
+      complete: status.providersConfigured,
+      optional: false,
+      onAction: () => onNavigateToSettings('providers'),
     },
     {
       id: 'first-run',
@@ -107,17 +108,25 @@ function buildSteps(
   ];
 }
 
+/** The step whose button is the primary action: the first required one still to do, else the first optional one. */
+function firstStepToDo(steps: readonly OnboardingStep[]): string | undefined {
+  const toDo = steps.filter((step) => !step.complete);
+  return (toDo.find((step) => !step.optional) ?? toDo[0])?.id;
+}
+
 interface StepRowProps {
   readonly step: OnboardingStep;
   readonly stepNumber: number;
+  /** The first step still to do: its button is the one primary action of the guide. */
+  readonly isNext: boolean;
 }
 
 const StepRow = ({
-  step, stepNumber 
+  step, stepNumber, isNext
 }: StepRowProps) => (
   <li className="flex items-start gap-3 py-3">
     {step.complete ? (
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-emerald-700">
         <CheckIcon className="w-3.5 h-3.5" />
       </span>
     ) : (
@@ -127,7 +136,7 @@ const StepRow = ({
     )}
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2">
-        <p className={`text-sm font-medium ${step.complete ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>
+        <p className={`text-sm font-medium ${step.complete ? 'text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>
           {step.title}
         </p>
         {step.optional && (
@@ -137,12 +146,9 @@ const StepRow = ({
       <p className="text-xs text-gray-500 mt-0.5">{step.description}</p>
     </div>
     {!step.complete && (
-      <button
-        onClick={step.onAction}
-        className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 transition-colors whitespace-nowrap"
-      >
+      <Button size="sm" variant={isNext ? 'primary' : 'secondary'} onClick={step.onAction} className="whitespace-nowrap">
         {step.actionLabel}
-      </button>
+      </Button>
     )}
   </li>
 );
@@ -156,7 +162,7 @@ const StepRow = ({
  * - Only queries setup status while onboarding is neither skipped nor
  *   complete; once every required step has been seen complete, a persisted
  *   flag stops all future checks.
- * - "Set up later" skips permanently (persisted).
+ * - "Don't show again" skips permanently (persisted).
  * - Escape / backdrop / a step action close the modal for the current
  *   session only, so it reappears on the next visit while setup is pending.
  */
@@ -187,6 +193,7 @@ export const OnboardingModal = ({
   const requiredSteps = steps.filter((step) => !step.optional);
   const completedRequired = requiredSteps.filter((step) => step.complete).length;
   const allRequiredComplete = requiredSteps.length > 0 && completedRequired === requiredSteps.length;
+  const nextStepId = firstStepToDo(steps);
 
   // Persist completion so future sessions skip the status checks entirely.
   useEffect(() => {
@@ -226,13 +233,14 @@ export const OnboardingModal = ({
     >
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-gray-500">
-          Complete these steps to start tracking how AI models cite your brand.
+          Do the required steps in order. Your first analysis run fills the Dashboard with answers, brand mentions and
+          citations.
         </p>
         <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs whitespace-nowrap">
           {completedRequired} of {requiredSteps.length} required steps done
         </span>
       </div>
-      <ol className="mt-2 divide-y divide-gray-100">
+      <ol className="mt-2 divide-y divide-gray-100 dark:divide-gray-700">
         {steps.map((step, index) => (
           <StepRow
             key={step.id}
@@ -241,16 +249,15 @@ export const OnboardingModal = ({
               onAction: () => handleStepAction(step),
             }}
             stepNumber={index + 1}
+            isNext={step.id === nextStepId}
           />
         ))}
       </ol>
-      <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
-        <button
-          onClick={handleSkip}
-          className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-        >
-          Set up later
-        </button>
+      <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between gap-3">
+        <p className="text-xs text-gray-500">Close this guide to see it again on your next visit.</p>
+        <Button variant="ghost" onClick={handleSkip} className="whitespace-nowrap">
+          Don&apos;t show again
+        </Button>
       </div>
     </Modal>
   );

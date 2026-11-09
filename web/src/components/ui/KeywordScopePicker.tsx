@@ -169,8 +169,8 @@ function GroupIdPicker({
       </div>
       <fieldset className="border-0 p-0 m-0">
         <legend className="sr-only">Keyword groups</legend>
-        <div className="max-h-80 overflow-y-auto divide-y divide-gray-200">
-          {groups.length === 0 && <p className="p-4 text-sm text-gray-400">No keyword groups available.</p>}
+        <div className="max-h-80 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
+          {groups.length === 0 && <p className="p-4 text-sm text-gray-500">No keyword groups available.</p>}
           {groups.map((group) => {
             const isSelected = selected.has(group.id);
             const selectionLimitReached = capped && selected.size >= maxSelectionCount;
@@ -181,7 +181,7 @@ function GroupIdPicker({
                   disabled={disabled || (!isSelected && selectionLimitReached)}
                   className="w-4 h-4 text-gray-900 rounded-sm border-gray-300 focus:ring-gray-900" />
                 <span className="flex-1 text-sm text-gray-700">{group.name}</span>
-                <span className="text-xs text-gray-400">{keywordCountLabel(group.keyword_count)}</span>
+                <span className="text-xs text-gray-500">{keywordCountLabel(group.keyword_count)}</span>
               </label>
             );
           })}
@@ -269,14 +269,14 @@ function KeywordIdPicker({
           <span className="text-gray-500">{selected.size} of {keywords.length} selected</span>
           <button type="button" onClick={() => onChange(globalSelectionComplete ? [] : globalTargetIds)}
             disabled={disabled || keywords.length === 0 || (capped && maxSelectionCount === 0)}
-            className="text-gray-700 hover:text-gray-900 font-medium disabled:text-gray-300">
+            className="text-gray-700 hover:text-gray-900 dark:hover:text-white font-medium disabled:text-gray-300 dark:disabled:text-gray-500">
             {globalSelectionLabel(globalSelectionComplete, globalSelectionIsCapped, maxSelectionCount)}
           </button>
         </div>
       </div>
       <ScopeCapHint hint={capHint} atLimit={selectionAtLimit} moreKeywordsExist={maxSelectionCount < allIds.length} />
-      <div className="max-h-80 overflow-y-auto divide-y divide-gray-200">
-        {visibleSections.length === 0 && <p className="p-4 text-sm text-gray-400">No keywords match your search.</p>}
+      <div className="max-h-80 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
+        {visibleSections.length === 0 && <p className="p-4 text-sm text-gray-500">No keywords match your search.</p>}
         {visibleSections.map((section) => {
           const state = sectionState(section, selected);
           const isCollapsed = collapsed.has(section.id);
@@ -300,7 +300,7 @@ function KeywordIdPicker({
                   aria-expanded={!isCollapsed}
                   className="flex-1 flex items-center justify-between text-left text-sm font-medium text-gray-900">
                   <span>{section.name}</span>
-                  <span className="text-xs text-gray-400">{keywordCountLabel(section.keywords.length)}</span>
+                  <span className="text-xs text-gray-500">{keywordCountLabel(section.keywords.length)}</span>
                 </button>
               </div>
               {!isCollapsed && (
@@ -310,7 +310,7 @@ function KeywordIdPicker({
                     const isSelected = selected.has(keyword.id);
                     return (
                       // Stryker disable next-line StringLiteral: React uses this only for reconciliation identity; the rendered label and selection behavior are unchanged.
-                      <label key={`${section.id}:${keyword.id}`} htmlFor={keywordId} className="flex items-center gap-2 p-1.5 hover:bg-white rounded-sm cursor-pointer">
+                      <label key={`${section.id}:${keyword.id}`} htmlFor={keywordId} className="flex items-center gap-2 p-1.5 hover:bg-white dark:hover:bg-gray-800 rounded-sm cursor-pointer">
                         <input id={keywordId} name={name} value={keyword.id} type="checkbox" checked={isSelected}
                           onChange={() => toggleKeyword(keyword.id)}
                           disabled={disabled || (!isSelected && selectionAtLimit)}
@@ -395,7 +395,8 @@ function ScopedKeywordScopePicker({
 
   return (
     <div className="space-y-3">
-      <div role="radiogroup" aria-label="Scope mode" className="flex flex-wrap items-center gap-3">
+      {/* One allowed mode leaves nothing to choose, so the caller's own controls stand alone. */}
+      {displayedModes.length > 1 && <div role="radiogroup" aria-label="Scope mode" className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Scope</span>
         {displayedModes.map((mode) => (
           <label key={mode} className="inline-flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
@@ -405,7 +406,7 @@ function ScopedKeywordScopePicker({
             <span>{modeLabel(mode)}</span>
           </label>
         ))}
-      </div>
+      </div>}
       <ScopedIdPicker
         idPrefix={idPrefix}
         name={name}

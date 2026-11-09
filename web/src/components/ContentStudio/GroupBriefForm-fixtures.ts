@@ -148,17 +148,28 @@ export function renderGroupBriefFormWithMarkets(): ComponentProps<typeof GroupBr
   return props;
 }
 
+/** Step 2's "A keyword group" option, the default when groups exist. */
+export const GROUP_SCOPE_RADIO = /^A keyword group/u;
+
 export async function selectGroupForBrief(): Promise<void> {
-  await userEvent.click(screen.getByRole('radio', { name: 'Groups' }));
-  await userEvent.click(screen.getByRole('checkbox', { name: 'Generic Group' }));
+  await userEvent.click(screen.getByRole('radio', { name: GROUP_SCOPE_RADIO }));
+  await userEvent.selectOptions(screen.getByLabelText('Keyword group'), 'group-1');
+}
+
+/** Switches step 2 to "Specific keywords", which reveals the keyword picker. */
+export async function chooseSpecificKeywords(): Promise<void> {
+  await userEvent.click(screen.getByRole('radio', { name: /^Specific keywords/u }));
 }
 
 async function selectKeywordForBrief(name = 'Alpha keyword'): Promise<void> {
   await userEvent.click(screen.getByRole('checkbox', { name }));
 }
 
-/** Ticks the market named `name` in the brief's market filter. */
-export const tickBriefMarket = (name: string) => selectKeywordForBrief(name);
+/** Opens "Limit to markets (optional)" and ticks the market named `name`. */
+export async function tickBriefMarket(name: string): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: /^Limit to markets/u }));
+  await selectKeywordForBrief(name);
+}
 
 export async function chooseGroupBriefMode(name: RegExp): Promise<void> {
   await userEvent.click(screen.getByRole('radio', { name }));
@@ -170,8 +181,14 @@ export async function selectGroupBriefMode(name: RegExp): Promise<void> {
 }
 
 export async function fillImproveUrlBrief(landingUrl: string): Promise<void> {
-  await selectGroupBriefMode(/Improve current URL/u);
+  await selectGroupBriefMode(/^Improve an existing page/u);
   await userEvent.type(screen.getByLabelText('Current landing URL'), landingUrl);
+}
+
+/** Picks the template `templateId` and opens "Customize the prompt", where its actions live. */
+export async function openTemplateEditor(templateId: string): Promise<void> {
+  await userEvent.selectOptions(screen.getByLabelText('Template'), templateId);
+  await userEvent.click(screen.getByRole('button', { name: /^Customize the prompt/u }));
 }
 
 export async function reviewGroupBrief(): Promise<void> {
@@ -193,18 +210,8 @@ export async function submitKeywordBrief(names: readonly string[]): Promise<void
   await submitGroupBrief();
 }
 
-export function readFieldIdentity(
-  field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-) {
-  return {
-    id: field.id,
-    labelFor: field.labels?.[0]?.htmlFor,
-    name: field.name,
-  };
-}
-
-
 export async function selectKeywordsForBrief(names: readonly string[]): Promise<void> {
+  await chooseSpecificKeywords();
   for (const name of names) await selectKeywordForBrief(name);
 }
 
@@ -218,6 +225,7 @@ export async function selectPerKeywordBatch(names: readonly string[]): Promise<v
 }
 
 export async function selectAllKeywordsForBrief(): Promise<void> {
+  await chooseSpecificKeywords();
   await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
 }
 

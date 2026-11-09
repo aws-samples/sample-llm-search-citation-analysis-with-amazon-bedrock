@@ -106,7 +106,7 @@ const BACKLINK_COLUMNS: ReadonlyArray<BacklinksColumn<BacklinkRow>> = [
     header: 'Anchor',
     help: 'Text or format of the link',
     render: (row) => (row.anchor === null
-      ? <span className="text-gray-400">No anchor text</span>
+      ? <span className="text-gray-500">No anchor text</span>
       : <span className="block max-w-[11rem] truncate" title={row.anchor}>{row.anchor}</span>),
   },
   {
