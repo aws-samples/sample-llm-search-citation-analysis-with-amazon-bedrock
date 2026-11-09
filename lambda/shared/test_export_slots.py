@@ -9,6 +9,7 @@ import pytest
 from shared.change_events import EXPORT_CHANGED
 from shared.export_contract import MAX_RUNNING_EXPORTS_PER_USER
 from shared.export_jobs import ExportJobs, NewExport, StaleExportError, TooManyExportsError, new_item, slots_key
+from testing.assertions import present
 from testing.export_fakes import exports_table
 from testing.export_fixtures import ALICE, BOB, NOW
 
@@ -110,7 +111,7 @@ def test_a_status_change_is_announced_to_its_owner(jobs: ExportJobs, change_even
     created = jobs.create(_queued())
     running = jobs.save(created, NOW, status='running', upload_id='upload-1')
     jobs.save(running, NOW, written=10)
-    jobs.save(jobs.get(created['export_id']), NOW, status='ready')
+    jobs.save(present(jobs.get(created['export_id'])), NOW, status='ready')
 
     assert change_events_bus.details(EXPORT_CHANGED) == [
         {'export_id': created['export_id'], 'status': status, 'owner_sub': ALICE.sub} for status in ('running', 'ready')

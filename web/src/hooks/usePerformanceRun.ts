@@ -3,20 +3,10 @@ import {
 } from 'react';
 import { seoErrorMessage } from '../api/seo';
 import { fetchLighthouseRun } from '../api/seoPerformance';
-import {
-  deploymentChannel, eventField, type LiveEvent
-} from '../infrastructure/liveEvents';
 import type {
   LighthouseRun, StartRunResponse
 } from '../types/api/seoPerformance';
-import { useLiveRefresh } from './useLiveRefresh';
-
-const SEO_CHANNEL = deploymentChannel('seo');
-
-/** Whether `event` says a step of Lighthouse run `runId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
-export function isLighthouseRunEvent(event: LiveEvent, runId: string): boolean {
-  return eventField(event, 'feature') === 'lighthouse' && eventField(event, 'id') === runId;
-}
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
 /** Nothing shown yet, a start or open under way, a run on screen, or why it could not be shown. */
 export type RunState =
@@ -67,10 +57,8 @@ export function usePerformanceRun(): RunController {
   const [state, setState] = useState<RunState>({ status: 'idle' });
   const latest = useRef(0);
 
-  const show = useCallback(async (load: () => Promise<StartRunResponse>) => {
-    latest.current += 1;
-    const ticket = latest.current;
-    setState({ status: 'starting' });
+  /** Shows what `load` answers unless a newer start or open took over since `ticket` was drawn. */
+  const settle = useCallback(async (ticket: number, load: () => Promise<StartRunResponse>) => {
     try {
       const answer = await load();
       if (latest.current === ticket) setState(shown(answer.run, answer.reused));
@@ -79,21 +67,19 @@ export function usePerformanceRun(): RunController {
     }
   }, []);
 
-  const running = state.status === 'running' ? state : null;
-  useLiveRefresh(
-    running === null ? null : SEO_CHANNEL,
-    async () => {
-      if (running === null) return;
-      const ticket = latest.current;
-      try {
-        const run = await fetchLighthouseRun(running.run.run_id);
-        if (latest.current === ticket) setState(shown(run, running.reused));
-      } catch (failure) {
-        if (latest.current === ticket) setState(failed(failure));
-      }
-    },
-    (event) => running !== null && isLighthouseRunEvent(event, running.run.run_id)
-  );
+  const show = useCallback(async (load: () => Promise<StartRunResponse>) => {
+    latest.current += 1;
+    setState({ status: 'starting' });
+    await settle(latest.current, load);
+  }, [settle]);
+
+  useSeoJobRefresh('lighthouse', state.status === 'running' ? state.run.run_id : null, (runId) => settle(
+    latest.current,
+    async () => ({
+      run: await fetchLighthouseRun(runId),
+      reused: state.status === 'running' && state.reused
+    })
+  ));
 
   const open = useCallback((runId: string) => show(async () => ({
     run: await fetchLighthouseRun(runId),

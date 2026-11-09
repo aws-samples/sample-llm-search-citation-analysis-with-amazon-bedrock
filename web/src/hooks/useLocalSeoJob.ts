@@ -5,17 +5,12 @@ import { seoErrorMessage } from '../api/seo';
 import {
   fetchLocalJob, startLocalJob
 } from '../api/seoLocal';
-import {
-  deploymentChannel, eventField, type LiveEvent
-} from '../infrastructure/liveEvents';
 import type {
   LocalJob, LocalJobRequest
 } from '../types/api/seoLocal';
-import { useLiveRefresh } from './useLiveRefresh';
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
 const TERMINAL: readonly LocalJob['status'][] = ['completed', 'failed', 'timed_out'];
-const SEO_CHANNEL = deploymentChannel('seo');
-
 export type LocalJobState =
   | { readonly status: 'idle' }
   | { readonly status: 'starting' }
@@ -38,11 +33,6 @@ export interface LocalJobController {
 
 function isTerminal(job: LocalJob): boolean {
   return TERMINAL.includes(job.status);
-}
-
-/** Whether `event` says a step of local SEO job `jobId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
-export function isLocalJobEvent(event: LiveEvent, jobId: string): boolean {
-  return eventField(event, 'feature') === 'local' && eventField(event, 'id') === jobId;
 }
 
 /**
@@ -79,20 +69,14 @@ export function useLocalSeoJob(): LocalJobController {
     });
   }, []);
 
-  const running = state.status === 'running' ? state : null;
-  useLiveRefresh(
-    running === null ? null : SEO_CHANNEL,
-    async () => {
-      if (running === null) return;
-      const generation = generationRef.current;
-      try {
-        show(await fetchLocalJob(running.job.job_id), running.reused, generation);
-      } catch (failure) {
-        fail(generation, failure);
-      }
-    },
-    (event) => running !== null && isLocalJobEvent(event, running.job.job_id)
-  );
+  useSeoJobRefresh('local', state.status === 'running' ? state.job.job_id : null, async (jobId) => {
+    const generation = generationRef.current;
+    try {
+      show(await fetchLocalJob(jobId), state.status === 'running' && state.reused, generation);
+    } catch (failure) {
+      fail(generation, failure);
+    }
+  });
 
   const start = useCallback(async (request: LocalJobRequest) => {
     stop();

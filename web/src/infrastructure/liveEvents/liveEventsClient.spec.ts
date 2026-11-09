@@ -21,6 +21,14 @@ function spyListener() {
   };
 }
 
+/** A client over fake deps (`overrides` replacing some) with one runs subscription, after its first timer turn. */
+async function setupSubscribed(overrides: Parameters<typeof fakeLiveEventsDeps>[0] = {}) {
+  const fake = fakeLiveEventsDeps(overrides);
+  new LiveEventsClient(fake.deps).subscribe(deploymentChannel('runs'), spyListener());
+  await vi.advanceTimersByTimeAsync(0);
+  return fake;
+}
+
 async function setupConnected(channel = deploymentChannel('runs')) {
   const fake = fakeLiveEventsDeps();
   const client = new LiveEventsClient(fake.deps);
@@ -194,9 +202,7 @@ describe('LiveEventsClient reconnecting', () => {
   });
 
   it('stops retrying on its own after the last attempt and tries again when the page wakes', async () => {
-    const fake = fakeLiveEventsDeps();
-    new LiveEventsClient(fake.deps).subscribe(deploymentChannel('runs'), spyListener());
-    await vi.advanceTimersByTimeAsync(0);
+    const fake = await setupSubscribed();
     await waitForEveryConnectionToDrop(fake, MAX_RECONNECT_ATTEMPTS + 1);
     const opened = fake.sockets.length;
     await vi.advanceTimersByTimeAsync(600_000);
@@ -218,9 +224,7 @@ describe('LiveEventsClient without live events', () => {
 
   it('waits for a session before it connects', async () => {
     const idToken = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce(null).mockResolvedValue(ID_TOKEN);
-    const fake = fakeLiveEventsDeps({ idToken });
-    new LiveEventsClient(fake.deps).subscribe(deploymentChannel('runs'), spyListener());
-    await vi.advanceTimersByTimeAsync(0);
+    const fake = await setupSubscribed({ idToken });
     expect(fake.sockets).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(RECONNECT_BASE_MS);
     expect(fake.sockets).toHaveLength(1);

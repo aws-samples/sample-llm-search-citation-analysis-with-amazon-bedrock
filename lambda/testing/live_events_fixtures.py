@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from shared import change_events
 from shared.change_events import ChangeKind
 
 WORKFLOW = 'CitationAnalysis-Workflow'
 RESEARCH = 'CitationAnalysis-KeywordResearch'
 STATE_MACHINE_TOPICS = {WORKFLOW: 'runs', RESEARCH: 'research'}
 OWNER_SUB = '3f1c2a4e-9b7d-4e21-8a55-0c6d2f1e9a10'
+
+#: Every kind ``shared.change_events`` defines, found by type so a new one is covered without listing it here.
+PUBLISHED_KINDS = tuple(value for value in vars(change_events).values() if isinstance(value, ChangeKind))
+#: The analysis workflow's per-keyword event, put on the bus by Step Functions (``lib/constructs/live-events.ts``).
+WORKFLOW_KEYWORD_FINISHED = ChangeKind('citation-analysis.runs', 'run.keyword.finished')
 
 
 def change_event(kind: ChangeKind, detail: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@ import {
   act, waitFor
 } from '@testing-library/react';
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
   fetchLocalJob, startLocalJob
@@ -11,23 +11,19 @@ import {
   buildGridJob, buildStartJobResponse
 } from '../api/seoLocal-fixtures';
 import { renderStartedJob } from './useLocalSeoJob-fixtures';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
-} from '../test/liveEventsMock';
+  emitSeoJobChanged, waitForDoneAfterSeoJobChanged, waitForJobReads
+} from '../test/seoJobEvents';
 
 vi.mock('../api/seoLocal');
 vi.mock('../api/seo', () => import('../test/seoApiMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const COLLECTING = buildGridJob('collecting', null);
 
 beforeEach(() => {
   vi.mocked(startLocalJob).mockResolvedValue(buildStartJobResponse(COLLECTING));
   vi.mocked(fetchLocalJob).mockResolvedValue(COLLECTING);
-});
-
-afterEach(() => {
-  resetLiveEvents();
 });
 
 describe('useLocalSeoJob', () => {
@@ -41,34 +37,17 @@ describe('useLocalSeoJob', () => {
 
   it('reads it again when a step of the job ran, until the job completes', async () => {
     const { result } = await renderStartedJob();
-    await waitFor(() => {
-      expect(fetchLocalJob).toHaveBeenCalledTimes(1);
-    });
+    await waitForJobReads(fetchLocalJob, 1);
     vi.mocked(fetchLocalJob).mockResolvedValue(buildGridJob());
 
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      feature: 'local',
-      id: COLLECTING.job_id 
-    });
-
-    await waitFor(() => {
-      expect(result.current.state.status).toBe('done');
-    });
-    expect(liveSubscriberCount('seo')).toBe(0);
+    expect(await waitForDoneAfterSeoJobChanged('local', COLLECTING.job_id, () => result.current.state.status)).toBe(0);
   });
 
   it('ignores the steps of other jobs', async () => {
     await renderStartedJob();
-    await waitFor(() => {
-      expect(fetchLocalJob).toHaveBeenCalledTimes(1);
-    });
+    await waitForJobReads(fetchLocalJob, 1);
 
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      feature: 'local',
-      id: 'another-job' 
-    });
+    await emitSeoJobChanged('local', 'another-job');
 
     expect(fetchLocalJob).toHaveBeenCalledTimes(1);
   });

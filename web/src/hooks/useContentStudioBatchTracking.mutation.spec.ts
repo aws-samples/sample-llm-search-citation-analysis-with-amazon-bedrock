@@ -30,13 +30,12 @@ import { deferNextTwoAuthenticatedFetches } from '../test/infrastructureMock';
 import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import {
   activeBatchIds,
+  contentStudioListenerCount,
   renderTwoVisibleRunningBatches,
   startRunningBatch,
 } from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
-import { liveSubscriberCount } from '../test/liveEventsMock';
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
@@ -47,20 +46,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
 
     renderContentStudio(fetch);
 
-    expect(requestUrlsContaining(fetch, '/batches/')).toStrictEqual([]);
-    expect(liveSubscriberCount('content-studio')).toBe(0);
-  });
-
-  it('replaces one batch card instead of duplicating a repeated batch start', async () => {
-    const {
-      result, unmount
-    } = await startRunningBatch();
-
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
-
-    expect(activeBatchIds(result.current)).toStrictEqual(['batch-1']);
-    expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
-    unmount();
+    expect([requestUrlsContaining(fetch, '/batches/'), contentStudioListenerCount()]).toStrictEqual([[], 0]);
   });
 
   it('reads an accepted running batch again when a Content Studio item changes', async () => {
@@ -73,6 +59,17 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     await announceContentChange();
 
     expect(batchStatusRequestUrls(fetch)).toHaveLength(2);
+    unmount();
+  });
+
+  it('replaces one batch card instead of duplicating a repeated batch start', async () => {
+    const {
+      result, unmount
+    } = await startRunningBatch();
+
+    await act(() => result.current.generateContentBatch(mockBatchRequest));
+
+    expect([activeBatchIds(result.current), storedActiveContentStudioBatchIds()]).toStrictEqual([['batch-1'], ['batch-1']]);
     unmount();
   });
 

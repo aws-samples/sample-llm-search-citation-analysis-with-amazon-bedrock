@@ -1,18 +1,14 @@
 import {
-  afterEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents, waitForLive
+  emitLive, liveSubscriberCount, waitForLive
 } from '../../test/liveEventsMock';
 import { runEachTestWithFakeTimers } from '../../test/fakeTime';
 import { deploymentChannel } from './liveChannels';
 import type { LiveReadOutcome } from './liveWait';
 
 runEachTestWithFakeTimers();
-
-afterEach(() => {
-  resetLiveEvents();
-});
 
 class TimedOut extends Error {
   constructor() {

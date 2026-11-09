@@ -8,8 +8,9 @@ import {
   DEPLOYMENT_NAMESPACE, LIVE_EVENTS_RELAY_FUNCTION_NAME, OWN_CHANNEL_ONLY_HANDLER, USER_NAMESPACE
 } from './events-stack';
 import {
-  putEventsSources, resourceTypes, synthesizeEventsTemplate, synthesizeMainForEvents
+  putEventsSources, resourceTypes, synthesizeEventsTemplate
 } from './events-stack-fixtures';
+import { synthesizeMainTemplate } from './web-search-stack-fixtures';
 import { LIVE_EVENTS_PARAMETERS, STATE_MACHINE_TOPICS, WORKFLOW_STATE_MACHINE_NAME } from './constructs/live-events';
 
 /**
@@ -122,7 +123,7 @@ describe('the stack', () => {
 });
 
 describe('the producers in the main stack', () => {
-  const main = synthesizeMainForEvents();
+  const main = synthesizeMainTemplate();
 
   it.each([
     ['CitationAnalysis-GenerateSummary', ['citation-analysis.runs', 'citation-analysis.views', 'citation-analysis.snapshots']],

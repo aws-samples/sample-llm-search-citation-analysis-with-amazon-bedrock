@@ -1,5 +1,5 @@
 import {
-  afterEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import {
   act, renderHook
@@ -15,14 +15,13 @@ import {
   NARRATIVE_WAIT_LIMIT_MS, useNarrativeRegeneration
 } from './useNarrativeRegeneration';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
 import {
   buildInsightsWithNarrative, buildRegeneratedNarrative, mockApiGet, mockApiPost, stubRegenerateAndPoll
 } from './useNarrativeRegeneration-fixtures';
 
 vi.mock('../api/client', () => import('./useNarrativeRegeneration-fixtures'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const GROUP_SCOPE: ReportScope = {
   kind: 'group',
@@ -52,10 +51,6 @@ const WRITTEN = {
 
 describe('useNarrativeRegeneration', () => {
   runEachTestWithFakeTimers();
-
-  afterEach(() => {
-    resetLiveEvents();
-  });
 
   it('asks the API to regenerate the group narrative', async () => {
     await renderRegenerating(buildRegeneratedNarrative());
@@ -89,8 +84,7 @@ describe('useNarrativeRegeneration', () => {
     mockApiGet.mockResolvedValue(buildInsightsWithNarrative(buildRegeneratedNarrative()));
     await emitLive('insights', WRITTEN);
 
-    expect(result.current.narrative).toStrictEqual(buildRegeneratedNarrative());
-    expect(result.current.phase).toBe('idle');
+    expect([result.current.narrative, result.current.phase]).toStrictEqual([buildRegeneratedNarrative(), 'idle']);
   });
 
   it.each([

@@ -8,20 +8,19 @@ import {
   fetchLatestRankRun, startRankRun
 } from '../api/seoRankTracking';
 import { buildRankRun } from '../api/seoRankTracking-fixtures';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
-} from '../test/liveEventsMock';
+  emitSeoJobChanged, waitForJobReads
+} from '../test/seoJobEvents';
 import { useRankTrackingRun } from './useRankTrackingRun';
 
 vi.mock('../api/seoRankTracking');
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const TRACKER = 'tracker-1';
 const RUNNING = buildRankRun({ status: 'running' });
 const DONE = buildRankRun({ status: 'completed' });
 
 afterEach(() => {
-  resetLiveEvents();
   vi.clearAllMocks();
 });
 
@@ -30,6 +29,14 @@ function renderRun(initial = RUNNING, onFinished = vi.fn()) {
     onFinished,
     ...renderHook(() => useRankTrackingRun(TRACKER, initial, onFinished)) 
   };
+}
+
+/** Renders the hook over a running run that stays running, and waits for its catch-up read. */
+async function renderListeningRun() {
+  vi.mocked(fetchLatestRankRun).mockResolvedValue(RUNNING);
+  const view = renderRun();
+  await waitForJobReads(fetchLatestRankRun, 1);
+  return view;
 }
 
 describe('useRankTrackingRun', () => {
@@ -41,12 +48,9 @@ describe('useRankTrackingRun', () => {
   });
 
   it('reads the latest run once when it starts listening, to catch up', async () => {
-    vi.mocked(fetchLatestRankRun).mockResolvedValue(RUNNING);
-    renderRun();
+    await renderListeningRun();
 
-    await waitFor(() => {
-      expect(fetchLatestRankRun).toHaveBeenCalledExactlyOnceWith(TRACKER);
-    });
+    expect(fetchLatestRankRun).toHaveBeenCalledExactlyOnceWith(TRACKER);
   });
 
   it('reads it again when a step of this tracker’s run ran, and calls onFinished once it ended', async () => {
@@ -54,14 +58,8 @@ describe('useRankTrackingRun', () => {
     const {
       result, onFinished 
     } = renderRun();
-    await waitFor(() => {
-      expect(fetchLatestRankRun).toHaveBeenCalledTimes(1);
-    });
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      feature: 'rank',
-      id: TRACKER 
-    });
+    await waitForJobReads(fetchLatestRankRun, 1);
+    await emitSeoJobChanged('rank', TRACKER);
 
     await waitFor(() => {
       expect(result.current.run).toStrictEqual(DONE);
@@ -80,15 +78,8 @@ describe('useRankTrackingRun', () => {
       id: TRACKER 
     }],
   ])('ignores an event of %s', async (_case, fields) => {
-    vi.mocked(fetchLatestRankRun).mockResolvedValue(RUNNING);
-    renderRun();
-    await waitFor(() => {
-      expect(fetchLatestRankRun).toHaveBeenCalledTimes(1);
-    });
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      ...fields 
-    });
+    await renderListeningRun();
+    await emitSeoJobChanged(fields.feature, fields.id);
 
     expect(fetchLatestRankRun).toHaveBeenCalledTimes(1);
   });

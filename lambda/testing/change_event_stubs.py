@@ -11,6 +11,14 @@ from shared import change_events
 from shared.change_events import ChangeKind
 
 
+def _kind_of(detail_type: str) -> ChangeKind:
+    """The ``shared.change_events`` kind whose ``detail-type`` is ``detail_type``; a typo fails the test."""
+    kinds = [value for value in vars(change_events).values() if isinstance(value, ChangeKind) and value.detail_type == detail_type]
+    if len(kinds) != 1:
+        raise KeyError(f'no change event kind has detail-type {detail_type!r}')
+    return kinds[0]
+
+
 class RecordingEvents:
     """Accepts every ``PutEvents`` entry (or refuses them all with ``refuse``) and keeps it."""
 
@@ -27,8 +35,10 @@ class RecordingEvents:
             return {'FailedEntryCount': len(Entries), 'Entries': [{'ErrorCode': 'InternalFailure'} for _ in Entries]}
         return {'FailedEntryCount': 0, 'Entries': [{'EventId': str(index)} for index, _ in enumerate(Entries)]}
 
-    def details(self, kind: ChangeKind) -> list[dict[str, Any]]:
-        """The decoded detail of every ``kind`` event put so far, in order."""
+    def details(self, kind: ChangeKind | str) -> list[dict[str, Any]]:
+        """The decoded detail of every ``kind`` event put so far, in order; ``kind`` may be its ``detail-type``."""
+        if isinstance(kind, str):
+            kind = _kind_of(kind)
         return [
             json.loads(entry['Detail']) for entry in self.entries
             if entry['Source'] == kind.source and entry['DetailType'] == kind.detail_type

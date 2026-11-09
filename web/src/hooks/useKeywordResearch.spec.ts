@@ -9,7 +9,7 @@ import {
 } from '../test/fetchResponses';
 import { RESEARCH_WAIT_LIMIT_MS } from './researchJobWatch';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
@@ -18,6 +18,7 @@ import {
   buildStep,
   buildCompletedExpansionJob,
   buildCompletedCompetitorJob,
+  buildTwoExpansionsOptions,
   runningJobResearchOptions,
 } from './useKeywordResearch-fixtures';
 import {
@@ -33,11 +34,18 @@ import {
 import { advanceBy } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+
+/** Starts an expansion whose job stays running and lets `ms` of fake time pass; the hook's result. */
+async function renderRunningExpansionFor(ms: number) {
+  const { result } = renderResearch(runningJobResearchOptions);
+  await startExpansion(result);
+  await advanceBy(ms);
+  return result;
+}
 
 describe('useKeywordResearch', () => {
   beforeEach(() => {
@@ -47,7 +55,6 @@ describe('useKeywordResearch', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    resetLiveEvents();
   });
 
   describe('initial state', () => {
@@ -170,16 +177,10 @@ describe('useKeywordResearch', () => {
     });
 
     it('clears the previous result and active job when a new expansion starts', async () => {
-      const { result } = renderResearch({
-        pendingIds: ['job-1', 'job-2'],
-        snapshots: {
-          'job-1': [buildCompletedExpansionJob('job-1', 'first')],
-          'job-2': [buildJob({
-            id: 'job-2',
-            status: 'running' 
-          })],
-        },
-      });
+      const { result } = renderResearch(buildTwoExpansionsOptions('first', buildJob({
+        id: 'job-2',
+        status: 'running'
+      })));
 
       await startExpansion(result, 1, 'first');
       expect(result.current.expansionResult?.id).toBe('job-1');
@@ -445,13 +446,7 @@ describe('useKeywordResearch', () => {
     });
 
     it('drops the superseded wait when a newer expansion starts', async () => {
-      const { result } = renderResearch({
-        pendingIds: ['job-1', 'job-2'],
-        snapshots: {
-          'job-1': [buildCompletedExpansionJob('job-1', 'first seed')],
-          'job-2': [buildCompletedExpansionJob('job-2', 'second seed')],
-        },
-      });
+      const { result } = renderResearch(buildTwoExpansionsOptions('first seed', buildCompletedExpansionJob('job-2', 'second seed')));
 
       await act(async () => {
         void result.current.expandKeywords('first seed', 'hospitality', 10);
@@ -466,10 +461,7 @@ describe('useKeywordResearch', () => {
     });
 
     it('reads the job only when it connects and when the job changes, never on a timer', async () => {
-      const { result } = renderResearch(runningJobResearchOptions);
-
-      await startExpansion(result);
-      await advanceBy(10 * 60_000);
+      await renderRunningExpansionFor(10 * 60_000);
       const afterTenMinutes = countJobPolls();
       await emitLive('research', {
         type: 'research-job.changed',
@@ -484,10 +476,7 @@ describe('useKeywordResearch', () => {
     });
 
     it('gives up with the timeout message after the wait limit', async () => {
-      const { result } = renderResearch(runningJobResearchOptions);
-
-      await startExpansion(result);
-      await advanceBy(RESEARCH_WAIT_LIMIT_MS);
+      const result = await renderRunningExpansionFor(RESEARCH_WAIT_LIMIT_MS);
 
       expect([result.current.error, result.current.loading, liveSubscriberCount('research')]).toStrictEqual([
         'Failed to process research request', false, 0,

@@ -32,7 +32,6 @@ import {
 
 vi.mock('../../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 vi.mock('../../../api/client', () => import('../../../hooks/useNarrativeRegeneration-fixtures'));
-vi.mock('../../../infrastructure/liveEvents', () => import('../../../test/liveEventsMock'));
 
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 

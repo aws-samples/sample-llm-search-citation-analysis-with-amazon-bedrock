@@ -72,11 +72,23 @@ describe('loadRuntimeConfig without a usable /config.json', () => {
   });
 });
 
+/** A freshly imported config module after it loaded a `/config.json` with the deployed API URL plus `fields`. */
+async function setupFreshConfig(fields: Record<string, unknown> = {}) {
+  vi.resetModules();
+  const runtimeConfig = await import('./runtimeConfig');
+  const result = await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({
+    apiUrl: DEPLOYED_API_URL,
+    ...fields
+  })));
+  return {
+    runtimeConfig,
+    result
+  };
+}
+
 describe('API_BASE_URL', () => {
   it('is the URL loadRuntimeConfig resolved when the config module is first imported after it', async () => {
-    vi.resetModules();
-    const runtimeConfig = await import('./runtimeConfig');
-    await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({ apiUrl: DEPLOYED_API_URL })));
+    await setupFreshConfig();
 
     const { API_BASE_URL } = await import('./index');
 
@@ -91,12 +103,7 @@ const LIVE_EVENTS = {
 
 describe('loadedLiveEvents', () => {
   it('is the liveEvents of /config.json once loadRuntimeConfig read it', async () => {
-    vi.resetModules();
-    const runtimeConfig = await import('./runtimeConfig');
-    await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({
-      apiUrl: DEPLOYED_API_URL,
-      liveEvents: LIVE_EVENTS 
-    })));
+    const { runtimeConfig } = await setupFreshConfig({ liveEvents: LIVE_EVENTS });
 
     expect(runtimeConfig.loadedLiveEvents()).toStrictEqual(LIVE_EVENTS);
   });
@@ -110,12 +117,9 @@ describe('loadedLiveEvents', () => {
     }],
     ['not an object', 'abc123'],
   ])('is null when liveEvents is %s, and the API still loads', async (_case, liveEvents) => {
-    vi.resetModules();
-    const runtimeConfig = await import('./runtimeConfig');
-    const result = await runtimeConfig.loadRuntimeConfig(buildSources(buildConfigResponse({
-      apiUrl: DEPLOYED_API_URL,
-      liveEvents 
-    })));
+    const {
+      runtimeConfig, result
+    } = await setupFreshConfig({ liveEvents });
 
     expect([result.status, runtimeConfig.loadedLiveEvents()]).toStrictEqual(['ready', null]);
   });

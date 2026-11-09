@@ -43,12 +43,14 @@ class ChangeKind:
     source: str
     detail_type: str
 
+    def __post_init__(self) -> None:
+        # The relay's rule matches the prefix, so a kind outside it would never reach a dashboard.
+        if not self.source.startswith(SOURCE_PREFIX):
+            raise ValueError(f'change event source {self.source!r} does not start with {SOURCE_PREFIX!r}')
+
 
 #: A step of an analysis run finished (``execution_id``, ``step``). The run's own status changes come from Step Functions.
 RUN_STEP_FINISHED: Final = ChangeKind('citation-analysis.runs', 'run.step.finished')
-#: One keyword of a run finished (``status``, ``run_timestamp``). Published by the workflow's ``PublishKeywordProgress``
-#: state (``lib/citation-analysis-stack.ts``), not from Python: each keyword is its own child execution.
-RUN_KEYWORD_FINISHED: Final = ChangeKind('citation-analysis.runs', 'run.keyword.finished')
 #: A keyword research job changed (``job_id``): a round was planned, a step ran, the job was evaluated or ended.
 RESEARCH_JOB_CHANGED: Final = ChangeKind('citation-analysis.research', 'research-job.changed')
 #: A Content Studio item changed status (``content_id``, ``status``).
@@ -69,10 +71,6 @@ EXPORT_CHANGED: Final = ChangeKind('citation-analysis.exports', 'export.changed'
 #: A step of an SEO job ran (``feature``, ``id``): a rank-tracking run, local SEO job, Lighthouse run or site audit.
 SEO_JOB_CHANGED: Final = ChangeKind('citation-analysis.seo', 'seo-job.changed')
 
-ALL_KINDS: Final = (
-    RUN_STEP_FINISHED, RUN_KEYWORD_FINISHED, RESEARCH_JOB_CHANGED, CONTENT_CHANGED, SELF_REFLECTION_FINISHED, NARRATIVE_FINISHED,
-    VIEW_JOB_FINISHED, SNAPSHOTS_BUILT, KPI_ALERTS_RAISED, EXPORT_CHANGED, SEO_JOB_CHANGED,
-)
 
 #: What a publish may raise; logged, never raised into the work that changed state.
 _PUBLISH_ERRORS = (BotoCoreError, ClientError, TypeError, ValueError)

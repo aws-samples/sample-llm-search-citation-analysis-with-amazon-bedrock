@@ -16,7 +16,6 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.change_events import RUN_STEP_FINISHED, SNAPSHOTS_BUILT, VIEW_JOB_FINISHED
 from shared.request_deadline import Deadline
 from shared.scope_series_build import SeriesBuildIncomplete
 from shared.snapshot_store import SnapshotBuildIncomplete
@@ -295,12 +294,12 @@ class TestChangeEvents:
 
     def test_an_in_process_build_announces_the_snapshots_and_the_run_step(self, actions, change_events_bus):
         _build_with(actions, heavy=False, event=_RUN_EVENT)
-        assert change_events_bus.details(SNAPSHOTS_BUILT) == [{'status': 'built'}]
-        assert change_events_bus.details(RUN_STEP_FINISHED) == [{'execution_id': _RUN_EVENT['execution_id'], 'step': 'build_scope_snapshots'}]
+        assert change_events_bus.details('scope-snapshots.built') == [{'status': 'built'}]
+        assert change_events_bus.details('run.step.finished') == [{'execution_id': _RUN_EVENT['execution_id'], 'step': 'build_scope_snapshots'}]
 
     def test_a_build_outside_a_run_announces_no_run_step(self, actions, change_events_bus):
         _build_with(actions, heavy=False)
-        assert (len(change_events_bus.details(SNAPSHOTS_BUILT)), change_events_bus.details(RUN_STEP_FINISHED)) == (1, [])
+        assert (len(change_events_bus.details('scope-snapshots.built')), change_events_bus.details('run.step.finished')) == (1, [])
 
     @pytest.mark.parametrize('running', [None, [{'executionArn': 'running-1'}]], ids=['started', 'already running'])
     def test_a_build_handed_to_the_state_machine_announces_nothing_itself(self, actions, change_events_bus, running):
@@ -314,4 +313,4 @@ class TestChangeEvents:
     ])
     def test_a_view_job_that_ends_announces_its_id_and_status(self, actions, change_events_bus, status, announced):
         _run_view_job(actions, {'job_id': 'job-7', 'status': status})
-        assert change_events_bus.details(VIEW_JOB_FINISHED) == announced
+        assert change_events_bus.details('view-job.finished') == announced

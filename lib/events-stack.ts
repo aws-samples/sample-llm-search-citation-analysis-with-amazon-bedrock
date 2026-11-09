@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import type { StackProps } from 'aws-cdk-lib';
 import * as appsync from 'aws-cdk-lib/aws-appsync';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -52,13 +53,11 @@ export function onSubscribe(ctx) {
  * `config.json`, so the dashboard finds them at run time.
  */
 export class CitationAnalysisEventsStack extends cdk.Stack {
-  public readonly api: appsync.EventApi;
-  public readonly relay: lambda.Function;
+  private readonly api: appsync.EventApi;
 
-  constructor(scope: Construct, id: string, props: cdk.StackProps = {}) {
+  constructor(scope: Construct, id: string, props: StackProps = {}) {
     super(scope, id, props);
-    const userPoolId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.userPoolId);
-    const userPool = cognito.UserPool.fromUserPoolId(this, 'UserPool', userPoolId);
+    const userPool = this.dashboardUserPool();
 
     this.api = new appsync.EventApi(this, 'LiveEventsApi', {
       apiName: 'CitationAnalysis-LiveEvents',
@@ -88,10 +87,10 @@ export class CitationAnalysisEventsStack extends cdk.Stack {
       code: appsync.Code.fromInline(OWN_CHANNEL_ONLY_HANDLER),
     });
 
-    this.relay = this.relayFunction();
-    deployment.grantPublish(this.relay);
-    user.grantPublish(this.relay);
-    this.routeEvents(this.relay);
+    const relay = this.relayFunction();
+    deployment.grantPublish(relay);
+    user.grantPublish(relay);
+    this.routeEvents(relay);
 
     new ssm.StringParameter(this, 'HttpDomainParameter', {
       parameterName: LIVE_EVENTS_PARAMETERS.httpDomain,
@@ -110,6 +109,12 @@ export class CitationAnalysisEventsStack extends cdk.Stack {
   }
 
   /** The relay: one event in, one signed publish out; the publish grants are its only permissions besides its logs. */
+  /** The dashboard's Cognito user pool, by the id the main stack writes to SSM. */
+  private dashboardUserPool(): cognito.IUserPool {
+    const userPoolId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.userPoolId);
+    return cognito.UserPool.fromUserPoolId(this, 'UserPool', userPoolId);
+  }
+
   private relayFunction(): lambda.Function {
     const role = lambdaServiceRole(
       this, 'RelayRole', 'CitationAnalysis-LiveEventsRelayRole',

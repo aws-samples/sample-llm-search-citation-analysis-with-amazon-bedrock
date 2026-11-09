@@ -1,14 +1,16 @@
 import {
-  afterEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import { STALE_REFETCH_LIMIT } from './useStaleRefetch';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
+import {
+  SNAPSHOTS_BUILT_EVENT, emitLiveRepeatedly, readsAndListeners
+} from '../test/liveReadCounts';
 import { answerEveryFetch } from '../test/fetchStubs';
 import { act } from '@testing-library/react';
 import { fixtureBody } from '../types/domain/scopeCoverage-fixtures';
@@ -58,12 +60,15 @@ async function renderProbeFetched(ms: number, polled = false) {
   return rendered;
 }
 
+/** Renders the probe over a stale answer whose background refetch never answers. */
+function renderProbeRefetchingStale() {
+  answerFetchesInOrder([staleProbe, 200]);
+  mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
+  return renderProbeFetched(0);
+}
+
 describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
   setupFakeTimersAndFetch();
-  afterEach(() => {
-    resetLiveEvents();
-  });
-
   it('holds the view job in computing while it waits for a 202 answer’s job', async () => {
     answerEveryFetch(computingBody, 202);
 
@@ -92,10 +97,7 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
     answerFetchesInOrder([staleProbe, 200], [staleProbe, 200], [currentProbe, 200]);
     const { result } = await renderProbeFetched(0);
 
-    await emitLive('snapshots', {
-      type: 'scope-snapshots.built',
-      status: 'built' 
-    });
+    await emitLive('snapshots', SNAPSHOTS_BUILT_EVENT);
 
     expect([result.current.data, mockAuthenticatedFetch.mock.calls.length]).toStrictEqual([currentProbe, 3]);
   });
@@ -113,10 +115,7 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
   });
 
   it('keeps loading false while a stale answer is refetched in the background', async () => {
-    answerFetchesInOrder([staleProbe, 200]);
-    mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
-
-    const { result } = await renderProbeFetched(0);
+    const { result } = await renderProbeRefetchingStale();
 
     expect([result.current.loading, result.current.data]).toStrictEqual([false, staleProbe]);
   });
@@ -125,13 +124,7 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
     answerEveryFetch(staleProbe);
     await renderProbeFetched(0);
 
-    await Array.from({ length: STALE_REFETCH_LIMIT + 5 }).reduce<Promise<void>>(async (previous) => {
-      await previous;
-      await emitLive('snapshots', {
-        type: 'scope-snapshots.built',
-        status: 'built' 
-      });
-    }, Promise.resolve());
+    await emitLiveRepeatedly('snapshots', SNAPSHOTS_BUILT_EVENT, STALE_REFETCH_LIMIT + 5);
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(STALE_REFETCH_LIMIT + 1);
   });
@@ -141,13 +134,11 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
 
     await renderProbeFetched(0);
 
-    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('snapshots')]).toStrictEqual([1, 0]);
+    expect(readsAndListeners('snapshots')).toStrictEqual([1, 0]);
   });
 
   it('cancels the pending stale refetch on reset', async () => {
-    answerFetchesInOrder([staleProbe, 200]);
-    mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
-    const { result } = await renderProbeFetched(0);
+    const { result } = await renderProbeRefetchingStale();
 
     act(() => { result.current.reset(); });
 
@@ -166,9 +157,7 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
   });
 
   it('stops listening for the rebuild on unmount', async () => {
-    answerFetchesInOrder([staleProbe, 200]);
-    mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
-    const { unmount } = await renderProbeFetched(0);
+    const { unmount } = await renderProbeRefetchingStale();
 
     unmount();
 

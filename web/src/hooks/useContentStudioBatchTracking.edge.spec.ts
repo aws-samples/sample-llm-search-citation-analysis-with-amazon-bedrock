@@ -48,7 +48,6 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const expiredRegistration = 1_000_000 - CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS;
 

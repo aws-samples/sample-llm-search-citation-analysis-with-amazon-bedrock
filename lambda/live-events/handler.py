@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Mapping
 from functools import cache
 from typing import Any
 
@@ -44,11 +45,15 @@ def _state_machine_topics() -> dict[str, str]:
     return {str(name): str(topic) for name, topic in parsed.items()} if isinstance(parsed, dict) else {}
 
 
+def _event_url(domain: str) -> str:
+    return f'https://{domain}/event'
+
+
 def signed_publish_request(domain: str, region: str, routed: ChannelMessage, credentials: Any) -> AWSRequest:
     """The SigV4-signed ``POST https://<domain>/event`` that publishes ``routed`` as one event."""
     body = json.dumps({'channel': routed.channel, 'events': [json.dumps(routed.message, separators=(',', ':'))]})
     request = AWSRequest(
-        method='POST', url=f'https://{domain}/event', data=body.encode('utf-8'),
+        method='POST', url=_event_url(domain), data=body.encode('utf-8'),
         headers={'content-type': 'application/json', 'host': domain},
     )
     SigV4Auth(credentials, 'appsync', region).add_auth(request)
@@ -62,13 +67,13 @@ def _publish(routed: ChannelMessage) -> None:
     if credentials is None:
         raise RelayPublishError('no credentials to sign the publish with')
     request = signed_publish_request(domain, region, routed, credentials.get_frozen_credentials())
-    response = _http().request('POST', request.url, body=request.body, headers=dict(request.headers.items()))
+    response = _http().request('POST', _event_url(domain), body=request.body, headers=dict(request.headers.items()))
     answer = json.loads(response.data or b'{}') if response.status == 200 else {}
     if response.status != 200 or answer.get('failed'):
         raise RelayPublishError(f'AppSync Events answered {response.status} for {routed.channel}')
 
 
-def handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
+def handler(event: Mapping[str, Any], _context: Any) -> dict[str, Any]:
     """Publish ``event`` to its channel; what was done (``published`` with the channel, or ``dropped``)."""
     routed = channel_message(event, _state_machine_topics())
     if routed is None:

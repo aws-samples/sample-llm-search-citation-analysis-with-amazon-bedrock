@@ -37,7 +37,6 @@ vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 vi.mock('../../../api/keywordGroups', () => ({ fetchKeywordGroups: vi.fn() }));
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
 vi.mock('../../../api/seoRankTracking');
-vi.mock('../../../infrastructure/liveEvents', () => import('../../../test/liveEventsMock'));
 vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 
 const NO_TRACKERS = buildTrackerList({ trackers: [] });

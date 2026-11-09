@@ -10,7 +10,6 @@ import {
 } from '../test/fetchResponses';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import {
   announceContentChange,

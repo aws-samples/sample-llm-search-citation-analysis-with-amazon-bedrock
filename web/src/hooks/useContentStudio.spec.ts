@@ -32,13 +32,12 @@ import { createMockJsonResponse } from '../test/fetchResponses';
 import { contentStatusPayload } from './useContentStudio-test-fixtures';
 import {
   buildStartedGenerationResponse,
+  contentStudioListenerCount,
   renderInFlightContentStudioAction,
   runContentStudioAction,
 } from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
-import { liveSubscriberCount } from '../test/liveEventsMock';
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
@@ -272,7 +271,7 @@ describe('useContentStudio status reads', () => {
   it('stops listening once the only generating item reaches three consecutive failures', async () => {
     const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
 
-    expect([vi.getTimerCount(), liveSubscriberCount('content-studio')]).toStrictEqual([0, 0]);
+    expect([vi.getTimerCount(), contentStudioListenerCount()]).toStrictEqual([0, 0]);
     unmount();
   });
 
@@ -431,9 +430,9 @@ describe('useContentStudio status reads', () => {
     const { unmount } = await renderContentStudioWithDeferredPolling([[
       buildPollingHistoryItem('content-a'),
     ]]);
-    expect(liveSubscriberCount('content-studio')).toBe(1);
+    expect(contentStudioListenerCount()).toBe(1);
     unmount();
 
-    expect(liveSubscriberCount('content-studio')).toBe(0);
+    expect(contentStudioListenerCount()).toBe(0);
   });
 });

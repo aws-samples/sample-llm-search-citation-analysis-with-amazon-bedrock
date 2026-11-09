@@ -6,6 +6,7 @@ import {
 } from 'vitest';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { deferAuthenticatedFetch } from '../test/infrastructureMock';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import type {
   ContentBriefBatchStartResponse,
   ContentBriefBatchStatusResponse,
@@ -181,4 +182,9 @@ export function renderInFlightContentStudioAction(
     ...rendered,
     deferred,
   };
+}
+
+/** How many Content Studio views listen to the `content-studio` channel now. */
+export function contentStudioListenerCount(): number {
+  return liveSubscriberCount('content-studio');
 }

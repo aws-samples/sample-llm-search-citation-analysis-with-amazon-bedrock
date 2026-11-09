@@ -9,7 +9,8 @@ import pytest
 from botocore.exceptions import EndpointConnectionError
 
 from shared import change_events
-from shared.change_events import ALL_KINDS, EXPORT_CHANGED, SOURCE_PREFIX, VIEW_JOB_FINISHED, publish_change
+from shared.change_events import EXPORT_CHANGED, SOURCE_PREFIX, VIEW_JOB_FINISHED, ChangeKind, publish_change
+from testing.live_events_fixtures import PUBLISHED_KINDS
 
 
 def test_publishes_one_entry_with_the_kind_and_compact_sorted_detail(change_events_bus):
@@ -29,22 +30,18 @@ def test_details_reads_back_only_the_requested_kind(change_events_bus):
     assert change_events_bus.details(VIEW_JOB_FINISHED) == [{'job_id': 'a', 'status': 'failed'}]
 
 
-def test_a_refused_entry_is_logged_and_answers_false(change_events_bus, caplog):
-    change_events_bus.refuse = True
+@pytest.mark.parametrize(('failure', 'logged'), [
+    ({'refuse': True}, 'EventBridge refused view-job.finished: InternalFailure'),
+    ({'error': EndpointConnectionError(endpoint_url='https://events.example')}, 'Could not publish view-job.finished'),
+], ids=['refused entry', 'client error'])
+def test_a_failed_publish_is_logged_and_never_raises_into_the_caller(change_events_bus, caplog, failure, logged):
+    for name, value in failure.items():
+        setattr(change_events_bus, name, value)
 
     with caplog.at_level(logging.WARNING, logger='shared.change_events'):
         assert publish_change(VIEW_JOB_FINISHED, {'job_id': 'a', 'status': 'done'}) is False
 
-    assert 'InternalFailure' in caplog.text
-
-
-def test_a_client_error_never_raises_into_the_caller(change_events_bus, caplog):
-    change_events_bus.error = EndpointConnectionError(endpoint_url='https://events.example')
-
-    with caplog.at_level(logging.WARNING, logger='shared.change_events'):
-        assert publish_change(VIEW_JOB_FINISHED, {'job_id': 'a', 'status': 'done'}) is False
-
-    assert 'Could not publish view-job.finished' in caplog.text
+    assert logged in caplog.text
 
 
 def test_a_detail_too_large_for_an_id_only_event_is_refused_before_the_call(change_events_bus):
@@ -53,13 +50,19 @@ def test_a_detail_too_large_for_an_id_only_event_is_refused_before_the_call(chan
     assert change_events_bus.entries == []
 
 
-@pytest.mark.parametrize('kind', ALL_KINDS, ids=lambda kind: kind.detail_type)
+@pytest.mark.parametrize('kind', PUBLISHED_KINDS, ids=lambda kind: kind.detail_type)
 def test_every_kind_uses_the_platform_source_prefix(kind):
     assert kind.source.startswith(SOURCE_PREFIX)
 
 
+def test_a_kind_outside_the_platform_prefix_is_refused():
+    with pytest.raises(ValueError, match='does not start with'):
+        ChangeKind('aws.states', 'run.step.finished')
+
+
 def test_kinds_are_unique():
-    assert len({(kind.source, kind.detail_type) for kind in ALL_KINDS}) == len(ALL_KINDS)
+    assert len(PUBLISHED_KINDS) == 10
+    assert len({(kind.source, kind.detail_type) for kind in PUBLISHED_KINDS}) == len(PUBLISHED_KINDS)
 
 
 def test_detail_values_that_are_not_json_are_sent_as_text(change_events_bus):

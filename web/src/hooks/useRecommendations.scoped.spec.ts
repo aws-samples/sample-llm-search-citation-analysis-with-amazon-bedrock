@@ -12,7 +12,6 @@ import {
 
 vi.mock('../api/recommendations', () => ({ saveRecommendationStatus: vi.fn() }));
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 import { saveRecommendationStatus } from '../api/recommendations';
 

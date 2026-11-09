@@ -16,9 +16,6 @@ export {
   deploymentChannel, eventField, userChannel, type LiveChannel, type LiveEvent
 } from './liveChannels';
 export type { LiveListener } from './liveEventsClient';
-export type {
-  LiveReadOutcome, LiveWait
-} from './liveWait';
 
 function onWake(retry: () => void): () => void {
   const visible = (): void => {

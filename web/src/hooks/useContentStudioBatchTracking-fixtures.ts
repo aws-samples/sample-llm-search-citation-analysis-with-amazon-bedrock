@@ -159,3 +159,11 @@ export async function announceContentChange(contentId = 'content-elsewhere'): Pr
   });
   await flushContentStudioPromises();
 }
+
+/** `announceContentChange` `times` times in a row. */
+export async function announceContentChanges(times: number): Promise<void> {
+  await Array.from({ length: times }).reduce<Promise<void>>(async (previous) => {
+    await previous;
+    await announceContentChange();
+  }, Promise.resolve());
+}

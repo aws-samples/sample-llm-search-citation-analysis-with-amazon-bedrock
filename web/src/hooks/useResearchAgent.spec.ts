@@ -1,10 +1,10 @@
 import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
-import { act } from '@testing-library/react';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
+import { act } from '@testing-library/react';
 import { buildAgentJob } from '../components/KeywordResearch/agent/agent-fixtures';
 import type { StartAgentRequest } from '../api/keywordResearch';
 import {
@@ -15,7 +15,6 @@ import type {
 } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const START_REQUEST: StartAgentRequest = {
   seed: 'Hotel Gran Marino',
@@ -38,7 +37,6 @@ describe('useResearchAgent', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    resetLiveEvents();
   });
 
   it('lists the agent runs from history on mount', async () => {

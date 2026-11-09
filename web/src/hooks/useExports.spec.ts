@@ -1,5 +1,5 @@
 import {
-  afterEach, describe, expect, it, vi
+  afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
   act, renderHook, waitFor
@@ -8,36 +8,49 @@ import {
   mockDeleteExport, mockFetchDownloadUrl, mockListExports, mockMarkExportSeen, mockStartExport
 } from '../test/exportsApiMock';
 import { buildExportSummary } from '../types/domain/exports-fixtures';
+import type { ExportSummary } from '../types/domain/exports';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
 import {
   useExports, useExportsCenter
 } from './useExports';
 
 vi.mock('../api/exports', () => import('../test/exportsApiMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const RUNNING = buildExportSummary({ status: 'running' });
 const READY = buildExportSummary({ status: 'ready' });
 
+beforeEach(() => {
+  mockListExports.mockReset();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** Renders the exports center over list reads that answer `lists` in order, the last one for every later read. */
+function renderCenterOver(...lists: ExportSummary[][]) {
+  for (const list of lists.slice(0, -1)) mockListExports.mockResolvedValueOnce({ exports: list });
+  mockListExports.mockResolvedValue({ exports: lists[lists.length - 1] ?? [] });
+  return renderHook(() => useExportsCenter());
+}
+
+async function waitForListReads(count: number): Promise<void> {
+  await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(count));
+}
+
 describe('useExportsCenter live list', () => {
-  afterEach(() => {
-    resetLiveEvents();
-  });
-
   it('listens to the user’s own exports channel while an export runs, reading once to catch up', async () => {
-    mockListExports.mockResolvedValue({ exports: [RUNNING] });
-    renderHook(() => useExportsCenter());
+    renderCenterOver([RUNNING]);
 
-    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+    await waitForListReads(2);
     expect(liveSubscriberCount('exports')).toBe(1);
   });
 
   it('re-reads the list when one of the user’s exports changes', async () => {
-    mockListExports.mockResolvedValue({ exports: [RUNNING] });
-    renderHook(() => useExportsCenter());
-    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+    renderCenterOver([RUNNING]);
+    await waitForListReads(2);
 
     await emitLive('exports', {
       type: 'export.changed',
@@ -45,28 +58,25 @@ describe('useExportsCenter live list', () => {
       status: 'ready' 
     });
 
-    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(3));
+    await waitForListReads(3);
   });
 
   it('stops listening once no export is queued or running', async () => {
-    mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
-    renderHook(() => useExportsCenter());
+    renderCenterOver([RUNNING], [READY]);
 
-    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(2));
+    await waitForListReads(2);
     expect(liveSubscriberCount('exports')).toBe(0);
   });
 
   it('does not listen when every export is finished', async () => {
-    mockListExports.mockResolvedValue({ exports: [READY] });
-    renderHook(() => useExportsCenter());
-    await waitFor(() => expect(mockListExports).toHaveBeenCalledTimes(1));
+    renderCenterOver([READY]);
+    await waitForListReads(1);
 
     expect(liveSubscriberCount('exports')).toBe(0);
   });
 
   it('toasts that a running export is ready when the read after its event sees it finished', async () => {
-    mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([RUNNING], [READY]);
 
     await waitFor(() => expect(result.current.toasts.map((toast) => [toast.tone, toast.message])).toStrictEqual([['success', 'Citations export is ready']]));
   });
@@ -74,32 +84,22 @@ describe('useExportsCenter live list', () => {
   it('shows a browser notification when the user allowed them', async () => {
     const notification = vi.fn();
     vi.stubGlobal('Notification', Object.assign(notification, { permission: 'granted' }));
-    mockListExports.mockResolvedValueOnce({ exports: [RUNNING] }).mockResolvedValue({ exports: [READY] });
-    renderHook(() => useExportsCenter());
+    renderCenterOver([RUNNING], [READY]);
 
     await waitFor(() => expect(notification).toHaveBeenCalledWith('Citations export is ready', {
       body: 'citations-group-coruna.xlsx',
       tag: 'exp-coruna',
     }));
-    vi.unstubAllGlobals();
   });
 });
 
 describe('useExportsCenter actions', () => {
-  afterEach(() => {
-    resetLiveEvents();
-    mockListExports.mockReset();
-  });
-
   it('counts the finished exports the user has not seen', async () => {
-    mockListExports.mockResolvedValue({
-      exports: [READY, buildExportSummary({
-        export_id: 'e2',
-        status: 'failed',
-        notified: true,
-      })],
-    });
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([READY, buildExportSummary({
+      export_id: 'e2',
+      status: 'failed',
+      notified: true,
+    })]);
 
     await waitFor(() => expect(result.current.unseenCount).toBe(1));
   });
@@ -111,8 +111,7 @@ describe('useExportsCenter actions', () => {
       status: 'queued' 
     });
     mockStartExport.mockResolvedValueOnce(started);
-    mockListExports.mockResolvedValueOnce({ exports: [READY] }).mockResolvedValue({ exports: [started, READY] });
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([READY], [started, READY]);
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(() => result.current.start({
@@ -125,9 +124,8 @@ describe('useExportsCenter actions', () => {
   });
 
   it('rejects start with the API error and adds no export', async () => {
-    mockListExports.mockResolvedValue({ exports: [] });
     mockStartExport.mockRejectedValueOnce(new RangeError('Unknown view'));
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([]);
 
     await expect(act(() => result.current.start({
       view: 'alerts',
@@ -138,8 +136,7 @@ describe('useExportsCenter actions', () => {
   });
 
   it('marks every unseen finished export seen on the server and clears the badge', async () => {
-    mockListExports.mockResolvedValue({ exports: [READY, RUNNING] });
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([READY, RUNNING]);
     await waitFor(() => expect(result.current.unseenCount).toBe(1));
 
     act(() => result.current.markAllSeen());
@@ -148,8 +145,7 @@ describe('useExportsCenter actions', () => {
   });
 
   it('removes a deleted export from the list', async () => {
-    mockListExports.mockResolvedValue({ exports: [READY] });
-    const { result } = renderHook(() => useExportsCenter());
+    const { result } = renderCenterOver([READY]);
     await waitFor(() => expect(result.current.exports).toHaveLength(1));
 
     await act(() => result.current.remove('exp-coruna'));

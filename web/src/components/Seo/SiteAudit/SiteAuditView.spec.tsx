@@ -12,7 +12,7 @@ import {
   AUDIT_ID, PAGE_URL, buildAuditDetail, buildSiteAudit
 } from '../../../api/seoAudits-fixtures';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../../../test/liveEventsMock';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
 import { findBrandTrackingLinkElement } from '../settingsDomains-fixtures';
@@ -27,7 +27,6 @@ vi.mock('../../../api/exports', () => import('../../../test/exportsApiMock'));
 vi.mock('../../../api/seo', () => import('../../../test/seoApiMock'));
 vi.mock('../../../api/seoAudits');
 vi.mock('../../../hooks/useIsAdmin', () => import('../../../test/useIsAdminMock'));
-vi.mock('../../../infrastructure/liveEvents', () => import('../../../test/liveEventsMock'));
 
 const RUNNING = buildAuditDetail({
   status: 'running',
@@ -45,7 +44,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  resetLiveEvents();
 });
 
 describe('SiteAuditView setup', () => {

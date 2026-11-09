@@ -1,18 +1,18 @@
 import {
-  afterEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import { fixtureBody } from '../types/domain/scopeCoverage-fixtures';
 import { setupFakeTimersAndFetch } from '../test/scopedTestKit';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
-  emitLive, liveSubscriberCount, reconnectLive, resetLiveEvents
+  emitLive, liveSubscriberCount, reconnectLive
 } from '../test/liveEventsMock';
+import { readsAndListeners } from '../test/liveReadCounts';
 import { apiGet } from './client';
 import { VIEW_JOB_WAIT_LIMIT_MS } from './viewJobs';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 const computingBody = fixtureBody('visibility', 'computing');
 const completeBody = fixtureBody('visibility', 'complete');
@@ -32,14 +32,18 @@ function mockComputingThenComplete(computingAnswers: number): void {
   mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(completeBody));
 }
 
+/** Starts `GET /visibility` over two computing answers then the complete body, and lets `ms` of fake time pass. */
+async function setupComputingVisibility(ms: number): Promise<{ readonly request: Promise<unknown> }> {
+  mockComputingThenComplete(2);
+  const request = apiGet<unknown>('/visibility');
+  await vi.advanceTimersByTimeAsync(ms);
+  return { request };
+}
+
 /** `authenticatedFetch` answers 202 computing forever. */
 function mockAlwaysComputing(): void {
   mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(computingBody, 202)));
 }
-
-afterEach(() => {
-  resetLiveEvents();
-});
 
 describe('apiGet on a 202 computing answer', () => {
   setupFakeTimersAndFetch();
@@ -52,10 +56,7 @@ describe('apiGet on a 202 computing answer', () => {
   });
 
   it('reads again only when the job’s finished event arrives, not on a timer', async () => {
-    mockComputingThenComplete(2);
-
-    const request = apiGet<unknown>('/visibility');
-    await vi.advanceTimersByTimeAsync(VIEW_JOB_WAIT_LIMIT_MS - 1);
+    const { request } = await setupComputingVisibility(VIEW_JOB_WAIT_LIMIT_MS - 1);
     const callsBeforeEvent = mockAuthenticatedFetch.mock.calls.length;
     await emitLive('view-jobs', FINISHED);
 
@@ -79,10 +80,7 @@ describe('apiGet on a 202 computing answer', () => {
   });
 
   it('reads again after a reconnect, to catch up on what it missed', async () => {
-    mockComputingThenComplete(2);
-
-    const request = apiGet<unknown>('/visibility');
-    await vi.advanceTimersByTimeAsync(0);
+    const { request } = await setupComputingVisibility(0);
     await reconnectLive('view-jobs');
 
     await expect(request).resolves.toStrictEqual(completeBody);
@@ -110,7 +108,7 @@ describe('apiGet on a 202 computing answer', () => {
     await vi.advanceTimersByTimeAsync(VIEW_JOB_WAIT_LIMIT_MS);
 
     await outcome;
-    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('view-jobs')]).toStrictEqual([2, 0]);
+    expect(readsAndListeners('view-jobs')).toStrictEqual([2, 0]);
   });
 
   it('rejects with AbortError, stops listening and sends no further request when the caller aborts during the wait', async () => {
@@ -123,7 +121,7 @@ describe('apiGet on a 202 computing answer', () => {
     await outcome;
     await emitLive('view-jobs', FINISHED);
 
-    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('view-jobs')]).toStrictEqual([2, 0]);
+    expect(readsAndListeners('view-jobs')).toStrictEqual([2, 0]);
   });
 
   it('rejects with a 500 ApiRequestError carrying the message when the job failed', async () => {

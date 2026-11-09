@@ -12,6 +12,7 @@ import {
 } from '../test/fetchResponses';
 import {
   announceContentChange,
+  announceContentChanges,
   buildRunningBatchStatusesFor,
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
@@ -32,6 +33,7 @@ import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import {
   activeBatchIds,
   batchStatusRequestCounts,
+  contentStudioListenerCount,
   renderTwoRunningBatchesWithFakeTimers,
   renderTwoVisibleRunningBatches,
   startTerminalBatch,
@@ -55,12 +57,16 @@ import {
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
-import { liveSubscriberCount } from '../test/liveEventsMock';
 
 import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
+
+/** One status request for each of the two recovered batches. */
+const ONE_STATUS_READ_EACH = {
+  'batch-1': 1,
+  'batch-2': 1,
+};
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
@@ -75,22 +81,7 @@ describe('useContentStudio recovered batch persistence', () => {
       expect(activeBatchIds(result.current)).toStrictEqual(['batch-1', 'batch-2']);
     });
 
-    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
-      'batch-1': 1,
-      'batch-2': 1,
-    });
-  });
-
-  it('listens once for every recovered batch', async () => {
-    const {
-      fetch, unmount
-    } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-2').length).toBeGreaterThan(0);
-    });
-
-    expect(liveSubscriberCount('content-studio')).toBe(1);
-    unmount();
+    expect(batchStatusRequestCounts(fetch, activeBatchIds(result.current))).toStrictEqual(ONE_STATUS_READ_EACH);
   });
 
   it('ignores malformed persisted candidate state without making requests', () => {
@@ -169,7 +160,7 @@ describe('useContentStudio recovered batch persistence', () => {
 });
 
 describe('useContentStudio aggregate batch reads', () => {
-  it('requests another status for every tracked batch after ten seconds', async () => {
+  it('requests another status for every tracked batch when a Content Studio item changes', async () => {
     const {
       fetch, unmount
     } = await renderTwoRunningBatchesWithFakeTimers();
@@ -231,17 +222,18 @@ describe('useContentStudio aggregate batch reads', () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(expect.anything());
   });
 
-  it('stops listening when the hook unmounts', async () => {
+  it('listens once for every recovered batch and stops listening when the hook unmounts', async () => {
     const {
       fetch, unmount
     } = renderTwoRunningBatches();
     await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-1').length).toBeGreaterThan(0);
+      expect(batchStatusRequestUrls(fetch, 'batch-2').length).toBeGreaterThan(0);
     });
+    const whileMounted = contentStudioListenerCount();
 
     unmount();
 
-    expect(liveSubscriberCount('content-studio')).toBe(0);
+    expect([whileMounted, contentStudioListenerCount()]).toStrictEqual([1, 0]);
   });
 });
 
@@ -288,10 +280,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
 
     dispatchBatchStorageEvent(['batch-1', 'batch-2']);
 
-    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
-      'batch-1': 1,
-      'batch-2': 1,
-    });
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual(ONE_STATUS_READ_EACH);
   });
 
   it('invalidates a stale poll when another tab replaces the candidate timestamp', async () => {
@@ -389,8 +378,7 @@ describe('useContentStudio batch request races', () => {
       throw new TypeError('Storage unavailable');
     });
 
-    await announceContentChange();
-    await announceContentChange();
+    await announceContentChanges(2);
 
     expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
       'batch-terminal': 2,

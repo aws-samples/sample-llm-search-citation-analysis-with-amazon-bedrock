@@ -1,9 +1,5 @@
 /**
- * Replaces `infrastructure/liveEvents` in hook and view specs:
- *
- * ```ts
- * vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
- * ```
+ * Replaces `infrastructure/liveEvents` in every dashboard spec (`setup.ts` mocks it and resets it after each test).
  *
  * A subscription is reported active at once (as the real client does once AppSync confirms it), so the view's
  * catch-up read runs; `emitLive` delivers an event and `reconnectLive` reports the subscription active again.
@@ -19,9 +15,6 @@ export {
   deploymentChannel, eventField, userChannel, type LiveChannel, type LiveEvent
 } from '../infrastructure/liveEvents/liveChannels';
 export type { LiveListener } from '../infrastructure/liveEvents/liveEventsClient';
-export type {
-  LiveReadOutcome, LiveWait
-} from '../infrastructure/liveEvents/liveWait';
 
 const listeners = new Map<string, Set<LiveListener>>();
 const connections = { automatic: true };

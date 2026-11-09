@@ -1285,11 +1285,10 @@ class TestChangeEvents:
         assert change_events_bus.details(RESEARCH_JOB_CHANGED) == [{'job_id': 'job-9'}]
 
     def test_an_action_that_raises_still_announces_its_job(self, change_events_bus):
-        table = _table_with(_finished_expansion_job())
-        table.update_item.side_effect = conditional_check_failure(message='checkpoints keep moving')
+        failing = MagicMock(side_effect=RuntimeError('model call failed'))
 
-        with pytest.raises(_mod.CheckpointConflictError):
-            _run_on(table, {'action': 'finalize', 'job_id': 'job-1'})
+        with patch.dict(_mod.ACTIONS, {'finalize': failing}), pytest.raises(RuntimeError, match='model call failed'):
+            _mod.handler({'action': 'finalize', 'job_id': 'job-1'}, None)
 
         assert change_events_bus.details(RESEARCH_JOB_CHANGED) == [{'job_id': 'job-1'}]
 

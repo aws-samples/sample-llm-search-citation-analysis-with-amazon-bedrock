@@ -1,5 +1,5 @@
 import {
-  afterEach, beforeEach, describe, it, expect, vi
+  beforeEach, describe, it, expect, vi
 } from 'vitest';
 import {
   act, renderHook
@@ -21,12 +21,12 @@ import {
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
+  emitLive, liveSubscriberCount
 } from '../test/liveEventsMock';
+import { readsAndListeners } from '../test/liveReadCounts';
 
 // Hoisted above the imports: the hook reaches the API through the mocked infrastructure.
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 /** Renders the hook and triggers the reflection the fixtures describe, answered by `responses` in order. */
 async function renderTriggered(...responses: unknown[]) {
@@ -51,10 +51,6 @@ describe('useSelfReflection while the analysis runs in the background', () => {
 
   beforeEach(() => {
     mockAuthenticatedFetch.mockReset();
-  });
-
-  afterEach(() => {
-    resetLiveEvents();
   });
 
   it('checks the analysis once when it starts listening, to catch up', async () => {
@@ -114,7 +110,7 @@ describe('useSelfReflection while the analysis runs in the background', () => {
 
     await advanceFakeTime(0);
 
-    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('insights')]).toStrictEqual([2, 0]);
+    expect(readsAndListeners('insights')).toStrictEqual([2, 0]);
   });
 
   it('reports why the analysis failed', async () => {
@@ -149,6 +145,6 @@ describe('useSelfReflection while the analysis runs in the background', () => {
 
     await advanceFakeTime(0);
 
-    expect([mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('insights')]).toStrictEqual([1, 0]);
+    expect(readsAndListeners('insights')).toStrictEqual([1, 0]);
   });
 });

@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.change_events import SELF_REFLECTION_FINISHED
+from shared import change_events
 from shared.models import BedrockDeadlineError
 from shared.self_invoke import SelfInvokeDispatchError
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
@@ -175,7 +175,7 @@ class TestJobRun:
     def test_announces_how_the_job_ended(self, reflection, change_events_bus, bedrock, status):
         Job(reflection, bedrock=bedrock)
 
-        assert change_events_bus.details(SELF_REFLECTION_FINISHED) == [
+        assert change_events_bus.details(change_events.SELF_REFLECTION_FINISHED) == [
             {'keyword': 'hotel con spa', 'brand': 'Hotel Sol', 'query_prompt_id': 'familia', 'status': status},
         ]
 

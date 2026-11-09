@@ -1,6 +1,6 @@
 import { waitFor } from '@testing-library/react';
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
   fetchLighthouseRun, startLighthouse
@@ -9,13 +9,13 @@ import {
   RUN_ID, buildRun, buildStartRunResponse
 } from '../api/seoPerformance-fixtures';
 import { renderStartedRun } from './usePerformanceRun-fixtures';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import {
-  emitLive, liveSubscriberCount, resetLiveEvents
-} from '../test/liveEventsMock';
+  emitSeoJobChanged, waitForDoneAfterSeoJobChanged, waitForJobReads
+} from '../test/seoJobEvents';
 
 vi.mock('../api/seoPerformance');
 vi.mock('../api/seo', () => import('../test/seoApiMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 
 class RefusedError extends Error {
   constructor(message: string) {
@@ -34,10 +34,6 @@ beforeEach(() => {
   vi.mocked(fetchLighthouseRun).mockResolvedValue(RUNNING);
 });
 
-afterEach(() => {
-  resetLiveEvents();
-});
-
 describe('usePerformanceRun', () => {
   it('reads the run it started once when it starts listening, to catch up', async () => {
     await renderStartedRun();
@@ -49,34 +45,17 @@ describe('usePerformanceRun', () => {
 
   it('reads the run again when a step of it ran and settles once it completes', async () => {
     const { result } = await renderStartedRun();
-    await waitFor(() => {
-      expect(fetchLighthouseRun).toHaveBeenCalledTimes(1);
-    });
+    await waitForJobReads(fetchLighthouseRun, 1);
     vi.mocked(fetchLighthouseRun).mockResolvedValue(buildRun());
 
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      feature: 'lighthouse',
-      id: RUN_ID
-    });
-
-    await waitFor(() => {
-      expect(result.current.state.status).toBe('done');
-    });
-    expect(liveSubscriberCount('seo')).toBe(0);
+    expect(await waitForDoneAfterSeoJobChanged('lighthouse', RUN_ID, () => result.current.state.status)).toBe(0);
   });
 
   it('ignores the steps of other runs', async () => {
     await renderStartedRun();
-    await waitFor(() => {
-      expect(fetchLighthouseRun).toHaveBeenCalledTimes(1);
-    });
+    await waitForJobReads(fetchLighthouseRun, 1);
 
-    await emitLive('seo', {
-      type: 'seo-job.changed',
-      feature: 'lighthouse',
-      id: 'another-run'
-    });
+    await emitSeoJobChanged('lighthouse', 'another-run');
 
     expect(fetchLighthouseRun).toHaveBeenCalledTimes(1);
   });

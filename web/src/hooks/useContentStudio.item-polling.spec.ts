@@ -30,7 +30,6 @@ import {
 import { announceContentChange } from './useContentStudioBatchTracking-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-vi.mock('../infrastructure/liveEvents', () => import('../test/liveEventsMock'));
 import { liveSubscriberCount } from '../test/liveEventsMock';
 
 const terminalStatuses = [

@@ -8,10 +8,10 @@ import { vi } from 'vitest';
 import {
   act, renderHook 
 } from '@testing-library/react';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   holdLiveConnections, reconnectLive
 } from '../test/liveEventsMock';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
   buildCompletedExpansionJob, createResearchMockFetch, type ResearchMockFetchOptions 

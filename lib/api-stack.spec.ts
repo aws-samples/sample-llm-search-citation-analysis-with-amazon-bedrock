@@ -181,7 +181,7 @@ describe('API stack cross-stack references', () => {
   it('reads the dashboard origin, the user pool id, the distribution id and the live events domains from SSM at deploy time', () => {
     const expected = [...Object.values(DASHBOARD_API_PARAMETERS), ...Object.values(LIVE_EVENTS_PARAMETERS)];
     expect(Object.keys(snapshot.apiSsmParameters).sort((left, right) => left.localeCompare(right)))
-      .toStrictEqual(expected.sort((left, right) => left.localeCompare(right)));
+      .toStrictEqual([...expected].sort((left, right) => left.localeCompare(right)));
     expect(Object.values(snapshot.apiSsmParameters).map((parameter) => parameter.type))
       .toStrictEqual(Array(expected.length).fill('AWS::SSM::Parameter::Value<String>'));
   });

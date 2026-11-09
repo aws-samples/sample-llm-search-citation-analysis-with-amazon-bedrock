@@ -126,6 +126,17 @@ export interface ResearchMockFetchOptions {
 /** Poll snapshots for a job-1 that never leaves the running state. */
 export const runningJobResearchOptions: ResearchMockFetchOptions = {snapshots: { 'job-1': [buildJob({ status: 'running' })] },};
 
+/** Two expansions started in turn: `job-1` completes for `firstSeed`, and `job-2` answers `secondJob`. */
+export function buildTwoExpansionsOptions(firstSeed: string, secondJob: KeywordResearchItem): ResearchMockFetchOptions {
+  return {
+    pendingIds: ['job-1', 'job-2'],
+    snapshots: {
+      'job-1': [buildCompletedExpansionJob('job-1', firstSeed)],
+      'job-2': [secondJob],
+    },
+  };
+}
+
 /**
  * Answers successive GET /keyword-research/{id} calls with `snapshots[id]` in
  * order; the last snapshot repeats once the list is exhausted, and an id

@@ -6,7 +6,6 @@ import pytest
 from live_channel_routes import ROUTES, channel_message, is_channel_segment
 
 from shared.change_events import (
-    ALL_KINDS,
     EXPORT_CHANGED,
     NARRATIVE_FINISHED,
     RESEARCH_JOB_CHANGED,
@@ -15,15 +14,17 @@ from shared.change_events import (
 )
 from testing.live_events_fixtures import (
     OWNER_SUB,
+    PUBLISHED_KINDS,
     RESEARCH,
     STATE_MACHINE_TOPICS,
     WORKFLOW,
+    WORKFLOW_KEYWORD_FINISHED,
     change_event,
     execution_status_event,
 )
 
 
-@pytest.mark.parametrize('kind', ALL_KINDS, ids=lambda kind: kind.detail_type)
+@pytest.mark.parametrize('kind', [*PUBLISHED_KINDS, WORKFLOW_KEYWORD_FINISHED], ids=lambda kind: kind.detail_type)
 def test_every_published_kind_has_a_route(kind):
     assert (kind.source, kind.detail_type) in ROUTES
 

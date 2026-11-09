@@ -5,18 +5,8 @@ import {
   fetchLatestRankRun, startRankRun
 } from '../api/seoRankTracking';
 import { seoErrorMessage } from '../api/seo';
-import {
-  deploymentChannel, eventField, type LiveEvent
-} from '../infrastructure/liveEvents';
 import type { RankRun } from '../types/api/seoRankTracking';
-import { useLiveRefresh } from './useLiveRefresh';
-
-const SEO_CHANNEL = deploymentChannel('seo');
-
-/** Whether `event` says a step of a run of tracker `trackerId` ran (`seo-job.changed`, `lambda/seo-jobs/seo-jobs.py`). */
-export function isRankRunEvent(event: LiveEvent, trackerId: string): boolean {
-  return eventField(event, 'feature') === 'rank' && eventField(event, 'id') === trackerId;
-}
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
 export function isRunActive(run: RankRun | null): boolean {
   return run !== null && (run.status === 'pending' || run.status === 'running');
@@ -59,14 +49,10 @@ export function useRankTrackingRun(trackerId: string, initial: RankRun | null, o
   }, [initial]);
 
   const active = isRunActive(run);
-  useLiveRefresh(
-    active ? SEO_CHANNEL : null,
-    () => fetchLatestRankRun(trackerId).then((latest) => {
-      setRun(latest);
-      if (!isRunActive(latest)) finishedRef.current();
-    }, (failure: unknown) => setError(seoErrorMessage(failure))),
-    (event) => isRankRunEvent(event, trackerId)
-  );
+  useSeoJobRefresh('rank', active ? trackerId : null, (tracker) => fetchLatestRankRun(tracker).then((latest) => {
+    setRun(latest);
+    if (!isRunActive(latest)) finishedRef.current();
+  }, (failure: unknown) => setError(seoErrorMessage(failure))));
 
   const begin = useCallback(() => {
     setStart({
