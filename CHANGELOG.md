@@ -9,6 +9,21 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.1] - 2026-11-09
+
+### Fixed
+
+- **Deduplication could not create a keyword's first KeywordLatest object.** Its role could read and write
+  `scope-snapshots/keywords/*` but not list the bucket, so S3 answered the read of a missing object with
+  `AccessDenied` instead of `NoSuchKey`, and `read_keyword_latest` raised instead of starting a new object. A keyword's
+  first run after 2.45.0 failed that step, and so did the `latest` backfill on a deployment upgraded from 2.44.0 or
+  earlier (seen upgrading 2.43.0 to 2.54.0). The role now has `s3:ListBucket` on the keywords bucket, limited to the
+  `scope-snapshots/keywords/*` prefix (`lib/citation-analysis-stack.ts`, checked in `lib/scope-snapshots.spec.ts`).
+
+### Upgrade notes
+
+- Deploy, then run the `latest` backfill once if a previous one stopped with `AccessDenied` (README, "KPI backfill").
+
 ## [2.54.0] - 2026-11-09
 
 ### Fixed

@@ -1553,6 +1553,13 @@ export class CitationAnalysisStack extends cdk.Stack {
     // the brand row of a capped run, the personas, and the counts block's
     // partition counts (Citations rows, CrawledContent on KeywordIndex).
     allow(deduplicationLambdaRole, ['s3:GetObject', 's3:PutObject'], [keywordsBucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}keywords/*`)]);
+    // Without ListBucket, S3 answers a read of a keyword with no object yet with AccessDenied instead of NoSuchKey, so
+    // the first run (and the `latest` backfill) of every keyword failed instead of creating its object.
+    deduplicationLambdaRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:ListBucket'],
+      resources: [keywordsBucket.bucketArn],
+      conditions: { StringLike: { 's3:prefix': [`${SCOPE_SNAPSHOT_PREFIX}keywords/*`] } },
+    }));
     keywordRunBrandsTable.grant(deduplicationLambdaRole, 'dynamodb:PutItem');
     allow(deduplicationLambdaRole, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(deduplicationLambdaRole, ['dynamodb:Query'], [`${crawledContentTable.tableArn}/index/KeywordIndex`]);
