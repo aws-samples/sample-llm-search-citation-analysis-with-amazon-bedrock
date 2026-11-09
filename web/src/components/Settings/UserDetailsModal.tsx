@@ -17,9 +17,6 @@ import {
 import {
   confirmationFor, passwordCopy, type ConfirmedAction
 } from './UserConfirmations';
-import {
-  useDialogFocus, useStackedDialogFocus
-} from './UserDialogFocus';
 
 type BusyAction = 'role' | 'access' | ConfirmedAction;
 
@@ -73,8 +70,6 @@ export function UserDetailsModal({
     busy, feedback, run
   } = useDialogActions();
   const password = passwordCopy(user);
-  useDialogFocus();
-  useStackedDialogFocus(confirming);
   const closeConfirmation = useCallback(() => setConfirming(null), []);
 
   const confirmed: Record<ConfirmedAction, () => Promise<void>> = {

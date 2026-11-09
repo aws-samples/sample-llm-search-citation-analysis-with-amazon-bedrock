@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
@@ -22,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from testing.events import parse_response
+from testing.module_loader import API_DIR
 from testing.report_scope_fixtures import (
     OLD_TS,
     RUN_TS,
@@ -33,8 +33,6 @@ from testing.report_scope_fixtures import (
     scoped_report,
 )
 from testing.search_results_fixtures import sort_condition
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
 
 FARO = {'group_id': 'faro'}
 OWNED = {'first_party_domains': ['hotel-faro.com']}
@@ -80,7 +78,7 @@ def _wired(
 
 @pytest.fixture(scope='module')
 def insights() -> ModuleType:
-    return load_scoped_handler(_HERE, 'get-reports-insights.py')
+    return load_scoped_handler(API_DIR, 'get-reports-insights.py')
 
 
 @pytest.fixture

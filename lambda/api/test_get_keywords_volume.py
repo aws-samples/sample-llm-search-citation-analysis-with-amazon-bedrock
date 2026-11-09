@@ -8,17 +8,15 @@ twenty group memberships) must still fit one page budget.
 """
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 from testing.env import KEYWORDS_TABLE_ENV
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 from testing.response_size import assert_within_page_budget
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
 get_keywords_module = handler_fixture(
-    _API_DIR, 'get-keywords.py', 'get_keywords_volume_under_test', env=KEYWORDS_TABLE_ENV, scope='function',
+    API_DIR, 'get-keywords.py', 'get_keywords_volume_under_test', env=KEYWORDS_TABLE_ENV, scope='function',
 )
 
 

@@ -3,53 +3,44 @@ import {
   describe, expect, it
 } from 'vitest';
 import { renderScheduleForm } from './ScheduleForm-fixtures';
+import {
+  fieldIdentity, keywordPickerIdentity, labelledFieldIdentity, valuedFieldIdentity
+} from '../../test/fieldIdentity';
 
 describe('ScheduleForm', () => {
   it('associates default schedule fields with page-specific identities', () => {
     renderScheduleForm();
 
-    const fields = ['Schedule name', 'Frequency', 'Time', 'Timezone'].map((label) => (
-      screen.getByLabelText<HTMLInputElement | HTMLSelectElement>(label)
-    ));
-
-    expect(fields.map((field) => [
-      field.id,
-      field.labels?.[0]?.htmlFor,
-      field.name,
-    ])).toStrictEqual([
-      [
-        'schedule-display-name',
-        'schedule-display-name',
-        'schedule-display-name',
-      ],
-      [
-        'schedule-frequency',
-        'schedule-frequency',
-        'schedule-frequency',
-      ],
-      [
-        'schedule-time',
-        'schedule-time',
-        'schedule-time',
-      ],
-      [
-        'schedule-timezone',
-        'schedule-timezone',
-        'schedule-timezone',
-      ],
+    expect(['Schedule name', 'Repeat', 'Time', 'Timezone'].map(labelledFieldIdentity)).toStrictEqual([
+      {
+        id: 'schedule-display-name',
+        labelFor: 'schedule-display-name',
+        name: 'schedule-display-name',
+      },
+      {
+        id: 'schedule-frequency',
+        labelFor: 'schedule-frequency',
+        name: 'schedule-frequency',
+      },
+      {
+        id: 'schedule-time',
+        labelFor: 'schedule-time',
+        name: 'schedule-time',
+      },
+      {
+        id: 'schedule-timezone',
+        labelFor: 'schedule-timezone',
+        name: 'schedule-timezone',
+      },
     ]);
   });
 
   it('associates Enabled with its schedule-specific identity', () => {
     renderScheduleForm();
 
-    const enabled = screen.getByRole<HTMLInputElement>('checkbox', { name: /Enabled/u });
+    const enabled = screen.getByRole<HTMLInputElement>('switch', { name: 'Enabled' });
 
-    expect({
-      id: enabled.id,
-      labelFor: enabled.labels?.[0]?.htmlFor,
-      name: enabled.name,
-    }).toStrictEqual({
+    expect(fieldIdentity(enabled)).toStrictEqual({
       id: 'schedule-enabled',
       labelFor: 'schedule-enabled',
       name: 'schedule-enabled',
@@ -61,12 +52,7 @@ describe('ScheduleForm', () => {
 
     const radios = screen.getAllByRole<HTMLInputElement>('radio');
 
-    expect(radios.map((radio) => ({
-      id: radio.id,
-      labelFor: radio.labels?.[0]?.htmlFor,
-      name: radio.name,
-      value: radio.value,
-    }))).toStrictEqual([
+    expect(radios.map(valuedFieldIdentity)).toStrictEqual([
       {
         id: 'schedule-scope-mode-all',
         labelFor: 'schedule-scope-mode-all',
@@ -91,13 +77,7 @@ describe('ScheduleForm', () => {
   it('associates the weekly timing field with its schedule-specific identity', () => {
     renderScheduleForm({ mode: 'all' }, { frequency: 'weekly' });
 
-    const dayOfWeek = screen.getByLabelText<HTMLSelectElement>('Day of week');
-
-    expect({
-      id: dayOfWeek.id,
-      labelFor: dayOfWeek.labels?.[0]?.htmlFor,
-      name: dayOfWeek.name,
-    }).toStrictEqual({
+    expect(labelledFieldIdentity('Day of week')).toStrictEqual({
       id: 'schedule-day-of-week',
       labelFor: 'schedule-day-of-week',
       name: 'schedule-day-of-week',
@@ -107,13 +87,7 @@ describe('ScheduleForm', () => {
   it('associates the monthly timing field with its schedule-specific identity', () => {
     renderScheduleForm({ mode: 'all' }, { frequency: 'monthly' });
 
-    const dayOfMonth = screen.getByLabelText<HTMLInputElement>('Day of month (1-28)');
-
-    expect({
-      id: dayOfMonth.id,
-      labelFor: dayOfMonth.labels?.[0]?.htmlFor,
-      name: dayOfMonth.name,
-    }).toStrictEqual({
+    expect(labelledFieldIdentity('Day of month')).toStrictEqual({
       id: 'schedule-day-of-month',
       labelFor: 'schedule-day-of-month',
       name: 'schedule-day-of-month',
@@ -128,12 +102,7 @@ describe('ScheduleForm', () => {
 
     const group = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Include group Hotel Coruña' });
 
-    expect({
-      id: group.id,
-      labelFor: group.labels?.[0]?.htmlFor,
-      name: group.name,
-      value: group.value,
-    }).toStrictEqual({
+    expect(valuedFieldIdentity(group)).toStrictEqual({
       id: 'schedule-group-group-coruna',
       labelFor: 'schedule-group-group-coruna',
       name: 'schedule-group-ids',
@@ -147,33 +116,18 @@ describe('ScheduleForm', () => {
       keyword_ids: [],
     });
 
-    const search = screen.getByLabelText<HTMLInputElement>('Search keywords');
-    const keyword = screen.getByRole<HTMLInputElement>('checkbox', { name: 'best hotels malaga' });
-
-    expect([
-      [
-        search.id,
-        search.labels?.[0]?.htmlFor,
-        search.name,
-      ],
-      [
-        keyword.id,
-        keyword.labels?.[0]?.htmlFor,
-        keyword.name,
-        keyword.value,
-      ],
-    ]).toStrictEqual([
-      [
-        'schedule-keyword-scope-search',
-        'schedule-keyword-scope-search',
-        'schedule-keyword-scope-search',
-      ],
-      [
-        'schedule-keyword-scope-section-group-coruna-keyword-kw-1',
-        'schedule-keyword-scope-section-group-coruna-keyword-kw-1',
-        'schedule-keyword-ids',
-        'kw-1',
-      ],
-    ]);
+    expect(keywordPickerIdentity('best hotels malaga')).toStrictEqual({
+      search: {
+        id: 'schedule-keyword-scope-search',
+        labelFor: 'schedule-keyword-scope-search',
+        name: 'schedule-keyword-scope-search',
+      },
+      keyword: {
+        id: 'schedule-keyword-scope-section-group-coruna-keyword-kw-1',
+        labelFor: 'schedule-keyword-scope-section-group-coruna-keyword-kw-1',
+        name: 'schedule-keyword-ids',
+        value: 'kw-1',
+      },
+    });
   });
 });

@@ -6,6 +6,7 @@ Supports listing folders/files and fetching file content.
 
 Endpoints:
     GET /api/raw-responses/browse?prefix=path/to/folder&bucket=responses|screenshots[&next_token=...]
+        (newest first across the whole folder, 1,000 entries per page)
     GET /api/raw-responses/file?key=path/to/file.json&bucket=responses|screenshots
     GET /api/raw-responses/download?key=path/to/file.json&bucket=responses|screenshots
 """
@@ -13,24 +14,25 @@ Endpoints:
 import functools
 import json
 import os
-import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import unquote
 
 import boto3
 
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
-
 from shared.api_response import success_response, validation_error
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_cursor, encode_cursor
 from shared.decorators import api_handler, route_handler, validate
+from shared.request_deadline import current_deadline
 
 s3_client = boto3.client('s3')
 
-# Entries (folders + files) per browse page: S3's own ListObjectsV2 maximum.
+# Entries (folders + files) per browse page, and per ListObjectsV2 call (S3's maximum).
 BROWSE_PAGE_KEYS = 1000
+# Most entries one listing reads before sorting: 20 ListObjectsV2 calls, names
+# and sizes only. The root holds one folder per run day, so this is decades of
+# daily runs; past it the answer says ``truncated: true``.
+MAX_LISTED_ENTRIES = 20 * BROWSE_PAGE_KEYS
 # Above this object size, /file answers with a presigned download link instead
 # of the content: JSON-escaping (and the envelope's second escaping) can more
 # than triple accented text on the way out.
@@ -174,48 +176,91 @@ def _file_entry(obj: Mapping[str, Any], prefix: str) -> dict[str, Any] | None:
     }
 
 
+def _read_folder(bucket: str, prefix: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """``(folders, files, truncated)`` directly under ``prefix``, following S3's pages.
+
+    S3 lists keys ascending only, so a newest-first listing has to read the
+    whole folder before it can sort. Reading stops after ``MAX_LISTED_ENTRIES``
+    entries or when the request's time budget runs out; ``truncated`` then
+    says the newest entries (listed last by S3) may be missing.
+    """
+    folders: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    deadline = current_deadline()
+    continuation_token: str | None = None
+    while True:
+        response = _list_objects(bucket, prefix, continuation_token)
+        folders.extend(_folder_entry(cp) for cp in response.get('CommonPrefixes', []))
+        files.extend(entry for obj in response.get('Contents', []) if (entry := _file_entry(obj, prefix)) is not None)
+        continuation_token = response.get('NextContinuationToken') if response.get('IsTruncated') else None
+        if continuation_token is None:
+            return folders, files, False
+        if len(folders) + len(files) >= MAX_LISTED_ENTRIES or deadline.stop_reading('raw-responses listing'):
+            return folders, files, True
+
+
+def _comes_after(path: str, after: str) -> bool:
+    """Whether ``path`` follows ``after`` in listing order: folders (paths ending in ``/``) first, each kind newest first."""
+    path_is_file, after_is_file = not path.endswith('/'), not after.endswith('/')
+    if path_is_file != after_is_file:
+        return path_is_file
+    return path < after
+
+
 def list_prefixes(
     bucket: str,
     prefix: str = '',
     root_prefix: str = 'raw-responses/',
-    continuation_token: str | None = None,
+    after: str | None = None,
 ) -> dict[str, Any]:
     """
-    One page of the folders and files at a given S3 prefix.
+    One page of the folders and files at a given S3 prefix, newest first across the whole folder.
 
-    S3 lists keys in ascending order, ``BROWSE_PAGE_KEYS`` entries per page;
-    each page is sorted newest first by name and ``next_token`` carries S3's
-    continuation token (``None`` on the last page).
+    The folder is read in full (up to ``MAX_LISTED_ENTRIES``), sorted
+    descending by name (date folders and timestamped files put the latest
+    first), folders before files, and cut into pages of ``BROWSE_PAGE_KEYS``.
+    ``next_token`` carries the prefix and the path of the page's last entry,
+    so a page continues after that entry even when a newer run added folders
+    meanwhile. ``folder_count`` / ``file_count`` count the whole folder (as
+    read); ``total_folders`` / ``total_files`` count this page.
     """
     prefix = resolve_prefix(prefix, root_prefix)
-    response = _list_objects(bucket, prefix, continuation_token)
+    folders, files, truncated = _read_folder(bucket, prefix)
+    folders.sort(key=lambda entry: entry['path'], reverse=True)
+    files.sort(key=lambda entry: entry['path'], reverse=True)
+    entries = folders + files
 
-    folders = [_folder_entry(cp) for cp in response.get('CommonPrefixes', [])]
-    files = [entry for obj in response.get('Contents', []) if (entry := _file_entry(obj, prefix)) is not None]
-
-    # Sort folders and files by name (newest first for date folders and timestamps)
-    folders.sort(key=lambda x: x['name'], reverse=True)
-    files.sort(key=lambda x: x['name'], reverse=True)
-
-    following = response.get('NextContinuationToken') if response.get('IsTruncated') else None
+    start = 0 if after is None else next(
+        (index for index, entry in enumerate(entries) if _comes_after(entry['path'], after)), len(entries)
+    )
+    page = entries[start:start + BROWSE_PAGE_KEYS]
+    page_folders = [entry for entry in page if entry['type'] == 'folder']
+    page_files = [entry for entry in page if entry['type'] != 'folder']
+    more = start + len(page) < len(entries)
     return {
         'prefix': prefix,
-        'folders': folders,
-        'files': files,
-        'total_folders': len(folders),
-        'total_files': len(files),
-        'next_token': encode_cursor({'prefix': prefix, 's3': following}) if following else None,
+        'folders': page_folders,
+        'files': page_files,
+        'total_folders': len(page_folders),
+        'total_files': len(page_files),
+        'folder_count': len(folders),
+        'file_count': len(files),
+        'truncated': truncated,
+        'next_token': encode_cursor({'prefix': prefix, 'after': page[-1]['path']}) if more else None,
     }
 
 
 def decode_browse_token(token: str | None, prefix: str) -> tuple[bool, str | None]:
-    """``(valid, s3_continuation_token)`` for a browse ``next_token`` issued for ``prefix``."""
+    """``(valid, after_path)`` for a browse ``next_token`` issued for ``prefix``."""
     if token is None:
         return True, None
-    decoded = decode_cursor(token, ('prefix', 's3'))
-    if decoded is None or decoded['prefix'] != prefix or not isinstance(decoded['s3'], str) or not decoded['s3']:
+    decoded = decode_cursor(token, ('prefix', 'after'))
+    if decoded is None or decoded['prefix'] != prefix:
         return False, None
-    return True, decoded['s3']
+    after = decoded['after']
+    if not isinstance(after, str) or not after.startswith(prefix) or after == prefix:
+        return False, None
+    return True, after
 
 
 class ObjectNotFoundError(Exception):
@@ -316,11 +361,11 @@ def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str, next_
     if not actual_bucket:
         return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
-    valid, continuation_token = decode_browse_token(next_token, resolve_prefix(prefix, root_prefix))
+    valid, after = decode_browse_token(next_token, resolve_prefix(prefix, root_prefix))
     if not valid:
         return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
 
-    result = list_prefixes(actual_bucket, prefix, root_prefix, continuation_token)
+    result = list_prefixes(actual_bucket, prefix, root_prefix, after)
     result['bucket_type'] = bucket
     return success_response(result, event)
 

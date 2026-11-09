@@ -9,7 +9,6 @@ back whole, a YouTube video's oEmbed fields included.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import call, patch
 
@@ -20,8 +19,8 @@ from shared.cursors import encode_cursor
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _URL = 'https://example.com/hotels/coruna'
 _CRAWL = {'normalized_url': _URL, 'crawled_at': '2026-05-02T08:00:00Z', 'keyword': 'hotel coruña'}
 _VIDEO_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
@@ -39,7 +38,7 @@ _VIDEO_CRAWL = {
 }
 
 crawled_content_module = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'get-crawled-content.py',
     'get_crawled_content_under_test',
     env={'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled-content'},

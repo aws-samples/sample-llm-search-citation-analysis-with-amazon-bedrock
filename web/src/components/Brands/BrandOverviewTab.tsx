@@ -6,6 +6,7 @@ import {
   classificationLabel, sentimentTextColor
 } from './brandPresentation';
 import { useAllBrandAppearances } from './useAllBrandAppearances';
+import { providerName } from '../../constants/providers';
 
 interface BrandOverviewTabProps {
   brand: AggregatedBrand;
@@ -15,7 +16,7 @@ interface BrandOverviewTabProps {
 
 const SENTIMENTS = ['positive', 'neutral', 'negative', 'mixed'] as const;
 
-const sentimentSummaryColor = (sentiment: string) => (sentiment === 'mixed' ? 'text-yellow-600' : sentimentTextColor(sentiment));
+const sentimentSummaryColor = (sentiment: string) => (sentiment === 'mixed' ? 'text-amber-700' : sentimentTextColor(sentiment));
 
 const AppearanceRow = ({
   appearance, bestRank
@@ -24,11 +25,11 @@ const AppearanceRow = ({
   bestRank: number;
 }) => (
   <div className="flex items-center justify-between p-3 bg-gray-50 rounded">
-    <div className="flex items-center gap-3">
-      <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium text-sm">
-        {appearance.provider.toUpperCase()}
+    <div className="flex items-center gap-3 min-w-0">
+      <span className="w-36 shrink-0 px-3 py-1 bg-blue-100 text-blue-800 rounded font-medium text-sm text-center">
+        {providerName(appearance.provider)}
       </span>
-      <div>
+      <div className="min-w-0 break-words">
         <div className="text-sm font-medium text-gray-900">
           Rank #{appearance.rank} • {appearance.mention_count} mention(s)
           {appearance.keyword && <span className="text-gray-500 font-normal"> • {appearance.keyword}</span>}
@@ -49,7 +50,7 @@ const AppearanceRow = ({
     <div className="text-right">
       <div className="text-sm font-medium text-gray-900">
         {appearance.rank === bestRank && (
-          <span className="text-emerald-600">Best Rank</span>
+          <span className="text-violet-700">Best Rank</span>
         )}
       </div>
     </div>
@@ -112,7 +113,7 @@ const SentimentSummary = ({ brand }: { brand: AggregatedBrand }) => {
                 {count}
               </div>
               <div className="text-xs text-gray-500 capitalize">{sentiment}</div>
-              <div className="text-xs text-gray-400">{percentage}%</div>
+              <div className="text-xs text-gray-500">{percentage}%</div>
             </div>
           );
         })}
@@ -127,9 +128,9 @@ export const BrandOverviewTab = ({
   const getClassificationColor = (classification: string) => {
     switch (classification) {
       case 'first_party':
-        return 'bg-green-50 text-green-600 border-green-200';
+        return 'bg-gray-50 text-emerald-700 border-gray-200';
       case 'competitor':
-        return 'bg-red-50 text-red-600 border-red-200';
+        return 'bg-red-50 text-red-700 border-red-200';
       default:
         return 'bg-gray-50 text-gray-600 border-gray-200';
     }
@@ -140,20 +141,20 @@ export const BrandOverviewTab = ({
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4">
         <div className="bg-blue-50 rounded-lg p-3 sm:p-4">
-          <div className="text-xs sm:text-sm text-blue-600 font-medium">Overall Rank</div>
+          <div className="text-xs sm:text-sm text-blue-700 font-medium">Overall Rank</div>
           <div className="text-2xl sm:text-3xl font-bold text-blue-900 mt-1">#{brand.overall_rank}</div>
         </div>
-        <div className="bg-green-50 rounded-lg p-3 sm:p-4">
-          <div className="text-xs sm:text-sm text-green-600 font-medium">AI Providers</div>
-          <div className="text-2xl sm:text-3xl font-bold text-green-900 mt-1">{brand.provider_count}</div>
+        <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+          <div className="text-xs sm:text-sm text-emerald-700 font-medium">AI Providers</div>
+          <div className="text-2xl sm:text-3xl font-bold text-emerald-900 mt-1">{brand.provider_count}</div>
         </div>
-        <div className="bg-purple-50 rounded-lg p-3 sm:p-4">
-          <div className="text-xs sm:text-sm text-purple-600 font-medium">Total Mentions</div>
-          <div className="text-2xl sm:text-3xl font-bold text-purple-900 mt-1">{brand.total_mentions}</div>
+        <div className="bg-violet-50 rounded-lg p-3 sm:p-4">
+          <div className="text-xs sm:text-sm text-violet-700 font-medium">Total Mentions</div>
+          <div className="text-2xl sm:text-3xl font-bold text-violet-900 mt-1">{brand.total_mentions}</div>
         </div>
-        <div className="bg-orange-50 rounded-lg p-3 sm:p-4">
-          <div className="text-xs sm:text-sm text-orange-600 font-medium">Aggregate Score</div>
-          <div className="text-2xl sm:text-3xl font-bold text-orange-900 mt-1">{brand.aggregate_score}</div>
+        <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+          <div className="text-xs sm:text-sm text-amber-800 font-medium">Aggregate Score</div>
+          <div className="text-2xl sm:text-3xl font-bold text-amber-900 dark:text-amber-200 mt-1">{brand.aggregate_score}</div>
         </div>
         <div className={`rounded-lg p-3 sm:p-4 border col-span-2 sm:col-span-1 ${getClassificationColor(brand.classification)}`}>
           <div className="text-xs sm:text-sm font-medium">Classification</div>

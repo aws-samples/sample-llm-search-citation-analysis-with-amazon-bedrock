@@ -1,23 +1,52 @@
-import { useState } from 'react';
-import type {
-  AggregatedBrand, BrandConfig 
-} from '../../types';
+import {
+  useState, type ReactNode
+} from 'react';
+import type { AggregatedBrand } from '../../types';
 import { ArrowRightIcon } from '../ui';
 import { providerName } from '../../constants/providers';
+import { BRAND_TYPE_BADGE } from '../../constants/brandTypeBadge';
+
+type SortKey = 'rank' | 'score' | 'providers';
+
+const SORT_OPTIONS: ReadonlyArray<readonly [SortKey, string]> = [
+  ['rank', 'By Rank'],
+  ['score', 'By Score'],
+  ['providers', 'By Providers'],
+];
 
 interface BrandMentionsTableProps {
-  brands: AggregatedBrand[];
+  /** The brands loaded so far, best aggregate score first. */
+  brands: readonly AggregatedBrand[];
+  /** Brands of the scope and filter over every page; defaults to the loaded count. */
+  totalBrands?: number;
+  /** More pages of brands load as the reader scrolls. */
+  moreToLoad?: boolean;
+  /** Below the table: the load-on-scroll footer. */
+  footer?: ReactNode;
   keyword: string;
+  /** Whether `keyword` names one keyword; otherwise it is a group or "All keywords". */
+  singleKeyword?: boolean;
   onBrandClick: (brand: AggregatedBrand) => void;
-  config?: BrandConfig | null;
+}
+
+/**
+ * "Showing 100 of 1,037 brands". The rank order is the API's (aggregate
+ * score), so it holds for brands not loaded yet; sorting by providers only
+ * reorders the loaded brands, and the line says so while more remain.
+ */
+function shownSummary(shown: number, total: number, moreToLoad: boolean, sortBy: SortKey): string {
+  const noun = total === 1 ? 'brand' : 'brands';
+  const count = shown < total ? `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} ${noun}` : `${total.toLocaleString()} ${noun} found`;
+  if (!moreToLoad) return count;
+  return sortBy === 'providers' ? `${count} · sorted among the loaded brands; scroll for more` : `${count} · more load as you scroll`;
 }
 
 export const BrandMentionsTable = ({
-  brands, keyword, onBrandClick, config 
+  brands, totalBrands, moreToLoad = false, footer, keyword, singleKeyword = true, onBrandClick
 }: BrandMentionsTableProps) => {
-  const [sortBy, setSortBy] = useState<'rank' | 'score' | 'providers'>('rank');
+  const [sortBy, setSortBy] = useState<SortKey>('rank');
 
-  const sortedBrands = [...(brands ?? [])].sort((a, b) => {
+  const sortedBrands = [...brands].sort((a, b) => {
     switch (sortBy) {
       case 'rank':
         return a.overall_rank - b.overall_rank;
@@ -31,60 +60,45 @@ export const BrandMentionsTable = ({
   });
 
   const getRankColor = (rank: number) => {
-    if (rank <= 3) return 'text-green-600 bg-green-50';
-    if (rank <= 7) return 'text-blue-600 bg-blue-50';
+    if (rank <= 3) return 'text-emerald-700 bg-gray-50';
+    if (rank <= 7) return 'text-blue-700 bg-blue-50';
     return 'text-gray-600 bg-gray-50';
   };
 
   const getClassificationBadge = (classification: string) => {
     switch (classification) {
       case 'first_party':
-        return <span className="px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-medium">First Party</span>;
+        return <span className={`px-2 py-1 rounded text-xs font-medium ${BRAND_TYPE_BADGE.first_party}`}>First Party</span>;
       case 'competitor':
-        return <span className="px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-medium">Competitor</span>;
+        return <span className={`px-2 py-1 rounded text-xs font-medium ${BRAND_TYPE_BADGE.competitor}`}>Competitor</span>;
       default:
-        return <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">Other</span>;
+        return <span className={`px-2 py-1 rounded text-xs font-medium ${BRAND_TYPE_BADGE.other}`}>Other</span>;
     }
   };
-
-  const industryName = config?.industry 
-    ? config.industry.charAt(0).toUpperCase() + config.industry.slice(1)
-    : 'Brand';
 
   return (
     <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{industryName} Mentions</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Brands mentioned</h2>
           <p className="text-xs sm:text-sm text-gray-600 mt-1">
-            Keyword: <span className="font-semibold">{keyword}</span> • {brands.length} brands found
+            {singleKeyword ? 'Keyword' : 'Scope'}: <span className="font-semibold break-words">{keyword}</span> • {shownSummary(brands.length, totalBrands ?? brands.length, moreToLoad, sortBy)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setSortBy('rank')}
-            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
-              sortBy === 'rank' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            By Rank
-          </button>
-          <button
-            onClick={() => setSortBy('score')}
-            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
-              sortBy === 'score' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            By Score
-          </button>
-          <button
-            onClick={() => setSortBy('providers')}
-            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
-              sortBy === 'providers' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            By Providers
-          </button>
+          {SORT_OPTIONS.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={sortBy === value}
+              onClick={() => setSortBy(value)}
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 ${
+                sortBy === value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -121,7 +135,7 @@ export const BrandMentionsTable = ({
           <tbody className="bg-white divide-y divide-gray-200">
             {sortedBrands.map((brand) => {
               const getRowBgClass = (classification: string | undefined) => {
-                if (classification === 'first_party') return 'bg-green-50/30';
+                if (classification === 'first_party') return 'bg-gray-50/30';
                 if (classification === 'competitor') return 'bg-red-50/30';
                 return '';
               };
@@ -141,7 +155,7 @@ export const BrandMentionsTable = ({
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm font-medium text-gray-900">{brand.name}</div>
+                    <div className="text-sm font-medium text-gray-900 break-words">{brand.name}</div>
                     {brand.parent_company && (
                       <div className="text-xs text-gray-500">{brand.parent_company}</div>
                     )}
@@ -149,15 +163,14 @@ export const BrandMentionsTable = ({
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getClassificationBadge(brand.classification)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <div className="flex justify-center gap-1 flex-wrap">
+                  <td className="px-6 py-4 text-center">
+                    <div className="flex justify-center gap-1 flex-wrap max-w-56 mx-auto">
                       {brand.providers.slice(0, 4).map((provider) => (
                         <span
                           key={provider}
-                          className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
-                          title={providerName(provider)}
+                          className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs whitespace-nowrap"
                         >
-                          {provider.slice(0, 3).toUpperCase()}
+                          {providerName(provider)}
                         </span>
                       ))}
                       {brand.providers.length > 4 && (
@@ -166,7 +179,7 @@ export const BrandMentionsTable = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">{brand.provider_count} AI(s)</div>
+                    <div className="text-xs text-gray-500 mt-1">{brand.provider_count} {brand.provider_count === 1 ? 'AI engine' : 'AI engines'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <span className="text-sm font-medium text-gray-900">{brand.total_mentions}</span>
@@ -175,7 +188,7 @@ export const BrandMentionsTable = ({
                     <span className="text-sm font-medium text-gray-900">#{brand.best_rank}</span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className="text-sm font-bold text-blue-600">{brand.aggregate_score}</span>
+                    <span className="text-sm font-bold text-blue-700">{brand.aggregate_score}</span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <button
@@ -183,7 +196,7 @@ export const BrandMentionsTable = ({
                         e.stopPropagation();
                         onBrandClick(brand);
                       }}
-                      className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-800 text-sm font-medium rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
                     >
                       View Details
                       <ArrowRightIcon className="w-4 h-4" />
@@ -198,10 +211,11 @@ export const BrandMentionsTable = ({
 
       {brands.length === 0 && (
         <div className="text-center py-12 text-gray-500">
-          <p className="text-lg">No brand mentions found for this keyword</p>
-          <p className="text-sm mt-2">Try running an analysis first</p>
+          <p className="text-lg">No brand mentions found in this scope</p>
+          <p className="text-sm mt-2">Run an analysis for these keywords, or pick another scope or filter.</p>
         </div>
       )}
+      {footer}
     </div>
   );
 };

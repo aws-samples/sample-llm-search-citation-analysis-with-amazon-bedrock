@@ -20,7 +20,7 @@ vi.mock('../../../hooks/useBrandConfig', () => ({useBrandConfig: vi.fn()}));
 import { useCompetitorGap } from './useCompetitorGap';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 
-const mockGap = useCompetitorGap as ReturnType<typeof vi.fn>;
+const mockGap = vi.mocked(useCompetitorGap);
 const mockBrand = vi.mocked(useBrandConfig);
 
 /** The one source Adidas is cited from that we are not; it is both an exclusive source and an outreach target. */
@@ -50,8 +50,11 @@ const POPULATED_DATA = {
   ready: true,
 };
 
-function renderAt(path: string, competitors: string[] = ['Adidas', 'Asics']) {
-  mockBrand.mockReturnValue(buildTrackedBrandsHookResult(['Nike'], competitors));
+function renderAt(path: string, competitors: string[] = ['Adidas', 'Asics'], loadingConfig = false) {
+  mockBrand.mockReturnValue({
+    ...buildTrackedBrandsHookResult(['Nike'], competitors),
+    loading: loadingConfig,
+  });
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -113,10 +116,17 @@ describe('CompetitorGapReport', () => {
 
   it('renders a competitor switcher populated with every configured competitor', () => {
     renderAt('/reports/competitor/Adidas');
-    const select = screen.getByLabelText(/Competitor:/i) as HTMLSelectElement;
+    const select = screen.getByLabelText('Competitor') as HTMLSelectElement;
     const optionValues = Array.from(select.options).map((o) => o.value);
     expect(optionValues).toContain('Adidas');
     expect(optionValues).toContain('Asics');
+  });
+
+  it('waits for the brand config before saying no competitor is configured', () => {
+    renderAt('/reports/competitor', [], true);
+
+    expect(screen.queryByText(/no competitors configured/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Selecting competitor…')).toBeInTheDocument();
   });
 
   it('renders the empty-state when no competitors are configured', () => {
@@ -133,14 +143,7 @@ describe('CompetitorGapReport', () => {
   });
 
   it('loads nothing before the brand config lists any competitor', () => {
-    mockBrand.mockReturnValue(buildTrackedBrandsHookResult(['Nike'], []));
-    render(
-      <MemoryRouter initialEntries={['/reports/competitor/Adidas']}>
-        <Routes>
-          <Route path="/reports/competitor/:competitor" element={<CompetitorGapReport />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderAt('/reports/competitor/Adidas', []);
 
     expect(mockGap).toHaveBeenCalledWith(null);
   });

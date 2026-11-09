@@ -8,22 +8,18 @@ lives in ``test_report_scopes.py``; the size budget in ``test_get_visibility_met
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.report_scope_fixtures import report_handler_fixture
 from testing.search_results_fixtures import active_keywords_table, report_dynamodb, search_results_table
 from testing.sentiment_examples_fixtures import OLDER_RUN, stored_answer, stored_brand
 from testing.window_budget_fixtures import one_scope_worker, request_deadline_of, spent_request_budget, ticking_deadline
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-visibility_handler = handler_fixture(_API_DIR, 'get-visibility-metrics.py', 'get_visibility_metrics_budget_under_test', env=REPORT_TABLES_ENV)
+visibility_handler = report_handler_fixture('get-visibility-metrics.py', 'get_visibility_metrics_budget_under_test')
 
 _BRAND_CONFIG = {'tracked_brands': {'first_party': ['Altiplano Air'], 'competitors': []}}
 

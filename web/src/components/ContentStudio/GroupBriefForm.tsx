@@ -1,24 +1,27 @@
 import {
-  useMemo, useState
+  useEffect, useMemo, useState
 } from 'react';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import type {
-  AnalysisScope,
   ContentBriefBatchRequest,
   ContentBriefScope,
   ContentBriefStrategy,
   GroupBriefIdea,
   GroupBriefMode,
   Keyword,
+  KeywordGroup,
 } from '../../types';
-import { KeywordScopePicker } from '../ui/KeywordScopePicker';
 import { GroupBriefFormSkeleton } from './ContentStudioSkeletons';
+import { BriefKeywordFields } from './BriefKeywordFields';
+import { BriefReviewFields } from './BriefReviewFields';
+import { BriefStep } from './BriefStep';
+import {
+  describeBriefScope, emptyBriefScope
+} from './briefScope';
 import {
   GenerationConfirmation,
   GenerationModeFields,
   issueMessage,
-  ScopePreview,
-  StrategyFields,
 } from './GroupBriefFields';
 import {
   canonicalContentBriefScope,
@@ -30,23 +33,25 @@ import {
 import {
   GROUP_BRIEF_BATCH_LIMIT_GUIDANCE,
   GROUP_BRIEF_BATCH_MAX_KEYWORDS,
-  GROUP_BRIEF_LANGUAGES,
+  GROUP_BRIEF_MODE_OPTIONS,
   createGroupBriefIdeaId,
   validateGroupBriefDraft,
+  type GroupBriefValidationField,
   type GroupBriefValidationIssue,
 } from './GroupBriefForm-source';
 import { GroupBriefPromptEditor } from './GroupBriefPromptEditor';
 import { useGroupBriefTemplateDraft } from './useGroupBriefTemplateDraft';
 import {
-  keywordsInMarkets, scopeMarketIds, withMarketIds
+  keywordsInMarkets, scopeMarketIds
 } from '../Markets/marketScope';
-import { MarketScopeFilter } from '../Markets/MarketScopeFilter';
 
 interface GroupBriefFormProps {
   readonly keywords: Keyword[];
   readonly generating: boolean;
   readonly onGenerate: (idea: GroupBriefIdea) => Promise<boolean>;
   readonly onGenerateBatch: (request: ContentBriefBatchRequest) => Promise<boolean>;
+  /** Keywords to start with ticked, as when a content idea opens the brief. */
+  readonly initialKeywordIds?: readonly string[];
 }
 
 function batchCapIssue(
@@ -60,19 +65,60 @@ function batchCapIssue(
   return issueMessage(issues, 'strategy');
 }
 
-export function GroupBriefForm({
+/** Handed-in keywords open on "Specific keywords"; otherwise a keyword group, the usual unit of a brief. */
+function initialBriefScope(
+  groups: readonly KeywordGroup[], initialKeywordIds: readonly string[] | undefined
+): ContentBriefScope {
+  if (initialKeywordIds !== undefined && initialKeywordIds.length > 0) {
+    return {
+      mode: 'keywords',
+      keyword_ids: [...initialKeywordIds],
+    };
+  }
+  return emptyBriefScope(groups.length > 0 ? 'groups' : 'keywords');
+}
+
+/** The control to focus for the first validation issue. */
+function issueFieldId(field: GroupBriefValidationField, scope: ContentBriefScope): string | null {
+  // The strategy issue already disables the button beside it.
+  if (field === 'strategy') return null;
+  if (field === 'scope') return scope.mode === 'groups' ? 'group-brief-group' : 'group-brief-keyword-scope-search';
+  if (field === 'landing_url') return 'group-brief-url';
+  if (field === 'current_copy') return 'group-brief-copy';
+  return 'group-brief-template';
+}
+
+function modeLabel(mode: GroupBriefMode): string {
+  return GROUP_BRIEF_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+}
+
+/** The Content Brief tab: holds a placeholder until the keyword groups are known, as they pick the default scope. */
+export function GroupBriefForm(props: GroupBriefFormProps) {
+  const {
+    groups, loading, error
+  } = useKeywordGroups();
+  if (loading) return <GroupBriefFormSkeleton />;
+  return <GroupBriefSteps {...props} groups={groups} groupsError={error} />;
+}
+
+/**
+ * Three numbered steps in the order the user decides: what to write, for
+ * which keywords, then a review with the paid-call estimate and the one
+ * primary action, which opens the cost confirmation.
+ */
+function GroupBriefSteps({
   keywords,
   generating,
   onGenerate,
   onGenerateBatch,
-}: GroupBriefFormProps) {
-  const {
-    groups, loading: groupsLoading, error: groupsError
-  } = useKeywordGroups();
-  const [scope, setScope] = useState<ContentBriefScope>({
-    mode: 'keywords',
-    keyword_ids: [],
-  });
+  initialKeywordIds,
+  groups,
+  groupsError,
+}: GroupBriefFormProps & {
+  readonly groups: KeywordGroup[];
+  readonly groupsError: string | null;
+}) {
+  const [scope, setScope] = useState<ContentBriefScope>(() => initialBriefScope(groups, initialKeywordIds));
   const [strategy, setStrategy] = useState<ContentBriefStrategy>('combined');
   const [mode, setMode] = useState<GroupBriefMode>('create_new_landing_page');
   const [landingUrl, setLandingUrl] = useState('');
@@ -81,6 +127,7 @@ export function GroupBriefForm({
   const [validationIssues, setValidationIssues] = useState<GroupBriefValidationIssue[]>([]);
   const [clientIdeaId, setClientIdeaId] = useState(createGroupBriefIdeaId);
   const [pendingGeneration, setPendingGeneration] = useState<PendingGeneration | null>(null);
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const template = useGroupBriefTemplateDraft(mode);
 
   const activeKeywords = useMemo(
@@ -122,7 +169,11 @@ export function GroupBriefForm({
       templateId: template.selectedTemplateId,
     });
     setValidationIssues(issues);
-    if (issues.length > 0) return;
+    if (issues.length > 0) {
+      // The problem may sit steps above the button, so take the user to it.
+      setFocusTarget(issueFieldId(issues[0].field, canonicalScope));
+      return;
+    }
 
     const fields = contentBriefFields(
       mode,
@@ -155,7 +206,22 @@ export function GroupBriefForm({
   const requestDisabled = generating || template.loading || strategyIssue !== undefined;
   const loadError = groupsError ?? template.error;
 
-  if (groupsLoading) return <GroupBriefFormSkeleton />;
+  // Runs after the render that shows the issue, so a field revealed by it (the prompt editor) exists.
+  useEffect(() => {
+    if (focusTarget === null) return;
+    document.getElementById(focusTarget)?.focus();
+    setFocusTarget(null);
+  }, [focusTarget]);
+
+  const changeScope = (nextScope: ContentBriefScope) => {
+    setScope(nextScope);
+    setValidationIssues([]);
+  };
+  const summary = [
+    modeLabel(mode),
+    describeBriefScope(canonicalScope, groups, selectedKeywords.length),
+    outputLanguage,
+  ].join(' · ');
 
   return (
     <>
@@ -163,7 +229,8 @@ export function GroupBriefForm({
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Content Brief</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Create one scoped brief or queue separate background briefs for each keyword.
+            Get a landing-page draft written from what AI engines answer for your keywords. Nothing is charged
+            until you confirm the cost.
           </p>
         </div>
 
@@ -173,109 +240,70 @@ export function GroupBriefForm({
           </div>
         )}
 
-        <fieldset className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
-          <legend className="px-1 text-sm font-semibold text-gray-900">Target scope</legend>
-          <KeywordScopePicker
-            idPrefix="group-brief-keyword-scope"
-            name="group-brief-keyword-ids"
-            keywords={pickableKeywords}
+        <BriefStep number={1} title="What do you want to write?">
+          <GenerationModeFields
+            mode={mode}
+            landingUrl={landingUrl}
+            currentCopy={currentCopy}
+            disabled={generating}
+            issues={validationIssues}
+            onModeChange={handleModeChange}
+            onLandingUrlChange={setLandingUrl}
+            onCurrentCopyChange={setCurrentCopy}
+          />
+          <GroupBriefPromptEditor
+            mode={mode}
+            templates={template.templates}
+            templatesLoading={template.loading}
+            selectedTemplate={template.selectedTemplate}
+            templateName={template.draft.name}
+            templateDescription={template.draft.description}
+            promptTemplate={template.draft.prompt}
+            dirty={template.dirty}
+            disabled={generating}
+            saving={template.saving}
+            issue={issueMessage(validationIssues, 'prompt_template')
+              ?? issueMessage(validationIssues, 'template_id')}
+            notice={template.notice ?? undefined}
+            onSelect={template.select}
+            onNameChange={template.setName}
+            onDescriptionChange={template.setDescription}
+            onPromptChange={template.setPrompt}
+            onReset={template.reset}
+            onSaveAsNew={template.saveAsNew}
+            onUpdate={template.updateSelected}
+            onDelete={template.deleteSelected}
+          />
+        </BriefStep>
+
+        <BriefStep number={2} title="Which keywords?" scrollIntoViewOnMount={initialKeywordIds !== undefined && initialKeywordIds.length > 0}>
+          <BriefKeywordFields
+            pickableKeywords={pickableKeywords}
             groups={groups}
             scope={scope}
-            onChange={(nextScope: AnalysisScope) => {
-              if (nextScope.mode === 'all') return;
-              setScope(nextScope);
+            selectedKeywords={selectedKeywords}
+            disabled={generating}
+            issue={scopeIssue}
+            onChange={changeScope}
+          />
+        </BriefStep>
+
+        <BriefStep number={3} title="Review and start">
+          <BriefReviewFields
+            strategy={strategy}
+            selectedKeywordCount={selectedKeywords.length}
+            outputLanguage={outputLanguage}
+            summary={summary}
+            disabled={generating}
+            submitDisabled={requestDisabled}
+            strategyIssue={strategyIssue}
+            onStrategyChange={(nextStrategy) => {
+              setStrategy(nextStrategy);
               setValidationIssues([]);
             }}
-            allowedModes={['groups', 'keywords']}
-            maxGroups={1}
-            maxKeywords={50}
-            disabled={generating}
+            onLanguageChange={setOutputLanguage}
           />
-          <MarketScopeFilter
-            idPrefix="group-brief"
-            selectedIds={marketIds}
-            onChange={(nextMarketIds) => {
-              setScope(withMarketIds(scope, nextMarketIds));
-              setValidationIssues([]);
-            }}
-            disabled={generating}
-          />
-          <ScopePreview scope={canonicalScope} groups={groups} keywords={selectedKeywords} />
-          {scopeIssue && <p role="alert" className="text-sm text-red-600">{scopeIssue}</p>}
-        </fieldset>
-
-        <StrategyFields
-          strategy={strategy}
-          selectedKeywordCount={selectedKeywords.length}
-          disabled={generating}
-          issue={strategyIssue}
-          onChange={(nextStrategy) => {
-            setStrategy(nextStrategy);
-            setValidationIssues([]);
-          }}
-        />
-
-        <GenerationModeFields
-          mode={mode}
-          landingUrl={landingUrl}
-          currentCopy={currentCopy}
-          disabled={generating}
-          issues={validationIssues}
-          onModeChange={handleModeChange}
-          onLandingUrlChange={setLandingUrl}
-          onCurrentCopyChange={setCurrentCopy}
-        />
-
-        <GroupBriefPromptEditor
-          mode={mode}
-          templates={template.templates}
-          templatesLoading={template.loading}
-          selectedTemplate={template.selectedTemplate}
-          templateName={template.draft.name}
-          templateDescription={template.draft.description}
-          promptTemplate={template.draft.prompt}
-          dirty={template.dirty}
-          disabled={generating}
-          saving={template.saving}
-          issue={issueMessage(validationIssues, 'prompt_template')
-            ?? issueMessage(validationIssues, 'template_id')}
-          notice={template.notice ?? undefined}
-          onSelect={template.select}
-          onNameChange={template.setName}
-          onDescriptionChange={template.setDescription}
-          onPromptChange={template.setPrompt}
-          onReset={template.reset}
-          onSaveAsNew={template.saveAsNew}
-          onUpdate={template.updateSelected}
-          onDelete={template.deleteSelected}
-        />
-
-        <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="w-full sm:max-w-xs">
-            <label htmlFor="group-brief-language" className="block text-sm font-medium text-gray-900">
-              Output language
-            </label>
-            <select
-              id="group-brief-language"
-              name="group-brief-language"
-              value={outputLanguage}
-              onChange={(event) => setOutputLanguage(event.target.value)}
-              disabled={generating}
-              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            >
-              {GROUP_BRIEF_LANGUAGES.map((language) => (
-                <option key={language} value={language}>{language}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="submit"
-            disabled={requestDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Review generation
-          </button>
-        </div>
+        </BriefStep>
       </form>
 
       <GenerationConfirmation
@@ -283,6 +311,7 @@ export function GroupBriefForm({
         generating={generating}
         onClose={() => setPendingGeneration(null)}
         onConfirm={confirmGeneration}
+        summary={summary}
       />
     </>
   );

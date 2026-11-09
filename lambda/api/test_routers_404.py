@@ -25,19 +25,19 @@ import os
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 # --- Test bootstrap --------------------------------------------------------
 
-# The routers do `sys.path.insert(0, '/opt/python')` at import time then
-# `from shared.api_response import not_found_response`; locally that path does
-# not exist and `shared` resolves from the source tree via lambda/conftest.py.
+# The routers do `from shared.api_response import not_found_response`, which
+# in Lambda resolves from the layer (/opt/python is on the runtime's
+# sys.path); locally `shared` resolves from the source tree via
+# lambda/conftest.py.
 # `shared/__init__.py` re-exports api_response as a *function*, shadowing the
 # submodule, so the module object (whose CORS cache the tests reset) has to be
 # fetched through import_module.
 _layer_api_response = importlib.import_module('shared.api_response')
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ROUTERS = [
     'execution-mgmt',
@@ -50,7 +50,7 @@ ROUTERS = [
 
 def _load_router(name):
     """Load a router .py file (hyphenated name) as a fresh module."""
-    return load_handler_module(_API_DIR, f'{name}.py', name.replace('-', '_') + '_router_under_test')
+    return load_handler_module(API_DIR, f'{name}.py', name.replace('-', '_') + '_router_under_test')
 
 
 def _unmatched_event(origin='https://evil.example.com'):
@@ -135,7 +135,7 @@ def test_does_not_hardcode_wildcard_origin_in_source(router_name):
     'Access-Control-Allow-Origin': '*' literal in the router's 404 path.
     This test reads the router source to ensure that literal has been removed.
     """
-    source_path = os.path.join(_API_DIR, f'{router_name}.py')
+    source_path = os.path.join(API_DIR, f'{router_name}.py')
     with open(source_path, encoding='utf-8') as fh:
         source = fh.read()
 

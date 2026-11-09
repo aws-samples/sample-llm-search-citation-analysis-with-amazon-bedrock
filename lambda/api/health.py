@@ -7,13 +7,8 @@ browser-based monitors (dashboards, uptime pings from the React app)
 don't get blocked.
 """
 
-import logging
-
 from shared.api_response import api_response
 from shared.utils import get_timestamp
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def handler(event, context):

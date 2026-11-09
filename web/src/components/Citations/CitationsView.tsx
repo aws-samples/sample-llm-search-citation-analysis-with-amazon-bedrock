@@ -11,9 +11,8 @@ import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
 import { CitationsAsOf } from './CitationsAsOf';
-import { PaginationHeader } from '../ui/PaginationHeader';
+import { LoadOnScrollFooter } from '../ui/LoadOnScrollFooter';
 import { Spinner } from '../ui/Spinner';
-import { pageWindow } from '../ui/pagination';
 import { 
   parseApiResponse, 
   safeJsonParse,
@@ -28,12 +27,11 @@ import { exportToExcel } from '../../exporters/excelGenerator';
 import { datedExcelFileName } from '../../exporters/excelFileName';
 import { fetchAllCitationUrls } from '../../api/citationPages';
 import {
-  useMarketCitations, type MarketCitations
-} from '../../hooks/useMarketCitations';
+  useCitationPages, type CitationPages
+} from './useCitationPages';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useSelectedMarketId } from '../Markets/marketSelectionContext';
 import { ErrorAlert } from '../ui/ErrorAlert';
-import { StrokeIcon } from '../ui/StrokeIcon';
 
 /** How long the URL search waits for typing to pause before asking the API. */
 export const URL_SEARCH_DEBOUNCE_MS = 300;
@@ -51,7 +49,7 @@ function summaryCards(totals: CitationsPage | null): ReadonlyArray<readonly [str
   return [
     ['Total URLs', urls.toLocaleString()],
     ['Citations', citations.toLocaleString()],
-    ['Avg/URL', urls > 0 ? (citations / urls).toFixed(1) : '0'],
+    ['Citations per URL', urls > 0 ? (citations / urls).toFixed(1) : '0'],
   ];
 }
 
@@ -66,21 +64,58 @@ function nextSort(previous: SortConfig, column: SortColumn): SortConfig {
   };
 }
 
-/** The rows to show: the placeholder until the first page of every market combined arrives, then the page. */
-function visibleRows(view: MarketCitations, marketId: string | null, placeholder?: readonly TopUrl[]): TopUrl[] {
-  if (view.totals === null && marketId === null && placeholder !== undefined) return [...placeholder];
-  return view.citations;
+/** The rows to show: the placeholder until the first page of every market combined arrives, then every loaded page. */
+function visibleRows(view: CitationPages, marketId: string | null, placeholder?: readonly TopUrl[]): readonly TopUrl[] {
+  if (view.totals === null && marketId === null && placeholder !== undefined) return placeholder;
+  return view.rows;
+}
+
+/** "Showing 50 of 1,234 URLs · more load as you scroll". */
+function shownSummary(shown: number, total: number): string {
+  const noun = total === 1 ? 'URL' : 'URLs';
+  if (shown >= total) return `Showing ${total.toLocaleString()} ${noun}`;
+  return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} ${noun} · more load as you scroll`;
 }
 
 function isFiltered(searchQuery: string, minCitations: number | '', contentType: ContentTypeFilter): boolean {
   return searchQuery !== '' || minCitations !== '' || contentType !== 'all';
 }
 
+/**
+ * Below the table: the empty state, or the end of the list that loads the
+ * next page as the reader nears it. Nothing while a new order or filter
+ * loads (the rows on screen are the old query's) or over placeholder rows.
+ */
+const CitationListEnd = ({
+  view, shown, total, filtered
+}: {
+  view: CitationPages;
+  shown: number;
+  total: number;
+  filtered: boolean;
+}) => {
+  if (view.loading) return null;
+  if (shown === 0) return (
+    <div className="text-center py-12 text-gray-500">
+      {filtered ? 'No citations match your filters' : 'No citations yet'}
+    </div>
+  );
+  if (view.totals === null) return null;
+  return (
+    <LoadOnScrollFooter
+      onLoadMore={view.loadMore}
+      hasMore={view.hasMore}
+      loading={view.loadingMore}
+      failed={view.failed}
+      watch={shown}
+      doneLabel={total === 1 ? 'The only URL is shown.' : `All ${total.toLocaleString()} URLs are shown.`}
+    />
+  );
+};
+
 export const CitationsView = ({
   placeholder, onNavigateToRawResponses 
 }: CitationsViewProps) => {
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(25);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [breakdownData, setBreakdownData] = useState<Record<string, UrlBreakdown[]>>({});
   const [loadingBreakdown, setLoadingBreakdown] = useState<Record<string, boolean>>({});
@@ -103,23 +138,14 @@ export const CitationsView = ({
     minCitations,
     contentType,
   };
-  const view = useMarketCitations({
-    ...listQuery,
-    page: currentPage,
-    pageSize: itemsPerPage,
-  });
-  const pageCitations = visibleRows(view, marketId, placeholder);
-  const totalItems = view.totals?.matched_urls ?? pageCitations.length;
-  const { startIndex } = pageWindow(totalItems, currentPage, itemsPerPage);
+  const view = useCitationPages(listQuery);
+  const rows = visibleRows(view, marketId, placeholder);
+  const totalItems = view.totals?.matched_urls ?? rows.length;
 
+  // A new order or filter lists other URLs from the top: no row stays open.
   const handleSort = (column: SortColumn) => {
     setSortBy(prev => nextSort(prev, column));
-    setCurrentPage(1);
-  };
-
-  const handleItemsPerPageChange = (value: number) => {
-    setItemsPerPage(value);
-    setCurrentPage(1);
+    setExpandedRow(null);
   };
 
   const toggleRow = async (idx: number, url: string) => {
@@ -195,19 +221,12 @@ export const CitationsView = ({
         <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
           <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Citations</h2>
           <p className="text-sm text-gray-500 mt-2 leading-relaxed">
-            Browse all URLs that AI search engines cite as authoritative sources in their responses. 
-            These are the websites that AI assistants like ChatGPT, Perplexity, Gemini, and Claude 
-            consider trustworthy for your tracked keywords. URLs with high citation counts across 
-            multiple keywords are particularly influential — getting mentioned on these sites can 
-            significantly boost your AI visibility.
+            Every URL that ChatGPT, Perplexity, Gemini, Claude and the other engines cited in their answers for your
+            keywords. Pages cited for many keywords are the sources most worth getting your brand onto.
           </p>
-          <div className="mt-3 flex items-center gap-2 text-sm">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-700 rounded-full text-xs sm:text-sm">
-              <StrokeIcon className="w-3.5 h-3.5" paths={['M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122']} strokeWidth={2} />
-              <span className="hidden sm:inline">Click any row to see keyword and provider breakdown</span>
-              <span className="sm:hidden">Tap row for details</span>
-            </span>
-          </div>
+          <p className="mt-2 text-xs sm:text-sm text-gray-500">
+            Open a row to see which keywords and engines cite it. <span className="font-medium text-gray-700">View</span> shows the crawled page.
+          </p>
         </div>
 
         <ErrorAlert message={view.error ?? exportError} />
@@ -238,28 +257,22 @@ export const CitationsView = ({
           setMinCitations={setMinCitations}
           contentType={contentType}
           setContentType={setContentType}
-          setCurrentPage={setCurrentPage}
+          onFilterChange={() => setExpandedRow(null)}
           onDownloadExcel={downloadToExcel}
         />
 
         {/* Table */}
         <div className="bg-white rounded-lg border border-gray-200">
-          <PaginationHeader
-            page={currentPage}
-            pageSize={itemsPerPage}
-            total={totalItems}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={handleItemsPerPageChange}
-            idPrefix="citations"
-            label="Citations pagination"
-          />
+          <p className="px-6 py-3 text-sm text-gray-500 border-b border-gray-200">
+            {shownSummary(rows.length, totalItems)}
+          </p>
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <CitationTableHeader sort={sortBy} onSort={handleSort} />
               <tbody className="bg-white divide-y divide-gray-200">
-                {pageCitations.map((citation, idx) => {
-                  const globalRank = startIndex + idx + 1;
+                {rows.map((citation, idx) => {
+                  const globalRank = idx + 1;
                   const isExpanded = expandedRow === idx;
                   const breakdown = breakdownData[citation.url] ?? [];
                   const isLoading = loadingBreakdown[citation.url] ?? false;
@@ -283,11 +296,7 @@ export const CitationsView = ({
             </table>
           </div>
 
-          {pageCitations.length === 0 && !view.loading && (
-            <div className="text-center py-12 text-gray-500">
-              {hasFilters ? 'No citations match your filters' : 'No citations yet'}
-            </div>
-          )}
+          <CitationListEnd view={view} shown={rows.length} total={totalItems} filtered={hasFilters} />
         </div>
 
       </div>

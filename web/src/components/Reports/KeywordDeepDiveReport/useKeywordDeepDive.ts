@@ -5,9 +5,24 @@ import { usePersonaRankings } from '../../../hooks/usePersonaRankings';
 import { useBrandMentions } from '../../../hooks/useBrandMentions';
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useRecommendations } from '../../../hooks/useRecommendations';
-import { useReportReady } from '../layout/useReportReady';
+import {
+  useReportReady, type ReportDataSlice
+} from '../layout/useReportReady';
 import { ALL_SCOPE } from '../../ui/reportScope';
 import type { ReportScope } from '../../../types';
+
+const NO_DATA_SETTLED = { noData: true } as const;
+
+/**
+ * A slice whose endpoint answered "no data yet" has settled with neither data
+ * nor an error; count it as settled so the auto-print still fires.
+ */
+function settledWhenNoData(slice: ReportDataSlice & { readonly noData: boolean }): ReportDataSlice {
+  return slice.noData ? {
+    ...slice,
+    data: NO_DATA_SETTLED
+  } : slice;
+}
 
 /**
  * Compose every fetch the Keyword Deep Dive report needs into a single hook.
@@ -64,8 +79,8 @@ export function useKeywordDeepDive(keyword: string | null) {
     visibility,
     trends,
     personas,
-    mentions,
-    gaps,
+    settledWhenNoData(mentions),
+    settledWhenNoData(gaps),
     recommendations,
   ]);
 
@@ -82,9 +97,11 @@ export function useKeywordDeepDive(keyword: string | null) {
     mentions: mentions.data,
     mentionsError: mentions.error,
     mentionsLoading: mentions.loading,
+    mentionsNoData: mentions.noData,
     gaps: gaps.data,
     gapsError: gaps.error,
     gapsLoading: gaps.loading,
+    gapsNoData: gaps.noData,
     recommendations: recommendations.data,
     recommendationsError: recommendations.error,
     recommendationsLoading: recommendations.loading,

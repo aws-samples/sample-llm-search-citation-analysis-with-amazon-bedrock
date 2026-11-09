@@ -18,10 +18,10 @@ function SubmissionHistory({ history }: { readonly history: readonly IndexNowSub
       {history.length === 0
         ? <p className="mt-2 text-sm text-gray-600">Nothing submitted yet.</p>
         : (
-          <ol className="mt-2 divide-y divide-gray-100 text-sm">
+          <ol className="mt-2 divide-y divide-gray-100 dark:divide-gray-700 text-sm">
             {history.map((entry) => (
               <li key={`${entry.submitted_at}-${entry.submitted_by}`} className="py-2">
-                <p className="text-gray-800">
+                <p className="text-gray-800 dark:text-gray-200">
                   {entry.submitted_at.slice(0, 16).replace('T', ' ')} · {String(entry.url_count)} URLs
                   {entry.source === 'audit' ? ' from the latest audit' : ''} · by {entry.submitted_by}
                   {entry.skipped_count > 0 ? ` · ${String(entry.skipped_count)} skipped` : ''}

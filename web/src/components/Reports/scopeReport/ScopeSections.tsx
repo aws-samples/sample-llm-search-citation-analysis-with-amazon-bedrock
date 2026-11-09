@@ -7,6 +7,7 @@ import { TruncatedHistoryNote } from '../layout/HistoryCutNote';
 import { ReportSectionPlaceholder } from '../layout/ReportSectionPlaceholder';
 import { ReportStatGrid } from '../layout/ReportStatGrid';
 import type { SectionGate } from '../layout/sectionGate';
+import type { SectionShape } from '../layout/SectionSkeleton';
 import { latestRunsSubtitle } from './KpiChangeCard';
 import {
   gateLatestRuns, gateTrend
@@ -36,7 +37,11 @@ function GatedSection<T>({
   );
 }
 
-interface ScopeSectionFrameProps<T> extends SectionFrameProps<T> {readonly report: ScopeReportData;}
+interface ScopeSectionFrameProps<T> extends SectionFrameProps<T> {
+  readonly report: ScopeReportData;
+  /** What the section shows (a table by default, or a chart), so its loading skeleton takes that shape. */
+  readonly loadingShape?: SectionShape;
+}
 
 /**
  * A section drawn from the latest runs (`/visibility`): its loading, error
@@ -44,15 +49,15 @@ interface ScopeSectionFrameProps<T> extends SectionFrameProps<T> {readonly repor
  * around `children`.
  */
 export function LatestRunSection({
-  report, ...frame
+  report, loadingShape, ...frame
 }: ScopeSectionFrameProps<VisibilityResponse>) {
-  return <GatedSection gate={gateLatestRuns(report, frame.title)} {...frame} />;
+  return <GatedSection gate={gateLatestRuns(report, frame.title, loadingShape)} {...frame} />;
 }
 
 /** A section drawn from the trend (`/trends`): its loading, error and empty placeholders, then its heading around `children`, noting a cut window. */
 export function TrendSection({
   report, children, ...frame
-}: Omit<ScopeSectionFrameProps<HistoricalTrendsResponse>, 'emptyMessage'>) {
+}: Omit<ScopeSectionFrameProps<HistoricalTrendsResponse>, 'emptyMessage' | 'loadingShape'>) {
   return (
     <GatedSection gate={gateTrend(report, frame.title)} {...frame}>
       {(trends) => (
@@ -77,7 +82,7 @@ interface HeadlineProps {
 export function LatestRunHeadline({
   report, cards, children
 }: HeadlineProps) {
-  const gate = gateLatestRuns(report, 'Headline');
+  const gate = gateLatestRuns(report, 'Headline', 'stats');
   if (!gate.ready) return gate.placeholder;
 
   return (

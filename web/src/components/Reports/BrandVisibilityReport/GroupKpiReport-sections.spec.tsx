@@ -42,13 +42,13 @@ describe('GroupKpiReport evolution', () => {
   it('lists the model changes between group runs', () => {
     renderGroupKpiReport();
 
-    expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · openai: gpt-5-mini → gpt-5.2`)).toBeInTheDocument();
+    expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · OpenAI: gpt-5-mini → gpt-5.2`)).toBeInTheDocument();
   });
 
   it('lists every model of a provider that answered with several', () => {
     renderGroupKpiReport({ history: buildHistory({ runs: buildRunSeries({ models: { openai: ['a', 'b'] } }, { models: { openai: ['c', 'd'] } }) }) });
 
-    expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · openai: a, b → c, d`)).toBeInTheDocument();
+    expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · OpenAI: a, b → c, d`)).toBeInTheDocument();
   });
 
   it('shows no model list when every run used the same models', () => {

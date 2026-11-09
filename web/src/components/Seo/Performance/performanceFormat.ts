@@ -18,8 +18,8 @@ export const RATING_LABELS: Record<Rating, string> = {
 };
 
 export const RATING_CLASSES: Record<Rating, string> = {
-  good: 'bg-emerald-100 text-emerald-800',
-  'needs-improvement': 'bg-amber-100 text-amber-800',
+  good: 'bg-gray-100 text-emerald-800',
+  'needs-improvement': 'bg-gray-100 text-amber-800',
   poor: 'bg-red-100 text-red-800',
 };
 

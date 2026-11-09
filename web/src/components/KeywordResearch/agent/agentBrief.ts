@@ -30,6 +30,21 @@ export function dimensionLabel(dimension: string | undefined, catalog: readonly 
   return catalog.find((option) => option.id === dimension)?.label ?? 'Other';
 }
 
+/**
+ * A dimension's description without the label it repeats: catalogues write
+ * "Audience type — who is travelling…" under the label "Audience", so the card
+ * shows "who is travelling…". Descriptions that do not start with the label stay whole.
+ */
+export function dimensionHint(option: Pick<AgentDimensionOption, 'label' | 'description'>): string {
+  const separator = ' — ';
+  const cut = option.description.indexOf(separator);
+  if (cut < 0) return option.description;
+  const lead = option.description.slice(0, cut).toLocaleLowerCase();
+  const rest = option.description.slice(cut + separator.length);
+  if (rest === '' || !lead.startsWith(option.label.toLocaleLowerCase())) return option.description;
+  return rest.charAt(0).toLocaleUpperCase() + rest.slice(1);
+}
+
 /** The dimension catalogue a run was started with (backfilled by the API on legacy rows). */
 export function runCatalog(job: KeywordResearchItem): AgentDimensionOption[] {
   return job.config?.dimension_catalog ?? [];

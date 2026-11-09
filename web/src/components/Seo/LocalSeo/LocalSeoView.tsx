@@ -72,7 +72,7 @@ function ConfiguredLocalSeo() {
   return (
     <div className="space-y-4">
       <PageHeaderCard title="Local SEO" relaxed={false}
-        description="Google business listings and profiles, Maps results and a local rank grid around the header market's city." />
+        description="Google business listings and profiles, Maps results and a local rank grid around the city of the market selected at the top of the page." />
       <TabBar tabs={TABS} activeId={tab} onChange={setTab} label="Local SEO" />
       {tab === 'search' && <BusinessSearchTab settings={settings} onOpenBusiness={openBusiness} />}
       {tab === 'profile' && <BusinessProfileTab profile={profile} market={market} settings={settings} />}

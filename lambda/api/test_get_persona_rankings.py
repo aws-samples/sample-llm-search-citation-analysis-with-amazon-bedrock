@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import patch
 
@@ -12,6 +11,7 @@ from shared.kpi_engine import answers_from_rows, brand_table
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 from testing.search_results_fixtures import (
     oldest_page_first_table,
     report_dynamodb,
@@ -19,7 +19,6 @@ from testing.search_results_fixtures import (
     search_results_table,
 )
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
     'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
@@ -28,7 +27,7 @@ _ENV = {
 _KEYWORD = 'hotel sol spa'
 _RUN = '2026-09-20T06:00:00.000000Z'
 
-persona_module = handler_fixture(_API_DIR, 'get-persona-rankings.py', 'get_persona_rankings_under_test', env=_ENV)
+persona_module = handler_fixture(API_DIR, 'get-persona-rankings.py', 'get_persona_rankings_under_test', env=_ENV)
 
 
 def _brand(name: str, rank: int, classification: str = 'first_party') -> dict[str, Any]:

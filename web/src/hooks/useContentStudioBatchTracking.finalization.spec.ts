@@ -25,6 +25,7 @@ import {
   mockBatchRequest,
   storeActiveContentStudioBatchCandidates,
   storedActiveContentStudioBatchIds,
+  waitForStoredBatchCandidatesCleared,
 } from './useContentStudio-fixtures';
 import { batchStatusRequestCounts } from './useContentStudio-scenario-fixtures';
 import {
@@ -66,9 +67,7 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
       buildRunningBatchStatusResponse()
     );
     const { result } = renderHook(() => useContentStudio());
-    await waitFor(() => {
-      expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
-    });
+    await waitForStoredBatchCandidatesCleared();
 
     dispatchBatchCandidateStorageEvent([candidate]);
     await waitFor(() => {

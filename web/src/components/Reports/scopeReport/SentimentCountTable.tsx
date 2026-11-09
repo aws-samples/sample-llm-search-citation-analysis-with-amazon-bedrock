@@ -56,7 +56,7 @@ function CountCell({
   readonly onSelect: SelectCount;
 }) {
   const count = row.split[sentiment];
-  if (count === 0) return <span className="text-gray-400">0</span>;
+  if (count === 0) return <span className="text-gray-500">0</span>;
   return (
     <Button
       variant="ghost"

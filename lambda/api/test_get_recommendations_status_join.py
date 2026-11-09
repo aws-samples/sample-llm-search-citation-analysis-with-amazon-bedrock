@@ -18,9 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.utils import recommendation_id
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module
 
 
 @pytest.fixture
@@ -33,7 +31,7 @@ def mod():
         patch('boto3.resource', return_value=MagicMock()),
         patch('boto3.client', return_value=MagicMock()),
     ):
-        return load_handler_module(_API_DIR, 'get-recommendations.py')
+        return load_handler_module(API_DIR, 'get-recommendations.py')
 
 
 def _make_rec(rec_type='gap', title='Pitch outdoor publishers', keywords=None):
@@ -227,7 +225,7 @@ def test_rules_report_a_provider_gap_when_the_brand_is_missing_on_three_keywords
     recs = _recommend(mod, _gemini_omits_brand(('kw-a', 'kw-b', 'kw-c')))
 
     provider_gap, = _of_type(recs, 'provider_gap')
-    assert provider_gap['title'] == 'Not Appearing on Gemini'
+    assert provider_gap['title'] == 'Not Appearing on Google Gemini'
     assert provider_gap['keywords'] == ['kw-a', 'kw-b', 'kw-c']
     assert provider_gap['priority'] == 'medium'
 
@@ -236,6 +234,13 @@ def test_rules_report_no_provider_gap_when_the_brand_is_missing_on_only_two_keyw
     recs = _recommend(mod, _gemini_omits_brand(('kw-a', 'kw-b')))
 
     assert _of_type(recs, 'provider_gap') == []
+
+
+def test_rules_report_no_provider_gap_for_a_web_search_provider_which_writes_no_answer(mod):
+    items = [result for keyword in ('kw-a', 'kw-b', 'kw-c')
+             for result in (_result(keyword, 'openai', [_mine(1)]), _result(keyword, 'brave', [_rival()]))]
+
+    assert _of_type(_recommend(mod, items), 'provider_gap') == []
 
 
 def test_rules_report_competitor_dominance_when_competitor_mentions_exceed_the_brand_rank(mod):

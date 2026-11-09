@@ -3,6 +3,9 @@
  *
  * Expanded sidebar: the entry links to its first page and opens the group; the chevron beside it only opens or
  * closes it. The pages are listed under the entry, indented on a guide line, with their counts and attention dots.
+ * A child that is the entry's own page (the SEO overview) is left out of that list, since the entry already opens
+ * it; the entry then shows as the current page. While another page of the group is open, the entry keeps a
+ * stronger label without the highlight, so only one row is highlighted.
  * Collapsed to the icon rail (desktop): the icon opens a pop-out beside the rail listing the same pages, which
  * closes on Escape, a click outside or a choice. Mobile never collapses, so it always shows the inline list.
  */
@@ -13,12 +16,32 @@ import { createPortal } from 'react-dom';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { CHEVRON_DOWN_PATHS } from '../ui/iconPaths';
 import type { NavChild } from './sidebarChildren';
+import { navIconClass } from './sidebarNav';
 
 /** The rail is shown from this width up (Tailwind `lg`); below it the sidebar is a drawer and never a rail. */
 const RAIL_MEDIA = '(min-width: 1024px)';
 
 /** `classes` on desktop while the sidebar is collapsed to its rail; nothing otherwise. */
 export const whenCollapsed = (collapsed: boolean, classes: string): string => (collapsed ? classes : '');
+
+/** How a group entry looks: its own page is open, another page of the group is, or neither. */
+export type RowState = 'active' | 'within' | 'idle';
+
+function rowStateOf(ownPageOpen: boolean, activeChildId: string | null): RowState {
+  if (ownPageOpen) return 'active';
+  return activeChildId === null ? 'idle' : 'within';
+}
+
+/** The pages listed under the entry (all but the entry's own page), and how the entry looks. */
+function groupRows(items: readonly NavChild[], path: string, activeChildId: string | null) {
+  const ownPage = items.find((item) => item.path === path);
+  const ownPageOpen = activeChildId !== null && ownPage?.id === activeChildId;
+  return {
+    inlineItems: items.filter((item) => item !== ownPage),
+    ownPageOpen,
+    rowState: rowStateOf(ownPageOpen, activeChildId),
+  };
+}
 
 export const ATTENTION_LABEL = 'Needs configuration';
 
@@ -37,7 +60,7 @@ interface Props {
   readonly activeChildId: string | null;
   readonly open: boolean;
   readonly collapsed: boolean;
-  readonly rowClass: (active: boolean) => string;
+  readonly rowClass: (state: RowState) => string;
   readonly onOpenGroup: () => void;
   readonly onToggle: () => void;
   readonly onNavigate: (path: string) => void;
@@ -47,7 +70,7 @@ function childClass(active: boolean): string {
   const state = active
     ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-medium'
     : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-white';
-  return `flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${state}`;
+  return `flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${state}`;
 }
 
 function ChildLink({
@@ -63,7 +86,7 @@ function ChildLink({
         event.preventDefault();
         onNavigate(item.path);
       }}>
-      <StrokeIcon className={`w-4 h-4 shrink-0 ${item.iconColor}`} paths={item.iconPaths} aria-hidden="true" />
+      <StrokeIcon className={`w-4 h-4 shrink-0 ${navIconClass(item.iconColor, active)}`} paths={item.iconPaths} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
       {item.needsAttention === true && <AttentionDot />}
       {item.badge !== undefined && item.badge > 0 && (
@@ -134,10 +157,29 @@ function RailFlyout({
         left: anchor.left,
       }}
       className="fixed z-[60] w-60 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 shadow-lg">
-      <p className="px-2.5 pb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{label}</p>
+      <p className="px-2.5 pb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</p>
       <ChildList items={items} activeChildId={activeChildId} onNavigate={onNavigate} className="space-y-0.5" />
     </nav>,
     document.body,
+  );
+}
+
+/** The chevron beside the entry: shows or hides the group's pages (not on the rail, where the entry opens a pop-out). */
+function GroupToggle({
+  label, open, collapsed, listId, onToggle
+}: {
+  readonly label: string;
+  readonly open: boolean;
+  readonly collapsed: boolean;
+  readonly listId: string;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={listId}
+      aria-label={`${open ? 'Hide' : 'Show'} ${label} pages`}
+      className={`absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${whenCollapsed(collapsed, 'lg:hidden')}`}>
+      <StrokeIcon className={`w-4 h-4 transition-transform ${open ? '' : '-rotate-90'}`} paths={CHEVRON_DOWN_PATHS} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -152,7 +194,9 @@ export function SidebarGroup({
   const refs = useRef([rowRef, panelRef]).current;
   const closeFlyout = () => setAnchor(null);
   useDismiss(anchor !== null, refs, closeFlyout);
-  const active = activeChildId !== null;
+  const {
+    inlineItems, ownPageOpen, rowState
+  } = groupRows(items, path, activeChildId);
   const attention = items.some((item) => item.needsAttention === true);
 
   const openRow = () => {
@@ -178,23 +222,20 @@ export function SidebarGroup({
       <div className="relative">
         <a ref={rowRef} href={path} title={collapsed ? label : undefined}
           aria-expanded={collapsed ? anchor !== null : undefined} aria-controls={collapsed && anchor !== null ? flyoutId : undefined}
-          className={`${rowClass(active)} pr-10 ${whenCollapsed(collapsed, 'lg:pr-0')}`}
+          aria-current={ownPageOpen ? 'page' : undefined}
+          className={`${rowClass(rowState)} pr-10 ${whenCollapsed(collapsed, 'lg:pr-0')}`}
           onClick={(event) => {
             event.preventDefault();
             openRow();
           }}>
-          <span className={iconColor ?? 'text-gray-400'}>{icon}</span>
+          <span className={navIconClass(iconColor, rowState !== 'idle')}>{icon}</span>
           <span className={whenCollapsed(collapsed, 'lg:sr-only')}>{label}</span>
           {attention && !open && <AttentionDot className={`ml-auto ${whenCollapsed(collapsed, 'lg:absolute lg:top-1.5 lg:right-2.5')}`} />}
         </a>
-        <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={listId}
-          aria-label={`${open ? 'Hide' : 'Show'} ${label} pages`}
-          className={`absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 dark:hover:text-gray-200 ${whenCollapsed(collapsed, 'lg:hidden')}`}>
-          <StrokeIcon className={`w-4 h-4 transition-transform ${open ? '' : '-rotate-90'}`} paths={CHEVRON_DOWN_PATHS} aria-hidden="true" />
-        </button>
+        <GroupToggle label={label} open={open} collapsed={collapsed} listId={listId} onToggle={onToggle} />
       </div>
       {open && (
-        <ChildList id={listId} items={items} activeChildId={activeChildId} onNavigate={navigate}
+        <ChildList id={listId} items={inlineItems} activeChildId={activeChildId} onNavigate={navigate}
           className={`mt-1 ml-5 pl-2.5 border-l border-gray-200 dark:border-gray-700 space-y-0.5 ${whenCollapsed(collapsed, 'lg:hidden')}`} />
       )}
       {anchor !== null && (

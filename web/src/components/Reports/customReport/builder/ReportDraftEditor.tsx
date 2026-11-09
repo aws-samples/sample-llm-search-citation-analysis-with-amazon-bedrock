@@ -1,5 +1,5 @@
 import {
-  useId, useState
+  useId, useRef, useState, type RefObject
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -7,7 +7,7 @@ import {
   type CustomReportDays
 } from '../../../../api/customReports';
 import { Button } from '../../../ui';
-import { ConfirmModal } from '../../../ui/Modal';
+import { DeleteReportModal } from '../DeleteReportModal';
 import { PeriodSelector } from '../../scopeReport/ScopeReport';
 import {
   blockName, type CatalogEntry
@@ -16,7 +16,7 @@ import { customReportPath } from '../customReportRoute';
 import { BlockCatalogPanel } from './BlockCatalogPanel';
 import { ReportCanvas } from './ReportCanvas';
 import {
-  draftInput, draftProblem, saveFailureMessage
+  draftInput, draftProblem, saveFailureMessage, titleProblemOf
 } from './reportDraft';
 import { useReportDraft } from './useReportDraft';
 
@@ -54,6 +54,7 @@ export function ReportDraftEditor({ saved }: Props) {
   const [revealProblems, setRevealProblems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const usedTypes = new Set(draft.items.map((item) => item.block.type));
   const full = draft.items.length >= MAX_REPORT_BLOCKS;
@@ -72,6 +73,7 @@ export function ReportDraftEditor({ saved }: Props) {
     const refusal = draftProblem(draft);
     setProblem(refusal);
     setRevealProblems(refusal !== null);
+    if (refusal !== null && titleProblemOf(draft.title) !== null) titleRef.current?.focus();
     if (refusal !== null) return;
     setSaving(true);
     try {
@@ -111,6 +113,8 @@ export function ReportDraftEditor({ saved }: Props) {
           days={draft.days}
           onTitleChange={setTitle}
           onDaysChange={setDays}
+          titleRef={titleRef}
+          titleProblem={revealProblems ? titleProblemOf(draft.title) : null}
         />
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -156,14 +160,11 @@ export function ReportDraftEditor({ saved }: Props) {
       </form>
 
       {saved !== null && (
-        <ConfirmModal
+        <DeleteReportModal
+          report={saved}
           isOpen={confirmingDelete}
           onClose={() => setConfirmingDelete(false)}
           onConfirm={() => void removeSaved(saved)}
-          title="Delete this report?"
-          message={`"${saved.title}" will be removed for everyone. This cannot be undone.`}
-          confirmText="Delete report"
-          confirmVariant="danger"
         />
       )}
     </>
@@ -176,13 +177,17 @@ interface DetailsProps {
   readonly days: CustomReportDays;
   readonly onTitleChange: (title: string) => void;
   readonly onDaysChange: (days: CustomReportDays) => void;
+  readonly titleRef: RefObject<HTMLInputElement>;
+  /** Why the name would be refused, once a save was tried; `null` otherwise. */
+  readonly titleProblem: string | null;
 }
 
 /** The page heading, the report name and its period. */
 function DraftDetails({
-  heading, title, days, onTitleChange, onDaysChange
+  heading, title, days, onTitleChange, onDaysChange, titleRef, titleProblem
 }: DetailsProps) {
   const titleId = useId();
+  const problemId = useId();
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 sm:p-6">
       <h2 className="text-lg font-semibold text-gray-900 sm:text-xl">{heading}</h2>
@@ -193,14 +198,18 @@ function DraftDetails({
         <div>
           <label htmlFor={titleId} className="block text-sm font-medium text-gray-700 mb-1">Report name</label>
           <input
+            ref={titleRef}
             id={titleId}
             type="text"
+            aria-invalid={titleProblem !== null}
+            aria-describedby={titleProblem === null ? undefined : problemId}
             value={title}
             maxLength={MAX_REPORT_TITLE_LENGTH}
             placeholder="e.g. Monthly AI visibility for the board"
             onChange={(event) => onTitleChange(event.target.value)}
-            className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900"
+            className={`w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-gray-900 ${titleProblem === null ? 'border-gray-200' : 'border-red-300'}`}
           />
+          {titleProblem !== null && <p id={problemId} className="mt-1 text-xs text-red-700">{titleProblem}</p>}
         </div>
         <PeriodSelector days={days} onChange={onDaysChange} />
       </div>

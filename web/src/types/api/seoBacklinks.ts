@@ -163,7 +163,11 @@ export interface TrackedBacklinkDomain {
   readonly snapshots: readonly BacklinkSnapshotPoint[];
 }
 
-export interface BacklinkSnapshotsResponse {readonly domains: readonly TrackedBacklinkDomain[];}
+export interface BacklinkSnapshotsResponse {
+  /** List-price ceiling of one "Snapshot now" run (one summary call per tracked domain), in USD. */
+  readonly estimated_run_cost_usd: number;
+  readonly domains: readonly TrackedBacklinkDomain[];
+}
 
 export interface BacklinkSnapshotRunResponse {
   readonly started: boolean;

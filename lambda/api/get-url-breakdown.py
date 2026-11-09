@@ -10,14 +10,10 @@ maintaining a separate URL-to-keyword mapping table".
 """
 
 import logging
-import sys
 from typing import Any
 from urllib.parse import unquote
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.bounded_reads import collect_capped_partition

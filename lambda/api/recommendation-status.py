@@ -53,16 +53,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Any
 
 import boto3
-
-# Shared layer path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import (
     error_response,

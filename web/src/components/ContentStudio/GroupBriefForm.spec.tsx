@@ -13,6 +13,9 @@ import { useContentBriefTemplates } from '../../hooks/useContentBriefTemplates';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import * as groupBriefSource from './GroupBriefForm-source';
 import {
+  labelledFieldIdentity, valuedFieldIdentity
+} from '../../test/fieldIdentity';
+import {
   GROUP_BRIEF_BATCH_LIMIT_GUIDANCE,
   GROUP_BRIEF_DEFAULT_TEMPLATES,
 } from './GroupBriefForm-source';
@@ -27,6 +30,9 @@ import {
   buildNumberedKeywords,
   buildSavedContentBriefTemplate,
   chooseGroupBriefMode,
+  chooseSpecificKeywords,
+  GROUP_SCOPE_RADIO,
+  openTemplateEditor,
   confirmGroupBrief,
   fillImproveUrlBrief,
   renderGroupBriefForm,
@@ -37,7 +43,6 @@ import {
   selectKeywordsForBrief,
   selectPerKeywordBatch,
   selectPerKeywordStrategy,
-  readFieldIdentity,
   submitGroupBrief,
   submitKeywordBrief,
 } from './GroupBriefForm-fixtures';
@@ -53,13 +58,13 @@ const THREE_KEYWORD_NAMES = ['Alpha keyword', 'Beta keyword', 'Other group keywo
 const modeFieldIdentityCases = [
   {
     testName: 'associates the URL field with its group-brief identity',
-    mode: /Improve current URL/u,
+    mode: /^Improve an existing page/u,
     label: 'Current landing URL',
     identity: 'group-brief-url',
   },
   {
     testName: 'associates the copy field with its group-brief identity',
-    mode: /Rewrite pasted copy/u,
+    mode: /^Rewrite copy you paste/u,
     label: 'Current copy',
     identity: 'group-brief-copy',
   },
@@ -78,9 +83,16 @@ describe('GroupBriefForm scope', () => {
     renderGroupBriefForm();
 
     expect(screen.getByRole('form', { name: 'Content Brief' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Groups' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Keywords' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'All' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: GROUP_SCOPE_RADIO })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /^Specific keywords/u })).not.toBeChecked();
+    expect(screen.queryByRole('radio', { name: /^All/u })).not.toBeInTheDocument();
+  });
+
+  it('shows no keyword list before the user picks specific keywords', () => {
+    renderGroupBriefForm();
+
+    expect(screen.queryByRole('searchbox', { name: 'Search keywords' })).not.toBeInTheDocument();
+    expect(screen.getByText('No group chosen yet')).toBeInTheDocument();
   });
 
   it('previews every active group member when group mode is selected', async () => {
@@ -88,7 +100,7 @@ describe('GroupBriefForm scope', () => {
 
     await selectGroupForBrief();
 
-    expect(screen.getByText('Generic Group: 2 active keywords')).toBeInTheDocument();
+    expect(screen.getByText('2 active keywords in Generic Group')).toBeInTheDocument();
     expect(screen.getByText('Alpha keyword')).toBeInTheDocument();
     expect(screen.getByText('Beta keyword')).toBeInTheDocument();
     expect(screen.queryByText('Inactive keyword')).not.toBeInTheDocument();
@@ -132,7 +144,7 @@ describe('GroupBriefForm scope', () => {
 
     await submitGroupBrief();
 
-    expect(screen.getByText('Selected keywords: 50 active keywords')).toBeInTheDocument();
+    expect(screen.getByText('50 keywords selected')).toBeInTheDocument();
     expect(formProps.onGenerate).toHaveBeenCalledWith(expect.objectContaining({ scope: buildContentBriefKeywordScope(keywords.map((keyword) => keyword.id)) }));
   });
 
@@ -143,12 +155,14 @@ describe('GroupBriefForm scope', () => {
     await selectGroupForBrief();
     await reviewGroupBrief();
 
-    expect(screen.getByText('Generic Group: 51 active keywords')).toBeInTheDocument();
+    expect(screen.getByText('51 active keywords in Generic Group')).toBeInTheDocument();
     expect(screen.getByText(/selected scope has more than 50 active keywords/iu)).toBeInTheDocument();
     expect(formProps.onGenerate).not.toHaveBeenCalledWith(expect.anything());
   });
 
   it('excludes inactive and missing-status keywords from selection', () => {
+    // Without groups the brief opens on "Specific keywords", where the picker lists what is selectable.
+    mockUseKeywordGroups.mockReturnValue(buildKeywordGroupHookResult({ groups: [] }));
     renderGroupBriefForm({
       keywords: [
         buildKeyword({ status: 'inactive' }),
@@ -162,7 +176,7 @@ describe('GroupBriefForm scope', () => {
 
     expect(screen.queryByText('Alpha keyword')).not.toBeInTheDocument();
     expect(screen.queryByText('Missing status')).not.toBeInTheDocument();
-    expect(screen.getByText('Selected keywords: 0 active keywords')).toBeInTheDocument();
+    expect(screen.getByText('No keywords selected yet')).toBeInTheDocument();
   });
 });
 
@@ -218,7 +232,7 @@ describe('GroupBriefForm strategy', () => {
 describe('GroupBriefForm content fields', () => {
   it('requires an http or https URL when improve current URL mode is selected', async () => {
     renderGroupBriefForm();
-    await selectGroupBriefMode(/Improve current URL/u);
+    await selectGroupBriefMode(/^Improve an existing page/u);
 
     await reviewGroupBrief();
 
@@ -241,7 +255,7 @@ describe('GroupBriefForm content fields', () => {
 
   it('requires non-whitespace copy when rewrite pasted copy mode is selected', async () => {
     renderGroupBriefForm();
-    await selectGroupBriefMode(/Rewrite pasted copy/u);
+    await selectGroupBriefMode(/^Rewrite copy you paste/u);
     await userEvent.type(screen.getByLabelText('Current copy'), '   ');
 
     await reviewGroupBrief();
@@ -341,7 +355,7 @@ describe('GroupBriefForm templates', () => {
     );
     renderGroupBriefForm();
 
-    await userEvent.selectOptions(screen.getByLabelText('Saved template'), saved.id);
+    await openTemplateEditor(saved.id);
 
     expect(screen.getByRole('button', { name: 'Update template' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Delete template' })).toBeEnabled();
@@ -363,7 +377,7 @@ describe('GroupBriefForm templates', () => {
       buildContentBriefTemplatesHookResultWithSaved(saved, { update })
     );
     const formProps = renderGroupBriefForm();
-    await userEvent.selectOptions(screen.getByLabelText('Saved template'), saved.id);
+    await userEvent.selectOptions(screen.getByLabelText('Template'), saved.id);
     fireEvent.change(
       screen.getByLabelText('Prompt template'),
       { target: { value: 'Requested edit {scope}' } }
@@ -394,7 +408,7 @@ describe('GroupBriefForm templates', () => {
     );
     vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     renderGroupBriefForm();
-    await userEvent.selectOptions(screen.getByLabelText('Saved template'), saved.id);
+    await openTemplateEditor(saved.id);
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete template' }));
 
@@ -417,11 +431,7 @@ describe('GroupBriefForm request state', () => {
   it('associates always-visible fields with group-brief identities', () => {
     renderGroupBriefForm();
 
-    const fields = ['Output language'].map((label) => (
-      screen.getByLabelText<HTMLSelectElement>(label)
-    ));
-
-    expect(fields.map(readFieldIdentity)).toStrictEqual([
+    expect(['Output language'].map(labelledFieldIdentity)).toStrictEqual([
       {
         id: 'group-brief-language',
         labelFor: 'group-brief-language',
@@ -436,10 +446,13 @@ describe('GroupBriefForm request state', () => {
     const modes = within(screen.getByRole('group', { name: 'Generation mode' }))
       .getAllByRole<HTMLInputElement>('radio');
 
-    expect(modes.map((mode) => ({
-      ...readFieldIdentity(mode),
-      value: mode.value,
-    }))).toStrictEqual([
+    expect(modes.map(valuedFieldIdentity)).toStrictEqual([
+      {
+        id: 'group-brief-mode-create_new_landing_page',
+        labelFor: 'group-brief-mode-create_new_landing_page',
+        name: 'group-brief-mode',
+        value: 'create_new_landing_page',
+      },
       {
         id: 'group-brief-mode-improve_current_url',
         labelFor: 'group-brief-mode-improve_current_url',
@@ -452,26 +465,18 @@ describe('GroupBriefForm request state', () => {
         name: 'group-brief-mode',
         value: 'rewrite_pasted_copy',
       },
-      {
-        id: 'group-brief-mode-create_new_landing_page',
-        labelFor: 'group-brief-mode-create_new_landing_page',
-        name: 'group-brief-mode',
-        value: 'create_new_landing_page',
-      },
     ]);
   });
 
-  it('gives keyword checkboxes unique ids with one plural name', () => {
+  it('gives keyword checkboxes unique ids with one plural name', async () => {
     renderGroupBriefForm();
+    await chooseSpecificKeywords();
 
     const checkboxes = THREE_KEYWORD_NAMES.map((name) => (
       screen.getByRole<HTMLInputElement>('checkbox', { name })
     ));
 
-    expect(checkboxes.map((checkbox) => ({
-      ...readFieldIdentity(checkbox),
-      value: checkbox.value,
-    }))).toStrictEqual([
+    expect(checkboxes.map(valuedFieldIdentity)).toStrictEqual([
       {
         id: 'group-brief-keyword-scope-section-group-1-keyword-keyword-1',
         labelFor: 'group-brief-keyword-scope-section-group-1-keyword-keyword-1',
@@ -499,9 +504,7 @@ describe('GroupBriefForm request state', () => {
     renderGroupBriefForm();
 
     await chooseGroupBriefMode(mode);
-    const field = screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(label);
-
-    expect(readFieldIdentity(field)).toStrictEqual({
+    expect(labelledFieldIdentity(label)).toStrictEqual({
       id: identity,
       labelFor: identity,
       name: identity,
@@ -512,7 +515,8 @@ describe('GroupBriefForm request state', () => {
     renderGroupBriefForm({ generating: true });
 
     expect(screen.getByRole('button', { name: 'Review generation' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'Groups' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: GROUP_SCOPE_RADIO })).toBeDisabled();
+    expect(screen.getByLabelText('Keyword group')).toBeDisabled();
     expect(screen.getByLabelText('Prompt template')).toBeDisabled();
   });
 });

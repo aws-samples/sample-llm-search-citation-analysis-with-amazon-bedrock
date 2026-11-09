@@ -21,6 +21,8 @@ import {
   CHART_BAR_PATHS, CLOCK_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
 } from '../ui/iconPaths';
 import { ModalCloseFooter } from '../ui/ModalCloseFooter';
+import { Modal } from '../ui/Modal';
+import { providerName } from '../../constants/providers';
 
 interface CitationDetailModalProps {
   citation: CrawledContent;
@@ -69,7 +71,7 @@ const hasTab = (citation: CrawledContent, tab: TabType): boolean => {
 const StatusBadge = ({ status }: { status?: CrawlStatus }) => {
   if (!status || status === 'success') return null;
   const styles = {
-    blocked: 'bg-amber-100 text-amber-800 border-amber-200',
+    blocked: 'bg-gray-100 text-amber-800 border-gray-200',
     error: 'bg-red-100 text-red-800 border-red-200',
   };
   const labels = {
@@ -107,8 +109,8 @@ const CitingProviders = ({ providers }: { providers: string[] }) => (
     <h3 className="text-sm font-semibold text-gray-900 mb-3">Cited By</h3>
     <div className="flex gap-2 flex-wrap">
       {providers.map((provider) => (
-        <span key={provider} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-          {provider.toUpperCase()}
+        <span key={provider} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium capitalize">
+          {providerName(provider)}
         </span>
       ))}
     </div>
@@ -155,7 +157,7 @@ const SeoPointList = ({
 const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
   <div className="space-y-6">
     {seoAnalysis.relevance_score && (
-      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
+      <div className="bg-gradient-to-r from-blue-50 to-violet-50 dark:from-blue-900/25 dark:to-violet-900/25 border border-blue-200 rounded-lg p-6">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-gray-900">Relevance Score</h3>
@@ -168,12 +170,12 @@ const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
     <SeoPointList title="Strengths" items={seoAnalysis.strengths} headingClassName="text-emerald-800" bulletClassName="text-emerald-600" />
     <SeoPointList title="Weaknesses" items={seoAnalysis.weaknesses} headingClassName="text-red-800" bulletClassName="text-red-600" />
     {seoAnalysis.recommendations && seoAnalysis.recommendations.length > 0 && (
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-amber-900 mb-3">Action Items</h3>
         <ol className="space-y-2">
           {seoAnalysis.recommendations.map((rec, idx) => (
             <li key={rec} className="flex items-start gap-2 text-sm text-gray-700">
-              <span className="font-bold text-yellow-700">{idx + 1}.</span><span>{rec}</span>
+              <span className="font-bold text-amber-700">{idx + 1}.</span><span>{rec}</span>
             </li>
           ))}
         </ol>
@@ -197,6 +199,7 @@ export const CitationDetailModal = ({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const panelId = useId();
+  const titleId = useId();
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -258,38 +261,33 @@ export const CitationDetailModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 !mt-0">
-      <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex justify-between items-start">
-            <div className="flex-1 pr-4">
-              <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-xl font-bold text-gray-900">{citation.title}</h2>
-                <StatusBadge status={citation.status} />
-              </div>
-              <a href={safeHref(citation.normalized_url)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">
-                {citation.normalized_url}
-              </a>
-              <div className="flex gap-4 mt-2 text-sm text-gray-500">
-                <span>{formatDate(citation.crawled_at)}</span>
-                <span>Keyword: {citation.keyword}</span>
-                <span>{citation.citation_count} citation(s)</span>
-              </div>
-            </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">×</button>
+    <Modal isOpen onClose={onClose} size="6xl" layout="flush" labelledBy={titleId}>
+      <div className="px-6 py-4 border-b border-gray-200">
+        <div className="pr-10">
+          <div className="flex items-center gap-2 mb-1 min-w-0">
+            <h2 id={titleId} className="text-xl font-bold text-gray-900 break-words min-w-0">{citation.title}</h2>
+            <StatusBadge status={citation.status} />
+          </div>
+          <a href={safeHref(citation.normalized_url)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-700 hover:underline break-all">
+            {citation.normalized_url}
+          </a>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-500">
+            <span>{formatDate(citation.crawled_at)}</span>
+            <span className="break-words">Keyword: {citation.keyword}</span>
+            <span>{citation.citation_count} {citation.citation_count === 1 ? 'citation' : 'citations'}</span>
           </div>
         </div>
-        <TabBar
-          tabs={TABS.filter((tab) => hasTab(citation, tab.id))}
-          activeId={activeTab}
-          onChange={setActiveTab}
-          label="Citation details"
-          panelId={panelId}
-          className="px-6"
-        />
-        <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-6">{renderTabContent()}</TabPanel>
-        <ModalCloseFooter onClose={onClose} />
       </div>
-    </div>
+      <TabBar
+        tabs={TABS.filter((tab) => hasTab(citation, tab.id))}
+        activeId={activeTab}
+        onChange={setActiveTab}
+        label="Citation details"
+        panelId={panelId}
+        className="px-6"
+      />
+      <TabPanel id={panelId} activeId={activeTab} className="flex-1 overflow-y-auto p-6">{renderTabContent()}</TabPanel>
+      <ModalCloseFooter onClose={onClose} />
+    </Modal>
   );
 };

@@ -6,6 +6,14 @@ import {
 } from '@testing-library/react';
 import { useKeywordDeepDive } from './useKeywordDeepDive';
 import { settledSlice } from '../scopeReport/scopeReport-fixtures';
+import {
+  buildTrendView, buildVisibility
+} from '../layout/reportPayload-fixtures';
+import { buildCitationGapsResponse } from '../../Insights/CitationGaps-fixtures';
+import {
+  buildRecommendationsHookResult, buildRecommendationsResponse
+} from '../../Insights/Recommendations-fixtures';
+import { brandMentionsExportResponse } from '../../Brands/brandMentionsExport-fixtures';
 
 vi.mock('../../../hooks/useVisibilityMetrics', () => ({useVisibilityMetrics: vi.fn(),}));
 vi.mock('../../../hooks/useHistoricalTrends', () => ({useHistoricalTrends: vi.fn(),}));
@@ -21,12 +29,12 @@ import { useBrandMentions } from '../../../hooks/useBrandMentions';
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useRecommendations } from '../../../hooks/useRecommendations';
 
-const mockVisibility = useVisibilityMetrics as ReturnType<typeof vi.fn>;
-const mockTrends = useHistoricalTrends as ReturnType<typeof vi.fn>;
-const mockPersonas = usePersonaRankings as ReturnType<typeof vi.fn>;
-const mockMentions = useBrandMentions as ReturnType<typeof vi.fn>;
-const mockGaps = useCitationGaps as ReturnType<typeof vi.fn>;
-const mockRecommendations = useRecommendations as ReturnType<typeof vi.fn>;
+const mockVisibility = vi.mocked(useVisibilityMetrics);
+const mockTrends = vi.mocked(useHistoricalTrends);
+const mockPersonas = vi.mocked(usePersonaRankings);
+const mockMentions = vi.mocked(useBrandMentions);
+const mockGaps = vi.mocked(useCitationGaps);
+const mockRecommendations = vi.mocked(useRecommendations);
 
 /** Renders the hook with a keyword prop so a test can rerender it for another keyword. */
 function renderKeywordDeepDive(initialKeyword: string) {
@@ -54,26 +62,34 @@ describe('useKeywordDeepDive', () => {
 
   beforeEach(() => {
     mockVisibility.mockReturnValue({
-      ...settledSlice({ keyword: 'foo' }),
+      ...settledSlice(buildVisibility()),
       fetchVisibilityMetrics: fetchVisibility,
     });
     mockTrends.mockReturnValue({
-      ...settledSlice({ trend_data: [] }),
+      ...settledSlice(buildTrendView()),
       fetchHistoricalTrends: fetchTrends,
     });
     mockPersonas.mockReturnValue({
-      ...settledSlice({ personas: [] }),
+      ...settledSlice({
+        keyword: 'foo',
+        personas: [],
+        cross_persona_summary: { brands: [] },
+      }),
       fetchPersonaRankings: fetchPersonas,
     });
-    mockMentions.mockReturnValue(settledSlice({ aggregated: {} }));
+    mockMentions.mockReturnValue({
+      ...settledSlice(brandMentionsExportResponse),
+      noData: false,
+    });
     mockGaps.mockReturnValue({
-      ...settledSlice({ gaps: [] }),
+      ...settledSlice(buildCitationGapsResponse()),
+      noData: false,
       fetchCitationGaps: fetchGaps,
     });
-    mockRecommendations.mockReturnValue({
-      ...settledSlice({ recommendations: [] }),
+    mockRecommendations.mockReturnValue(buildRecommendationsHookResult({
+      ...settledSlice(buildRecommendationsResponse()),
       fetchRecommendations: fetchRecs,
-    });
+    }));
   });
 
   it('does not fetch visibility, trends, or personas when keyword is null', () => {
@@ -162,8 +178,21 @@ describe('useKeywordDeepDive', () => {
     mockMentions.mockReturnValue({
       data: null,
       loading: true,
-      error: null 
+      error: null,
+      noData: false,
     });
     expect(renderKeywordDeepDive('best running shoes').result.current.ready).toBe(false);
+  });
+
+  it('counts a "no data yet" slice as settled, so the report can still print', () => {
+    mockMentions.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      noData: true,
+    });
+    const { current } = renderKeywordDeepDive('never analysed').result;
+    expect(current.ready).toBe(true);
+    expect(current.mentionsNoData).toBe(true);
   });
 });

@@ -19,7 +19,8 @@ interface CitationFiltersProps {
   setMinCitations: (min: number | '') => void;
   contentType: ContentTypeFilter;
   setContentType: (contentType: ContentTypeFilter) => void;
-  setCurrentPage: (page: number) => void;
+  /** Any filter changed or was cleared: the list starts again from the top. */
+  onFilterChange: () => void;
   onDownloadExcel: () => void;
 }
 
@@ -30,14 +31,15 @@ export const CitationFilters = ({
   setMinCitations,
   contentType,
   setContentType,
-  setCurrentPage,
+  onFilterChange,
   onDownloadExcel,
 }: CitationFiltersProps) => {
+  const hasFilters = searchQuery !== '' || minCitations !== '' || contentType !== 'all';
   const handleClear = () => {
     setSearchQuery('');
     setMinCitations('');
     setContentType('all');
-    setCurrentPage(1);
+    onFilterChange();
   };
 
   return (
@@ -52,7 +54,7 @@ export const CitationFilters = ({
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              setCurrentPage(1);
+              onFilterChange();
             }}
             placeholder="Filter by URL..."
             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
@@ -66,7 +68,7 @@ export const CitationFilters = ({
             value={contentType}
             onChange={(e) => {
               setContentType(toContentTypeFilter(e.target.value));
-              setCurrentPage(1);
+              onFilterChange();
             }}
             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
           >
@@ -76,7 +78,7 @@ export const CitationFilters = ({
           </select>
         </div>
         <div className="w-full sm:w-32">
-          <label htmlFor="citation-min-filter" className="block text-sm font-medium text-gray-700 mb-1">Min Citations</label>
+          <label htmlFor="citation-min-filter" className="block text-sm font-medium text-gray-700 mb-1">Min. citations</label>
           <input
             type="number"
             id="citation-min-filter"
@@ -84,7 +86,7 @@ export const CitationFilters = ({
             value={minCitations}
             onChange={(e) => {
               setMinCitations(e.target.value ? parseInt(e.target.value) : '');
-              setCurrentPage(1);
+              onFilterChange();
             }}
             placeholder="Any"
             min={1}
@@ -92,15 +94,20 @@ export const CitationFilters = ({
           />
         </div>
         <div className="flex gap-2">
+          {/* Only offered once a filter is set, so the idle bar has one action. */}
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+            >
+              Clear filters
+            </button>
+          )}
           <button
-            onClick={handleClear}
-            className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Clear
-          </button>
-          <button
+            type="button"
             onClick={onDownloadExcel}
-            className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+            className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500"
           >
             <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
             <span className="sr-only sm:not-sr-only">Export</span>

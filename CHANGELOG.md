@@ -9,6 +9,144 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.43.1] - 2026-11-08
+
+### Fixed
+
+- Dark and light theme audit of the dashboard (every component under `web/src/`, static review against
+  `docs/design-system.md`):
+  - New global dark overrides in `web/src/index.css`: `text-gray-800` (was gray-800 on a gray-800 card),
+    `divide-gray-100/200` (bright row lines), `hover:text-gray-600/700/800/900` (text turned near-black on hover),
+    `text-blue-600`, `text-red-600`, `text-violet-600`, `text-purple-600` (about 3:1 on gray-800, now the -400
+    shades), `text-violet-700/900`, accent `hover:text-*`, `hover:bg-red-50`, `bg-amber-50/50`, the cyan badge of
+    Google AI Overviews, the sky market badge, and disabled inputs, textareas and selects (a pale box in dark).
+  - Printing is always light: a `?print=1` report tab renders in the light theme (classes and chart palette)
+    whatever the saved theme, and printing a dark page drops the `dark` class between `beforeprint` and
+    `afterprint` (`hooks/useTheme.ts`).
+  - Component fixes: small `-600` accent text below 4.5:1 on white moved to `-700`; invisible focus rings
+    (`focus:ring-gray-200`, removed outlines) now `focus:ring-gray-900`; dark selected, hover and disabled states in
+    tabs, chips, toggles and pickers; unreadable rank-grid cells in Local SEO; `break-words` / `min-w-0` on long
+    names and URLs; `aria-label` on icon-only close and remove buttons; sortable Citations headers are buttons with
+    `aria-sort`.
+  - The Content Studio overlay and the keyword detail overlay are `<dialog aria-modal>` with a dark surface, and
+    close on Escape like `ui/Modal`. The primary button of `ConfirmModal` is readable on the dark modal.
+  - Muted text is `text-gray-500` (4.8:1 on white) instead of `text-gray-400` (2.6:1) in every component: captions,
+    helper text, section labels and icon buttons. `text-gray-400` is left for decoration.
+  - Primary buttons and selected toggles (`bg-gray-900 text-white`) invert to white with gray-900 text in dark mode
+    (they were 1.2:1 against the gray-800 card); disabled ones are gray-600.
+  - Keyboard access: the Action Center recommendation title, the Raw Responses folder and file rows, the Recent
+    Searches keyword cell and the brand tag remove control are real buttons with focus rings (they were click-only
+    `<div>`, `<td>` and `<span>` elements).
+  - `CitationDetailModal`, `BrandDetailModal` and the brand tracking configuration dialog use `ui/Modal`, so they
+    close on Escape and are named modal dialogs. `ui/Modal` gains the `5xl` and `6xl` sizes, `layout="flush"` and
+    `labelledBy`.
+- `docs/design-system.md` §1.2 lists the dark overrides `index.css` actually has (the table listed fuchsia, rose,
+  teal, slate and other classes that had none), explains that `dark:` variants win over the global overrides, and
+  documents light printing.
+
+- One palette in both themes: grey by default, blue for interaction, violet for your brand, with amber, emerald and
+  red kept for status text, numbers and dots (`docs/design-system.md` §2.2). Feature tints (teal, cyan, sky, lime,
+  rose, fuchsia, pink, slate, indigo, orange, yellow) are gone from the components; sidebar icons are grey with the
+  open page in blue; stat-card icons, engine chips and competitor badges are neutral; first-party brands, domains,
+  rows and buttons are violet (one brand-type badge in `constants/brandTypeBadge.ts`); coloured card stripes are
+  replaced by neutral borders. Charts keep one hue per series.
+- `index.css`: 279 dark-override selectors for classes no component uses any more are removed, and the dark
+  overrides are one section per palette role. Tailwind drops unused utilities at build time, but hand-written rules
+  in `index.css` always ship.
+- Settings › Keywords redesigned: one header with a single add control ("in <market>" picker, "Paste a list"), a
+  group filter column with counts where rename and delete sit in a per-group "⋯" menu, and a one-line-per-row table
+  (keyword, market, groups, status, "⋯") with search, status and market filters, select-all on the page, a selection
+  bar only while rows are ticked, and 25 rows per page. 8,319 px tall before this release, 1,737 px now.
+- Settings › Brand tracking (and the Configure Brands dialog) redesigned: "Your brand" with tag inputs for brand names
+  and websites, "Competitors" as one table row per competitor with its website chips, "Find competitors" and
+  "Suggest sub-brands" (was "Expand Brand") with inline selectable suggestions, extraction options and the prompt
+  under one collapsed "Advanced" section instead of a tab, and a save bar that appears only with unsaved changes.
+  Neutral surfaces with violet as the only brand accent; 2,657 px tall before, 1,555 px now.
+- Schedule redesigned: "New schedule" opens a dialog that asks what to run (Analysis run, or the paid domain traffic
+  and backlink snapshots as cards tagged "Paid"), when (Repeat, day, time and timezone in one row with a live
+  "Every Monday at 09:00 · Next run …" line; the timezone defaults to the browser's), which keywords (as on Run
+  Analysis, markets behind "Limit to markets (optional)"), then an optional name (a generated one is saved when left
+  blank). One Cancel and one Create, errors inline, paid confirmations kept. Each schedule in the list is one row with
+  its summary, next run, an on/off switch and a "⋯" menu (Edit, Run now, Delete). The API payload is unchanged.
+- Run Analysis rebuilt: a "Start a run" card with "Which keywords" as on the Schedule dialog, a "Sent to" line naming
+  the enabled AI engines and personas with links to change them, and a footer with "Will run: N keywords …", the
+  number of billed answers, the reason when Start is disabled, and "Start analysis". The current run is one card with
+  a plain-words status, elapsed time, a 3-step progress (prepare keywords, ask AI engines and crawl sources, write
+  summary) with a keyword progress bar and a live region, links to Visibility, Recent Searches and Raw Responses when
+  it finishes, the failing step and what to do when it fails, and the activity log behind "Details". The leave dialog
+  says "Leave Run Analysis?" in plain words. API calls unchanged.
+- Raw Responses lists newest first across the whole folder, not only within one S3 page of 1,000 keys (which put the
+  oldest entries on top once a folder grew past it): `browse-raw-responses.py` reads every page up to 20,000 entries or
+  the request deadline, sorts, and pages with a cursor bound to the folder (a new run between pages repeats nothing);
+  `folder_count`, `file_count` and `truncated` describe the whole folder. The explorer is a compact list grouped by
+  month with readable run dates, the latest 10 run days (or 50 entries) first and "Show all", a filter box for long
+  folders, and keyword and provider folders A to Z. The root page is 1,025 px tall instead of 3,292 px.
+- Recent Searches loads as you scroll: 25 keyword rows at a time, and the next page of runs from the API when the
+  loaded ones run out, instead of a page-number pager and a "Load older searches" button (`ui/LoadOnScrollFooter`,
+  `ui/useLoadOnScroll`). A "Load more" button stays for keyboard users, and a failed fetch shows "Try again" instead
+  of retrying on its own.
+- Reports redesigned. The landing groups the reports by the question they answer ("How visible are we?", "How do we
+  compare?", "Where do the answers come from?", "What should we do next?") as neutral cards with that question and
+  the audience, with "New custom report" as the one primary action and custom reports as a compact list with a "⋯"
+  menu (Open, Edit, Delete); no author email is shown. Every report page shares one header (breadcrumb "Reports ›
+  name", title, purpose, generated time, "Save as PDF", and the scope, keyword and period controls in one row),
+  section titles and subtitles with one spacing, charts and tables framed as cards, right-aligned numbers, a fade
+  on wide tables, and loading skeletons shaped like the content. On report pages the app bar's title is not a
+  heading and its PDF icon is left out; the print preview drops the header frame and draws charts without animation.
+- Content Studio › Content Brief is three numbered steps: "What do you want to write?" (three mode cards with the
+  most common preselected, the template, and "Customize the prompt (optional)" collapsed), "Which keywords?" (a
+  keyword group by default with its keyword count, specific keywords only when chosen, markets behind "Limit to
+  markets (optional)", and a live summary), and "Review and start" (strategy, language, the paid-call estimate and the
+  one "Review generation" button). A validation error moves focus to the field at fault. A content idea has "Open in
+  Content Brief", which ticks its keyword and scrolls to step 2. Tab badges are a dot and text instead of red and
+  pulsing pills, and the prompt editor no longer opens by itself.
+- A failed Brand tracking save now says "Could not save your changes. Try again." and keeps the changes; it used to
+  keep them only in the page and report success (`useBrandConfig.saveConfig` restores the config and rethrows).
+- Keyword Research › History: type and status filters with counts, failed runs older than 7 days behind "Show N
+  older failed runs", and 20 rows at a time.
+- Prices before paid calls: the Keyword Explorer shows the ceiling of one search under Search (`Seo/seoPrices.ts`,
+  mirroring `shared/dataforseo_pricing.py`) with Mode, Results and clickstream behind "Options"; the Backlinks
+  "Snapshot now?" confirmation shows the API's `estimated_run_cost_usd`.
+- Dialogs: `ui/Modal` moves focus into the dialog on open (or to `initialFocus`), keeps Tab inside the top dialog and
+  returns focus to the opener on close (`ui/useDialogFocus`); the Users dialogs' own copy is removed.
+- "No AI answers yet" is a neutral notice with a link to Run Analysis (`ui/NoDataYet`) instead of a red error, when the
+  brand-mentions API answers 404 or the citation-gaps API answers "No data found for keyword" for a keyword with no
+  run (Brand Mentions, Citation Gaps, Keyword Deep Dive). Real failures stay errors.
+- UX flow review of every page on the live dashboard (screenshots in both themes):
+  - Run Analysis: one "What to run" choice (all active keywords by default, keyword groups or specific keywords),
+    markets behind "Limit to markets (optional)", a live "Will run: N keywords" line, and Start as the only action;
+    a keyword-group chip no longer starts a paid run on its first click.
+  - Brand Mentions opens on all keywords instead of "Pick a scope above"; the brand detail modal shows only the
+    overview for a group or all keywords.
+  - Visibility shows the top 15 keywords and brands with "Show all"; Content Studio shows 10 ideas with "Show
+    all" and puts the brief prompt behind "Customize the prompt (optional)"; the Research Agent brief keeps the
+    required choices first and the rest under "More options".
+  - The header names the page inside SEO and Settings ("SEO › Backlinks"); the sidebar drops the SEO "Overview"
+    duplicate; onboarding lists the steps in order with one primary button.
+  - Engine names instead of ids everywhere (`providerName` covers the web-search providers); AI providers grouped
+    into answer engines, web-search providers and SEO data; Keywords puts the add field first.
+  - Reports: Keyword Deep Dive with no answers shows one "No AI answers yet" notice; `?print=1` keeps its query.
+- Action Center and Content Studio provider-gap items cover only the AI engines (web-search providers write no
+  answer), use display names ("Not Appearing on Google Gemini") and keep a stable order
+  (`lambda/api/get-recommendations.py`, `lambda/api/content-studio.py`, `shared/config.py` `provider_display_name`).
+
+### Changed
+
+- Citations and Brand Mentions load as you scroll, like Recent Searches (`ui/LoadOnScrollFooter`, new
+  `hooks/useContinuedPages.ts`). Citations asks the API for 50 URLs at a time instead of showing a page-number pager;
+  a new sort, filter or market starts again from the top, and ranks count down the whole list. Brand Mentions loads
+  the next 100 brands as you reach the end instead of stopping at the top 100. Both say "Showing N of M", keep a
+  "Load more" button for keyboard users, and show "Try again" after a failed page. Sorting Brand Mentions by
+  providers reorders only the loaded brands, and the header says so while more remain.
+- `GET /api/brand-mentions` (summary view) pages its brand list: `aggregated.next_token` continues it 100 brands at
+  a time, best aggregate score first, and is `null` on the last page; `brands_truncated` is true while more pages
+  remain. The token is bound to the scope, market, run, provider, persona and classification, so a token from
+  another query (or from `view=appearances`) answers 400. A request without a token answers as before.
+- Amazon Bedrock Web Search: `webSearchRegion` also accepts `us-west-2`, where AgentCore Web Search is now
+  available, so the gateway can run in the same region as the other stacks.
+- `.kiro/agents/ux-ui-auditor.json`: a Kiro agent that audits and fixes dashboard components for light and dark
+  theme problems.
+
 ## [2.43.0] - 2026-11-08
 
 ### Added
@@ -149,6 +287,15 @@ process.
   - Tenet 8 (events, no polling): the SEO stack's four bounded dashboard polling hooks are recorded in the tenet 8 gap
     of `TENETS.md`; moving them to AppSync Events is tracked in #208.
   - Three duplicated spec blocks are factored away instead of baselined in `.jscpd-baseline/`.
+
+- Node.js is pinned to 24, the newest Lambda managed runtime, in `.nvmrc`. CI installs it from that file
+  (`node-version-file`), both `package.json` files declare `engines.node` `>=24 <25`, `scripts/validate.sh`
+  refuses any other major, and `@types/node` is `^24.19.2`.
+- Duplication gate: import statements no longer count as clones in the TypeScript and Python test jscpd configs
+  (`ignorePattern`); the clones the baseline accepted are cut from 455 to 270 by sharing the duplicated code
+  (custom-resource provider and `loggedStateMachine` in the CDK app, filter param rules in `shared/scope_params.py`,
+  `useMountedRef`, test fixtures and helpers) and removing the `/opt/python` `sys.path` preamble and unused module
+  loggers from the Lambda handlers.
 
 - Dependencies: `jscpd` 5.4.2, `knip` 6.44.1 (root and dashboard), `@stryker-mutator/*` 10.1.1 (the npm group of
   Dependabot #196, without `@vitest/eslint-plugin` 1.6.28, which wants TypeScript 6); the `minimatch` override is

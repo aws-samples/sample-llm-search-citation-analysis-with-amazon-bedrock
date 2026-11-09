@@ -8,7 +8,6 @@ import { ErrorAlert } from '../ui/ErrorAlert';
 import type { UserActionOutcome } from '../../hooks/useUserManagement';
 import type { UserRole } from './UserPresentation';
 import { UserRolePicker } from './UserRolePicker';
-import { useDialogFocus } from './UserDialogFocus';
 
 /** Cognito's default `TemporaryPasswordValidityDays`; `lib/constructs/auth.ts` does not override it. */
 export const INVITE_VALID_DAYS = 7;
@@ -28,7 +27,6 @@ export function InviteModal({
   const [role, setRole] = useState<UserRole>('member');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useDialogFocus();
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -59,7 +57,7 @@ export function InviteModal({
             className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900"
             required
           />
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             We&apos;ll email them a temporary password. It expires after {INVITE_VALID_DAYS} days; you can resend the invite from Manage.
           </p>
         </div>

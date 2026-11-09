@@ -1,10 +1,10 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { Construct } from 'constructs';
+import { monthLogGroup } from './api-functions';
 import { bedrockTierEnv } from './bedrock-invoke';
 import { WEB_SEARCH_GATEWAY_URL_PARAMETER, readWebSearchRegion } from './web-search';
 
@@ -342,11 +342,7 @@ export function providerSearchFunction(
   label: string = constructLabel(provider.id),
 ): lambda.Function {
   const functionName = providerSearchFunctionName(provider.id);
-  const logGroup = new logs.LogGroup(scope, `${label}LogGroup`, {
-    logGroupName: `/aws/lambda/${functionName}`,
-    retention: logs.RetentionDays.ONE_MONTH,
-    removalPolicy: cdk.RemovalPolicy.DESTROY,
-  });
+  const logGroup = monthLogGroup(scope, `${label}LogGroup`, `/aws/lambda/${functionName}`, cdk.RemovalPolicy.DESTROY);
   const { cap, interval } = limits;
   // Only a paced provider carries the interval; the search handler reads it per request.
   const pacingEnvironment: Record<string, string> = interval > 0

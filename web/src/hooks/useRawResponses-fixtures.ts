@@ -142,9 +142,6 @@ export function createMockFetch(options: MockFetchOptions = {}) {
       return Promise.resolve(createMockJsonResponse({ download_url: options.downloadUrl ?? 'https://s3.example.com/presigned-url' }));
     }
 
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({}) 
-    });
+    return Promise.resolve(createMockJsonResponse({}));
   });
 }

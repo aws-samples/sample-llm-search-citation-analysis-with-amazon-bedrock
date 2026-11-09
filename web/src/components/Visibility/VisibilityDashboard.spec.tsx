@@ -37,7 +37,9 @@ import {
   buildKeywordGroup, buildKeywordGroupsHookResult
 } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
-import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
+import {
+  ANALYZE_SCOPE_OPTIONS, SCOPE_KEYWORDS
+} from '../ui/useKeywordScopeOptions-fixtures';
 import { exportVisibilityOverview } from './visibilityOverviewExport';
 import {
   SINGLE_PERSONA_RANKINGS, TOO_FEW_PERSONAS, buildPersonaRankingsHookResult, buildTrendsHookResult, buildVisibilityHookResult
@@ -120,7 +122,7 @@ describe('VisibilityDashboard', () => {
     it('offers all keywords, every group and every keyword in the scope selector', () => {
       renderDashboard();
 
-      expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
+      expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(ANALYZE_SCOPE_OPTIONS);
     });
 
     it('loads all-keywords visibility and 30 days of daily history by default', () => {

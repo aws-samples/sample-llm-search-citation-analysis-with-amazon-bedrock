@@ -16,6 +16,7 @@ caller is already allowed to read; never put an authorization decision in one.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from collections.abc import Iterable
 from decimal import Decimal
@@ -84,10 +85,33 @@ def decode_offset_cursor(token: str | None) -> int | None:
     if token is None:
         return 0
     decoded = decode_cursor(token, ('offset',))
-    if decoded is None:
-        return None
-    offset = decoded['offset']
+    return None if decoded is None else _offset(decoded['offset'])
+
+
+def _offset(value: Any) -> int | None:
+    """``value`` when it is a non-negative integer offset, else ``None``."""
     # bool is an int subclass; True must not read as offset 1.
-    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
-    return offset
+    return value
+
+
+def query_binding(query: dict[str, Any]) -> str:
+    """A short digest of the query a page belongs to, for ``encode_bound_offset_cursor``."""
+    raw = json.dumps(query, separators=(',', ':'), sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]
+
+
+def encode_bound_offset_cursor(offset: int, total: int, binding: str) -> str | None:
+    """``encode_offset_cursor`` that also names its query (``query_binding``), or ``None`` at the list's end."""
+    return encode_cursor({'offset': offset, 'query': binding}) if offset < total else None
+
+
+def decode_bound_offset_cursor(token: str | None, binding: str) -> int | None:
+    """The offset of an ``encode_bound_offset_cursor`` token: 0 without one, ``None`` when malformed or for another query."""
+    if token is None:
+        return 0
+    decoded = decode_cursor(token, ('offset', 'query'))
+    if decoded is None or decoded['query'] != binding:
+        return None
+    return _offset(decoded['offset'])

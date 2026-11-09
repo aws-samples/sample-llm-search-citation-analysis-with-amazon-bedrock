@@ -15,12 +15,6 @@ import { EXCLAMATION_TRIANGLE_PATHS } from '../ui/iconPaths';
  * pills and health badge, the auto-disabled note and the enable switch.
  */
 
-export function getProviderCardBorderClass(configured: boolean, enabled: boolean): string {
-  if (configured && enabled) return 'border-emerald-200';
-  if (configured) return 'border-amber-200';
-  return 'border-gray-200';
-}
-
 export function getProviderDotClass(configured: boolean, enabled: boolean): string {
   if (configured && enabled) return 'bg-emerald-500';
   if (configured) return 'bg-amber-500';
@@ -46,8 +40,8 @@ function getToggleTitle(provider: ProviderConfig): string {
  * their own.
  */
 const HEALTH_TONE_CLASSES: Record<ProviderHealthTone, string> = {
-  ok: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-  warning: 'text-amber-800 bg-amber-50 border-amber-200',
+  ok: 'text-emerald-700 bg-gray-50 border-gray-200',
+  warning: 'text-amber-800 bg-gray-50 border-gray-200',
   critical: 'text-red-800 bg-red-50 border-red-300 font-semibold',
 };
 
@@ -111,12 +105,12 @@ function configuredLabel(provider: ProviderConfig): string {
 /** "Configured" plus the masked key and health, or the amber "Not configured" pill. */
 export const ProviderStatus = ({ provider }: ProviderHealthProps) => {
   if (!provider.configured) {
-    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">{unconfiguredLabel(provider)}</span>;
+    return <span className="text-xs text-amber-700 bg-gray-50 px-2 py-1 rounded">{unconfiguredLabel(provider)}</span>;
   }
   const ownKey = !usesIamAuth(provider) && provider.credential_from === undefined;
   return (
     <>
-      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{configuredLabel(provider)}</span>
+      <span className="text-xs text-emerald-700 bg-gray-50 px-2 py-1 rounded">{configuredLabel(provider)}</span>
       {ownKey && provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
       <ProviderHealthBadge provider={provider} />
     </>
@@ -139,7 +133,7 @@ export const ProviderToggle = ({
       onClick={onToggle}
       disabled={saving || !provider.configured}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        on ? 'bg-emerald-500' : 'bg-gray-300'
+        on ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-500'
       } ${provider.configured ? '' : 'opacity-50 cursor-not-allowed'}`}
       title={getToggleTitle(provider)}
     >

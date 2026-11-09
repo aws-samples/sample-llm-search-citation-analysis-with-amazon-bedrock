@@ -17,14 +17,10 @@ user. No route calls a paid API.
 """
 
 import re
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from seo_http import brand_config, seo_error, seo_route
 

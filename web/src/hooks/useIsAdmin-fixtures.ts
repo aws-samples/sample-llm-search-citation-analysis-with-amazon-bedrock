@@ -1,7 +1,4 @@
-import { expect } from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { renderLoadedHook } from '../test/loadedHook';
 import { useIsAdmin } from './useIsAdmin';
 
 /**
@@ -9,7 +6,5 @@ import { useIsAdmin } from './useIsAdmin';
  * session has been read, so `isAdmin` reflects the resolved membership.
  */
 export async function renderResolvedIsAdmin(getGroups: () => Promise<string[]>) {
-  const rendered = renderHook(() => useIsAdmin(getGroups));
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
-  return rendered;
+  return renderLoadedHook(() => useIsAdmin(getGroups));
 }

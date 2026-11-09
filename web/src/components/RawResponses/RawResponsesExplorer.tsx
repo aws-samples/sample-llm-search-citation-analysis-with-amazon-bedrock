@@ -171,6 +171,7 @@ const ExplorerBody = ({
 
     {!selectedFile && browseData && !loading && (
       <FolderFileList
+        key={browseData.prefix}
         browseData={browseData}
         onFolderClick={onFolderClick}
         onFileClick={onFileClick}
@@ -242,8 +243,9 @@ const ExplorerHeader = ({
       </div>
       {selectedFile && (
         <button
+          type="button"
           onClick={onBack}
-          className="px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2 self-start sm:self-auto"
+          className="px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2 self-start sm:self-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
         >
           <StrokeIcon className="w-4 h-4" paths={['M10 19l-7-7m0 0l7-7m-7 7h18']} />
           Back

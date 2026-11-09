@@ -10,14 +10,10 @@ translation of one question shares the source keyword's id). On update an
 omitted reference is left alone and ``''``/``null`` removes it.
 """
 
-import sys
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, route_handler, validate

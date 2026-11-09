@@ -15,7 +15,7 @@ describe('PromptCard', () => {
 
   it('displays status with winning styling', () => {
     render(<PromptCard prompt={basePrompt} />);
-    expect(screen.getByText('winning')).toHaveClass('bg-green-100', 'text-green-800');
+    expect(screen.getByText('winning')).toHaveClass('bg-gray-100', 'text-emerald-800');
   });
 
   it('displays status with losing styling', () => {

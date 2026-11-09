@@ -10,11 +10,7 @@ leaves stale numbers behind. Rows are keyed ``(keyword_id, market_id)`` with the
 Keywords-table identity (``shared.utils.keyword_id``).
 """
 
-import sys
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 from seo_http import MARKET_ID_FIELD, body_list, keyword_id_list, keyword_list, resolve_market, seo_route

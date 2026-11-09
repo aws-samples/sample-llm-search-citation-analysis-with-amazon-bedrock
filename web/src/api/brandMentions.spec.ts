@@ -2,12 +2,13 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  brandMentionsParams, fetchBrandAppearances, InvalidBrandMentionsResponseError
+  brandMentionsParams, fetchBrandAppearances, fetchBrandSummaryPage, InvalidBrandMentionsResponseError
 } from './brandMentions';
 import { mockApiGet } from './clientMock-fixtures';
 import {
   APPEARANCE_PAGE_1, APPEARANCE_PAGE_2, HOTEL_GROUP, RUN
 } from './brandMentions-fixtures';
+import { brandMentionsExportResponse } from '../components/Brands/brandMentionsExport-fixtures';
 
 vi.mock('./client', () => import('./clientMock-fixtures'));
 
@@ -110,5 +111,53 @@ describe('brandMentionsParams', () => {
       keyword: 'hotel sol',
       query_prompt_id: 'familia' 
     });
+  });
+});
+
+describe('fetchBrandSummaryPage', () => {
+  it('asks for the summary page the token points at, with the same scope and filters', async () => {
+    mockApiGet.mockResolvedValue(brandMentionsExportResponse);
+
+    await fetchBrandSummaryPage({
+      scope: HOTEL_GROUP,
+      marketId: 'es',
+      filters: { classification: 'competitor' },
+    }, 'brands-2');
+
+    expect(mockApiGet).toHaveBeenCalledWith('/brand-mentions', {
+      params: {
+        group_id: 'hotel-sol',
+        market_id: 'es',
+        classification: 'competitor',
+        next_token: 'brands-2',
+      },
+      signal: undefined,
+    });
+  });
+
+  it.each([
+    ['the next token', 'brands-3', 'brands-3'],
+    ['no token from an older API build', undefined, null],
+  ])('returns the brands of the page and %s', async (_case, token, expected) => {
+    mockApiGet.mockResolvedValue({
+      ...brandMentionsExportResponse,
+      aggregated: {
+        ...brandMentionsExportResponse.aggregated,
+        next_token: token,
+      },
+    });
+
+    const page = await fetchBrandSummaryPage(UNFILTERED_GROUP_READ, 'brands-2');
+
+    expect(page).toStrictEqual({
+      items: brandMentionsExportResponse.aggregated.brands,
+      nextToken: expected,
+    });
+  });
+
+  it('refuses an answer that is not a summary', async () => {
+    mockApiGet.mockResolvedValue(APPEARANCE_PAGE_1);
+
+    await expect(fetchBrandSummaryPage(UNFILTERED_GROUP_READ, 'brands-2')).rejects.toThrow(InvalidBrandMentionsResponseError);
   });
 });

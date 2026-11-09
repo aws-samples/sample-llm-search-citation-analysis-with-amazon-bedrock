@@ -14,7 +14,7 @@ import {
   buildChange, buildHistory, buildRun, detailWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 import {
-  itAsksForOwnedDomains, itShowsHeadlineCards, itShowsNoComparison
+  HEADLINE_LABELS, itAsksForOwnedDomains, itShowsHeadlineCards, itShowsNoComparison
 } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
@@ -24,7 +24,7 @@ describe('GroupKpiReport headline cards of the latest group run, not of a newer 
   it('shows four cards: mention rate, share of voice, visibility score and citation rate', () => {
     renderGroupKpiReport();
 
-    expect(headlineCardLabels()).toStrictEqual(['Mention rate', 'Share of voice', 'Visibility score', 'Citation rate']);
+    expect(headlineCardLabels()).toStrictEqual(HEADLINE_LABELS);
   });
 
   itShowsHeadlineCards(renderGroupKpiReport, groupRunFootnote);

@@ -90,7 +90,7 @@ export const InputForm = ({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://competitor.com"
-          className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+          className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
         />
       </div>
       <button
@@ -130,7 +130,7 @@ const SeoElementRow = ({
         href={safeHref(value)} 
         target="_blank" 
         rel="noopener noreferrer"
-        className="text-blue-600 hover:underline break-all"
+        className="text-blue-700 hover:underline break-all"
       >
         {value}
       </a>
@@ -195,7 +195,7 @@ export const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => 
       <div className="flex items-center gap-2 text-xs font-medium text-gray-700 mb-3">
         <StrokeIcon className="w-4 h-4 rotate-90" paths={CHEVRON_RIGHT_PATHS} strokeWidth={2} />
         <span>Extracted SEO Elements</span>
-        <span className="text-gray-400 font-normal">(actual page data)</span>
+        <span className="text-gray-500 font-normal">(actual page data)</span>
       </div>
       
       <div className="space-y-3 text-xs">

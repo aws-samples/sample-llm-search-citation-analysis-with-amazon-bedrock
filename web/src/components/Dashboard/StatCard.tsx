@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
  * Visual tone of the stat card icon badge.
  *
  * The set of tones is intentionally small and matches the design system
- * accent palette (see `docs/design-system.md`). Each tone resolves to a
+ * accent palette (see `docs/design-system.md`); dark mode shows every tone in neutral grey. Each tone resolves to a
  * tinted background and matching foreground colour for the icon container.
  */
 type StatCardTone = 'blue' | 'violet' | 'emerald' | 'amber' | 'gray';
@@ -23,36 +23,23 @@ interface StatCardProps {
 /** Why a total may be an estimate, as the tooltip and screen readers say it. */
 export const APPROXIMATE_COUNT_NOTE = 'Approximate count: large tables are counted from a total refreshed every few hours.';
 
+const NEUTRAL_TONE = {
+  bg: 'bg-gray-100 dark:bg-gray-700/60',
+  text: 'text-gray-600 dark:text-gray-300',
+  border: 'border-gray-200 dark:border-gray-700',
+};
+
+/** Every tone renders the same neutral badge (design-system §2.2); the tones stay so callers keep their intent. */
 const toneClasses: Record<StatCardTone, {
   bg: string;
   text: string;
   border: string;
 }> = {
-  blue: {
-    bg: 'bg-blue-50',
-    text: 'text-blue-600',
-    border: 'border-blue-100',
-  },
-  violet: {
-    bg: 'bg-violet-50',
-    text: 'text-violet-600',
-    border: 'border-violet-100',
-  },
-  emerald: {
-    bg: 'bg-emerald-50',
-    text: 'text-emerald-600',
-    border: 'border-emerald-100',
-  },
-  amber: {
-    bg: 'bg-amber-50',
-    text: 'text-amber-600',
-    border: 'border-amber-100',
-  },
-  gray: {
-    bg: 'bg-gray-50',
-    text: 'text-gray-500',
-    border: 'border-gray-100',
-  },
+  blue: NEUTRAL_TONE,
+  violet: NEUTRAL_TONE,
+  emerald: NEUTRAL_TONE,
+  amber: NEUTRAL_TONE,
+  gray: NEUTRAL_TONE,
 };
 
 export const StatCard = ({

@@ -52,7 +52,7 @@ function SubmissionOutcome({ submission }: { readonly submission: ActionState<In
       {value.skipped_count > 0 && (
         <p className="text-xs text-gray-600">{String(value.skipped_count)} URLs skipped (not on the brand&apos;s own domains).</p>
       )}
-      <ul className="divide-y divide-gray-100">{value.hosts.map((host) => <HostOutcome key={host.host} host={host} />)}</ul>
+      <ul className="divide-y divide-gray-100 dark:divide-gray-700">{value.hosts.map((host) => <HostOutcome key={host.host} host={host} />)}</ul>
     </div>
   );
 }
@@ -84,7 +84,7 @@ export function IndexNowSubmit({
       <label className="block text-sm text-gray-700">
         URLs (one per line)
         <textarea
-          className="mt-1 block h-28 w-full rounded border border-gray-300 px-2 py-1 font-mono text-xs"
+          className="mt-1 block h-28 w-full rounded border border-gray-300 px-2 py-1 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-gray-900"
           value={text}
           onChange={(event) => { setText(event.target.value); }}
         />

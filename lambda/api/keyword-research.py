@@ -29,7 +29,6 @@ import contextlib
 import json
 import logging
 import os
-import sys
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -38,9 +37,6 @@ from urllib.parse import urlparse
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.ai_clients import get_web_search_clients
 from shared.api_response import api_response, not_found_response, success_response, validation_error

@@ -1,12 +1,9 @@
 import {
-  useState, useMemo 
+  useState, useMemo, type ReactNode
 } from 'react';
 import type { Search } from '../../types';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
-import {
-  PaginationHeader, type PaginationHeaderProps
-} from '../ui/PaginationHeader';
-import { paginate } from '../ui/pagination';
+import { LoadOnScrollFooter } from '../ui/LoadOnScrollFooter';
 import { summarizeSearches } from '../../formatting/searchSummary';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import { datedExcelFileName } from '../../exporters/excelFileName';
@@ -25,6 +22,9 @@ import {
   KeywordRow,
 } from './SearchesViewComponents';
 
+/** Keyword rows added each time the reader reaches the end of the list. */
+const SEARCH_ROWS_STEP = 25;
+
 interface SearchesViewProps {
   /** The newest page of runs (the dashboard load). */
   searches: Search[];
@@ -41,8 +41,7 @@ export const SearchesView = ({
   const [exportError, setExportError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [visibleCount, setVisibleCount] = useState(SEARCH_ROWS_STEP);
   const [searchQuery, setSearchQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [promptFilter, setPromptFilter] = useState<string>('all');
@@ -91,21 +90,27 @@ export const SearchesView = ({
     }
   };
 
-  const {
-    pageItems: paginatedKeywords, totalItems
-  } = paginate(keywordGroups, currentPage, itemsPerPage);
+  const shownKeywords = keywordGroups.slice(0, visibleCount);
+  const canRevealMore = visibleCount < keywordGroups.length;
+  const showFromTop = () => setVisibleCount(SEARCH_ROWS_STEP);
 
-  const handleItemsPerPageChange = (value: number) => {
-    setItemsPerPage(value);
-    setCurrentPage(1);
-    setExpandedRow(null);
+  // The next batch: more of the rows already loaded, else the next page from the API.
+  const showMore = () => {
+    if (canRevealMore) {
+      setVisibleCount((count) => count + SEARCH_ROWS_STEP);
+      return;
+    }
+    if (pages.hasMore && !pages.loadingMore) {
+      setVisibleCount((count) => count + SEARCH_ROWS_STEP);
+      void pages.loadMore();
+    }
   };
 
   const clearFilters = () => {
     setSearchQuery('');
     setProviderFilter('all');
     setPromptFilter('all');
-    setCurrentPage(1);
+    showFromTop();
   };
 
   return (
@@ -120,11 +125,11 @@ export const SearchesView = ({
 
         <FiltersSection
           searchQuery={searchQuery}
-          setSearchQuery={(value) => { setSearchQuery(value); setCurrentPage(1); }}
+          setSearchQuery={(value) => { setSearchQuery(value); showFromTop(); }}
           providerFilter={providerFilter}
-          setProviderFilter={(value) => { setProviderFilter(value); setCurrentPage(1); }}
+          setProviderFilter={(value) => { setProviderFilter(value); showFromTop(); }}
           promptFilter={promptFilter}
-          setPromptFilter={(value) => { setPromptFilter(value); setCurrentPage(1); }}
+          setPromptFilter={(value) => { setPromptFilter(value); showFromTop(); }}
           providers={providers}
           promptNames={promptNames}
           onClear={clearFilters}
@@ -132,35 +137,25 @@ export const SearchesView = ({
         />
 
         <SearchTable
-          keywordGroups={paginatedKeywords}
+          keywordGroups={shownKeywords}
+          totalKeywords={keywordGroups.length}
+          moreToLoad={pages.hasMore}
           expandedRow={expandedRow}
           onToggleRow={toggleRow}
           onSelectKeyword={setSelectedKeyword}
-          pagination={{
-            page: currentPage,
-            pageSize: itemsPerPage,
-            total: totalItems,
-            onPageChange: setCurrentPage,
-            onPageSizeChange: handleItemsPerPageChange,
-            idPrefix: 'searches',
-            label: 'Searches pagination',
-          }}
           searchQuery={searchQuery}
           providerFilter={providerFilter}
+          footer={keywordGroups.length > 0 && (
+            <LoadOnScrollFooter
+              onLoadMore={showMore}
+              hasMore={canRevealMore || pages.hasMore}
+              loading={pages.loadingMore}
+              failed={pages.error !== null}
+              watch={`${shownKeywords.length}/${searches.length}`}
+              doneLabel={keywordGroups.length === 1 ? "The only keyword is shown." : `All ${keywordGroups.length} keywords are shown.`}
+            />
+          )}
         />
-
-        {pages.hasMore && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => void pages.loadMore()}
-              disabled={pages.loadingMore}
-              className="px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-            >
-              {pages.loadingMore ? 'Loading…' : 'Load older searches'}
-            </button>
-          </div>
-        )}
       </div>
 
 
@@ -181,30 +176,38 @@ function buildExcelData(searches: Search[]): Record<string, unknown>[] {
 
 interface SearchTableProps {
   keywordGroups: KeywordGroup[];
+  /** Keywords matching the filters among the runs loaded so far. */
+  totalKeywords: number;
+  /** The API holds older runs than the ones loaded. */
+  moreToLoad: boolean;
   expandedRow: string | null;
   onToggleRow: (keyword: string) => void;
   onSelectKeyword: (keyword: string) => void;
-  pagination: PaginationHeaderProps;
   searchQuery: string;
   providerFilter: string;
+  footer: ReactNode;
 }
 
 const SearchTable = ({
   keywordGroups,
+  totalKeywords,
+  moreToLoad,
   expandedRow,
   onToggleRow,
   onSelectKeyword,
-  pagination,
   searchQuery,
   providerFilter,
+  footer,
 }: SearchTableProps) => (
   <div className="bg-white rounded-lg border border-gray-200">
-    <PaginationHeader {...pagination} />
+    <p className="px-6 py-3 text-sm text-gray-500 border-b border-gray-200">
+      {shownSummary(keywordGroups.length, totalKeywords, moreToLoad)}
+    </p>
 
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <TableHeader />
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="bg-white divide-y divide-gray-200 dark:divide-gray-700">
           {keywordGroups.map((group) => (
             <KeywordRow
               key={group.keyword}
@@ -221,8 +224,16 @@ const SearchTable = ({
     {keywordGroups.length === 0 && (
       <EmptyState searchQuery={searchQuery} providerFilter={providerFilter} />
     )}
+    {footer}
   </div>
 );
+
+/** "Showing 25 of 30 keywords · older runs load as you scroll". */
+function shownSummary(shown: number, total: number, moreToLoad: boolean): string {
+  const noun = shown === 1 ? 'keyword' : 'keywords';
+  const count = shown < total ? `Showing ${shown} of ${total} keywords` : `Showing ${shown} ${noun}`;
+  return moreToLoad ? `${count} · older runs load as you scroll` : `${count}, newest runs first`;
+}
 
 const TableHeader = () => (
   <thead className="bg-gray-50">
@@ -231,7 +242,7 @@ const TableHeader = () => (
       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Providers</th>
       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Runs</th>
       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Citations</th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg</th>
+      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap" title="Average citations per run">Avg / run</th>
       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Run</th>
       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
     </tr>

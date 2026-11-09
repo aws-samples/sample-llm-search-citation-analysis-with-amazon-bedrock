@@ -105,13 +105,13 @@ const MentionStats = ({
   if (!brandData || mentionCount === 0) return null;
   
   return (
-    <div className="px-4 sm:px-6 py-3 bg-purple-50 border-b border-purple-100">
+    <div className="px-4 sm:px-6 py-3 bg-violet-50 border-b border-violet-100">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-        <div className="text-sm text-purple-900">
+        <div className="text-sm text-violet-900">
           <span className="font-semibold">{mentionCount} mention(s)</span> found in this response
         </div>
         {mentionPositions.length > 0 && (
-          <div className="text-xs text-purple-700">
+          <div className="text-xs text-violet-700">
             Positions: {mentionPositions.slice(0, 5).map((p, idx) => `pos-${idx}-${Math.floor(p / 100)}`).join(', ')}
             {mentionPositions.length > 5 && '...'}
           </div>
@@ -170,7 +170,7 @@ const FeedbackSection = ({
   bgColor?: string;
   titleColor?: string;
 }) => (
-  <div className="mt-4 border border-green-200 rounded-lg overflow-hidden">
+  <div className="mt-4 border border-gray-200 rounded-lg overflow-hidden">
     <button
       onClick={onToggle}
       className={`w-full px-4 py-3 ${bgColor} transition-colors flex items-center justify-between`}

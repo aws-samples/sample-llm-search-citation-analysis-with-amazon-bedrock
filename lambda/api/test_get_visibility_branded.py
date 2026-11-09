@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
 
 from shared.kpi_engine import answer_from_row, answers_from_rows
 from testing.events import parse_response
+from testing.module_loader import API_DIR
 from testing.report_scope_fixtures import brand, load_scoped_handler, result, scoped_report
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
 _HOTEL = brand('Hotel Coruna', 'first_party', 1, 1)
 
 
@@ -32,7 +31,7 @@ _ROWS = {
 
 @pytest.fixture(scope='module')
 def visibility():
-    return load_scoped_handler(_HERE, 'get-visibility-metrics.py', '_branded')
+    return load_scoped_handler(API_DIR, 'get-visibility-metrics.py', '_branded')
 
 
 @pytest.fixture

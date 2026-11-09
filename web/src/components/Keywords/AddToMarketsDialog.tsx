@@ -46,7 +46,7 @@ function PickStep({
                 onChange={() => onToggle(market.market_id)}
                 className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900" />
               {market.name}
-              <span className="text-xs text-gray-400">{market.language_name}</span>
+              <span className="text-xs text-gray-500">{market.language_name}</span>
             </label>
           );
         })}

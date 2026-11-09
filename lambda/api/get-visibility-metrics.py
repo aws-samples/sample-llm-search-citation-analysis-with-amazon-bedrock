@@ -12,12 +12,7 @@ Optional: ``query_prompt_id`` keeps one persona's answers of the latest run;
 ``brand`` narrows the leaderboard to matching brand names.
 """
 
-import logging
-import sys
 from typing import Any
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import query_last_two_runs_rows
 from shared.api_response import success_response
@@ -25,6 +20,8 @@ from shared.brand_visibility import tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.kpi_engine import BRANDED_FILTERS, Answer, answers_from_rows, filter_branded, owned_domains_from
 from shared.scope_params import (
+    BRAND_FILTER_PARAMS,
+    PERSONA_FILTER_PARAMS,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     keywords_table_name,
@@ -34,9 +31,6 @@ from shared.scoped_reports import capped_scope, read_scope_keywords, required_re
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # One latest-run read per keyword, SCOPE_MAX_WORKERS at a time (map_scope_keywords).
 dynamodb = scoped_dynamodb_resource()
@@ -113,8 +107,8 @@ def scope_visibility(
 @validate({
     'branded': {'type': str, 'choices': list(BRANDED_FILTERS), 'default': 'all'},
     **SCOPE_QUERY_PARAMS,
-    'brand': {'type': str, 'max_length': 200},
-    'query_prompt_id': {'type': str, 'max_length': 100},
+    **BRAND_FILTER_PARAMS,
+    **PERSONA_FILTER_PARAMS,
 })
 @required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
 def handler(event, context, report_scope, brand=None, query_prompt_id=None, branded='all'):

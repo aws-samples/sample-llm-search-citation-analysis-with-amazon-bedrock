@@ -22,6 +22,10 @@ import { ResearchListSkeleton } from './ResearchListSkeleton';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
 import { LoadMoreButton } from '../ui/LoadMoreButton';
 import { StrokeIcon } from '../ui/StrokeIcon';
+import { HistoryFilterBar } from './ResearchHistoryFilters';
+import {
+  DEFAULT_HISTORY_FILTERS, filterHistory, type HistoryFilters
+} from './researchHistoryFilter';
 import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
 } from '../ui/iconPaths';
@@ -59,11 +63,41 @@ const EmptyState = () => (
   <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
     <StrokeIcon className="w-12 h-12 mx-auto text-gray-300" paths={CLOCK_PATHS} />
     <p className="mt-4 text-sm text-gray-500">No research history yet</p>
-    <p className="text-xs text-gray-400 mt-1">
+    <p className="text-xs text-gray-500 mt-1">
       Start by expanding a keyword or analyzing a competitor
     </p>
   </div>
 );
+
+/** Rows shown at once; "Show more" reveals the next batch of the loaded runs. */
+const ROWS_PER_PAGE = 20;
+
+/** Without `onClear` the filters are already at their defaults and only the old-failures toggle can help. */
+const NoMatchState = ({ onClear }: { onClear?: () => void }) => (
+  <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
+    <p className="text-sm text-gray-500">No loaded runs match these filters.</p>
+    {onClear !== undefined && <button
+      type="button"
+      onClick={onClear}
+      className="mt-2 rounded text-sm font-medium text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
+    >
+      Clear filters
+    </button>}
+  </div>
+);
+
+interface HistoryPagerProps extends Pick<ResearchHistoryProps, 'onLoadMore' | 'loadingMore'> {
+  /** Filtered runs already loaded but not yet shown. */
+  remaining: number;
+  onShowMore: () => void;
+}
+
+/** Shows the next batch of loaded runs first, then asks the API for older ones. */
+const HistoryPager = ({
+  remaining, onShowMore, onLoadMore, loadingMore = false
+}: HistoryPagerProps) => (remaining > 0
+  ? <LoadMoreButton onLoadMore={onShowMore} loading={false} label={`Show ${Math.min(ROWS_PER_PAGE, remaining)} more`} />
+  : <LoadMoreButton onLoadMore={onLoadMore} loading={loadingMore} label="Load older research" />);
 
 export const ResearchHistory = ({
   history,
@@ -76,6 +110,17 @@ export const ResearchHistory = ({
   loadingMore = false,
 }: ResearchHistoryProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
+  const [shownCount, setShownCount] = useState(ROWS_PER_PAGE);
+  // Ages are measured from when the tab opened, so rows do not jump in and out while it is open.
+  const [now] = useState(() => Date.now());
+  const filtered = useMemo(() => filterHistory(history, filters, now), [history, filters, now]);
+  const shown = filtered.slice(0, shownCount);
+
+  const changeFilters = (next: HistoryFilters) => {
+    setFilters(next);
+    setShownCount(ROWS_PER_PAGE);
+  };
 
   useEffect(() => {
     onRefresh();
@@ -97,9 +142,15 @@ export const ResearchHistory = ({
       {loading && history.length === 0 && <ResearchListSkeleton label="Loading history" detailsGapClassName="mt-2" />}
       {!loading && history.length === 0 && <EmptyState />}
 
-      {history.length > 0 && (
+      <HistoryFilterBar history={history} filters={filters} now={now} onChange={changeFilters} />
+
+      {history.length > 0 && filtered.length === 0 && (
+        <NoMatchState onClear={filters === DEFAULT_HISTORY_FILTERS ? undefined : () => changeFilters(DEFAULT_HISTORY_FILTERS)} />
+      )}
+
+      {shown.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
-          {history.map((item) => (
+          {shown.map((item) => (
             <HistoryItem
               key={item.id}
               item={item}
@@ -113,7 +164,12 @@ export const ResearchHistory = ({
         </div>
       )}
 
-      <LoadMoreButton onLoadMore={history.length > 0 ? onLoadMore : undefined} loading={loadingMore} label="Load older research" />
+      <HistoryPager
+        remaining={filtered.length - shown.length}
+        onShowMore={() => setShownCount((count) => count + ROWS_PER_PAGE)}
+        onLoadMore={history.length > 0 ? onLoadMore : undefined}
+        loadingMore={loadingMore}
+      />
     </div>
   );
 };
@@ -219,7 +275,7 @@ const ExpandButton = ({
 }: ExpandButtonProps) => (
   <button
     type="button"
-    className="mt-0.5 text-gray-400 shrink-0"
+    className="mt-0.5 rounded text-gray-500 shrink-0 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
     aria-label={isExpanded ? 'Collapse research keywords' : 'Expand research keywords'}
     aria-expanded={isExpanded}
     aria-controls={controls}
@@ -242,11 +298,11 @@ const TYPE_BADGES: Record<string, {
   },
   competitor: {
     label: 'Competitor',
-    className: 'bg-purple-100 text-purple-700',
+    className: 'bg-violet-100 text-violet-700',
   },
   agent: {
     label: 'Agent',
-    className: 'bg-emerald-100 text-emerald-700',
+    className: 'bg-gray-100 text-emerald-700',
   },
 };
 
@@ -288,7 +344,7 @@ const StepSummary = ({ item }: { item: KeywordResearchItem }) => {
       <span className="hidden sm:inline">•</span>
       <span>
         {item.steps_done ?? 0}/{total} providers
-        {failed > 0 && <span className="text-red-600"> ({failed} failed)</span>}
+        {failed > 0 && <span className="text-red-700"> ({failed} failed)</span>}
       </span>
     </>
   );
@@ -306,7 +362,7 @@ const withoutRowToggle = (action: () => void) => (event: MouseEvent) => {
 const RetryButton = ({ onClick }: RowActionProps) => (
   <button
     onClick={withoutRowToggle(onClick)}
-    className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+    className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
     title="Retry failed providers"
     aria-label="Retry failed providers"
   >
@@ -317,8 +373,9 @@ const RetryButton = ({ onClick }: RowActionProps) => (
 const DeleteButton = ({ onClick }: RowActionProps) => (
   <button
     onClick={withoutRowToggle(onClick)}
-    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+    className="p-2 text-gray-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
     title="Delete"
+    aria-label="Delete"
   >
     <StrokeIcon className="w-4 h-4" paths={TRASH_PATHS} />
   </button>

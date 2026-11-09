@@ -26,10 +26,9 @@ import pytest
 from shared.scope_params import ReportScope
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 from testing.response_size import assert_within_page_budget, long_text
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
@@ -62,7 +61,7 @@ def search_table() -> MagicMock:
 @pytest.fixture
 def mod(search_table: MagicMock, monkeypatch: pytest.MonkeyPatch):
     with patch.dict(os.environ, _ENV):
-        module = load_handler_module(_API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_volume_under_test')
+        module = load_handler_module(API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_volume_under_test')
     monkeypatch.setattr(module, 'dynamodb', fake_dynamodb_resource(search_table))
     monkeypatch.setattr(module, 'all_active_scope', lambda _table: ReportScope('all', _KEYWORDS, {'mode': 'all'}, 'All keywords'))
     return module

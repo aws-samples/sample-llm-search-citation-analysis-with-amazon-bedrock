@@ -5,7 +5,6 @@ DataForSEO is never called: ``ai_overview_search`` is replaced on the handler mo
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
@@ -16,13 +15,9 @@ from shared.dataforseo_locations import GLOBAL_MARKET_CODES
 from shared.dataforseo_serp import AiOverviewResult, OrganicItem
 from shared.markets import Market
 from shared.provider_health import INVALID_KEY, classify_provider_error
-from testing.handler_fixtures import handler_fixture
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.search_handler_fixtures import search_handler_fixture
 
-search_handler = handler_fixture(
-    module_name='search_handler_ai_overview', directory=os.path.dirname(os.path.abspath(__file__)),
-    filename='handler.py', env=SEARCH_HANDLER_ENV,
-)
+search_handler = search_handler_fixture('search_handler_ai_overview')
 
 _KEYWORD = 'hotel coruña'
 _ORGANIC = (

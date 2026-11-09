@@ -81,7 +81,7 @@ function BriefCard({ item }: { readonly item: ContentStudioHistory }) {
         )}
       />
       {item.content_warning && (
-        <output className="block rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <output className="block rounded-md bg-gray-50 px-3 py-2 text-sm text-amber-800 dark:bg-gray-950/40 dark:text-amber-200">
           <span className="font-semibold">Needs review: </span>
           {formatContentWarning(item.content_warning)}
         </output>

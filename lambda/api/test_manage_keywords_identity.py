@@ -1,6 +1,5 @@
 """Identity and conditional-write tests for manual keyword management."""
 
-import os
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +9,7 @@ from testing.dynamodb_stubs import conditional_check_failure, fake_table
 from testing.env import KEYWORDS_TABLE_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
 _FULLWIDTH_ALPHA = ''.join(chr(code_point) for code_point in (
     0xFF21,
@@ -24,7 +24,7 @@ _ALREADY_EXISTS = (409, {'error': 'Keyword already exists'})
 _NOT_FOUND = (404, {'error': 'Keyword not found'})
 
 manage_module = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)), 'manage-keywords.py', 'manage_keywords_under_test_identity',
+    API_DIR, 'manage-keywords.py', 'manage_keywords_under_test_identity',
     env=KEYWORDS_TABLE_ENV, scope='function',
 )
 

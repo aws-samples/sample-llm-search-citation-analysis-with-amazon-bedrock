@@ -115,7 +115,8 @@ describe('Local results and rank grid from Settings', () => {
   it.each(TARGET_TABS)('names the brand\'s own domain as the business matched on the %s tab', async (tab) => {
     await openTab(tab);
 
-    expect(screen.getByLabelText(`Your business (empty: ${OWNED_DOMAIN}) by`)).toBeInTheDocument();
+    expect(screen.getByLabelText('Find your business by')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(`Empty: matches ${OWNED_DOMAIN}`)).toBeInTheDocument();
   });
 
   it('sends no business so the server matches the brand\'s own domain', async () => {

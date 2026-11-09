@@ -12,9 +12,10 @@
  *   - `sm` (32px height)
  *   - `md` (default, 36-40px height)
  *
- * Dark mode is handled at the global stylesheet level (see `index.css`),
- * which is why `bg-gray-900 / hover:bg-gray-800` works in both themes
- * without explicit `dark:` variants.
+ * Dark mode is handled at the global stylesheet level (see `index.css`):
+ * `bg-gray-900 text-white` inverts to white with gray-900 text in dark, and
+ * `hover:bg-gray-800` to gray-100, so the primary variant needs no `dark:`
+ * colour variants.
  *
  * See `docs/design-system.md` for usage guidance.
  */
@@ -39,7 +40,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const baseClasses =
-  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500';
+  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800';
 
 const sizeClasses: Record<ButtonSize, string> = {
   sm: 'px-3 py-1.5 text-sm',
@@ -54,7 +55,7 @@ const iconOnlySizeClasses: Record<ButtonSize, string> = {
 const variantClasses = (variant: ButtonVariant): string => {
   switch (variant) {
     case 'primary':
-      return 'bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-300';
+      return 'bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-100 disabled:bg-gray-200 disabled:text-gray-500 dark:disabled:bg-gray-700 dark:disabled:text-gray-400';
     case 'secondary':
       return 'bg-white text-gray-900 border border-gray-200 hover:bg-gray-50';
     case 'ghost':
@@ -62,7 +63,7 @@ const variantClasses = (variant: ButtonVariant): string => {
     case 'danger':
       return 'bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300';
     case 'iconOnly':
-      return 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md';
+      return 'text-gray-500 hover:text-gray-600 hover:bg-gray-100 rounded-md';
   }
 };
 

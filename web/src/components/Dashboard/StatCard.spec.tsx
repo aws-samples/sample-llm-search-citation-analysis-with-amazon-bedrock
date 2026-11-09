@@ -50,18 +50,10 @@ describe('StatCard', () => {
     expect(svg).toBeInTheDocument();
   });
 
-  it('applies blue tone classes when tone prop is "blue"', () => {
-    const { container } = renderStatCard({ tone: 'blue' });
+  it.each(['blue', 'violet', 'emerald', 'amber', undefined] as const)('draws the %s tone as the neutral icon badge', (tone) => {
+    const { container } = renderStatCard(tone === undefined ? {} : { tone });
 
-    const badge = container.querySelector('.bg-blue-50');
-    expect(badge).toBeInTheDocument();
-  });
-
-  it('falls back to gray tone classes when tone prop is omitted', () => {
-    const { container } = renderStatCard();
-
-    const badge = container.querySelector('.bg-gray-50');
-    expect(badge).toBeInTheDocument();
+    expect(container.querySelector('.bg-gray-100.text-gray-600')).toBeInTheDocument();
   });
 
   it('prefixes an approximate value with ≈', () => {

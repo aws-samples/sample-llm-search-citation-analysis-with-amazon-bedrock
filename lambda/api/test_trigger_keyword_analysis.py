@@ -19,7 +19,7 @@ from botocore.exceptions import ClientError
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.deadlines import spent_deadline
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 mock_keywords_table = MagicMock()
 mock_prompts_table = MagicMock()
@@ -37,7 +37,7 @@ _ENV = {
 def _load(filename, module_name):
     with patch('boto3.resource', return_value=mock_dynamodb), patch('boto3.client', return_value=mock_stepfunctions), \
             patch.dict(os.environ, _ENV):
-        return load_handler_module(os.path.dirname(__file__), filename, module_name)
+        return load_handler_module(API_DIR, filename, module_name)
 
 
 _subset = _load('trigger-keyword-analysis.py', 'trigger_keyword_analysis_under_test')

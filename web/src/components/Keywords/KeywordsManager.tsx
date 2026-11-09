@@ -1,436 +1,163 @@
-import {
-  useCallback, useMemo, useRef, useState
-} from 'react';
-import {
-  apiDelete, apiPost, apiPut
-} from '../../api/client';
-import type {
-  Keyword, KeywordGroup
-} from '../../types';
-import { useAlertModal } from '../../hooks/useAlertModal';
-import {
-  mergeUpdatedKeywords, useKeywordGroups
-} from '../../hooks/useKeywordGroups';
+import type { Keyword } from '../../types';
 import {
   ConfirmModal, AlertModal
 } from '../ui/Modal';
+import { KeywordAddBar } from './KeywordAddBar';
+import { KeywordTable } from './KeywordTable';
 import {
-  KeywordInputSection,
-  KeywordList,
-} from './KeywordsManagerComponents';
-import {
-  KeywordGroupsPanel, filterKeywords, isGroupFilterFor
+  KeywordGroupsPanel, isGroupFilterFor
 } from './KeywordGroupsPanel';
-import type { GroupFilter } from './KeywordGroupsPanel';
 import { BulkGroupBar } from './KeywordGroupAssignment';
 import { AddToMarketsDialog } from './AddToMarketsDialog';
 import { KeywordMarketSelect } from './KeywordMarketControls';
-import { useKeywordMarketState } from './useKeywordMarketState';
+import { isKeywordActive } from './keywordEntry';
+import { useKeywordsManager } from './useKeywordsManager';
+import { useKeywordListPage } from './useKeywordListPage';
 import {
-  CREATE_ERROR_MESSAGE,
-  UPDATE_ERROR_MESSAGE,
-  ACTIVE_KEYWORD_STATUS,
-  DELETE_ERROR_MESSAGE,
-  PAUSED_KEYWORD_STATUS,
-  STATUS_ERROR_MESSAGE,
-  buildBulkMessage,
-  buildCreateKeywordBody,
-  collectBulkResults,
-  getBulkAlert,
-  getSafeErrorMessage,
-  isDuplicateKeyword,
-  isKeywordActive,
-  parseBulkKeywords,
-  parseKeywordResponse,
-  processBulkKeyword,
-} from './keywordEntry';
-import type { BulkKeywordResult } from './keywordEntry';
+  KeywordListPager, KeywordListSearch
+} from './KeywordListSearch';
 
 interface KeywordsManagerProps {
   keywords: Keyword[];
   setKeywords: (keywords: Keyword[]) => void;
 }
 
-type DeleteTarget =
-  | {
-    kind: 'keyword';
-    id: string 
+/** `ids` added to (`selected`) or removed from `current`. */
+function withPageSelection(current: ReadonlySet<string>, ids: string[], selected: boolean): Set<string> {
+  const next = new Set(current);
+  for (const id of ids) {
+    if (selected) next.add(id); else next.delete(id);
   }
-  | {
-    kind: 'group';
-    group: KeywordGroup 
-  }
-  | null;
+  return next;
+}
 
+/** Why a narrowed view is empty: the search text, or else the status/market filters. */
+function noMatchMessage(query: string): string {
+  const needle = query.trim();
+  return needle === '' ? 'No keywords match these filters.' : `No keywords match "${needle}".`;
+}
+
+/**
+ * Settings › Keywords: the page header with the add bar, then the group
+ * filter beside the keyword table.
+ */
 export const KeywordsManager = ({
   keywords, setKeywords
 }: KeywordsManagerProps) => {
-  const [newKeyword, setNewKeyword] = useState('');
-  const [bulkKeywords, setBulkKeywords] = useState('');
-  const [isBulkMode, setIsBulkMode] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editText, setEditText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState<GroupFilter>('all');
-  const [bulkSelectedIds, setBulkSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const [groupMenuKeywordId, setGroupMenuKeywordId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
-  const {
-    alertModal, showAlert, closeAlert
-  } = useAlertModal();
-  const market = useKeywordMarketState(keywords);
-
-  // The setter we receive is not guaranteed to accept functional updates, so
-  // membership responses are merged against the latest keywords via a ref.
-  const keywordsRef = useRef(keywords);
-  keywordsRef.current = keywords;
-  const applyUpdatedKeywords = useCallback((updated: Keyword[]) => {
-    setKeywords(mergeUpdatedKeywords(keywordsRef.current, updated));
-  }, [setKeywords]);
-
-  const {
-    groups, loading: groupsLoading, createGroup, renameGroup, removeGroup, changeMemberships
-  } = useKeywordGroups({ onKeywordsUpdated: applyUpdatedKeywords });
-
-  const knownGroupIds = useMemo(() => new Set(groups.map((group) => group.id)), [groups]);
-  const visibleKeywords = useMemo(
-    () => filterKeywords(keywords, filter, knownGroupIds),
-    [keywords, filter, knownGroupIds]
-  );
-  const ungroupedCount = useMemo(
-    () => filterKeywords(keywords, 'ungrouped', knownGroupIds).length,
-    [keywords, knownGroupIds]
-  );
-  // Keywords added while a group is selected land in that group.
-  const targetGroupIds = typeof filter === 'object' ? [filter.groupId] : [];
-
-  /** The trimmed entry, or null when it is blank or (after an alert) a duplicate. */
-  const acceptedKeyword = (entry: string, editingKeywordId?: string): string | null => {
-    const trimmed = entry.trim();
-    if (!trimmed) return null;
-    if (isDuplicateKeyword(trimmed, keywords, editingKeywordId)) {
-      showAlert('Duplicate Keyword', `"${trimmed}" already exists`, 'error');
-      return null;
-    }
-    return trimmed;
-  };
-
-  const addKeyword = async () => {
-    const trimmed = acceptedKeyword(newKeyword);
-    if (trimmed === null) return;
-
-    setSaving(true);
-    try {
-      const response = await apiPost<unknown>(
-        '/keywords',
-        buildCreateKeywordBody(trimmed, targetGroupIds, market.newMarketId),
-        { allowStructured4xx: true }
-      );
-      const data = parseKeywordResponse(response);
-      setKeywords([data, ...keywords]);
-      setNewKeyword('');
-    } catch (error) {
-      console.error('Error adding keyword:', error);
-      showAlert('Error', getSafeErrorMessage(error, CREATE_ERROR_MESSAGE), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const addBulkKeywords = async () => {
-    if (!bulkKeywords.trim()) return;
-
-    const keywordList = parseBulkKeywords(bulkKeywords);
-    if (keywordList.length === 0) return;
-
-    const duplicates = keywordList.filter((keyword) => isDuplicateKeyword(keyword, keywords));
-    const newKeywordsToAdd = keywordList.filter((keyword) => !isDuplicateKeyword(keyword, keywords));
-
-    if (newKeywordsToAdd.length === 0) {
-      showAlert('All Duplicates', `All keywords already exist: ${duplicates.join(', ')}`, 'error');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const results: BulkKeywordResult[] = [];
-      for (const keyword of newKeywordsToAdd) {
-        results.push(await processBulkKeyword(keyword, targetGroupIds, market.newMarketId));
-      }
-
-      const {
-        addedKeywords, failures
-      } = collectBulkResults(results);
-
-      if (addedKeywords.length > 0) {
-        setKeywords([...addedKeywords, ...keywords]);
-      }
-      setBulkKeywords(failures.map(({ keyword }) => keyword).join('\n'));
-
-      const alert = getBulkAlert(addedKeywords.length, failures.length);
-      showAlert(
-        alert.title,
-        buildBulkMessage(addedKeywords.length, duplicates.length, failures),
-        alert.variant
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateKeyword = async (id: string) => {
-    const trimmed = acceptedKeyword(editText, id);
-    if (trimmed === null) return;
-
-    setSaving(true);
-    try {
-      const response = await apiPut<unknown>(
-        `/keywords/${id}`,
-        market.controls ? {
-          keyword: trimmed,
-          market_id: market.editMarketId,
-        } : { keyword: trimmed },
-        { allowStructured4xx: true }
-      );
-      const data = parseKeywordResponse(response);
-      setKeywords(keywords.map((item) => (item.id === id ? data : item)));
-      setEditingId(null);
-      setEditText('');
-    } catch (error) {
-      console.error('Error updating keyword:', error);
-      showAlert('Error', getSafeErrorMessage(error, UPDATE_ERROR_MESSAGE), 'error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const deleteKeyword = async (id: string) => {
-    await apiDelete<unknown>(`/keywords/${id}`, { allowStructured4xx: true });
-    setKeywords(keywords.filter((item) => item.id !== id));
-  };
-
-  /**
-   * Activate or pause keywords.
-   *
-   * Only the status changes: `keyword` is sent because the API requires it and
-   * refuses a different canonical identity, which makes this a no-op on the
-   * text. Each keyword is one PUT, so a partial failure leaves the successful
-   * ones changed — reported rather than rolled back, since the alternative is
-   * silently discarding work the user asked for.
-   */
-  const setKeywordStatus = async (targets: readonly Keyword[], active: boolean) => {
-    if (targets.length === 0) return;
-    const status = active ? ACTIVE_KEYWORD_STATUS : PAUSED_KEYWORD_STATUS;
-
-    setSaving(true);
-    try {
-      const updated = new Map<string, Keyword>();
-      const failures: string[] = [];
-      for (const target of targets) {
-        try {
-          const response = await apiPut<unknown>(
-            `/keywords/${target.id}`,
-            {
-              keyword: target.keyword,
-              status,
-            },
-            { allowStructured4xx: true }
-          );
-          const data = parseKeywordResponse(response);
-          updated.set(data.id, data);
-        } catch (error) {
-          console.error('Error changing keyword status:', error);
-          failures.push(target.keyword);
-        }
-      }
-
-      if (updated.size > 0) {
-        setKeywords(keywords.map((item) => updated.get(item.id) ?? item));
-        setBulkSelectedIds(new Set());
-      }
-      if (failures.length > 0) {
-        showAlert(
-          'Error',
-          `${STATUS_ERROR_MESSAGE} for ${failures.length} of ${targets.length}: ${failures.join(', ')}`,
-          'error'
-        );
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const selectedKeywords = keywords.filter((item) => bulkSelectedIds.has(item.id));
-  const pausedSelectedCount = selectedKeywords.filter((item) => !isKeywordActive(item)).length;
-
-  const deleteGroup = async (group: KeywordGroup) => {
-    const outcome = await removeGroup(group.id);
-    if (!outcome.success) {
-      showAlert('Error', outcome.message, 'error');
-      return;
-    }
-    if (isGroupFilterFor(filter, group.id)) setFilter('all');
-    // Members keep existing; only their membership went away.
-    setKeywords(keywords.map((item) => ({
-      ...item,
-      group_ids: item.group_ids?.filter((groupId) => groupId !== group.id),
-    })));
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    setSaving(true);
-    try {
-      if (deleteTarget.kind === 'keyword') {
-        await deleteKeyword(deleteTarget.id);
-      } else {
-        await deleteGroup(deleteTarget.group);
-      }
-    } catch (error) {
-      console.error('Error deleting:', error);
-      showAlert('Error', getSafeErrorMessage(error, DELETE_ERROR_MESSAGE), 'error');
-    } finally {
-      setSaving(false);
-      setDeleteTarget(null);
-    }
-  };
-
-  const runMembershipChange = async (groupId: string, changes: {
-    add?: string[];
-    remove?: string[] 
-  }) => {
-    setSaving(true);
-    try {
-      const outcome = await changeMemberships(groupId, changes);
-      if (!outcome.success) showAlert('Error', outcome.message, 'error');
-      return outcome.success;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleMembership = (keyword: Keyword, group: KeywordGroup, member: boolean) => {
-    void runMembershipChange(group.id, member ? { remove: [keyword.id] } : { add: [keyword.id] });
-  };
-
-  const applyBulk = async (group: KeywordGroup, action: 'add' | 'remove') => {
-    const ids = [...bulkSelectedIds];
-    const ok = await runMembershipChange(group.id, action === 'add' ? { add: ids } : { remove: ids });
-    if (ok) setBulkSelectedIds(new Set());
-  };
-
-  const toggleBulkSelect = (id: string) => {
-    const next = new Set(bulkSelectedIds);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setBulkSelectedIds(next);
-  };
-
-  const startEdit = (keyword: Keyword) => {
-    setEditingId(keyword.id);
-    setEditText(keyword.keyword);
-    market.setEditMarketId(keyword.market_id ?? '');
-  };
-
-  const emptyMessage = filter === 'all'
-    ? undefined
-    : 'No keywords in this view. Add one above, or tick keywords in "All" and use "Add to group".';
+  const m = useKeywordsManager(keywords, setKeywords);
+  const list = useKeywordListPage(m.visibleKeywords);
+  const listEmptyMessage = list.narrowed && m.visibleKeywords.length > 0 ? noMatchMessage(list.query) : m.emptyMessage;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200">
-      <KeywordGroupsPanel
-        groups={groups}
-        loading={groupsLoading}
-        totalKeywords={keywords.length}
-        ungroupedCount={ungroupedCount}
-        filter={filter}
-        onFilterChange={(next) => { setFilter(next); setBulkSelectedIds(new Set()); }}
-        onCreate={createGroup}
-        onRename={renameGroup}
-        onDelete={(group) => setDeleteTarget({
-          kind: 'group',
-          group 
-        })}
-        onNotify={showAlert}
-      />
+    // The Settings section already draws the card: bleed to its edges instead of nesting a second one.
+    <div className="-m-4 sm:-m-6">
+      <div className="p-4 sm:p-6 border-b border-gray-200 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Keywords</h2>
+          <p className="text-sm text-gray-500">Analysis runs send every active keyword to each AI engine.</p>
+        </div>
+        <KeywordAddBar
+          isBulkMode={m.isBulkMode}
+          setIsBulkMode={m.setIsBulkMode}
+          newKeyword={m.newKeyword}
+          setNewKeyword={m.setNewKeyword}
+          bulkKeywords={m.bulkKeywords}
+          setBulkKeywords={m.setBulkKeywords}
+          saving={m.saving}
+          onAddKeyword={m.addKeyword}
+          onAddBulkKeywords={m.addBulkKeywords}
+          marketPicker={m.market.controls && (
+            <KeywordMarketSelect id="new-keyword-market" label="Market for new keywords" prefix="in" value={m.market.newMarketId}
+              markets={m.market.markets} onChange={m.market.setNewMarketId} disabled={m.saving} />
+          )}
+          targetGroupName={m.groups.find((group) => isGroupFilterFor(m.filter, group.id))?.name}
+        />
+      </div>
 
-      <KeywordInputSection
-        isBulkMode={isBulkMode}
-        setIsBulkMode={setIsBulkMode}
-        newKeyword={newKeyword}
-        setNewKeyword={setNewKeyword}
-        bulkKeywords={bulkKeywords}
-        setBulkKeywords={setBulkKeywords}
-        saving={saving}
-        onAddKeyword={addKeyword}
-        onAddBulkKeywords={addBulkKeywords}
-        marketPicker={market.controls && (
-          <KeywordMarketSelect id="new-keyword-market" label="Market for new keywords" value={market.newMarketId}
-            markets={market.markets} onChange={market.setNewMarketId} disabled={saving} />
-        )}
-      />
+      <div className="p-4 sm:p-6 grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        <KeywordGroupsPanel
+          groups={m.groups}
+          loading={m.groupsLoading}
+          totalKeywords={keywords.length}
+          ungroupedCount={m.ungroupedCount}
+          filter={m.filter}
+          onFilterChange={(next) => { m.setFilter(next); m.setBulkSelectedIds(new Set()); list.setPage(1); }}
+          onCreate={m.createGroup}
+          onRename={m.renameGroup}
+          onDelete={(group) => m.setDeleteTarget({
+            kind: 'group',
+            group
+          })}
+          onNotify={m.showAlert}
+        />
 
-      <BulkGroupBar
-        selectedCount={bulkSelectedIds.size}
-        groups={groups}
-        busy={saving}
-        onAddToGroup={(group) => { void applyBulk(group, 'add'); }}
-        onRemoveFromGroup={(group) => { void applyBulk(group, 'remove'); }}
-        onClearSelection={() => setBulkSelectedIds(new Set())}
-        pausedSelectedCount={pausedSelectedCount}
-        onActivateSelected={() => {
-          void setKeywordStatus(selectedKeywords.filter((item) => !isKeywordActive(item)), true);
-        }}
-        onPauseSelected={() => {
-          void setKeywordStatus(selectedKeywords.filter(isKeywordActive), false);
-        }}
-      />
-
-      <KeywordList
-        keywords={visibleKeywords}
-        editingId={editingId}
-        editText={editText}
-        setEditText={setEditText}
-        onStartEdit={startEdit}
-        onUpdateKeyword={updateKeyword}
-        onCancelEdit={() => { setEditingId(null); setEditText(''); }}
-        onDeleteKeyword={(id) => setDeleteTarget({
-          kind: 'keyword',
-          id 
-        })}
-        marketControls={market.controls}
-        groups={groups}
-        bulkSelectedIds={bulkSelectedIds}
-        onToggleBulkSelect={toggleBulkSelect}
-        groupMenuKeywordId={groupMenuKeywordId}
-        onToggleGroupMenu={(id) => setGroupMenuKeywordId(groupMenuKeywordId === id ? null : id)}
-        onToggleMembership={toggleMembership}
-        membershipBusy={saving}
-        emptyMessage={emptyMessage}
-        onSetKeywordStatus={(keyword, active) => { void setKeywordStatus([keyword], active); }}
-        statusBusy={saving}
-      />
+        <div className="min-w-0 space-y-3">
+          {m.visibleKeywords.length > 0 && (
+            <KeywordListSearch list={list} totalCount={m.visibleKeywords.length} markets={m.market.controls?.markets} />
+          )}
+          <BulkGroupBar
+            selectedCount={m.bulkSelectedIds.size}
+            groups={m.groups}
+            busy={m.saving}
+            onAddToGroup={(group) => { void m.applyBulk(group, 'add'); }}
+            onRemoveFromGroup={(group) => { void m.applyBulk(group, 'remove'); }}
+            onClearSelection={() => m.setBulkSelectedIds(new Set())}
+            pausedSelectedCount={m.pausedSelectedCount}
+            onActivateSelected={() => {
+              void m.setKeywordStatus(m.selectedKeywords.filter((item) => !isKeywordActive(item)), true);
+            }}
+            onPauseSelected={() => {
+              void m.setKeywordStatus(m.selectedKeywords.filter(isKeywordActive), false);
+            }}
+          />
+          <div className="rounded-lg border border-gray-200">
+            <KeywordTable
+              keywords={list.pageItems}
+              footer={<KeywordListPager list={list} />}
+              editingId={m.editingId}
+              editText={m.editText}
+              setEditText={m.setEditText}
+              onStartEdit={m.startEdit}
+              onUpdateKeyword={m.updateKeyword}
+              onCancelEdit={() => { m.setEditingId(null); m.setEditText(''); }}
+              onDeleteKeyword={(id) => m.setDeleteTarget({
+                kind: 'keyword',
+                id
+              })}
+              marketControls={m.market.controls}
+              groups={m.groups}
+              bulkSelectedIds={m.bulkSelectedIds}
+              onToggleBulkSelect={m.toggleBulkSelect}
+              onSelectPage={(ids, selected) => m.setBulkSelectedIds(withPageSelection(m.bulkSelectedIds, ids, selected))}
+              groupMenuKeywordId={m.groupMenuKeywordId}
+              onToggleGroupMenu={(id) => m.setGroupMenuKeywordId(m.groupMenuKeywordId === id ? null : id)}
+              onToggleMembership={m.toggleMembership}
+              membershipBusy={m.saving}
+              emptyMessage={listEmptyMessage}
+              onSetKeywordStatus={(keyword, active) => { void m.setKeywordStatus([keyword], active); }}
+              statusBusy={m.saving}
+            />
+          </div>
+        </div>
+      </div>
 
       <ConfirmModal
-        isOpen={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        title={deleteTarget?.kind === 'group' ? 'Delete Keyword Group' : 'Delete Keyword'}
-        message={deleteTarget?.kind === 'group'
-          ? `Delete the group "${deleteTarget.group.name}"? Its keywords are kept; they just leave the group.`
+        isOpen={m.deleteTarget !== null}
+        onClose={() => m.setDeleteTarget(null)}
+        onConfirm={m.confirmDelete}
+        title={m.deleteTarget?.kind === 'group' ? 'Delete Keyword Group' : 'Delete Keyword'}
+        message={m.deleteTarget?.kind === 'group'
+          ? `Delete the group "${m.deleteTarget.group.name}"? Its keywords are kept; they just leave the group.`
           : 'Are you sure you want to delete this keyword?'}
         confirmText="Delete"
         confirmVariant="danger"
       />
 
-      <AlertModal {...alertModal} onClose={closeAlert} />
+      <AlertModal {...m.alertModal} onClose={m.closeAlert} />
 
-      <AddToMarketsDialog source={market.marketSource} keywords={keywords} markets={market.markets}
-        onClose={() => market.setMarketSource(null)}
-        onCreated={(created) => setKeywords([...created, ...keywordsRef.current])} />
+      <AddToMarketsDialog source={m.market.marketSource} keywords={keywords} markets={m.market.markets}
+        onClose={() => m.market.setMarketSource(null)}
+        onCreated={(created) => setKeywords([...created, ...m.keywordsRef.current])} />
     </div>
   );
 };

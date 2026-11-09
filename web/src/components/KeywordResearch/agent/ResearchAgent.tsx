@@ -21,7 +21,7 @@ export function ResearchAgent({ onKeywordsAdded }: ResearchAgentProps) {
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600">
-        Pick an industry template, name the business and let the agent plan, run and judge its own searches in the background; open a run to review and add the keywords it proposes.
+        Fill in the brief and start a run. When it finishes, open it under Runs to review the proposed keywords and add them.
       </p>
 
       <AgentBriefForm

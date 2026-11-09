@@ -29,8 +29,8 @@ const HistoryItem = ({
   onSelect: () => void;
 }) => {
   const statusColors = {
-    success: 'bg-emerald-100 text-emerald-800',
-    blocked: 'bg-amber-100 text-amber-800',
+    success: 'bg-gray-100 text-emerald-800',
+    blocked: 'bg-gray-100 text-amber-800',
     error: 'bg-red-100 text-red-800',
   };
   
@@ -57,7 +57,7 @@ const HistoryItem = ({
         </span>
       </div>
       {blockReason && (
-        <p className="text-xs text-amber-600 mb-1">
+        <p className="text-xs text-amber-700 mb-1">
           {BLOCK_REASON_LABELS[blockReason]}
         </p>
       )}
@@ -132,7 +132,7 @@ export const HistoryTab = ({
         <p className="text-red-700">{historyError}</p>
         <button
           onClick={onRetry}
-          className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+          className="mt-2 text-sm text-red-600 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200 underline"
         >
           Try again
         </button>

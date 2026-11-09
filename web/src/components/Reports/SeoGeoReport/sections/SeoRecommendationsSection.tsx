@@ -54,6 +54,7 @@ export function SeoRecommendationsSection({ insights }: Props) {
     loading: insights.loading,
     error: insights.error,
     loadingMessage: 'Loading the SEO recommendations…',
+    loadingShape: 'block',
     value: insights.recommendations.length > 0 ? insights.recommendations : null,
     emptyMessage: EMPTY_MESSAGE,
   });

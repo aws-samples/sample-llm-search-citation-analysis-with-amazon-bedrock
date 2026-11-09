@@ -122,7 +122,7 @@ export function SiteAuditSummary({
   const stopped = stopReasonText(audit);
   return (
     <div className="space-y-4">
-      {stopped !== null && <output className="block rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{stopped}</output>}
+      {stopped !== null && <output className="block rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-amber-800">{stopped}</output>}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <ScoreCard audit={audit} summary={summary} />
         <SeverityCards summary={summary} />

@@ -1,5 +1,6 @@
 import type { Search } from '../../types';
 import { summarizeSearches } from '../../formatting/searchSummary';
+import { providerName } from '../../constants/providers';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_DOWN_PATHS, DOWNLOAD_PATHS 
@@ -141,7 +142,7 @@ export const FiltersSection = ({
         >
           <option value="all">All Providers</option>
           {providers.map((p) => (
-            <option key={p} value={p}>{p}</option>
+            <option key={p} value={p}>{providerName(p)}</option>
           ))}
         </select>
       </div>
@@ -165,13 +166,13 @@ export const FiltersSection = ({
       <div className="flex gap-2">
         <button
           onClick={onClear}
-          className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200"
+          className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
         >
           Clear
         </button>
         <button
           onClick={onExport}
-          className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2"
+          className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2"
         >
           <DownloadIcon />
           <span className="sr-only sm:not-sr-only">Export</span>
@@ -197,16 +198,19 @@ export const KeywordRow = ({
 }: KeywordRowProps) => (
   <>
     <tr className="hover:bg-gray-50">
-      <td
-        className="px-6 py-4 text-sm font-medium text-gray-900 hover:text-gray-600 cursor-pointer"
-        onClick={onSelect}
-      >
-        {group.keyword}
+      <td className="px-6 py-4 text-sm font-medium text-gray-900">
+        <button
+          type="button"
+          onClick={onSelect}
+          className="text-left font-medium rounded hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+        >
+          {group.keyword}
+        </button>
       </td>
       <td className="px-6 py-4 text-sm">
         <div className="flex flex-wrap gap-1">
           {group.providers.map((p) => (
-            <span key={p} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{p}</span>
+            <span key={p} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">{providerName(p)}</span>
           ))}
         </div>
       </td>
@@ -221,7 +225,8 @@ export const KeywordRow = ({
       <td className="px-6 py-4">
         <button
           onClick={(e) => { e.stopPropagation(); onToggle(); }}
-          className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1"
+          aria-expanded={isExpanded}
+          className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
         >
           View
           <ChevronIcon isExpanded={isExpanded} />
@@ -262,7 +267,7 @@ const SearchDetailItem = ({ search }: { search: Search }) => {
     >
       <div className="flex items-center gap-4">
         <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
-          {search.provider}
+          {providerName(search.provider)}
         </span>
         <span className="text-sm text-gray-500">{new Date(search.timestamp).toLocaleString()}</span>
       </div>

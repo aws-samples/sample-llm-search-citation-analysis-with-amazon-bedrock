@@ -28,7 +28,6 @@ user: organising keywords is content-team work, not an admin action.
 """
 
 import logging
-import sys
 import uuid
 from collections.abc import Callable, Sequence
 from functools import partial, wraps
@@ -37,9 +36,6 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view

@@ -13,15 +13,11 @@ Features:
 
 import concurrent.futures
 import os
-import sys
 from collections import defaultdict
 from typing import Any
 
 import boto3
 from botocore.config import Config
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.brand_visibility import tracked_brand_names

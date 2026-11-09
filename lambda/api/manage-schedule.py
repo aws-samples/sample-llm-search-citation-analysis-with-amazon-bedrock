@@ -44,16 +44,12 @@ import logging
 import os
 import re
 import secrets
-import sys
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group

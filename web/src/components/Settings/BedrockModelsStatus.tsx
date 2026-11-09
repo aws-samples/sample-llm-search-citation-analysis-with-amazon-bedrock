@@ -43,7 +43,7 @@ function testText(test: BedrockTestState): string {
 
 function testTone(test: BedrockTestState): string {
   if (test.status !== 'done') return 'text-gray-500';
-  return test.result.valid ? 'text-green-700' : 'text-red-700';
+  return test.result.valid ? 'text-emerald-700' : 'text-red-700';
 }
 
 /** The latest test of the picked model, announced as it changes. */
@@ -55,5 +55,5 @@ export const BedrockTestOutput = ({ test }: { readonly test: BedrockTestState })
 export const BedrockSaveFeedback = ({ save }: { readonly save: BedrockSaveState }) => {
   if (save.status === 'failed') return <ErrorAlert message={save.message} spacingClassName="mt-3 " />;
   if (save.status !== 'saved') return null;
-  return <output className="mt-3 block text-sm font-medium text-green-700">Saved</output>;
+  return <output className="mt-3 block text-sm font-medium text-emerald-700">Saved</output>;
 };

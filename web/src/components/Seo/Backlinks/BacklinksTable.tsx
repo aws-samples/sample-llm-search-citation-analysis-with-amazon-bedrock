@@ -64,7 +64,7 @@ function ExpandButton({
       aria-expanded={open}
       aria-label={`${open ? 'Hide' : 'Show'} all links from ${domain}`}
       onClick={() => expansion.toggle(domain)}
-      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+      className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:text-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
     >
       <ChevronDownIcon className={`w-4 h-4 transition-transform ${open ? '' : '-rotate-90'}`} />
     </button>

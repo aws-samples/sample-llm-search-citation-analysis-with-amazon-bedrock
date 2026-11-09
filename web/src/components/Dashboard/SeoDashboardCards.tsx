@@ -13,7 +13,7 @@ import {
 } from './rankingsSummary';
 
 const CARD = 'bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6 space-y-3';
-const LINK = 'text-sm font-medium text-gray-900 dark:text-white hover:underline';
+const LINK = 'text-sm font-medium text-blue-700 dark:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 rounded';
 
 interface SeoCardProps {
   readonly title: string;

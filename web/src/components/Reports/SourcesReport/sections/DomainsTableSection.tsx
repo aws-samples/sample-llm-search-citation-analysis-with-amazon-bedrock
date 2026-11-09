@@ -21,7 +21,7 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
       <>
         {source.domain}
         {source.owned && (
-          <span className="ml-2 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+          <span className="ml-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-gray-950 dark:text-emerald-300">
             Owned
           </span>
         )}

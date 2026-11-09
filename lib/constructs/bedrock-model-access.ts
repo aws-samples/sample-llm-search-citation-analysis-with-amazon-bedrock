@@ -1,9 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { weekLogGroup } from './api-functions';
+import { inlineCustomResourceProvider } from './custom-resource-provider';
 
 /**
  * Anthropic models on Bedrock sit behind three independent gates, and IAM is
@@ -240,51 +240,33 @@ export class BedrockModelAccess extends Construct {
           resources: ['*'],
         }),
       ]),
-      logGroup: new logs.LogGroup(this, 'SubmitAnthropicUseCaseLogs', {
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
+      logGroup: weekLogGroup(this, 'SubmitAnthropicUseCaseLogs'),
     });
 
-    const agreementHandler = new lambda.Function(this, 'ModelAgreementHandler', {
+    const agreementProvider = inlineCustomResourceProvider(this, 'ModelAgreement', {
       functionName: 'CitationAnalysis-BedrockModelAgreement',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(agreementHandlerCode()),
-      timeout: cdk.Duration.minutes(2),
-      memorySize: 256,
       description: 'Subscribes the Claude models this stack invokes (AWS Marketplace agreement)',
-      logGroup: new logs.LogGroup(this, 'ModelAgreementHandlerLogs', {
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    });
-
-    agreementHandler.addToRolePolicy(new iam.PolicyStatement({
-      actions: [
-        'bedrock:GetFoundationModelAvailability',
-        'bedrock:ListFoundationModelAgreementOffers',
-        'bedrock:CreateFoundationModelAgreement',
+      code: agreementHandlerCode(),
+      timeout: cdk.Duration.minutes(2),
+      statements: [
+        new iam.PolicyStatement({
+          actions: [
+            'bedrock:GetFoundationModelAvailability',
+            'bedrock:ListFoundationModelAgreementOffers',
+            'bedrock:CreateFoundationModelAgreement',
+          ],
+          // None of these three accept a resource ARN.
+          resources: ['*'],
+        }),
+        // The Marketplace subscription Bedrock creates on our behalf. Scoped to
+        // calls Bedrock makes for this role, and held only by this deploy-time
+        // function — never by the Lambdas that serve traffic.
+        new iam.PolicyStatement({
+          actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
+          resources: ['*'],
+          conditions: { StringEquals: { 'aws:CalledViaLast': 'bedrock.amazonaws.com' } },
+        }),
       ],
-      // None of these three accept a resource ARN.
-      resources: ['*'],
-    }));
-
-    // The Marketplace subscription Bedrock creates on our behalf. Scoped to
-    // calls Bedrock makes for this role, and held only by this deploy-time
-    // function — never by the Lambdas that serve traffic.
-    agreementHandler.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
-      resources: ['*'],
-      conditions: { StringEquals: { 'aws:CalledViaLast': 'bedrock.amazonaws.com' } },
-    }));
-
-    const agreementProvider = new cr.Provider(this, 'ModelAgreementProvider', {
-      onEventHandler: agreementHandler,
-      logGroup: new logs.LogGroup(this, 'ModelAgreementProviderLogs', {
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
     });
 
     for (const modelId of props.modelIds) {

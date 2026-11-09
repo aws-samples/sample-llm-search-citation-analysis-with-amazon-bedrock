@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import sys
 from collections.abc import Iterator
 from types import ModuleType, SimpleNamespace
@@ -20,12 +19,13 @@ import pytest
 
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
 _LOGIN = 'seo@example.com'
 _CREDENTIAL = f'{_LOGIN}:example-password'
 
 providers_api = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)),
+    API_DIR,
     'manage-providers.py',
     'manage_providers_dataforseo',
     env={'CORS_ORIGIN_PARAM': '', 'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config'},

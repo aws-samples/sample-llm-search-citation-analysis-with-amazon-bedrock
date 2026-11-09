@@ -12,15 +12,11 @@ when the run starts.
 
 import logging
 import os
-import sys
 from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.analysis_runs import fetch_enabled_query_prompts, scope_run_input, start_analysis_run
 from shared.api_response import success_response, validation_error

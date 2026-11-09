@@ -78,7 +78,7 @@ function HeaderCell<TRow, TKey extends string>({
           ? column.header
           : (
             <button type="button" onClick={() => onSort(sortKey)}
-              className={`inline-flex items-center gap-1 uppercase tracking-wider rounded hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${active ? 'text-gray-900' : ''}`}>
+              className={`inline-flex items-center gap-1 uppercase tracking-wider rounded hover:text-gray-900 dark:hover:text-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 ${active ? 'text-gray-900' : ''}`}>
               {column.header}
               <SortGlyph active={active} order={order} />
             </button>
@@ -119,7 +119,7 @@ export function DataTable<TRow, TKey extends string = string>({
   const scroll = rows.length > STICKY_FROM_ROWS ? 'max-h-[70vh] overflow-auto' : 'overflow-x-auto';
   return (
     <div className={`${scroll} rounded-lg border border-gray-200 bg-white`}>
-      <table className="min-w-full divide-y divide-gray-200">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 z-10 bg-gray-50">
           <tr>
@@ -127,7 +127,7 @@ export function DataTable<TRow, TKey extends string = string>({
             {columns.map((column) => <HeaderCell key={column.id} column={column} sort={sort} onSort={onSort} />)}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
           {rows.length === 0 && (
             <tr><td colSpan={span} className={`${DATA_TABLE_CELL} py-8 text-center text-gray-500`}>{emptyText}</td></tr>
           )}

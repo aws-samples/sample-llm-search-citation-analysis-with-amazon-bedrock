@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from decimal import Decimal
 from typing import Any, NamedTuple
 from unittest.mock import MagicMock, call, patch
@@ -20,8 +19,8 @@ from testing.admin_authz_fixtures import caller_claims
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {
     'CORS_ORIGIN_PARAM': '',
     'DYNAMODB_TABLE_KPI_ALERTS': 'alerts',
@@ -45,7 +44,7 @@ _PUBLISHED_PAGE = {
 }
 
 alert_api = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'manage-alerts.py',
     'manage_alerts_under_test',
     env=_ENV,

@@ -6,11 +6,7 @@ stored: there are no spend caps by design, so the app keeps no balance or ledger
 error, so the Settings card can show its empty state.
 """
 
-import sys
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from seo_http import seo_route
 

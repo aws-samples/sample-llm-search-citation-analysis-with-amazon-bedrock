@@ -24,11 +24,7 @@ that passed authentication.
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import directory
 from auth import AuthError, DiscoveryDocument, discovery_document, unauthorized_response, verify_claims

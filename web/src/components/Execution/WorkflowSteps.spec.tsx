@@ -19,14 +19,14 @@ describe('WorkflowSteps', () => {
     (status) => {
       renderSteps(status);
 
-      expect(getKeywordStepElement().getByText('10 of 20 keywords')).toBeInTheDocument();
+      expect(getKeywordStepElement().getByText(/^10 of 20 keywords done/u)).toBeInTheDocument();
     }
   );
 
   it('shows the failed keyword count when keywords failed', () => {
     renderSteps('running', buildKeywordProgress({ keywords_failed: 3 }));
 
-    expect(getKeywordStepElement().getByText('3 failed')).toBeInTheDocument();
+    expect(getKeywordStepElement().getByText('12 of 20 keywords done · 3 failed')).toBeInTheDocument();
   });
 
   it('omits the failed keyword count when no keyword failed', () => {
@@ -35,20 +35,28 @@ describe('WorkflowSteps', () => {
       keywords_failed: 0 
     }));
 
-    expect(getKeywordStepElement().getByText('10 of 20 keywords')).toBeInTheDocument();
-    expect(screen.queryByText(/failed/u)).not.toBeInTheDocument();
+    expect(getKeywordStepElement().getByText('10 of 20 keywords done')).toBeInTheDocument();
+    expect(screen.queryByText(/failed$/u)).not.toBeInTheDocument();
   });
 
   it('shows no keyword count when the step has no counts yet', () => {
     renderSteps('running', null);
 
-    expect(screen.queryByText(/keywords$/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   });
 
-  it('describes the ProcessKeywords step in words', () => {
+  it('names the steps in plain words, not by their workflow state ids', () => {
     renderSteps('running');
 
-    expect(getKeywordStepElement().getByText('Search, dedupe and crawl per keyword')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem').map(item => item.querySelector('p')?.textContent))
+      .toStrictEqual(['Prepare keywords', 'Ask AI engines and crawl sources', 'Write summary']);
+    expect(screen.queryByText('ProcessKeywords')).not.toBeInTheDocument();
+  });
+
+  it('shows the keywords done as a progress bar', () => {
+    renderSteps('running');
+
+    expect(screen.getByRole('progressbar', { name: 'Keywords done' })).toHaveProperty('value', 10);
   });
 
   it('spells out every step status as text, not only as a colour', () => {

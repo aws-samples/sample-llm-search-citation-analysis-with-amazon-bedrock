@@ -13,16 +13,12 @@ before the Distributed Map (inline Map) have no map run and report
 
 import json
 import logging
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import unquote
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import not_found_response, success_response, validation_error
 from shared.decorators import api_handler, validate

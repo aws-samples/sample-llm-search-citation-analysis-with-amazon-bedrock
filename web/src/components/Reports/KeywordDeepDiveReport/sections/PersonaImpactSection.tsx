@@ -52,6 +52,7 @@ export function PersonaImpactSection({
     title: 'Persona impact',
     loading,
     loadingMessage: 'Loading persona breakdown…',
+    loadingShape: 'table',
     error,
     value: personas,
   });
@@ -107,5 +108,5 @@ function rankDelta(brand: CrossPersonaBrandSummary): number {
 }
 
 function meaningfulDeltaRowClass(brand: CrossPersonaBrandSummary): string {
-  return rankDelta(brand) >= MEANINGFUL_DELTA ? 'bg-amber-50 dark:bg-amber-950/20' : '';
+  return rankDelta(brand) >= MEANINGFUL_DELTA ? 'bg-gray-50 dark:bg-gray-950/20' : '';
 }

@@ -14,7 +14,6 @@ emptied per test so one test's totals cannot leak into the next.
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -31,9 +30,10 @@ from testing.env import STATS_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.markets_fixtures import BRAZIL, CHILE
+from testing.module_loader import API_DIR
 from testing.search_results_fixtures import key_parts
 
-stats_module = handler_fixture(os.path.dirname(__file__), 'get-stats.py', 'get_stats_under_test', env=STATS_ENV)
+stats_module = handler_fixture(API_DIR, 'get-stats.py', 'get_stats_under_test', env=STATS_ENV)
 
 _OLDER = '2026-05-01T08:00:00Z'
 _LATEST = '2026-05-02T08:00:00Z'

@@ -25,6 +25,7 @@ function trendColumns(): ReadonlyArray<ReportTableColumn<TrendDataPoint>> {
     },
     {
       header: 'Runs',
+      numeric: true,
       info: 'Analysis runs in the period. Every answer of every run in the period is pooled into its KPIs.',
       render: (point) => point.runs,
     },

@@ -10,7 +10,9 @@ lists), which grew past Lambda's 6 MiB response cap. Here:
 - ``brand_summary`` builds one entry per brand whose size does not grow with
   the scope: aggregates, distinct providers, per-provider best rank,
   sentiment counts and only the ``APPEARANCE_PREVIEW_LIMIT`` best-ranked
-  appearances; at most ``BRAND_LIMIT`` brands, with the totals reported.
+  appearances; one page of at most ``BRAND_LIMIT`` brands, with the totals
+  reported and a ``next_token`` (an offset cursor bound to the query) for
+  the next page.
 - ``appearance_rows`` is the flat, ordered list of every appearance (each
   tagged with its brand) that the ``view=appearances`` pages cut with an
   offset cursor; the Excel exports and the brand drill-down follow it.
@@ -26,10 +28,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from shared.answer_queries import latest_run_timestamp, previous_run_timestamp, query_keyword_run_rows
+from shared.cursors import encode_bound_offset_cursor
 from shared.dynamo_decimal import to_int
 from shared.request_deadline import current_deadline
 
-# Brands in one summary answer, best aggregate score first (the total is reported).
+# Brands in one summary page, best aggregate score first (the total is reported).
 BRAND_LIMIT = 100
 
 # Best-ranked appearances embedded in each brand summary of a multi-keyword
@@ -246,22 +249,32 @@ def _classified(brands: list[dict[str, Any]], classification: str | None) -> lis
 
 
 def brand_summary(
-    results: Iterable[Mapping[str, Any]], classification: str | None, preview_limit: int = APPEARANCE_PREVIEW_LIMIT,
+    results: Iterable[Mapping[str, Any]],
+    classification: str | None,
+    preview_limit: int = APPEARANCE_PREVIEW_LIMIT,
+    *,
+    offset: int = 0,
+    binding: str = '',
 ) -> dict[str, Any]:
     """The ``aggregated`` block of a summary answer.
 
-    ``brands``: the best ``BRAND_LIMIT`` brands of ``classification`` (all
-    classifications when ``None``); ``matching_brands`` how many there are;
-    ``total_unique_brands`` and ``summary`` count every brand of the rows.
+    ``brands``: the ``BRAND_LIMIT`` brands of ``classification`` (all
+    classifications when ``None``) from ``offset`` on, best aggregate score
+    first; ``matching_brands`` how many there are; ``brands_truncated`` and
+    ``next_token`` (bound to the query by ``binding``, ``None`` on the last
+    page) say whether more follow. ``total_unique_brands`` and ``summary``
+    count every brand of the rows.
     """
     brands = collect_brands(results)
     counts = Counter(entry['classification'] for entry in brands)
     matching = _classified(brands, classification)
+    end = offset + BRAND_LIMIT
     return {
-        'brands': [summarize_brand(entry, preview_limit) for entry in matching[:BRAND_LIMIT]],
+        'brands': [summarize_brand(entry, preview_limit) for entry in matching[offset:end]],
         'total_unique_brands': len(brands),
         'matching_brands': len(matching),
-        'brands_truncated': len(matching) > BRAND_LIMIT,
+        'brands_truncated': len(matching) > end,
+        'next_token': encode_bound_offset_cursor(end, len(matching), binding),
         'summary': {
             'first_party_count': counts['first_party'],
             'competitor_count': counts['competitor'],

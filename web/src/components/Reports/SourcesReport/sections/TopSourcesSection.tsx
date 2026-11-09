@@ -7,6 +7,7 @@ import {
 export function TopSourcesSection({ report }: ScopeSectionProps) {
   return (
     <LatestRunSection
+      loadingShape="chart"
       report={report}
       title="Most cited domains"
       subtitle="The domains cited by the most answers in the latest runs; your owned domains are highlighted."

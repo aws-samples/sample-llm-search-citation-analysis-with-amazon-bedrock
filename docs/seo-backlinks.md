@@ -1,6 +1,6 @@
-# Backlinks
+# Backlinks (SEO)
 
-Shows who links to a site, what changed recently, and which pages get the most links. It also shows how your domains' authority compares with your competitors' over time. Data comes from DataForSEO's Backlinks API through the SEO stack. The page needs the SEO stack to be deployed and a DataForSEO login saved in Settings › AI Providers.
+The Backlinks page (SEO › Backlinks, `/seo/backlinks`) shows who links to a site, what changed recently, and which pages get the most links. It also shows how your domains' authority compares with your competitors' over time. Data comes from DataForSEO's Backlinks API through the SEO stack. The page needs the SEO stack to be deployed and a DataForSEO login saved in Settings › AI providers.
 
 ## Looking up a target
 
@@ -13,7 +13,7 @@ Enter a domain or URL and choose a scope. The scope follows what you type until 
 | Subfolder (default for a URL with a path) | The path and everything under it | `example.com/blog/*` |
 | Exact URL | One page only | `example.com/pricing` |
 
-The page starts from Settings › Brand Tracking. With the input empty, the button reads **Analyze &lt;own domain&gt;** (the first owned domain; nothing is fetched until it is clicked), and the quick-pick buttons search your own domains (green, first) and your competitors' domains (amber) from Brand Tracking, plus any other domain with stored snapshots, with their subdomains. Without an owned domain the page links to Settings › Brand Tracking.
+The page starts from Settings › Brand tracking. With the input empty, the button reads **Analyze &lt;own domain&gt;** (the first owned domain; nothing is fetched until it is clicked), and the quick-pick buttons search your own domains (green, first) and your competitors' domains (amber) from Brand tracking, plus any other domain with stored snapshots, with their subdomains. Without an owned domain the page links to Settings › Brand tracking.
 
 Some targets are refused before anything is billed:
 
@@ -58,18 +58,18 @@ On the Backlinks tab, "One per domain" shows each linking domain's strongest lin
 
 The filter panel shows how many conditions you have used. If the filters go over the limit, no request is sent, and the server would refuse one anyway. Nothing is silently dropped.
 
-**Export CSV** saves the page of results that is on screen. A cell that starts with `=`, `+`, `-` or `@` gets a leading `'` so that a spreadsheet does not run it as a formula.
+**Export to Excel** saves the page of results that is on screen for free, or asks DataForSEO again for up to 10,000 rows of the same sorted and filtered table (1,000 rows per request). The export dialog shows the price ceiling and the number of requests before Download, and each request counts against the daily limit of paid lookups ([seo.md](seo.md#who-can-do-what)). Text is written as text cells, so a spreadsheet never runs it as a formula.
 
 ## Authority over time
 
-Weekly snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept, never expired. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
+Snapshots record the overview metrics of every owned and competitor domain, with subdomains. They are kept, never expired. The chart compares the rank of your domains with your competitors'. Reading snapshots is free.
 
 Admins can:
 
-- **Snapshot now**: takes one snapshot of every tracked domain, after a confirmation that names the paid calls (one per domain; no price is shown).
-- **Schedule weekly snapshots**: the link opens Operations > Schedule, where a **Backlink snapshots** schedule (paid) runs them on the day, time and zone the Admin picks. Saving an enabled one asks first and names its paid calls (one per domain). Nothing runs until such a schedule exists, and a disabled one costs nothing.
+- **Snapshot now**: takes one snapshot of every tracked domain, after a confirmation that names the paid calls (one per domain) and their estimated price.
+- **Schedule weekly snapshots**: the link opens Operations > Schedule, where a **Backlink snapshots** schedule (paid) runs them daily, weekly or monthly at the time and zone the Admin picks. Saving an enabled one asks first and names its paid calls (one per domain). Nothing runs until such a schedule exists, and a disabled one costs nothing.
 
-A run skips domains that were snapshotted less than 20 hours ago. It does not store empty answers. A failed domain is not retried, because DataForSEO bills the call even when it fails. A low-balance or login error stops the run.
+A run skips domains that were snapshotted less than 20 hours ago. It does not store empty answers. A failed domain is not retried, because DataForSEO bills the call even when it fails. A low-balance or login error stops the run. A run stops starting new calls 13 minutes in; the domains left are taken by the next run.
 
 ## Prices (DataForSEO list prices)
 
@@ -81,5 +81,6 @@ A run skips domains that were snapshotted less than 20 hours ago. It does not st
 | One table page | $0.024 + $0.000036 per row (about $0.03 for 100 rows) |
 | Expanding a referring domain | one table page of 100 rows |
 | Snapshot | about $0.024 per domain |
+| Export to Excel | $0.024 + $0.000036 per row per request of up to 1,000 rows (about $0.06 per 1,000 rows) |
 
 Answers are cached for 6 hours for every combination of target, scope, page, sort, filters, link mode and spam setting. A cached answer is free. Empty table pages are cached for 1 hour. If the history call fails, the overview is cached for only 15 minutes, so searching again soon retries the history.

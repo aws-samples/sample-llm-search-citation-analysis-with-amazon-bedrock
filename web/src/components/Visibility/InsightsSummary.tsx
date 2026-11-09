@@ -72,7 +72,7 @@ export function InsightsSummary({
       title={INSIGHTS_TITLE}
       info={INSIGHTS_INFO}
       actions={(
-        <Link to={NEW_CUSTOM_REPORT_PATH} className="text-sm font-medium text-gray-700 underline hover:text-gray-900">
+        <Link to={NEW_CUSTOM_REPORT_PATH} className="text-sm font-medium text-gray-700 underline hover:text-gray-900 dark:hover:text-white">
           Open in reports
         </Link>
       )}

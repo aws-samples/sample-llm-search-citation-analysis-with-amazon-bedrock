@@ -6,14 +6,17 @@ import {
   describeScheduleScope,
   describeScheduleTiming,
   formDataFromSchedule,
+  suggestScheduleName,
   timezoneOptions,
   toSchedulePayload,
   validateScheduleFormData,
+  withResolvedName,
 } from './scheduleFormModel';
 import {
   GROUP_CORUNA, GROUP_MARINO, buildSchedule, legacyKeywordSchedule 
 } from './ScheduleManager-fixtures';
 import { CHILE } from '../Markets/markets-fixtures';
+import type { ScheduleFormData } from '../../types';
 
 describe('formDataFromSchedule', () => {
   it('copies the stored form, scope and state into the editor', () => {
@@ -139,9 +142,55 @@ describe('toSchedulePayload', () => {
   });
 });
 
+describe('suggestScheduleName', () => {
+  const groups = [GROUP_CORUNA, GROUP_MARINO];
+
+  it.each<[string, Partial<ScheduleFormData>, string]>([
+    ['every keyword', {}, 'Daily analysis · all keywords'],
+    ['the one group by name', {
+      frequency: 'weekly',
+      scope: {
+        mode: 'groups',
+        group_ids: [GROUP_CORUNA.id]
+      }
+    }, 'Weekly analysis · Hotel Coruña'],
+    ['several groups by count', {
+      scope: {
+        mode: 'groups',
+        group_ids: [GROUP_CORUNA.id, GROUP_MARINO.id]
+      }
+    }, 'Daily analysis · 2 groups'],
+    ['picked keywords by count', {
+      frequency: 'monthly',
+      scope: {
+        mode: 'keywords',
+        keyword_ids: ['kw-1']
+      }
+    }, 'Monthly analysis · 1 keyword'],
+    ['a snapshot kind without a scope', {
+      kind: 'backlink_snapshots',
+      frequency: 'weekly'
+    }, 'Weekly backlink snapshots'],
+  ])('names %s', (_case, overrides, expected) => {
+    expect(suggestScheduleName({
+      ...defaultScheduleFormData(),
+      ...overrides
+    }, groups)).toBe(expected);
+  });
+
+  it('fills only a blank name', () => {
+    const named = {
+      ...defaultScheduleFormData(),
+      display_name: 'Mine'
+    };
+    expect([withResolvedName(named, groups).display_name, withResolvedName(defaultScheduleFormData(), groups).display_name])
+      .toStrictEqual(['Mine', 'Daily analysis · all keywords']);
+  });
+});
+
 describe('describeScheduleTiming', () => {
   it('describes a weekly schedule with its day and zone', () => {
-    expect(describeScheduleTiming(buildSchedule())).toBe('Weekly on Monday at 09:00 (Europe/Madrid)');
+    expect(describeScheduleTiming(buildSchedule())).toBe('Every Monday at 09:00 (Europe/Madrid)');
   });
 
   it('describes a monthly schedule with its day of month', () => {
@@ -155,11 +204,11 @@ describe('describeScheduleTiming', () => {
       } 
     });
 
-    expect(describeScheduleTiming(schedule)).toBe('Monthly on day 15 at 07:30 (UTC)');
+    expect(describeScheduleTiming(schedule)).toBe('Every month on day 15 at 07:30 (UTC)');
   });
 
   it('describes a daily schedule', () => {
-    expect(describeScheduleTiming(legacyKeywordSchedule)).toBe('Daily at 07:00 (UTC)');
+    expect(describeScheduleTiming(legacyKeywordSchedule)).toBe('Every day at 07:00 (UTC)');
   });
 
   it('falls back to the raw expression when the form is unknown', () => {

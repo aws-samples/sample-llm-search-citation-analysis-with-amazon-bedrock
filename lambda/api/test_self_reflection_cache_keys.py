@@ -13,7 +13,6 @@ with the table env vars set and `boto3` patched BEFORE the load
 (`testing.handler_fixtures.handler_fixture`).
 """
 
-import os
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -21,11 +20,10 @@ import pytest
 
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR
 
 reflection_handler = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'self-reflection.py',
     'self_reflection_under_test_cache_keys',
     env={

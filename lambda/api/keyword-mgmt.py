@@ -10,10 +10,6 @@ Routes:
 """
 
 import logging
-import sys
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import not_found_response, validation_error
 from shared.router import HandlerLoader, path_matches_route, route_not_found

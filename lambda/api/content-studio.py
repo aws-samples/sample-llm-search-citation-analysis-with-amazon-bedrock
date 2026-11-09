@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import sys
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterator
@@ -20,9 +19,6 @@ from boto3.dynamodb.conditions import Key
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.exceptions import ClientError
 
-# Add shared module to path
-sys.path.insert(0, "/opt/python")
-
 from shared.api_response import (
     api_response,
     not_found_response,
@@ -31,6 +27,7 @@ from shared.api_response import (
 )
 from shared.auth import get_caller_identity
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
+from shared.config import LLM_PROVIDERS, provider_display_name
 from shared.constants import MAX_KEYWORD_LENGTH, priority_rank
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
@@ -444,15 +441,17 @@ def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[
 
 
 def _provider_gap_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
-    missing_providers = visibility.all_providers - visibility.fp_providers
+    # Answer engines only: web-search providers return links, not answers, so they cannot "miss" the brand.
+    missing_providers = sorted((visibility.all_providers - visibility.fp_providers) & set(LLM_PROVIDERS))
     if not visibility.fp_found or not missing_providers:
         return None
+    missing_names = ", ".join(provider_display_name(provider) for provider in missing_providers)
     return {
         "id": str(uuid.uuid4()),
         "type": "provider_gap",
         "priority": "medium",
-        "title": f'Target {", ".join(missing_providers).title()} for "{keyword}"',
-        "description": f"Your brand appears on some AI engines but not on {', '.join(missing_providers)}.",
+        "title": f'Target {missing_names} for "{keyword}"',
+        "description": f"Your brand appears on some AI engines but not on {missing_names}.",
         "keyword": keyword,
         "source": "provider_analysis",
         "providers_missing": list(missing_providers),

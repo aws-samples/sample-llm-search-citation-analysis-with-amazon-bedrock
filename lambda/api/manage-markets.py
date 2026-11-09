@@ -33,13 +33,10 @@ The list is one BrandConfig item (``config_id = 'markets'``).
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Attr
-
-sys.path.insert(0, '/opt/python')
 
 from shared import auth
 from shared.api_response import api_response, validation_error

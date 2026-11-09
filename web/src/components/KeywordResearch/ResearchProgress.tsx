@@ -134,7 +134,7 @@ const ProgressSummary = ({
 
   return (
     <div className="flex items-center gap-3">
-      {active && <Spinner size="sm" className="text-gray-400" />}
+      {active && <Spinner size="sm" className="text-gray-500" />}
       <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getResearchStatusClass(status)}`}>
         {getResearchStatusLabel(status)}
       </span>

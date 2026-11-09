@@ -12,6 +12,7 @@ import { createMockJsonResponse } from '../test/fetchResponses';
 import {
   renderLoadedHook, waitForLoaded
 } from '../test/loadedHook';
+import { idleEndpointState } from '../test/idleEndpointState';
 import { keywordScope as kw } from '../components/ui/reportScope-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -26,14 +27,19 @@ interface BrandMentionsProps {
   filter: string | null;
 }
 
+/** How `/brand-mentions` answers a keyword with no analysis run. */
+const NO_RUN = {
+  shouldFail: true,
+  failStatus: 404,
+};
+
 describe('useBrandMentions', () => {
   it('returns an empty state when scope is null', () => {
     const { result } = renderHook(() => useBrandMentions(null));
 
     expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
+      ...idleEndpointState(),
+      noData: false,
     });
   });
 
@@ -82,13 +88,24 @@ describe('useBrandMentions', () => {
     });
   });
 
-  it('reports the brands server-error message when the fetch fails', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
+  it.each([
+    [404, null],
+    [401, 'Authentication required to view brands'],
+    [500, 'Failed to load brand mentions'],
+    [503, 'Failed to load brand mentions'],
+  ])('settles HTTP %i as "no data yet" only for 404 (a keyword with no run); error: %s', async (failStatus, message) => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch({
+      shouldFail: true,
+      failStatus,
+    }));
 
     const { result } = await renderLoadedHook(() => useBrandMentions(kw('test')));
 
-    expect(result.current.error).toBe('Failed to load brand mentions');
-    expect(result.current.data).toBeNull();
+    expect(result.current).toStrictEqual({
+      ...idleEndpointState(),
+      error: message,
+      noData: message === null,
+    });
   });
 
   it.each<[change: string, initialProps: BrandMentionsProps, nextProps: BrandMentionsProps]>([
@@ -127,6 +144,21 @@ describe('useBrandMentions', () => {
     await waitFor(() => {
       expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(initialCallCount + 1);
     });
+  });
+
+  it('drops the earlier answer when the next selection has no data yet', async () => {
+    mockAuthenticatedFetch
+      .mockImplementationOnce(createMockFetch())
+      .mockImplementation(createMockFetch(NO_RUN));
+    const initialProps: { run: string | null } = { run: null };
+    const view = renderHook(({ run }) => useBrandMentions(kw('test'), null, null, run), { initialProps });
+    await waitForLoaded(view.result);
+
+    view.rerender({ run: '2026-01-10T00:00:00Z' });
+
+    await waitFor(() => expect(view.result.current.noData).toBe(true));
+    expect(view.result.current.data).toBeNull();
+    expect(view.result.current.error).toBeNull();
   });
 
   it('aborts the pending request when the hook unmounts', () => {

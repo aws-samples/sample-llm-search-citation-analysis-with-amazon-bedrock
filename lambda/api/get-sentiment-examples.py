@@ -21,12 +21,7 @@ unread are left out (``keywords_truncated``); ``truncated`` is true whenever
 the budget cut anything (a page past it carries no answer text).
 """
 
-import logging
-import sys
 from typing import Any
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response, validation_error
@@ -47,9 +42,6 @@ from shared.sentiment_examples import (
     RowKey,
     sentiment_examples,
 )
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 #: What an example's answer text is read from: the row's key (to join it back) and the answer.
 ANSWER_TEXT_PROJECTION = 'keyword, timestamp_provider, #rsp'

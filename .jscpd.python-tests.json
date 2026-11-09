@@ -2,6 +2,10 @@
   "minTokens": 25,
   "minLines": 3,
   "mode": "weak",
+  "ignorePattern": [
+    "(?m)^[ \\t]*(from[ \\t]+\\S+[ \\t]+)?import[ \\t]+\\([^)]*\\)",
+    "(?m)^[ \\t]*(from[ \\t]+\\S+[ \\t]+)?import[ \\t]+[^(\\n][^\\n]*"
+  ],
   "baseline": ".jscpd-baseline/python-tests.json",
   "failOnNewClones": 0,
   "gitignore": true,

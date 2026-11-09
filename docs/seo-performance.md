@@ -1,14 +1,16 @@
-# Page performance
+# Page performance: Lighthouse, Core Web Vitals and IndexNow
 
-Page performance measures the brand's own pages with Google Lighthouse (through DataForSEO) and tells search
+The Performance page (SEO › Performance, `/seo/performance`) measures the brand's own pages with Google Lighthouse (through DataForSEO) and tells search
 engines about changed pages with IndexNow. The page has two tabs.
+
+![SEO Performance page with Lighthouse performance, accessibility, best practices and SEO scores and Core Web Vitals for a measured page](seoperformance.png)
 
 ## Lighthouse
 
-**Measure a page** runs Lighthouse on one page of the brand's own domains (Settings › Brand Tracking, or a
+**Measure a page** runs Lighthouse on one page of the brand's own domains (Settings › Brand tracking, or a
 subdomain of one) on mobile or desktop. The URL starts at the homepage of the brand's first own domain and suggests
 the latest finished site audit's pages (its sample pages, then up to 50 crawled pages, read for free when the field
-is first focused); without an own domain the form links to Settings › Brand Tracking. Nothing runs until **Run
+is first focused); without an own domain the form links to Settings › Brand tracking. Nothing runs until **Run
 Lighthouse** is pressed. A run takes up to a minute; the page shows its progress and then:
 
 - the four category scores, 0 to 100: Performance, Accessibility, Best practices, SEO (90 and above is good, 50 to
@@ -36,7 +38,7 @@ audit loaded cleanly are used, so a bot challenge is never measured. The page li
 confirmation first, naming the paid calls (one per page and device; no price is shown).
 
 **Recent runs** lists the 20 newest runs; **Show** reopens one at no cost. Runs are kept, never expired. The full
-Lighthouse report of every page is kept in the raw-responses bucket (`seo/lighthouse/`).
+Lighthouse report of every page is kept in the SEO bucket (`citation-analysis-seo-<account>`, under `seo/lighthouse/`).
 
 Asking again for the same page and device, or the same audit sample, within 15 minutes shows the run already
 started and buys nothing. A run is never retried: DataForSEO bills a run when it executes it, so a failed or

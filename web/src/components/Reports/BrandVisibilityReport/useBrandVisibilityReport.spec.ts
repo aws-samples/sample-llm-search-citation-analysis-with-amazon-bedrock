@@ -20,43 +20,48 @@ import type { ReportSlice } from '../layout/sectionGate';
 import {
   buildTrendView, buildVisibility
 } from '../layout/reportPayload-fixtures';
+import { buildHistory } from './groupKpiHistory-fixtures';
+import type {
+  HistoricalTrendsResponse, VisibilityResponse
+} from '../../../types';
+import type { GroupKpiHistoryResponse } from '../../../types/domain/groupKpiHistory';
 
 const VISIBILITY = buildVisibility();
 const TRENDS = buildTrendView();
 
-const mockVisibility = useVisibilityMetrics as ReturnType<typeof vi.fn>;
-const mockTrends = useHistoricalTrends as ReturnType<typeof vi.fn>;
-const mockGroupHistory = useGroupKpiHistory as ReturnType<typeof vi.fn>;
+const mockVisibility = vi.mocked(useVisibilityMetrics);
+const mockTrends = vi.mocked(useHistoricalTrends);
+const mockGroupHistory = vi.mocked(useGroupKpiHistory);
 
 const HOTEL_GROUP = {
   kind: 'group',
   groupId: 'hotel-sol' 
 } as const;
 
-const EMPTY_HISTORY = {
+const EMPTY_HISTORY = buildHistory({
   runs: [],
   keywords: [],
-};
+});
 
 const fetchVisibilityMetrics = vi.fn();
 const fetchHistoricalTrends = vi.fn();
 const fetchGroupKpiHistory = vi.fn();
 
-function mockVisibilitySlice(slice: ReportSlice<unknown>): void {
+function mockVisibilitySlice(slice: ReportSlice<VisibilityResponse>): void {
   mockVisibility.mockReturnValue({
     ...slice,
     fetchVisibilityMetrics,
   });
 }
 
-function mockTrendsSlice(slice: ReportSlice<unknown>): void {
+function mockTrendsSlice(slice: ReportSlice<HistoricalTrendsResponse>): void {
   mockTrends.mockReturnValue({
     ...slice,
     fetchHistoricalTrends,
   });
 }
 
-function mockGroupHistorySlice(slice: ReportSlice<unknown>): void {
+function mockGroupHistorySlice(slice: ReportSlice<GroupKpiHistoryResponse>): void {
   mockGroupHistory.mockReturnValue({
     ...slice,
     fetchGroupKpiHistory,

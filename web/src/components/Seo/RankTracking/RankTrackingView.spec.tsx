@@ -441,6 +441,16 @@ describe('RankTrackingView one-click start', () => {
 
     expect(await screen.findByRole('link', { name: 'Open Settings › Brand Tracking' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Track your rankings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Track a domain' })).toBeInTheDocument();
+  });
+
+  it('offers one button for the own tracker while the market has none', async () => {
+    vi.mocked(fetchRankTrackers).mockResolvedValue(NO_TRACKERS);
+
+    renderRankTracking();
+
+    expect(await screen.findByRole('button', { name: 'Track your rankings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Track a domain' })).not.toBeInTheDocument();
   });
 
   it('shows a non-admin the empty state without the one-click card', async () => {

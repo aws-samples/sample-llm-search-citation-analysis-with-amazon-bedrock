@@ -10,13 +10,13 @@ import pytest
 
 from shared.industry_presets import DEFAULT_INDUSTRY_ID
 from testing.events import api_gateway_event
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 
 def load_brand_config_module(module_name: str) -> ModuleType:
     """Load manage-brand-config.py with the table name it reads at import, so it loads without touching AWS."""
     os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brand-config')
-    return load_handler_module(os.path.dirname(__file__), 'manage-brand-config.py', module_name)
+    return load_handler_module(API_DIR, 'manage-brand-config.py', module_name)
 
 
 def capture_prompts(monkeypatch: pytest.MonkeyPatch, module: ModuleType, answer: str = '{}') -> list[str]:

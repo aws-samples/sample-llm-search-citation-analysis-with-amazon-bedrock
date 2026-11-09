@@ -3,15 +3,15 @@ import { ClipboardIcon } from '../ui/ClipboardIcon';
 
 const INTENT_COLORS: Record<string, string> = {
   informational: 'bg-blue-100 text-blue-700',
-  commercial: 'bg-purple-100 text-purple-700',
-  transactional: 'bg-green-100 text-green-700',
+  commercial: 'bg-violet-100 text-violet-700',
+  transactional: 'bg-gray-100 text-emerald-700',
   navigational: 'bg-gray-100 text-gray-700',
 };
 
 const COMPETITION_COLORS: Record<string, string> = {
-  low: 'text-green-600',
-  medium: 'text-yellow-600',
-  high: 'text-red-600',
+  low: 'text-emerald-700',
+  medium: 'text-amber-700',
+  high: 'text-red-700',
 };
 
 const intentColor = (intent: string): string => INTENT_COLORS[intent?.toLowerCase()] ?? 'bg-gray-100 text-gray-600';
@@ -30,7 +30,7 @@ export const KeywordSignalCells = ({ keyword }: { readonly keyword: ResearchKeyw
     <td className="px-6 py-4">
       <div className="flex items-center gap-2">
         <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div className="h-full bg-gray-900 rounded-full" style={{ width: `${(keyword.relevance ?? 0) * 10}%` }} />
+          <div className="h-full bg-gray-900 dark:bg-gray-200 rounded-full" style={{ width: `${(keyword.relevance ?? 0) * 10}%` }} />
         </div>
         <span className="text-xs text-gray-500">{keyword.relevance}/10</span>
       </div>
@@ -48,8 +48,9 @@ export const CopyKeywordCell = ({
   <td className="px-6 py-4 text-right">
     <button
       onClick={() => onCopy(keyword)}
-      className="text-gray-400 hover:text-gray-600 transition-colors"
+      className="rounded text-gray-500 hover:text-gray-900 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
       title="Copy keyword"
+      aria-label="Copy keyword"
     >
       <ClipboardIcon className="w-4 h-4" />
     </button>

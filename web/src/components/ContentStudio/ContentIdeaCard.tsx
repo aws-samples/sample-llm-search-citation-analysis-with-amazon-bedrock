@@ -9,11 +9,13 @@ interface ContentIdeaCardProps {
   idea: ContentIdea;
   onGenerate: (idea: ContentIdea) => void;
   isGenerating: boolean;
+  /** Opens the Content Brief tab with the idea's keyword ticked; absent when the keyword is not an active one. */
+  onOpenBrief?: () => void;
 }
 
 const priorityStyles = {
   high: 'bg-red-50 border-red-200 text-red-700',
-  medium: 'bg-amber-50 border-amber-200 text-amber-700',
+  medium: 'bg-gray-50 border-gray-200 text-amber-700',
   low: 'bg-gray-50 border-gray-200 text-gray-600'
 };
 
@@ -39,8 +41,8 @@ const contentAngleLabels: Record<string, string> = {
 };
 
 const getPriorityIconClass = (priority: string): string => {
-  if (priority === 'high') return 'bg-red-100 text-red-600';
-  if (priority === 'medium') return 'bg-amber-100 text-amber-600';
+  if (priority === 'high') return 'bg-red-100 text-red-700';
+  if (priority === 'medium') return 'bg-gray-100 text-amber-700';
   return 'bg-gray-100 text-gray-600';
 };
 
@@ -99,12 +101,12 @@ const IdeaMetadata = ({ idea }: { idea: ContentIdea }) => {
         <MetadataItem icon={sourcesIcon}>{idea.competitor_urls.length} sources</MetadataItem>
       )}
       {idea.providers_missing && idea.providers_missing.length > 0 && (
-        <MetadataItem icon={warningIcon} className="text-amber-600">
+        <MetadataItem icon={warningIcon} className="text-amber-700">
           Missing: {idea.providers_missing.join(', ')}
         </MetadataItem>
       )}
       {idea.current_rank && (
-        <MetadataItem icon={rankIcon} className="text-amber-600">
+        <MetadataItem icon={rankIcon} className="text-amber-700">
           Current rank: #{idea.current_rank}
         </MetadataItem>
       )}
@@ -113,24 +115,24 @@ const IdeaMetadata = ({ idea }: { idea: ContentIdea }) => {
 };
 
 export const ContentIdeaCard = ({
-  idea, onGenerate, isGenerating
+  idea, onGenerate, isGenerating, onOpenBrief
 }: ContentIdeaCardProps) => {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 hover:border-gray-300 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div className="flex items-start gap-3 sm:gap-4 flex-1">
+        <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
           <div className={`p-2 rounded-lg shrink-0 ${getPriorityIconClass(idea.priority)}`}>
             {typeIcons[idea.type] ?? typeIcons.visibility_gap}
           </div>
 
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              <h3 className="font-medium text-gray-900 text-sm sm:text-base">{idea.title}</h3>
+              <h3 className="font-medium text-gray-900 text-sm sm:text-base break-words min-w-0">{idea.title}</h3>
               <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${priorityStyles[idea.priority]}`}>
                 {idea.priority}
               </span>
               {idea.persona_name && (
-                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-50 border border-purple-200 text-purple-700">
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-violet-50 border border-violet-200 text-violet-700">
                   {idea.persona_name}
                 </span>
               )}
@@ -142,23 +144,35 @@ export const ContentIdeaCard = ({
           </div>
         </div>
 
-        <button
-          onClick={() => onGenerate(idea)}
-          disabled={isGenerating}
-          className="w-full sm:w-auto px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
-        >
-          {isGenerating ? (
-            <>
-              <Spinner size="sm" />
-              Creating...
-            </>
-          ) : (
-            <>
-              <StrokeIcon className="w-4 h-4" paths={PENCIL_ALT_PATHS} />
-              Create Content
-            </>
+        <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+          <button
+            onClick={() => onGenerate(idea)}
+            disabled={isGenerating}
+            type="button"
+            className="w-full sm:w-auto px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800"
+          >
+            {isGenerating ? (
+              <>
+                <Spinner size="sm" />
+                Creating...
+              </>
+            ) : (
+              <>
+                <StrokeIcon className="w-4 h-4" paths={PENCIL_ALT_PATHS} />
+                Create Content
+              </>
+            )}
+          </button>
+          {onOpenBrief && (
+            <button
+              type="button"
+              onClick={onOpenBrief}
+              className="rounded text-sm font-medium text-blue-700 hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
+            >
+              Open in Content Brief
+            </button>
           )}
-        </button>
+        </div>
       </div>
     </div>
   );

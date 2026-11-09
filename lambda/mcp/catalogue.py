@@ -994,7 +994,7 @@ OPERATIONS: tuple[Tool, ...] = (
     ),
     _tool(
         'get_brand_mentions', _BRAND_MENTIONS,
-        'What each engine answered for a keyword (text cut at 12,000 chars): brands (top 100, total given), positions, '
+        'What each engine answered for a keyword (text cut at 12,000 chars): brands (100 per page, next_token), positions, '
         'sentiment, citations. view=appearances: every appearance, paginated. ' + _SCOPE_RULE,
         ('answer', 'response', 'chatgpt', 'what the engine said', 'brands mentioned', 'position', 'rank', 'sentiment',
          'full response', 'prompt result', 'latest answer', 'appearances'),

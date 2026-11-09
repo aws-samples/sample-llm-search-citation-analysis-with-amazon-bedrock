@@ -14,15 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
-
-# handler.py resolves its table names at import; the autouse fixture below
-# re-patches them per test for the code paths that read the environment.
-setdefault_env(SEARCH_HANDLER_ENV)
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
+from testing.search_handler_fixtures import load_search_handler
 
 # Import this directory's handler.py by file path, under a unique module name.
 #
@@ -34,7 +26,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # only because alphabetical collection happened to leave search/ in front.
 # The unique name keeps this suite out of the contested `sys.modules['handler']`
 # slot entirely — the same pattern as test_provider_query_parity.py.
-handler = load_handler_module(_HERE, 'handler.py', 'search_handler_prompts')
+#
+# handler.py resolves its table names at import; the autouse fixture below
+# re-patches them per test for the code paths that read the environment.
+handler = load_search_handler('search_handler_prompts')
 
 
 @pytest.fixture(autouse=True)

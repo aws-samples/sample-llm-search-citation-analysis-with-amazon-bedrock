@@ -6,7 +6,7 @@ Steps of the site-audit state machine (``CitationAnalysis-SiteAudit``), dispatch
 - ``audit.finalize``: cross-page and site-level checks, summary; the audit becomes ``completed``.
 - ``audit.fail``: record why the execution failed (``failed``, with the phase it was in).
 
-Imported by ``seo-jobs.py``, which has already put the shared layer on ``sys.path``. Every step reads the
+Imported by ``seo-jobs.py``; ``shared.*`` resolves from the Lambda layer (``/opt/python``). Every step reads the
 audit first and does nothing to an audit that is no longer active (cancelled from the dashboard): it answers
 ``done`` so the state machine ends. Each step returns only ``{audit_id, chunk_no, done, wait_seconds}`` (Step
 Functions caps state at 256 KiB). No step calls a paid API.

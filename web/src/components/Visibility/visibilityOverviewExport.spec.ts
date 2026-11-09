@@ -20,6 +20,7 @@ import {
   KPI_SPECS, TREND_DEFINITION, VISIBILITY_DEFINITIONS
 } from '../../constants/kpiDefinitions';
 import { exportWorkbook } from '../../exporters/excelGenerator';
+import { definitionsSheet } from '../Reports/layout/kpiSheets';
 import type { VisibilityResponse } from '../../types';
 
 vi.mock('../../exporters/excelGenerator', async (importOriginal) => ({
@@ -120,10 +121,7 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports every visibility definition with how it is measured', () => {
-    expect(buildOverviewSheets().definitions.data).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => ({
-      KPI: entry.label,
-      'How it is measured': entry.definition,
-    })));
+    expect(buildOverviewSheets().definitions).toStrictEqual(definitionsSheet(VISIBILITY_DEFINITIONS));
   });
 
   it('ends the definitions with how a change and trend are judged', () => {

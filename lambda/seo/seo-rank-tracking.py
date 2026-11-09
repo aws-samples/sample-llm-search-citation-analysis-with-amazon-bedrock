@@ -27,14 +27,10 @@ added by hand. A body with a ``group_id`` and no ``keyword_scope`` means ``group
 """
 
 import re
-import sys
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import partial, wraps
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from seo_http import (
     MARKET_ID_FIELD,

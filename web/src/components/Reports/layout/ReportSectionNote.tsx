@@ -18,7 +18,7 @@ export function ReportSectionNote({
 }: Props) {
   return (
     <ReportSection title={title} subtitle={subtitle}>
-      <p className="text-sm text-gray-600 dark:text-gray-300">
+      <p className="rounded-lg border border-gray-200 bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm text-gray-600">
         {children}
       </p>
     </ReportSection>

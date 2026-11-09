@@ -1,4 +1,7 @@
 import type { Keyword } from '../../../types';
+import {
+  REPORT_CONTROL_LABEL_CLASS, REPORT_CONTROL_SELECT_CLASS
+} from './reportControls';
 
 interface Props {
   readonly keywords: ReadonlyArray<Keyword>;
@@ -17,10 +20,10 @@ export function ReportKeywordSelector({
   onChange,
 }: Props) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="w-full min-w-0 sm:w-[26rem]">
       <label
         htmlFor="report-keyword-select"
-        className="text-xs font-medium text-gray-500 dark:text-gray-400"
+        className={REPORT_CONTROL_LABEL_CLASS}
       >
         Keyword
       </label>
@@ -28,10 +31,10 @@ export function ReportKeywordSelector({
         id="report-keyword-select"
         value={selected ?? ''}
         onChange={(event) => onChange(event.target.value)}
-        className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 min-w-[14rem]"
+        className={REPORT_CONTROL_SELECT_CLASS}
       >
         {!selected && <option value="">Select a keyword…</option>}
-        {keywords.map((keyword) => (
+        {[...keywords].sort((a, b) => a.keyword.localeCompare(b.keyword, undefined, { sensitivity: 'base' })).map((keyword) => (
           <option key={keyword.keyword} value={keyword.keyword}>
             {keyword.keyword}
           </option>

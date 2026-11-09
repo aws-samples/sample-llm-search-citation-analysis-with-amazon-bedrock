@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
-import { RefreshIcon } from '../ui';
+import type { ReactNode } from 'react';
+import {
+  Button, RefreshIcon
+} from '../ui';
 import { ProvidersConfigSkeleton } from './ProvidersConfigSkeleton';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
@@ -28,6 +31,26 @@ export interface ProvidersConfigProps {
   /** Threaded from the parent, which already resolved membership. */
   readonly isAdmin: boolean;
 }
+
+interface ProviderGroupSectionProps {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly children: ReactNode;
+}
+
+/** One titled group of provider cards (answer engines, web search, SEO data). */
+const ProviderGroupSection = ({
+  id, title, description, children
+}: ProviderGroupSectionProps) => (
+  <section aria-labelledby={id} className="space-y-4">
+    <div>
+      <h4 id={id} className="text-sm font-semibold text-gray-900">{title}</h4>
+      <p className="text-xs text-gray-600 mt-1">{description}</p>
+    </div>
+    {children}
+  </section>
+);
 
 export const ProvidersConfig = ({
   providers, loading, onUpdate, onRefresh, updateError = null, isAdmin 
@@ -112,26 +135,32 @@ export const ProvidersConfig = ({
   return (
     <div className="space-y-6">
       <SettingsSectionHeader title="AI Provider Configuration" description="Configure API keys and enable/disable providers for analysis">
-        <button onClick={onRefresh} className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2">
-          <RefreshIcon className="w-4 h-4" />
+        <Button variant="secondary" leadingIcon={<RefreshIcon className="w-4 h-4" />} onClick={() => { void onRefresh(); }}>
           Refresh
-        </button>
+        </Button>
       </SettingsSectionHeader>
 
       <SettingsErrorNotice error={updateError ?? error} />
 
-      <div className="space-y-4">
-        {groups.engines.map(renderCard)}
-      </div>
+      {groups.engines.length > 0 && (
+        <ProviderGroupSection id="answer-engine-providers" title="Answer engines"
+          description="AI engines that write an answer. Their answers are stored and counted in the KPIs.">
+          {groups.engines.map(renderCard)}
+        </ProviderGroupSection>
+      )}
+
+      {groups.search.length > 0 && (
+        <ProviderGroupSection id="web-search-providers" title="Web search providers"
+          description="Add cited links to a run but write no answer, so they are not counted in the KPIs.">
+          {groups.search.map(renderCard)}
+        </ProviderGroupSection>
+      )}
 
       {groups.seo.length > 0 && (
-        <section aria-labelledby="seo-data-providers" className="space-y-4">
-          <div>
-            <h4 id="seo-data-providers" className="text-sm font-semibold text-gray-900">SEO data</h4>
-            <p className="text-xs text-gray-600 mt-1">Search volume, keyword difficulty and Google results pages for the SEO views and the Google AI Overviews engine.</p>
-          </div>
+        <ProviderGroupSection id="seo-data-providers" title="SEO data"
+          description="Search volume, keyword difficulty and Google results pages for the SEO views and the Google AI Overviews engine.">
           {groups.seo.map(renderCard)}
-        </section>
+        </ProviderGroupSection>
       )}
 
       <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">

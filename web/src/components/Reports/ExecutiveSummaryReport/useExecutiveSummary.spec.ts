@@ -12,7 +12,7 @@ import type { ReportSlice } from '../layout';
 import { buildOverview } from '../layout/reportPayload-fixtures';
 import { loadedOverview } from './sections/reportsOverview-fixtures';
 
-const mockOverview = useReportsOverview as ReturnType<typeof vi.fn>;
+const mockOverview = vi.mocked(useReportsOverview);
 
 describe('useExecutiveSummary', () => {
   const fetchReportsOverview = vi.fn();

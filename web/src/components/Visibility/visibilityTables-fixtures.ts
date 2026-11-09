@@ -2,12 +2,15 @@ import {
   screen, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { KeywordVisibilityRow } from '../../types';
+import type {
+  BrandLeaderboardRow, KeywordVisibilityRow
+} from '../../types';
 import { HISTORY_TITLE } from './VisibilityHistory';
 import { buildKpis } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
-  KEYWORD_WITHOUT_DATA, buildKeywordRow
+  KEYWORD_WITHOUT_DATA, buildBrandRow, buildKeywordRow
 } from './visibilityOverview-fixtures';
+import { VISIBILITY_ROW_LIMIT } from './useRowLimit';
 
 /** The text of every body cell, row by row. */
 export function bodyRowCells(table: HTMLElement): string[][] {
@@ -100,3 +103,19 @@ export const SORTABLE_KEYWORD_ROWS: readonly KeywordVisibilityRow[] = [
     }),
   }),
 ];
+
+/** One row more than a long table shows before "Show all". */
+export const OVER_LIMIT_COUNT = VISIBILITY_ROW_LIMIT + 1;
+
+/** "keyword 1" … "keyword n", best visibility score first. */
+export function numberedKeywordRows(count: number): KeywordVisibilityRow[] {
+  return Array.from({ length: count }, (_, index) => buildKeywordRow({
+    keyword: `keyword ${index + 1}`,
+    kpis: buildKpis({ visibility_score: 100 - index }),
+  }));
+}
+
+/** "Brand 1" … "Brand n", in the API's best-first order. */
+export function numberedBrandRows(count: number): BrandLeaderboardRow[] {
+  return Array.from({ length: count }, (_, index) => buildBrandRow({ name: `Brand ${index + 1}` }));
+}

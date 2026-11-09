@@ -66,9 +66,9 @@ export function quadrantLabel(quadrant: SeoGeoQuadrant): string {
 }
 
 const QUADRANT_BADGE_CLASSES: Readonly<Record<SeoGeoQuadrant, string>> = {
-  both_strong: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
-  ai_gap: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
-  seo_gap: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200',
+  both_strong: 'bg-gray-100 text-emerald-800 dark:bg-gray-900/40 dark:text-emerald-200',
+  ai_gap: 'bg-gray-100 text-amber-800 dark:bg-gray-900/40 dark:text-amber-200',
+  seo_gap: 'bg-gray-100 text-blue-800 dark:bg-gray-900/40 dark:text-blue-200',
   both_weak: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
   no_data: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
 };

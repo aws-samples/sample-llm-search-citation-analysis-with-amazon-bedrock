@@ -20,8 +20,6 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 logger = logging.getLogger(__name__)

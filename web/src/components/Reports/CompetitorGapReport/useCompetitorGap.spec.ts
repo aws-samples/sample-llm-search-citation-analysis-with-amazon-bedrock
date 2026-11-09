@@ -10,7 +10,7 @@ import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
 import { mockSingleCompetitorRollup } from '../../../hooks/useCompetitorRollup-fixtures';
 import type { CompetitorReportResponse } from '../../../api/reports';
 
-const mockHook = useCompetitorRollup as ReturnType<typeof vi.fn>;
+const mockHook = vi.mocked(useCompetitorRollup);
 
 describe('useCompetitorGap', () => {
   const fetchCompetitorRollup = vi.fn();

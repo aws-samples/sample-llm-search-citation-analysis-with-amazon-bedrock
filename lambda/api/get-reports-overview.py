@@ -24,13 +24,8 @@ Query params:
 
 from __future__ import annotations
 
-import logging
-import sys
 from collections.abc import Callable
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 
@@ -47,9 +42,6 @@ from shared.scope_params import (
 )
 from shared.scoped_reports import TREND_WINDOW_PARAMS
 from shared.utils import get_brand_config, get_timestamp
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 KEYWORDS_TABLE = keywords_table_name()

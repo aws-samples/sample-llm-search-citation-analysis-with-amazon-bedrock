@@ -1,6 +1,6 @@
 # Rank Tracking
 
-Rank Tracking shows where a domain ranks in Google's organic results for a list of keywords, on desktop and/or
+The Rank Tracking page (SEO › Rank Tracking, `/seo/rank-tracking`) shows where a domain ranks in Google's organic results for a list of keywords, on desktop and/or
 mobile, and how that changes over time. Results come from DataForSEO's Google SERP API.
 
 ## Trackers
@@ -9,7 +9,7 @@ A tracker is one domain in one market (the market picked in the header when it i
 
 | Setting | Values |
 |---|---|
-| Domain | Picked from Settings › Brand Tracking: your own domains (`first_party_domains`, the first one preselected), then "Competitor: name (domain)" for each `competitor_domains` entry, or "Other domain" (free text). Stored lower-case without `https://`, path or a leading `www.`. With no domain in Brand Tracking the form links to Settings › Brand Tracking. |
+| Domain | Picked from Settings › Brand tracking: your own domains (`first_party_domains`, the first one preselected), then "Competitor: name (domain)" for each `competitor_domains` entry, or "Other domain" (free text). Stored lower-case without `https://`, path or a leading `www.`. With no domain in Brand tracking the form links to Settings › Brand tracking. |
 | Market | The header market; not asked again. |
 | Keywords | The Settings keywords (`keyword_scope`): `all` (default) = every active keyword of the tracker's market (the Global market = keywords without a market), or `group` = the active keywords of one keyword group (`group_id`, any market). Both are read at every check, so a keyword added in Settings › Keywords is tracked from the next check. |
 | Extra keywords | Optional, collapsed in the form: keywords tracked for rankings only (they are not asked of the AI engines). Keywords you want everywhere belong in Settings. |
@@ -33,7 +33,7 @@ reactivates it.
 While the header market has no tracker, Admins see a card "Track <your domain> for your N keywords in <market>"
 (N from the free estimate). Its button opens the prefilled form (all keywords of the market, mobile, top 30,
 weekly); nothing is stored or paid for until the review is confirmed. "Track competitors" creates one tracker per
-competitor domain of Brand Tracking not yet tracked in the market, with the same keywords and defaults, after one
+competitor domain of Brand tracking not yet tracked in the market, with the same keywords and defaults, after one
 confirmation naming the paid searches per tracker. Readers who are not Admins see an empty state.
 
 ## How a position is found
@@ -61,7 +61,8 @@ found. A check that answered only some keywords on a device is marked partial; a
 
 ## Prices
 
-Prices are DataForSEO's list prices per search; your account is billed directly.
+Prices are DataForSEO's list prices per search, read from its price table in September 2026
+(`lambda/shared/dataforseo_pricing.py`); your account is billed directly.
 
 | Method | First page (10 results) | Each extra page |
 |---|---|---|
@@ -99,7 +100,8 @@ manual check, and at most $0.90 per scheduled check (about $3.60 a month weekly)
 
 - **Latest results**: each keyword's newest position per device, compared with a check from yesterday, last week,
   last month or 90 days ago (the newest finished check from before then, else the oldest one). An arrow shows a rise
-  or fall; Export CSV downloads the table (change = previous − current, `new`, or `lost`).
+  or fall; **Export to Excel** downloads the table: per device the position, the change (previous − current, `new`,
+  or `lost`), the ranking URL and the SERP features.
 - **Keyword history**: click a keyword to see its position per device over the last year; a miss is drawn at the
   bottom of the chart.
 - **Position distribution**: per finished check, the number of keywords in the top 3, 4–10, 11–20, not in the top

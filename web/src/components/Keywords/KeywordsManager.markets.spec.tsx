@@ -9,7 +9,9 @@ import {
   mockApiPost, mockApiPut
 } from '../../api/clientMock-fixtures';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
-import { existingKeywordFixture } from './KeywordsManager-fixtures';
+import {
+  chooseKeywordAction, existingKeywordFixture, getNewKeywordInput
+} from './KeywordsManager-fixtures';
 import {
   answerBrazilianSuggestion, BRAZILIAN_KEYWORD, CHILEAN_KEYWORD, renderMarketKeywordsManager, requestBrazilianSuggestion,
   startEditingChileanKeyword
@@ -30,7 +32,8 @@ describe('KeywordsManager markets', () => {
     await renderMarketKeywordsManager([existingKeywordFixture], false);
 
     expect(screen.queryByLabelText('Market for new keywords')).not.toBeInTheDocument();
-    expect(screen.queryByText('Add to markets…')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for hotels' }));
+    expect(screen.queryByRole('menuitem', { name: 'Add to markets…' })).toBeNull();
   });
 
   it.each([
@@ -47,7 +50,7 @@ describe('KeywordsManager markets', () => {
     await renderMarketKeywordsManager();
 
     await userEvent.selectOptions(screen.getByLabelText('Market for new keywords'), market);
-    await userEvent.type(screen.getByPlaceholderText('Enter new keyword...'), 'resorts');
+    await userEvent.type(getNewKeywordInput(), 'resorts');
     await userEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(mockApiPost).toHaveBeenCalledWith('/keywords', body, { allowStructured4xx: true });
@@ -62,9 +65,11 @@ describe('KeywordsManager markets', () => {
   it('lists the translations of a keyword with their markets', async () => {
     await renderMarketKeywordsManager([existingKeywordFixture, CHILEAN_KEYWORD]);
 
-    const [sourceTranslations] = screen.getAllByText(/Also asked as/u);
+    const [toggle] = screen.getAllByRole('button', { name: 'Also asked in 1 market' });
+    await userEvent.click(toggle);
 
-    expect(sourceTranslations).toHaveTextContent('Also asked as hoteles en santiago (Chile (Spanish))');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByText(/Also asked as/u)[0]).toHaveTextContent('Also asked as hoteles en santiago (Chile (Spanish))');
   });
 
   it('starts the edit on the keyword market', async () => {
@@ -95,13 +100,15 @@ describe('KeywordsManager markets', () => {
     });
     await renderMarketKeywordsManager();
 
-    expect(screen.queryByRole('button', { name: 'Add hotels to markets' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions for hotels' }));
+
+    expect(screen.queryByRole('menuitem', { name: 'Add to markets…' })).not.toBeInTheDocument();
   });
 
   it('does not offer the markets the keyword is already asked in', async () => {
     await renderMarketKeywordsManager([existingKeywordFixture, CHILEAN_KEYWORD]);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add hotels to markets' }));
+    await chooseKeywordAction('hotels', 'Add to markets…');
     const dialog = screen.getByRole('dialog');
 
     expect(within(dialog).queryByRole('checkbox', { name: /Chile/u })).not.toBeInTheDocument();

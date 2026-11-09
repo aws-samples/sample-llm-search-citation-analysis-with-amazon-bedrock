@@ -22,6 +22,7 @@ import {
   keywordSelectionKey, uniqueResearchKeywords
 } from './keywordIdentity';
 import { usePromotionMarket } from './usePromotionMarket';
+import { useMountedRef } from './useMountedRef';
 
 export const SELECTION_LIMIT = 500;
 export const PROMOTION_TIMEOUT_MS = 30_000;
@@ -206,7 +207,7 @@ export const usePromoteKeywords = (
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
+  const mountedRef = useMountedRef();
   const reconciliation = useContext(KEYWORD_RECONCILIATION_CONTEXT);
   const market = usePromotionMarket();
   const { marketId } = market;
@@ -264,13 +265,9 @@ export const usePromoteKeywords = (
     return true;
   }, [clearRequestTimer, requestKeywordReconciliation]);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      clearSuccessTimer();
-      cancelActiveRequest();
-    };
+  useEffect(() => () => {
+    clearSuccessTimer();
+    cancelActiveRequest();
   }, [cancelActiveRequest, clearSuccessTimer]);
 
   useEffect(() => {

@@ -4,13 +4,20 @@ import {
 import {
   fireEvent, render, screen, waitFor
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { SearchesView } from './SearchesView';
+import { labelledFieldIdentity } from '../../test/fieldIdentity';
 import { mockAuthenticatedFetch } from '../../test/infrastructureMock';
 import { lastExportedColumn } from '../../test/excelExportMock';
 import {
   answerSearchPages, NEWER_RUN, OLDER_RUN, TWO_SEARCH_PAGES
 } from '../../api/searchPages-fixtures';
-import { queryLoadOlderSearchesElement } from './SearchesView-fixtures';
+import {
+  buildKeywordRuns, queryLoadMoreElement, shownKeywordRows
+} from './SearchesView-fixtures';
+import {
+  installIntersectionObserverMock, scrollSentinelIntoView
+} from '../../test/intersectionObserverMock';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
 vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
@@ -26,33 +33,26 @@ const mockSearches = [
   },
 ];
 
-/** The view over the first page, with the older page answered and "Load older searches" clicked. */
+/** The view over the first page, with the older page answered and the end of the list scrolled into view. */
 function setupOlderPageLoad() {
+  installIntersectionObserverMock();
   answerSearchPages({ older: [[OLDER_RUN], null] });
   render(<SearchesView searches={[NEWER_RUN]} nextToken="older" />);
-  fireEvent.click(screen.getByRole('button', { name: 'Load older searches' }));
+  scrollSentinelIntoView();
 }
 
 describe('SearchesView', () => {
   it('renders the keyword table columns when there are no searches', () => {
     render(<SearchesView searches={[]} />);
     expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toStrictEqual([
-      'Keyword', 'Providers', 'Runs', 'Citations', 'Avg', 'Last Run', 'Details',
+      'Keyword', 'Providers', 'Runs', 'Citations', 'Avg / run', 'Last Run', 'Details',
     ]);
   });
 
   it('associates every filter with its searches-specific identity', () => {
     render(<SearchesView searches={mockSearches} />);
 
-    const filters = ['Search Keyword', 'Provider', 'Query Prompt'].map((label) => (
-      screen.getByLabelText<HTMLInputElement | HTMLSelectElement>(label)
-    ));
-
-    expect(filters.map((filter) => ({
-      id: filter.id,
-      labelFor: filter.labels?.[0]?.htmlFor,
-      name: filter.name,
-    }))).toStrictEqual([
+    expect(['Search Keyword', 'Provider', 'Query Prompt'].map(labelledFieldIdentity)).toStrictEqual([
       {
         id: 'searches-keyword-filter',
         labelFor: 'searches-keyword-filter',
@@ -71,25 +71,38 @@ describe('SearchesView', () => {
     ]);
   });
 
-  it('exposes the page-size selector with a searches-specific identity', () => {
-    render(<SearchesView searches={[]} />);
+  it('shows the first 25 keywords, then the next ones once the end of the list scrolls into view', () => {
+    installIntersectionObserverMock();
+    render(<SearchesView searches={buildKeywordRuns(30)} />);
+    const before = shownKeywordRows().length;
 
-    const selector = screen.getByLabelText<HTMLSelectElement>('Show:');
+    scrollSentinelIntoView();
 
-    expect({
-      id: selector.id,
-      labelFor: selector.labels?.[0]?.htmlFor,
-      name: selector.name,
-    }).toStrictEqual({
-      id: 'searches-items-per-page',
-      labelFor: 'searches-items-per-page',
-      name: 'searches-items-per-page',
-    });
+    expect([before, shownKeywordRows().length, screen.getByText('All 30 keywords are shown.')]).toStrictEqual([25, 30, expect.anything()]);
+  });
+
+  it('shows the next keywords when "Load more" is pressed', () => {
+    render(<SearchesView searches={buildKeywordRuns(30)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+
+    expect(shownKeywordRows()).toHaveLength(30);
   });
 
   it('renders keyword when searches exist', () => {
     render(<SearchesView searches={mockSearches} />);
     expect(screen.getByText('hotels')).toBeInTheDocument();
+  });
+
+  it('opens the keyword detail, which loads its runs, when Enter is pressed on the keyword', async () => {
+    render(<SearchesView searches={mockSearches} />);
+
+    screen.getByRole('button', { name: 'hotels' }).focus();
+    await userEvent.keyboard('{Enter}');
+
+    await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+      expect.stringContaining('keyword=hotels'), expect.anything(),
+    ));
   });
 
   it('shows empty state when no searches', () => {
@@ -100,13 +113,13 @@ describe('SearchesView', () => {
   it('offers no older searches when the first page is the last one', () => {
     render(<SearchesView searches={[NEWER_RUN]} />);
 
-    expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument();
+    expect(queryLoadMoreElement()).not.toBeInTheDocument();
   });
 
   it('loads the older page the token points at and keeps the first page', async () => {
     setupOlderPageLoad();
 
-    expect(await screen.findByRole('option', { name: 'gemini' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
   });
 
   it('asks for the page after the first one when loading older searches', async () => {
@@ -120,7 +133,7 @@ describe('SearchesView', () => {
   it('hides the button once the last page is loaded', async () => {
     setupOlderPageLoad();
 
-    await waitFor(() => expect(queryLoadOlderSearchesElement()).not.toBeInTheDocument());
+    await waitFor(() => expect(queryLoadMoreElement()).not.toBeInTheDocument());
   });
 
   it('exports the runs of every page', async () => {

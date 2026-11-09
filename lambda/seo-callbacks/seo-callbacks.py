@@ -18,11 +18,7 @@ endpoint tells a caller nothing; a malformed one gets 400.
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from botocore.exceptions import BotoCoreError, ClientError
 

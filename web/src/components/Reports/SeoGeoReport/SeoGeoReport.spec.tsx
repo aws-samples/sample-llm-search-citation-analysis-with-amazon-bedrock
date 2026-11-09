@@ -164,6 +164,6 @@ describe('seoGeoMarketNote', () => {
   });
 
   it('says every market combined covers the keywords without a market', () => {
-    expect(seoGeoMarketNote(null)).toBe('Keywords without a market; pick a market in the header for its keywords (Google results are per country).');
+    expect(seoGeoMarketNote(null)).toBe('Only keywords without a market are shown. Google results differ per country: pick a market in the header to compare its keywords.');
   });
 });

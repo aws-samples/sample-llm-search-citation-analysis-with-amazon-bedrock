@@ -22,7 +22,9 @@ import {
   definitionTerms, VISIBILITY_DEFINITION_TERMS, headlineCardLabels, statFigure, statFootnote
 } from '../Reports/layout/reportQueries-fixtures';
 import { NO_PREVIOUS_RUN } from '../Reports/layout/periodComparison';
-import { OWNED_DOMAINS_MISSING } from '../Reports/layout/KpiHeadline';
+import {
+  HEADLINE_LABELS, itAsksForOwnedDomains, itShowsNoComparison
+} from '../Reports/layout/kpiHeadline-fixtures';
 import { RUN_2 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import { formatDate } from '../../formatting/dateFormatter';
 
@@ -79,7 +81,7 @@ describe('VisibilityOverview', () => {
     it('shows the four headline KPIs as cards', () => {
       renderOverview();
 
-      expect(headlineCardLabels()).toStrictEqual(['Mention rate', 'Share of voice', 'Visibility score', 'Citation rate']);
+      expect(headlineCardLabels()).toStrictEqual(HEADLINE_LABELS);
     });
 
     it('shows the citation rate, not the keyword coverage, on the citation rate card', () => {
@@ -100,23 +102,23 @@ describe('VisibilityOverview', () => {
       expect(statFootnote('Mention rate')).toBe('-10.0 pts vs previous run (1 keyword)');
     });
 
-    it.each([
-      ['trends are not loaded', null],
-      ['the trend has a change', buildTrendsResponse()],
-    ])('says there is no earlier run when the keywords were analysed once, even if %s', (_condition, trends) => {
-      renderOverview({
-        visibility: buildVisibility({ change: null }),
-        trends 
-      });
+  });
 
-      expect(statFootnote('Visibility score')).toBe(NO_PREVIOUS_RUN);
-    });
+  describe.each([
+    ['trends are not loaded', null],
+    ['the trend has a change', buildTrendsResponse()],
+  ])('headline when the keywords were analysed once, even if %s', (_condition, trends) => {
+    itShowsNoComparison(() => renderOverview({
+      visibility: buildVisibility({ change: null }),
+      trends,
+    }), NO_PREVIOUS_RUN);
+  });
 
-    it('asks for owned domains on the citation rate card until they are configured', () => {
-      renderOverview({ visibility: buildVisibility({ citations_configured: false }) });
-
-      expect(statFootnote('Citation rate')).toBe(OWNED_DOMAINS_MISSING);
-    });
+  describe('headline before owned domains are configured', () => {
+    itAsksForOwnedDomains(
+      () => renderOverview({ visibility: buildVisibility({ citations_configured: false }) }),
+      (change) => `${change} vs previous run (1 keyword)`,
+    );
   });
 
   describe('panels', () => {

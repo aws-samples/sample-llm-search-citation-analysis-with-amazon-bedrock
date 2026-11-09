@@ -6,21 +6,18 @@ patched to hand back a stub per file name, so no handler module executes.
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from shared.router import HandlerLoader
 from testing.events import api_gateway_event
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module
 
 
 @pytest.fixture(scope='module')
 def router():
-    return load_handler_module(_API_DIR, 'stats-insights.py', 'stats_insights_router_routing_under_test')
+    return load_handler_module(API_DIR, 'stats-insights.py', 'stats_insights_router_routing_under_test')
 
 
 @pytest.mark.parametrize(('resource', 'filename'), [

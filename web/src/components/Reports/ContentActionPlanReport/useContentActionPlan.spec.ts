@@ -15,8 +15,8 @@ vi.mock('../../../hooks/useContentStudio', () => ({useContentStudio: vi.fn()}));
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useContentStudio } from '../../../hooks/useContentStudio';
 
-const mockGaps = useCitationGaps as ReturnType<typeof vi.fn>;
-const mockStudio = useContentStudio as ReturnType<typeof vi.fn>;
+const mockGaps = vi.mocked(useCitationGaps);
+const mockStudio = vi.mocked(useContentStudio);
 
 function renderPlan() {
   return renderHook(() => useContentActionPlan());

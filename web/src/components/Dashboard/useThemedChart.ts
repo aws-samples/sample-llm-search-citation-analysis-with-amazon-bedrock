@@ -13,6 +13,12 @@ import type { ChartTheme } from '../ui/chartTheme';
 
 Chart.register(...registerables);
 
+// A report preview tab (`?print=1`) is printed as soon as its data is in: charts draw their final frame at once
+// instead of being captured mid-animation.
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('print') === '1') {
+  Chart.defaults.animation = false;
+}
+
 export type ChartConfigurationBuilder<TItem, TType extends ChartType> = (
   items: TItem[],
   theme: ChartTheme,

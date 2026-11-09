@@ -19,7 +19,7 @@ function DomainCell({ source }: { readonly source: SourceRow }) {
   return (
     <>
       <span className="font-medium text-gray-900">{source.domain}</span>
-      {source.owned && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-800">owned</span>}
+      {source.owned && <span className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-xs text-violet-800">owned</span>}
     </>
   );
 }
@@ -33,7 +33,7 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
 ];
 
 function ownedRowClass(source: SourceRow): string {
-  return source.owned ? 'bg-emerald-50' : '';
+  return source.owned ? 'bg-violet-50' : '';
 }
 
 /** The most cited domains of the scope, most cited first, the brand's own domains badged and tinted. */

@@ -70,6 +70,12 @@ function positionTick(value: number | string): string {
   return Number(value) === BEYOND_TOP_X ? `>${SEO_TOP_POSITION}` : `#${value}`;
 }
 
+/** An axis tick: positions 1 to 10 and `>10`; the padding columns either side stay blank. */
+function axisTick(value: number | string): string {
+  const position = Number(value);
+  return position < 1 || position > BEYOND_TOP_X ? '' : positionTick(value);
+}
+
 /** A bubble's tooltip line: the keyword, its position and its mention rate. */
 export function pointLabel(membersByDataset: readonly (readonly SeoGeoPoint[])[]) {
   return (item: Pick<TooltipItem<'bubble'>, 'datasetIndex' | 'dataIndex'>): string => {
@@ -100,7 +106,7 @@ export function buildSeoGeoChartConfiguration(
       max: BEYOND_TOP_X + 1,
       ticks: {
         stepSize: 1,
-        callback: positionTick,
+        callback: axisTick,
       },
       title: {
         display: true,
@@ -125,6 +131,8 @@ export function buildSeoGeoChartConfiguration(
       r: bubbleRadius(point.volume, largest),
     })),
     backgroundColor: resolveColour(QUADRANT_COLOURS[quadrant.id], isDark),
+    // A bubble at 0% or 100% sits on the edge of the plot; draw it whole.
+    clip: MAX_RADIUS,
   }));
   return {
     type: 'bubble',

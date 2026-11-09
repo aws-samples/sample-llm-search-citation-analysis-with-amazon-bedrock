@@ -10,6 +10,7 @@ import {
 } from '../infrastructure';
 import { isRecord } from '../types/domain/keywordDecoders';
 import { useLatestRequest } from './useLatestRequest';
+import { useRequestStatus } from './useRequestStatus';
 
 /**
  * Error payload the analysis API returns with HTTP 200 for domain
@@ -47,7 +48,37 @@ export interface AnalysisResponseContract<TResponse> {
    * Defaults to true.
    */
   rejectBackendErrorBody?: boolean;
+  /**
+   * How the endpoint says "no AI answers for this scope yet": an HTTP status
+   * (`/brand-mentions` answers 404 for a keyword with no run) or a 200
+   * `{error}` message (`/citation-gaps`). Either one settles the request as
+   * `noData` instead of an error; every other failure stays an error.
+   */
+  noData?: NoDataSignal;
 }
+
+interface NoDataSignal {
+  readonly status?: number;
+  readonly errorMessage?: RegExp;
+}
+
+/** The value `fetchAnalysisResponse` resolves to when the endpoint reported no data yet. */
+const NO_DATA = Symbol('no data yet');
+
+/** The payload the last request stored, or its "no data yet" verdict (then `data` is null). */
+interface SettledOutcome<TResponse> {
+  readonly data: TResponse | null;
+  readonly noData: boolean;
+}
+
+const NOTHING_SETTLED: SettledOutcome<never> = {
+  data: null,
+  noData: false
+};
+const NO_DATA_SETTLED: SettledOutcome<never> = {
+  data: null,
+  noData: true
+};
 
 export interface AnalysisEndpointConfig<TArgs extends readonly unknown[], TResponse> extends AnalysisResponseContract<TResponse> {
   buildRequest: (...args: TArgs) => AnalysisRequest;
@@ -107,7 +138,8 @@ export function brandFilterParams(
 }
 
 /**
- * Performs one analysis request and returns its validated body. Throws the
+ * Performs one analysis request and returns its validated body, or `NO_DATA`
+ * when the contract's `noData` signal matches. Throws the
  * contract's own errors on a non-OK status, a 200 `{error}` body (unless the
  * contract opts out) and a body its type guard rejects; the caller owns the
  * abort, staleness and state-write decisions.
@@ -116,15 +148,28 @@ async function fetchAnalysisResponse<TResult>(
   request: AnalysisRequest,
   contract: AnalysisResponseContract<TResult>,
   signal: AbortSignal,
-): Promise<TResult> {
+): Promise<TResult | typeof NO_DATA> {
   const query = request.params ? `?${request.params.toString()}` : '';
   const response = await authenticatedFetch(`${API_BASE_URL}${request.path}${query}`, {
     ...request.init,
     signal,
   });
-  if (!response.ok) throw contract.createHttpError(response.status);
-
+  if (!response.ok) {
+    if (response.status === contract.noData?.status) return NO_DATA;
+    throw contract.createHttpError(response.status);
+  }
   const json: unknown = await response.json();
+  if (isNoDataBody(json, contract)) return NO_DATA;
+  return validatedBody(json, contract);
+}
+
+/** A 200 `{error}` body whose message is the endpoint's "no data yet" signal. */
+function isNoDataBody(json: unknown, contract: AnalysisResponseContract<unknown>): boolean {
+  return isBackendErrorResponse(json) && contract.noData?.errorMessage?.test(json.error) === true;
+}
+
+/** The payload, or the contract's error for a rejected `{error}` body or one the type guard refuses. */
+function validatedBody<TResult>(json: unknown, contract: AnalysisResponseContract<TResult>): TResult {
   if ((contract.rejectBackendErrorBody ?? true) && isBackendErrorResponse(json)) {
     throw contract.createResponseError(json.error);
   }
@@ -155,9 +200,12 @@ async function fetchAnalysisResponse<TResult>(
  * @returns `data`, `loading`, `error`, the configured `fetchData` and `reset`.
  */
 export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>(config: AnalysisEndpointConfig<TArgs, TResponse>) {
-  const [data, setData] = useState<TResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The payload and the "no data yet" flag change together, in one update,
+  // so no render can show a payload under a "no data yet" verdict or the reverse.
+  const [outcome, setOutcome] = useState<SettledOutcome<TResponse>>(NOTHING_SETTLED);
+  const {
+    loading, setLoading, error, setError 
+  } = useRequestStatus();
   const {
     beginRequest, isMounted, cancelRequest
   } = useLatestRequest();
@@ -174,10 +222,18 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     const latestRequest = beginRequest();
     setLoading(true);
     setError(null);
+    // A refetch keeps an earlier payload on screen, but not an earlier "no data yet".
+    setOutcome(previous => (previous.noData ? NOTHING_SETTLED : previous));
 
     try {
       const json = await fetchAnalysisResponse(request, contract, latestRequest.signal);
       if (!latestRequest.isCurrent()) return null;
+      if (json === NO_DATA) {
+        // Not a failure: the scope has no analysed answers yet. Earlier data is
+        // dropped so the view cannot show another scope's results under it.
+        setOutcome(NO_DATA_SETTLED);
+        return null;
+      }
       applyResult(json);
       return json;
     } catch (err) {
@@ -196,7 +252,10 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
 
   const fetchData = useCallback(
     (...args: TArgs) => runRequest(config.buildRequest(...args), config, result => {
-      setData(result);
+      setOutcome({
+        data: result,
+        noData: false
+      });
     }),
     // Stryker disable next-line ArrayDeclaration: React dependency list, not behaviour
     [config, runRequest],
@@ -206,15 +265,17 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   const reset = useCallback((): void => {
     // The dropped request's own settle no longer clears loading (it is not current), so clear it here.
     cancelRequest();
-    setData(null);
+    setOutcome(NOTHING_SETTLED);
     setLoading(false);
     setError(null);
   }, [cancelRequest]);
 
   return {
-    data,
+    data: outcome.data,
     loading,
     error,
+    /** The last request settled with "no AI answers for this scope yet" (see `noData` in the config): `data` and `error` are null. */
+    noData: outcome.noData,
     fetchData,
     /** Back to the idle state: the request in flight is dropped, `data` and `error` cleared. */
     reset,

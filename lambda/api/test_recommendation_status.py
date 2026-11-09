@@ -19,9 +19,7 @@ import pytest
 
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module
 
 
 class Loaded(NamedTuple):
@@ -44,7 +42,7 @@ def loaded() -> Loaded:
         patch.dict(os.environ, {'DYNAMODB_TABLE_RECOMMENDATION_STATUS': 'test-rec-status'}),
         patch('boto3.resource', return_value=mock_dynamodb),
     ):
-        mod = load_handler_module(_API_DIR, 'recommendation-status.py')
+        mod = load_handler_module(API_DIR, 'recommendation-status.py')
 
     # The module bound `dynamodb` and RECOMMENDATION_STATUS_TABLE while those
     # patches were active, so every later call already goes to the mock.

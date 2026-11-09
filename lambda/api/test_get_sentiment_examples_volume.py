@@ -10,7 +10,6 @@ Now the page is cut at ``PAGE_BUDGET_BYTES`` and ``next_token`` continues it.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import patch
 
@@ -21,16 +20,13 @@ from hypothesis import strategies as st
 from shared.sentiment_examples import ANSWER_TEXT_CAP
 from testing.answer_text_fixtures import answer_texts_dynamodb
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
 from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
-from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.report_scope_fixtures import report_handler_fixture
 from testing.response_size import assert_within_page_budget, long_text
 from testing.search_results_fixtures import active_keywords_table
 from testing.sentiment_examples_fixtures import stored_answer, stored_brand
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_volume_under_test', env=REPORT_TABLES_ENV)
+sentiment_handler = report_handler_fixture('get-sentiment-examples.py', 'get_sentiment_examples_volume_under_test')
 
 _NON_LATIN = '航空会社はこの地域でより多くの乗り継ぎを提供しています。'
 _ENGINES = ('openai', 'perplexity', 'gemini', 'claude')

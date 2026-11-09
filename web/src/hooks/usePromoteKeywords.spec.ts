@@ -41,6 +41,7 @@ import { promoteKeywords } from '../api/keywords';
 vi.mock('../api/client', () => ({ apiPost: vi.fn() }));
 
 import { apiPost } from '../api/client';
+import { countClearTimeoutsOnUnmount } from '../test/clearTimeoutOnUnmount';
 
 const mockApiPost = vi.mocked(apiPost);
 
@@ -494,15 +495,8 @@ describe('promotion request safety', () => {
     expect(mockApiPost).toHaveBeenCalledWith(...abortedPromotionRequest);
   });
 
-  it('clears the request timeout when the hook unmounts during promotion', () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    const { unmount } = renderPendingPromotion();
-    const callsBeforeUnmount = clearTimeoutSpy.mock.calls.length;
-
-    unmount();
-
-    expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
-    clearTimeoutSpy.mockRestore();
+  it('clears the request timeout when the hook unmounts during promotion', async () => {
+    await expect(countClearTimeoutsOnUnmount(() => Promise.resolve(renderPendingPromotion()))).resolves.toBe(1);
   });
 
   it('cancels stale promotion when available keywords change', () => {

@@ -1,6 +1,9 @@
 # Pending work
 
-State as of 7 October 2026, with version 2.33.1 deployed to a test account and proven from Kiro and Claude Code. Report insights Phases 1–3 and the MCP server
+Open work on the Citation Analysis sample: connecting the remaining MCP clients, reviewing insight thresholds once
+real data accumulates, and features to build only if a client needs them.
+
+Checked against the code on 8 November 2026 (version 2.43.1). Version 2.33.1 was deployed to a test account on 7 October 2026 and proven from Kiro and Claude Code. Report insights Phases 1–3 and the MCP server
 (discovery, read, write and spend tools, limits, audit, prompts) are implemented; what is left needs an account owner,
 real data over time, or a client that has not been tried yet. Delete a line when it is done; the list is meant to
 reach zero.
@@ -16,7 +19,8 @@ reach zero.
   `scopes_supported`); Quick Desktop's OAuth support is unverified (if it cannot do OAuth, build the personal-key
   route in §3).
 - **Decide the demo brand configuration.** The global brand configuration was swapped for the demo brand on 7 October;
-  the pre-demo configuration is backed up locally (path recorded in `docs/geo-insights-roadmap.md`). Restore it with a
+  the pre-demo configuration is backed up locally (its path was recorded in `docs/geo-insights-roadmap.md`, which is no
+  longer in the repository; ask the owner for it). Restore it with a
   `put-item` of the backup's `Item`, or keep the demo configuration while the demo runs.
 
 - **Codex CLI.** It rewrites the redirect URI with a per-server callback id (`http://127.0.0.1/callback/<id>`,
@@ -44,12 +48,12 @@ reach zero.
 
 ## 4. Decided against, for the record
 
-- `ruff format` as a gate: it would rewrite 269 files. If adopted, do it as a separate formatting-only change with a
+- `ruff format` as a gate: it would rewrite 609 of the 623 Python files (`ruff format --check .`, 8 November 2026). If adopted, do it as a separate formatting-only change with a
   `.git-blame-ignore-revs` file, not inside a feature change.
 - A CloudWatch alarm or custom metric on MCP refusals: no fixed monthly cost in this sample; the refusals are in the
   structured audit log lines and in `CitationAnalysis-McpState`.
 
 ## 5. Constraint to keep in mind
 
-- `CitationAnalysisStack` is at 490 of CloudFormation's 500 resources. The next sizeable addition goes into another
+- `CitationAnalysisStack` is at 497 of CloudFormation's 500 resources (`cdk.out/CitationAnalysisStack.template.json`, synth of 2.43.1 on 8 November 2026). The next sizeable addition goes into another
   stack (as the MCP server did), not into the main one.

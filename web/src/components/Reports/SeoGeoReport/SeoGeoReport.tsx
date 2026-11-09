@@ -37,7 +37,7 @@ const SEO_GEO_PATH = '/reports/seo-geo';
  */
 export function seoGeoMarketNote(marketLabel: string | null): string {
   return marketLabel === null
-    ? 'Keywords without a market; pick a market in the header for its keywords (Google results are per country).'
+    ? 'Only keywords without a market are shown. Google results differ per country: pick a market in the header to compare its keywords.'
     : `Keywords of ${marketLabel}.`;
 }
 

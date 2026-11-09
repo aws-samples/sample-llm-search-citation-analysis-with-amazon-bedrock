@@ -17,11 +17,6 @@ The paid one-off routes count against the caller's daily limit before they are d
 (``shared.seo_spend_limit``): past it the answer is 429 ``DAILY_LIMIT`` and no DataForSEO call is made.
 """
 
-import sys
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
-
 from shared.consolidated_router import route_map_handler
 from shared.seo_spend_limit import limited
 

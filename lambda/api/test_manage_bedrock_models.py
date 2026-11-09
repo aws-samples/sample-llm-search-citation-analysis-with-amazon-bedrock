@@ -11,7 +11,6 @@ resets it to the default. Every route is Admin-only and ``{id}`` must be
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 from decimal import Decimal
 from types import ModuleType
@@ -59,11 +58,10 @@ from testing.bedrock_model_fixtures import (
     timestamp_hours_ago,
 )
 from testing.handler_fixtures import handler_fixture
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR
 
 module = handler_fixture(
-    _API_DIR, 'manage-bedrock-models.py', 'manage_bedrock_models_under_test',
+    API_DIR, 'manage-bedrock-models.py', 'manage_bedrock_models_under_test',
     env={'CORS_ORIGIN_PARAM': '', 'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config'},
 )
 

@@ -27,14 +27,18 @@ vi.mock('../../hooks/useContentStudio', () => ({ useContentStudio: vi.fn() }));
 
 vi.mock('./ContentIdeaCard', () => ({
   ContentIdeaCard: ({
-    idea, onGenerate
+    idea, onGenerate, onOpenBrief
   }: {
     idea: ContentIdea;
     onGenerate: (idea: ContentIdea) => void;
+    onOpenBrief?: () => void;
   }) => (
-    <button type="button" onClick={() => onGenerate(idea)}>
-      Create content for {idea.keyword}
-    </button>
+    <>
+      <button type="button" onClick={() => onGenerate(idea)}>
+        Create content for {idea.keyword}
+      </button>
+      {onOpenBrief && <button type="button" onClick={onOpenBrief}>Brief for {idea.keyword}</button>}
+    </>
   ),
 }));
 
@@ -42,14 +46,16 @@ vi.mock('./GroupBriefForm', async () => {
   const fixtures = await import('./ContentStudioView-fixtures');
   return {
     GroupBriefForm: ({
-      keywords, onGenerate, onGenerateBatch
+      keywords, onGenerate, onGenerateBatch, initialKeywordIds
     }: {
       keywords: Keyword[];
+      initialKeywordIds?: readonly string[];
       onGenerate: (idea: GroupBriefIdea) => Promise<boolean>;
       onGenerateBatch: (request: ContentBriefBatchRequest) => Promise<boolean>;
     }) => (
       <div>
         <span>Content Brief received {keywords.length} keywords</span>
+        <span>Brief starts with [{initialKeywordIds?.join(', ')}]</span>
         <button
           type="button"
           onClick={() => { void onGenerate(fixtures.buildGroupBriefIdea()); }}
@@ -86,6 +92,15 @@ function renderContentStudioView(
 ) {
   mockUseContentStudio.mockReturnValue(buildContentStudioHookResult(overrides));
   return render(<ContentStudioView keywords={keywords} />);
+}
+
+/** Renders an idea about `ideaKeyword` next to the active "Alpha keyword" and hands it to the brief. */
+async function setupBriefHandoff(ideaKeyword: string) {
+  renderContentStudioView(
+    { ideas: [buildActionableIdea({ keyword: ideaKeyword })] },
+    [buildTabContentKeyword()]
+  );
+  await userEvent.click(screen.getByRole('button', { name: /^Brief for/u }));
 }
 
 /** Renders one ordinary idea (built with `overrides`) and opens its confirmation; returns the idea and the generateContent spy. */
@@ -195,6 +210,40 @@ describe('ContentStudioView', () => {
     expect(screen.getByText('Content Brief received 1 keywords')).toBeInTheDocument();
   });
 
+  it('opens the brief with the idea keyword ticked when the keyword is active', async () => {
+    await setupBriefHandoff(' alpha KEYWORD ');
+
+    expect(screen.getByRole('tab', { name: 'Content Brief' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Brief starts with [keyword-1]')).toBeInTheDocument();
+  });
+
+  it('opens the brief tab from the tab bar with nothing ticked', async () => {
+    await setupBriefHandoff('Alpha keyword');
+    await userEvent.click(screen.getByRole('tab', { name: /^Content Ideas/u }));
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Content Brief' }));
+
+    expect(screen.getByText('Brief starts with []')).toBeInTheDocument();
+  });
+
+  it('offers no brief handoff for an idea whose keyword is not an active keyword', () => {
+    renderContentStudioView(
+      { ideas: [buildActionableIdea({ keyword: 'Alpha keyword' })] },
+      [buildTabContentKeyword({ status: 'inactive' })]
+    );
+
+    expect(screen.queryByRole('button', { name: /^Brief for/u })).not.toBeInTheDocument();
+  });
+
+  it('shows the high-priority count as status text with a dot, not a filled pill', () => {
+    renderContentStudioView({ ideas: [buildActionableIdea()] });
+
+    const badge = screen.getByText('1 high priority');
+    expect(badge).toHaveClass('text-red-700');
+    expect(badge).not.toHaveClass('bg-red-100');
+    expect(badge.querySelector('[aria-hidden="true"]')).toHaveClass('rounded-full');
+  });
+
   it('switches to history after a combined brief is accepted', async () => {
     const generateContent = vi.fn().mockResolvedValue(
       buildPendingGenerateContentResponse('Alpha keyword')
@@ -264,7 +313,7 @@ describe('ContentStudioView', () => {
   it('keeps ordinary ideas behind their existing confirmation flow', async () => {
     const { generateContent } = await renderIdeaConfirmation();
 
-    expect(screen.getByText('Create Content')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Create Content' })).toHaveAttribute('aria-modal', 'true');
     expect(generateContent).not.toHaveBeenCalledWith(expect.anything());
   });
 

@@ -1,11 +1,10 @@
+import { vi } from 'vitest';
 import {
-  expect, vi
-} from 'vitest';
-import {
-  act, renderHook, waitFor
+  act, renderHook
 } from '@testing-library/react';
 import { buildJsonRequestInit } from '../api/contentStudio-fixtures';
 import { ApiRequestError } from '../infrastructure';
+import { waitForLoaded } from '../test/loadedHook';
 import type {
   BrandConfig, IndustryPresets
 } from '../types';
@@ -140,7 +139,7 @@ export function renderBrandConfig(options: BrandConfigMockApiOptions = {}) {
 /** Renders the hook and waits until config and presets have loaded. */
 export async function renderLoadedBrandConfig(options: BrandConfigMockApiOptions = {}) {
   const rendered = renderBrandConfig(options);
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  await waitForLoaded(rendered.result);
   return rendered;
 }
 

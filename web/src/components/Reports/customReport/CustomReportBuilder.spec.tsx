@@ -2,7 +2,7 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  fireEvent, screen, waitFor, within
+  fireEvent, screen, waitFor
 } from '@testing-library/react';
 import {
   mockApiDelete, mockApiGet, mockApiPost, mockApiPut
@@ -11,7 +11,7 @@ import { buildCustomReport } from '../../../api/customReports-fixtures';
 import { ApiRequestError } from '../../../infrastructure';
 import { changeField } from './customReport-fixtures';
 import {
-  REPORT_GONE, canvasBlockNames, canvasCard, canvasHandle, catalogItem, dragAndDrop, dropZone, renderCustomReportRoute, renderWithoutSavedReports,
+  canvasBlockNames, canvasCard, canvasHandle, catalogItem, confirmReportDeletion, describeMissingReportPage, dragAndDrop, dropZone, renderCustomReportRoute,
   reportCanvas, reportsListPayload
 } from './customReportPages-fixtures';
 
@@ -45,6 +45,13 @@ async function setupSavedReport() {
 
 function setupSaveClick() {
   fireEvent.click(screen.getByRole('button', { name: 'Save report' }));
+}
+
+/** Opens the builder for a new report, adds the Sources headline and saves it without a name. */
+function setupUnnamedSave() {
+  renderCustomReportRoute('/reports/custom/new');
+  fireEvent.click(screen.getByRole('button', { name: `Add ${SOURCES}` }));
+  setupSaveClick();
 }
 
 describe('Building a new custom report', () => {
@@ -115,12 +122,17 @@ describe('Building a new custom report', () => {
   });
 
   it('asks for a name before saving and sends nothing', () => {
-    renderCustomReportRoute('/reports/custom/new');
-    fireEvent.click(screen.getByRole('button', { name: `Add ${SOURCES}` }));
-    setupSaveClick();
+    setupUnnamedSave();
 
     expect(screen.getByRole('alert')).toHaveTextContent('Give the report a name.');
     expect(mockApiPost).not.toHaveBeenCalledWith('/custom-reports', expect.anything(), WRITE_OPTIONS);
+  });
+
+  it('marks the empty name field and moves focus to it when a save is refused', () => {
+    setupUnnamedSave();
+
+    const name = screen.getByRole('textbox', { name: 'Report name' });
+    expect([name.getAttribute('aria-invalid'), name === document.activeElement]).toStrictEqual(['true', true]);
   });
 
   it('shows the problem of an unfinished content block when a save is refused', () => {
@@ -178,16 +190,10 @@ describe('Editing a saved custom report', () => {
     mockApiDelete.mockResolvedValue({ deleted: 'report-board' });
     await setupSavedReport();
     fireEvent.click(screen.getByRole('button', { name: 'Delete report' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete report' }));
+    confirmReportDeletion();
 
     await waitFor(() => expect(screen.getByLabelText('Current location')).toHaveTextContent(/^\/reports$/u));
     expect(mockApiDelete).toHaveBeenCalledWith('/custom-reports/report-board', WRITE_OPTIONS);
-  });
-
-  it('offers the way back to Reports when the report is gone', async () => {
-    renderWithoutSavedReports('/reports/custom/report-missing/edit');
-
-    expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
   });
 
   it('shows the load failure without the way back when the reports cannot be read', async () => {
@@ -198,9 +204,5 @@ describe('Editing a saved custom report', () => {
     expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
   });
 
-  it('says the report is gone when no saved report has the id', async () => {
-    renderWithoutSavedReports('/reports/custom/report-missing/edit');
-
-    expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
-  });
+  describeMissingReportPage('/reports/custom/report-missing/edit');
 });

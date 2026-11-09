@@ -17,8 +17,8 @@ interface SentimentTone {
 export const SENTIMENT_TONES: Readonly<Record<SentimentLabel, SentimentTone>> = {
   positive: {
     label: 'Positive',
-    pill: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-    quote: 'border-emerald-300 dark:border-emerald-700',
+    pill: 'bg-gray-50 text-emerald-700 dark:bg-gray-900/40 dark:text-emerald-300',
+    quote: 'border-gray-300 dark:border-emerald-700',
   },
   neutral: {
     label: 'Neutral',
@@ -27,8 +27,8 @@ export const SENTIMENT_TONES: Readonly<Record<SentimentLabel, SentimentTone>> = 
   },
   mixed: {
     label: 'Mixed',
-    pill: 'bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-    quote: 'border-amber-300 dark:border-amber-700',
+    pill: 'bg-gray-50 text-amber-700 dark:bg-gray-900/40 dark:text-amber-300',
+    quote: 'border-gray-300 dark:border-amber-700',
   },
   negative: {
     label: 'Negative',

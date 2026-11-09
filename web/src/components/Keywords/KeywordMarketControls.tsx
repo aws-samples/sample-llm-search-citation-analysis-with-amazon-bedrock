@@ -1,7 +1,6 @@
 import {
   GLOBAL_MARKET_ID, type Keyword, type Market
 } from '../../types';
-import { MarketBadge } from '../Markets/MarketBadge';
 import {
   keywordMarketId, marketName
 } from '../Markets/marketSelection';
@@ -29,71 +28,98 @@ interface KeywordMarketSelectProps {
   readonly disabled?: boolean;
   /** Visually hide the label (dense rows); it stays the select's accessible name. */
   readonly hideLabel?: boolean;
+  /** A short visible word before the select (e.g. "in") while the full label stays its accessible name. */
+  readonly prefix?: string;
 }
+
+/** One `<option>` per configured market, valued by its id. */
+export const MarketOptions = ({ markets }: { readonly markets: readonly Market[] }) => (
+  <>{markets.map((market) => <option key={market.market_id} value={market.market_id}>{market.name}</option>)}</>
+);
 
 /** The market a new or edited keyword is asked from. */
 export function KeywordMarketSelect({
-  id, label, value, markets, onChange, disabled = false, hideLabel = false
+  id, label, value, markets, onChange, disabled = false, hideLabel = false, prefix
 }: KeywordMarketSelectProps) {
   return (
     <span className="inline-flex items-center gap-2">
-      <label htmlFor={id} className={hideLabel ? 'sr-only' : 'text-sm text-gray-600'}>{label}</label>
+      {prefix && <span aria-hidden="true" className="text-sm text-gray-500">{prefix}</span>}
+      <label htmlFor={id} className={hideLabel || prefix ? 'sr-only' : 'text-sm text-gray-600'}>{label}</label>
       <select id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}
-        className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+        className="py-2 pl-3 pr-8 max-w-[12rem] border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
         <option value="">No market</option>
-        {markets.map((market) => <option key={market.market_id} value={market.market_id}>{market.name}</option>)}
+        <MarketOptions markets={markets} />
       </select>
     </span>
   );
 }
 
-interface KeywordMarketInfoProps {
+interface KeywordMarketCellProps {
   readonly keyword: Keyword;
   readonly controls: KeywordMarketControls;
+  /** Whether the translations list (under the keyword) is open. */
+  readonly translationsOpen: boolean;
+  readonly onToggleTranslations: () => void;
+  /** The id of that list, for `aria-controls`. */
+  readonly translationsId: string;
 }
 
-/** A keyword row's market badge and the markets its translations are asked in. */
-export function KeywordMarketInfo({
-  keyword, controls
-}: KeywordMarketInfoProps) {
+/**
+ * A keyword row's market, as plain text with the country and language in its
+ * tooltip, and "+N" when translations ask the same question in N other
+ * markets. "+N" opens the list under the keyword.
+ */
+export function KeywordMarketCell({
+  keyword, controls, translationsOpen, onToggleTranslations, translationsId
+}: KeywordMarketCellProps) {
   const marketId = keywordMarketId(keyword);
-  const linked = linkedKeywords(keyword, controls.allKeywords);
+  const market = controls.markets.find((candidate) => candidate.market_id === marketId);
+  const linkedCount = linkedKeywords(keyword, controls.allKeywords).length;
+  const label = marketName(marketId, controls.markets);
   return (
-    <>
-      {marketId !== GLOBAL_MARKET_ID && <MarketBadge marketId={marketId} markets={controls.markets} />}
-      {linked.length > 0 && (
-        <span className="text-xs text-gray-500">
-          Also asked as{' '}
-          {linked.map((other, index) => (
-            <span key={other.id}>
-              {index > 0 && ', '}
-              <q>{other.keyword}</q> ({marketName(keywordMarketId(other), controls.markets)})
-            </span>
-          ))}
-        </span>
+    <span className="flex items-center gap-1.5 min-w-0">
+      {marketId === GLOBAL_MARKET_ID
+        ? <span className="text-gray-500" title="No market: asked without a country or language">—</span>
+        : <span className="truncate text-gray-700" title={market ? `Market ${label}: ${market.country_name}, ${market.language_name}` : `Market ${label}`}>{label}</span>}
+      {linkedCount > 0 && (
+        <button
+          type="button"
+          aria-expanded={translationsOpen}
+          aria-controls={translationsId}
+          aria-label={`Also asked in ${linkedCount} ${linkedCount === 1 ? 'market' : 'markets'}`}
+          title={`Also asked in ${linkedCount} ${linkedCount === 1 ? 'market' : 'markets'}`}
+          onClick={onToggleTranslations}
+          className="shrink-0 px-1.5 rounded text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
+        >
+          +{linkedCount}
+        </button>
       )}
-    </>
+    </span>
   );
 }
 
-interface AddToMarketsButtonProps {
+interface KeywordTranslationListProps {
   readonly keyword: Keyword;
   readonly controls: KeywordMarketControls;
+  readonly open: boolean;
+  readonly id: string;
 }
 
-export function AddToMarketsButton({
-  keyword, controls
-}: AddToMarketsButtonProps) {
-  const { onAddToMarkets } = controls;
-  if (onAddToMarkets === undefined) return null;
+/** "Also asked as <text> (<market>), …" under a keyword; rendered hidden until "+N" opens it. */
+export function KeywordTranslationList({
+  keyword, controls, open, id
+}: KeywordTranslationListProps) {
+  const linked = linkedKeywords(keyword, controls.allKeywords);
+  if (linked.length === 0) return null;
   return (
-    <button
-      type="button"
-      onClick={() => onAddToMarkets(keyword)}
-      aria-label={`Add ${keyword.keyword} to markets`}
-      className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200"
-    >
-      Add to markets…
-    </button>
+    <span id={id} hidden={!open} className={`${open ? 'block' : 'hidden'} mt-1 text-xs text-gray-500 whitespace-normal break-words`}>
+      Also asked as{' '}
+      {linked.map((other, index) => (
+        <span key={other.id}>
+          {index > 0 && ', '}
+          <q>{other.keyword}</q> ({marketName(keywordMarketId(other), controls.markets)})
+        </span>
+      ))}
+    </span>
   );
 }

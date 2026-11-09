@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: "Citation Analysis System"
+abstract: >-
+  An open-source, serverless system on AWS that tracks AI search visibility for
+  generative engine optimization (GEO): it sends prompts to AI search engines and
+  LLM providers such as ChatGPT, Perplexity, Gemini, Claude and Amazon Bedrock,
+  and runs citation analysis and brand monitoring on the answers.
+authors:
+  - name: "Amazon Web Services"
+    website: "https://aws.amazon.com/"
+license: MIT-0
+repository-code: "https://github.com/aws-samples/sample-llm-search-citation-analysis-with-amazon-bedrock"
+url: "https://github.com/aws-samples/sample-llm-search-citation-analysis-with-amazon-bedrock"
+version: "2.43.0"
+date-released: "2026-11-08"
+keywords:
+  - GEO
+  - generative engine optimization
+  - AI search visibility
+  - answer engine optimization
+  - citation analysis
+  - brand monitoring
+  - Amazon Bedrock
+  - LLM

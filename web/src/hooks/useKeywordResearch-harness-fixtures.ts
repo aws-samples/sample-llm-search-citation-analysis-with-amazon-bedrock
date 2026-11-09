@@ -86,3 +86,17 @@ export function findCall(predicate: (call: RecordedCall) => boolean): RecordedCa
 export function countJobPolls(): number {
   return recordedCalls().filter((call) => call.method === 'GET' && /\/keyword-research\/[^/?]+$/.test(call.url)).length;
 }
+
+/** The localStorage key under which the hook remembers the job it follows across refreshes. */
+const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+
+/** Stores `value` as the remembered job, as an earlier page load would have. */
+export function storeActiveResearchJob(value: string): void {
+  localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, value);
+}
+
+/** The remembered job, parsed, or null when the hook has forgotten it. */
+export function storedActiveResearchJob(): unknown {
+  const stored = localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+  return stored === null ? null : JSON.parse(stored);
+}

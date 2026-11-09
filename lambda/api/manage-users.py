@@ -6,16 +6,12 @@ Manages Cognito users: list, invite, update, enable/disable, reset password
 import concurrent.futures
 import logging
 import os
-import sys
 from collections.abc import Callable, Mapping
 from functools import wraps
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import (
     api_response,

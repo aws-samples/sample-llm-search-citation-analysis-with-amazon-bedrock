@@ -112,11 +112,12 @@ describe('ResearchProgress', () => {
     expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 
-  it('offers no retry on a running or completed job', () => {
-    const { rerender } = render(<ResearchProgress job={runningJob} onRetry={vi.fn()} />);
-    expect(queryRetryButtonElement()).not.toBeInTheDocument();
+  it.each([
+    ['running', runningJob],
+    ['completed', buildJob({ status: 'completed' })],
+  ])('offers no retry on a %s job', (_status, job) => {
+    render(<ResearchProgress job={job} onRetry={vi.fn()} />);
 
-    rerender(<ResearchProgress job={buildJob({ status: 'completed' })} onRetry={vi.fn()} />);
     expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 });

@@ -7,6 +7,9 @@ import { useBrandConfig } from '../../../hooks/useBrandConfig';
 import {
   ReportLayout, SectionPlaceholder 
 } from '../layout';
+import {
+  REPORT_CONTROL_LABEL_CLASS, REPORT_CONTROL_SELECT_CLASS
+} from '../layout/reportControls';
 import { useCompetitorGap } from './useCompetitorGap';
 import { HeadlineSection } from './sections/HeadlineSection';
 import { OutrankedKeywordsSection } from './sections/OutrankedKeywordsSection';
@@ -39,7 +42,9 @@ function configuredSelection(selected: string | null, configured: readonly strin
 export function CompetitorGapReport() {
   const params = useParams<{ competitor?: string }>();
   const navigate = useNavigate();
-  const { config } = useBrandConfig();
+  const {
+    config, loading: configLoading
+  } = useBrandConfig();
 
   const configuredCompetitors = config?.tracked_brands?.competitors ?? [];
   const selected = params.competitor
@@ -75,7 +80,8 @@ export function CompetitorGapReport() {
 
   usePrintMode({ ready: Boolean(selected) && data.ready });
 
-  if (configuredCompetitors.length === 0) {
+  // While the brand config loads, the report says it is selecting a competitor, not that none is configured.
+  if (!configLoading && configuredCompetitors.length === 0) {
     return (
       <ReportLayout
         title="Competitor Gap"
@@ -103,6 +109,7 @@ export function CompetitorGapReport() {
   return (
     <ReportLayout
       title={`Competitor Gap — ${selected}`}
+      name="Competitor Gap"
       subtitle="Where this competitor outranks us, who cites them but not us, and the outreach targets ordered by visibility lift."
       actions={(
         <CompetitorSwitcher
@@ -136,15 +143,15 @@ export function CompetitorSwitcher({
   readonly onChange: (next: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <label htmlFor="competitor-select" className="text-gray-600 dark:text-gray-400">
-        Competitor:
+    <div className="w-full min-w-0 sm:w-80">
+      <label htmlFor="competitor-select" className={REPORT_CONTROL_LABEL_CLASS}>
+        Competitor
       </label>
       <select
         id="competitor-select"
         value={selected}
         onChange={(e) => onChange(e.target.value)}
-        className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+        className={REPORT_CONTROL_SELECT_CLASS}
       >
         {competitors.map((c) => (
           <option key={c} value={c}>{c}</option>

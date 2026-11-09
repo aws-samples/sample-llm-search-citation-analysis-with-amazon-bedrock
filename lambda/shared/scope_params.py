@@ -81,6 +81,16 @@ SCOPE_QUERY_PARAMS: dict[str, dict[str, Any]] = {
 }
 """``@validate`` rules for the scope parameters and the market filter; handlers spread them into their own schema."""
 
+BRAND_FILTER_PARAMS: dict[str, dict[str, Any]] = {
+    'brand': {'type': str, 'max_length': 200},
+}
+"""``@validate`` rule for the optional brand filter; handlers spread it into their own schema."""
+
+PERSONA_FILTER_PARAMS: dict[str, dict[str, Any]] = {
+    'query_prompt_id': {'type': str, 'max_length': 100},
+}
+"""``@validate`` rule for the optional persona (query prompt) filter; handlers spread it into their own schema."""
+
 SCOPE_PARAMS = ('keyword', 'group_id', 'keyword_ids', 'scope')
 """The mutually exclusive scope parameters (``market_id`` narrows any of them and is not one)."""
 

@@ -171,6 +171,7 @@ export function buildTrackedDomain(overrides: Partial<TrackedBacklinkDomain> = {
 
 export function buildSnapshots(overrides: Partial<BacklinkSnapshotsResponse> = {}): BacklinkSnapshotsResponse {
   return {
+    estimated_run_cost_usd: 0.048,
     domains: [
       buildTrackedDomain(),
       buildTrackedDomain({

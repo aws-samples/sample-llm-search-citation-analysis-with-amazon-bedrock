@@ -6,25 +6,18 @@ Queries the SearchResults table, groups results by query_prompt_id,
 and calculates per-persona brand metrics plus a cross-persona summary.
 """
 
-import logging
 import os
-import sys
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
 from shared.kpi_engine import answers_from_rows, brand_table
+from shared.scope_params import PERSONA_FILTER_PARAMS
 from shared.search_results import search_results_table_name
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -213,7 +206,7 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
 @api_handler
 @validate({
     'keyword': require_keyword(),
-    'query_prompt_id': {'type': str, 'max_length': 100},
+    **PERSONA_FILTER_PARAMS,
 })
 def handler(event, context, keyword, query_prompt_id=None):
     """

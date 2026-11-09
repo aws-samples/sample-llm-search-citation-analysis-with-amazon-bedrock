@@ -55,16 +55,14 @@ export const ContentHistorySkeleton = () => (
 
 /** Holds the "n high priority" badge's place on the Content Ideas tab until the ideas arrive. */
 export const TabBadgeSkeleton = () => (
-  <span aria-hidden="true" className="skeleton ml-2 inline-block h-5 w-[6.5rem] rounded-full align-middle" />
+  <span aria-hidden="true" className="skeleton ml-2 inline-block h-4 w-[6.5rem] rounded-full align-middle" />
 );
 
-/** Card heights of the Content Brief form's sections: scope, strategy, mode, prompt editor, language and submit. */
+/** Card heights of the Content Brief form's three steps: what to write, which keywords, review. */
 const BRIEF_SECTIONS = [
-  ['scope', 'h-[260px]'],
-  ['strategy', 'h-40'],
-  ['mode', 'h-40'],
-  ['prompt', 'h-80'],
-  ['submit', 'h-[86px]'],
+  ['what', 'h-[300px]'],
+  ['keywords', 'h-[352px]'],
+  ['review', 'h-[352px]'],
 ] as const;
 
 /** The Content Brief form while the keyword groups it scopes by load. */

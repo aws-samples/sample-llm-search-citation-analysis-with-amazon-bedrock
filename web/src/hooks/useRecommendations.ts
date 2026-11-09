@@ -12,6 +12,7 @@ import { useSelectedMarketId } from '../components/Markets/marketSelectionContex
 import type {
   Recommendation, RecommendationStatus, RecommendationsResponse, ReportScope
 } from '../types';
+import { useRequestStatus } from './useRequestStatus';
 
 class RecommendationsFetchError extends Error {
   constructor(message = 'Failed to fetch recommendations') {
@@ -51,8 +52,9 @@ function withStatus(
  */
 export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
   const [data, setData] = useState<RecommendationsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    loading, setLoading, error, setError 
+  } = useRequestStatus();
   const [updatingIds, setUpdatingIds] = useState<readonly string[]>([]);
   const [statusError, setStatusError] = useState<string | null>(null);
   // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.

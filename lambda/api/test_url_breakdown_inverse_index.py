@@ -29,12 +29,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 # Required env vars must be present BEFORE the module imports — the handler
 # resolves them at module load via ``resolve_table_env``.
 os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-_mod = load_handler_module(os.path.dirname(__file__), 'get-url-breakdown.py')
+_mod = load_handler_module(API_DIR, 'get-url-breakdown.py')
 
 
 def _fake_table(pages: list[dict]) -> MagicMock:

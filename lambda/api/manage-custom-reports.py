@@ -24,9 +24,7 @@ the privacy-enhanced YouTube player and the Vimeo player. The link rules are
 pinned for both runtimes by ``test-fixtures/custom-report-blocks.json``.
 """
 
-import logging
 import re
-import sys
 import unicodedata
 import uuid
 from collections.abc import Callable
@@ -39,9 +37,6 @@ from urllib.parse import SplitResult, parse_qsl, urlsplit
 import boto3
 from botocore.exceptions import ClientError
 
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
-
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import get_caller_claims, get_caller_identity
 from shared.decorators import RouteNotHandledError, api_handler, json_object_body, route_handler, validate
@@ -51,9 +46,6 @@ from shared.dynamodb_conditions import delete_existing_item, is_conditional_chec
 from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp
 from shared.youtube import YOUTUBE_VIDEO_ID
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 reports_table = dynamodb.Table(resolve_table_env('DYNAMODB_TABLE_CUSTOM_REPORTS'))

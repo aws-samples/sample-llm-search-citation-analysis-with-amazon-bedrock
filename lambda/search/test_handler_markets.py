@@ -18,14 +18,12 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.handler_fixtures import handler_fixture
 from testing.provider_response_fixtures import (
     CHILE_MARKET_JSON,
     CLAUDE_DIRECT_RESPONSE,
@@ -36,13 +34,11 @@ from testing.provider_response_fixtures import (
     build_market,
     claude_search_error_response,
 )
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV, nothing_stored_fixture
+from testing.search_handler_fixtures import nothing_stored_fixture, search_handler_fixture
 
 # handler.py is loaded under its own module name (several Lambdas own a
 # `handler.py`; see test_handler_prompts.py).
-search_handler = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)), 'handler.py', 'search_handler_markets', env=SEARCH_HANDLER_ENV,
-)
+search_handler = search_handler_fixture('search_handler_markets')
 
 nothing_stored_yet = nothing_stored_fixture()
 

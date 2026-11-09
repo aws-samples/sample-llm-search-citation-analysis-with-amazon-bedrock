@@ -24,7 +24,7 @@ from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.env import SCHEDULE_ENV
 from testing.events import parse_response
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 
 class StateMachineDoesNotExist(Exception):
@@ -60,7 +60,7 @@ with (
     patch('boto3.resource', return_value=mock_dynamodb),
     patch.dict(os.environ, _test_env),
 ):
-    _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-schedule.py', 'manage_schedule')
+    _handler_mod = load_handler_module(API_DIR, 'manage-schedule.py', 'manage_schedule')
 
 GROUP_ID = 'a3f9c2d1-0000-4000-8000-000000000001'
 STATE_MACHINE_ARN = _test_env['STATE_MACHINE_ARN']

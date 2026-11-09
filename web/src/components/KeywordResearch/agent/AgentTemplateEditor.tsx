@@ -39,7 +39,7 @@ interface AgentTemplateEditorProps {
   readonly disabled?: boolean;
 }
 
-const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
+const INPUT_CLASS = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50';
 
 function FieldProblem({ message }: { readonly message: string | undefined }) {
   if (message === undefined) return null;
@@ -197,7 +197,7 @@ export function AgentTemplateEditor({
                   Remove
                 </Button>
               </div>
-              <p className="mt-1 text-[11px] text-gray-400">id: {dimensionRowId(row) || '—'}</p>
+              <p className="mt-1 text-[11px] text-gray-500">id: {dimensionRowId(row) || '—'}</p>
               <FieldProblem message={shown.rows[row.key]} />
             </li>
           ))}
@@ -248,7 +248,7 @@ export function AgentTemplateEditor({
             </Button>
           </>
         )}
-        {saving && <Spinner size="sm" className="text-gray-400" />}
+        {saving && <Spinner size="sm" className="text-gray-500" />}
       </div>
     </div>
   );

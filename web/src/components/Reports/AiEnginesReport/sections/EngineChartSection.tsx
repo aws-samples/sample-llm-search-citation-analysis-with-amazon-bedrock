@@ -7,6 +7,7 @@ import {
 export function EngineChartSection({ report }: ScopeSectionProps) {
   return (
     <LatestRunSection
+      loadingShape="chart"
       report={report}
       title="KPIs per engine"
       subtitle="Your mention rate, visibility score and citation rate in each AI engine's answers, on a 0–100 scale."

@@ -40,6 +40,7 @@ export function TrendHistorySection({
     title: 'Trend history',
     loading,
     loadingMessage: 'Loading trend history…',
+    loadingShape: 'chart',
     error,
     value: trends,
   });

@@ -12,10 +12,13 @@ from hypothesis import strategies as st
 
 from shared.cursors import (
     MAX_CURSOR_LENGTH,
+    decode_bound_offset_cursor,
     decode_cursor,
     decode_offset_cursor,
+    encode_bound_offset_cursor,
     encode_cursor,
     encode_offset_cursor,
+    query_binding,
 )
 
 
@@ -87,3 +90,30 @@ def test_any_string_key_round_trips(key: dict[str, str]) -> None:
 
     assert token is not None
     assert decode_cursor(token, key.keys()) == key
+
+
+class TestBoundOffsetCursor:
+    BINDING = query_binding({'scope': 'group:coruna', 'classification': None})
+
+    def test_round_trips_the_offset_for_the_same_query(self) -> None:
+        token = encode_bound_offset_cursor(100, 250, self.BINDING)
+
+        assert decode_bound_offset_cursor(token, self.BINDING) == 100
+
+    def test_is_absent_at_the_end_of_the_list(self) -> None:
+        assert encode_bound_offset_cursor(250, 250, self.BINDING) is None
+
+    def test_reads_as_zero_without_a_token(self) -> None:
+        assert decode_bound_offset_cursor(None, self.BINDING) == 0
+
+    def test_rejects_a_token_of_another_query(self) -> None:
+        token = encode_bound_offset_cursor(100, 250, query_binding({'scope': 'group:other', 'classification': None}))
+
+        assert decode_bound_offset_cursor(token, self.BINDING) is None
+
+    @pytest.mark.parametrize('payload', [{'offset': 100}, {'offset': -1, 'query': BINDING}, {'offset': True, 'query': BINDING}])
+    def test_rejects_unbound_or_invalid_offsets(self, payload: dict[str, object]) -> None:
+        assert decode_bound_offset_cursor(_raw_token(json.dumps(payload)), self.BINDING) is None
+
+    def test_binding_ignores_key_order(self) -> None:
+        assert query_binding({'a': 1, 'b': None}) == query_binding({'b': None, 'a': 1})

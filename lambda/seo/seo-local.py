@@ -19,13 +19,9 @@ import json
 import logging
 import os
 import re
-import sys
 from collections.abc import Callable, Mapping
 from functools import cache
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 import local_requests as req

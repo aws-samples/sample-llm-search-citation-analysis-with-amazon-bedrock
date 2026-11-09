@@ -1,9 +1,6 @@
-import { expect } from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { renderLoadedHook } from '../test/loadedHook';
 import { useQueryPrompts } from './useQueryPrompts';
 
 export const samplePrompt = {
@@ -22,9 +19,7 @@ export const samplePrompt = {
  */
 export async function renderLoadedQueryPrompts() {
   mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse([samplePrompt])));
-  const rendered = renderHook(() => useQueryPrompts());
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
-  return rendered;
+  return renderLoadedHook(() => useQueryPrompts());
 }
 
 /** Scripts the next `authenticatedFetch` call to answer `payload` with `status`. */

@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -16,9 +15,6 @@ from typing import Any, NamedTuple
 
 import boto3
 from botocore.exceptions import ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.ai_clients import (
     ANTHROPIC_API_BASE,

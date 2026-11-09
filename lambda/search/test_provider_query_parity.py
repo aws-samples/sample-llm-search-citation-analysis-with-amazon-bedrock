@@ -24,19 +24,12 @@ the user-facing query untouched.
 from __future__ import annotations
 
 import inspect
-import os
 from unittest.mock import MagicMock, patch
 
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
-
-setdefault_env(SEARCH_HANDLER_ENV)
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
+from testing.search_handler_fixtures import load_search_handler
 
 # Unique module name: see test_handler_prompts.py for why `import handler` is contested.
-_mod = load_handler_module(_HERE, 'handler.py', 'search_handler_parity')
+_mod = load_search_handler('search_handler_parity')
 
 KEYWORD = 'best hotels near Brussels Airport'
 PERSONA = 'I am travelling with two young children. {keyword}'

@@ -61,7 +61,7 @@ export const KeywordPromotionControls = ({ promotion }: KeywordPromotionControls
       <output className="block space-y-2">
         {submitting && (
           <span className="flex items-center gap-2 text-sm text-gray-600">
-            <Spinner size="sm" className="text-gray-400" />
+            <Spinner size="sm" className="text-gray-500" />
             Adding selected keywords...
           </span>
         )}
@@ -70,7 +70,7 @@ export const KeywordPromotionControls = ({ promotion }: KeywordPromotionControls
 
         {/* Auto-dismissed by the hook a few seconds after the request succeeds. */}
         {outcome && (
-          <span className="block text-sm text-green-700">{promotionSuccessMessage(outcome)}</span>
+          <span className="block text-sm text-emerald-700">{promotionSuccessMessage(outcome)}</span>
         )}
       </output>
 

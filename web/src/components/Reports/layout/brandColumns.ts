@@ -35,6 +35,7 @@ export function brandReachColumns(
     {
       header: 'Keywords',
       info: 'How many keywords\' answers name the brand.',
+      numeric: true,
       render: (brand) => brand.keywords,
     },
   ];

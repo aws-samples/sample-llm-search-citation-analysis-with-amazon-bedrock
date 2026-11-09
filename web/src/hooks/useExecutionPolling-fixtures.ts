@@ -97,9 +97,6 @@ export function createMockFetch(options: {
       return Promise.resolve(createMockJsonResponse(response));
     }
 
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({}) 
-    });
+    return Promise.resolve(createMockJsonResponse({}));
   });
 }

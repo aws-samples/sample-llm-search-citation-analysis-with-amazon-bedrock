@@ -4,15 +4,23 @@ import {
 import {
   fireEvent, render, screen, waitFor, within
 } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { expectRunAnalysisLink } from '../ui/NoDataYet-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import {
+  installIntersectionObserverMock, scrollSentinelIntoView
+} from '../../test/intersectionObserverMock';
+import { TestError } from '../../test/testError';
 import {
   brandKeywordsFixture,
   brandMentionsExportResponse,
+  firstOfManyBrandsResponse,
   GROUP_REPORT_SCOPE,
   GROUP_SCOPE_VALUE,
   HISTORICAL_BRAND_RUN,
   KEYWORD_REPORT_SCOPE,
   LATEST_BRAND_RUN,
+  secondPageBrand,
   selectBrandRun,
   selectBrandScope,
 } from './brandMentionsExport-fixtures';
@@ -20,11 +28,17 @@ import {
 const mocks = vi.hoisted(() => ({
   useBrandMentions: vi.fn(),
   exportBrandMentionsFor: vi.fn(),
+  fetchBrandSummaryPage: vi.fn(),
 }));
 
 vi.mock('../../hooks/useBrandMentions', () => ({useBrandMentions: mocks.useBrandMentions,}));
 
 vi.mock('./brandMentionsExport', () => ({exportBrandMentionsFor: mocks.exportBrandMentionsFor,}));
+
+vi.mock('../../api/brandMentions', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../api/brandMentions')>(),
+  fetchBrandSummaryPage: mocks.fetchBrandSummaryPage,
+}));
 
 vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
@@ -38,6 +52,7 @@ import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
+import { labelledFieldIdentity } from '../../test/fieldIdentity';
 
 vi.mock('../Personas/PersonaSelector', () => ({
   PersonaSelector: ({
@@ -91,6 +106,21 @@ describe('BrandsView', () => {
     mocks.exportBrandMentionsFor.mockResolvedValue(undefined);
   });
 
+  it('shows a neutral "no AI answers yet" state with a Run Analysis link, not an error, for a keyword with no run', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      noData: true,
+    });
+
+    render(<MemoryRouter><BrandsView keywords={brandKeywordsFixture} /></MemoryRouter>);
+
+    expect(screen.getByText(/No AI engine has answered for .* yet/)).toBeInTheDocument();
+    expectRunAnalysisLink();
+    expect(screen.queryByText(/No brand data found/)).not.toBeInTheDocument();
+  });
+
   it('renders the Brand Mentions heading when there are no keywords', () => {
     render(<BrandsView keywords={[]} />);
 
@@ -109,16 +139,28 @@ describe('BrandsView', () => {
     expect(renderedScopeOptionLabels()).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels']);
   });
 
-  it('asks for a scope when no scope has been selected', () => {
+  it('loads all keywords on arrival, matching the scope the selector shows', () => {
     render(<BrandsView keywords={brandKeywordsFixture} />);
 
-    expect(screen.getByText('Pick a scope above to view brand mentions')).toBeInTheDocument();
+    expect({
+      selected: screen.getByLabelText('Scope'),
+      lastCall: mocks.useBrandMentions.mock.lastCall,
+    }).toStrictEqual({
+      selected: expect.objectContaining({ value: 'all' }),
+      lastCall: [{ kind: 'all' }, null, null, null],
+    });
   });
 
-  it('shows the empty-keyword message when no keywords are available', () => {
+  it('asks for nothing and says what to do when no keywords are available', () => {
     render(<BrandsView keywords={[]} />);
 
-    expect(screen.getByText('No keywords available.')).toBeInTheDocument();
+    expect({
+      message: screen.getByText(/^No keywords available\./).textContent,
+      lastScope: mocks.useBrandMentions.mock.lastCall?.[0],
+    }).toStrictEqual({
+      message: 'No keywords available. Add keywords in Settings › Keywords, then run an analysis.',
+      lastScope: null,
+    });
   });
 
   it('supplies a brands-specific identity to the persona selector', () => {
@@ -187,13 +229,7 @@ describe('BrandsView', () => {
   it('associates the analysis-run label with a brands-specific identity', () => {
     renderWithBrandScope();
 
-    const runSelector = screen.getByLabelText<HTMLSelectElement>('Analysis run');
-
-    expect({
-      id: runSelector.id,
-      labelFor: runSelector.labels?.[0]?.htmlFor,
-      name: runSelector.name,
-    }).toStrictEqual({
+    expect(labelledFieldIdentity('Analysis run')).toStrictEqual({
       id: 'brands-analysis-run',
       labelFor: 'brands-analysis-run',
       name: 'brands-analysis-run',
@@ -251,22 +287,61 @@ describe('BrandsView', () => {
     });
   });
 
-  it('says how many brands the capped summary leaves out', () => {
-    mocks.useBrandMentions.mockReturnValue({
-      data: {
-        ...brandMentionsExportResponse,
-        aggregated: {
-          ...brandMentionsExportResponse.aggregated,
-          matching_brands: 140,
-          brands_truncated: true,
-        },
-      },
-      loading: false,
-      error: null,
+  describe('with more brands than one page', () => {
+    beforeEach(() => {
+      installIntersectionObserverMock();
+      vi.spyOn(console, 'error').mockImplementation(vi.fn());
+      mocks.useBrandMentions.mockReturnValue({
+        data: firstOfManyBrandsResponse,
+        loading: false,
+        error: null,
+      });
     });
-    renderWithBrandScope();
 
-    expect(screen.getByText('Showing the top 2 of 140 brands by aggregate score; the Excel export has every mention.')).toBeInTheDocument();
+    it('says how many of the matching brands are loaded', () => {
+      renderWithBrandScope();
+
+      expect(screen.getByText(/Showing 2 of 140 brands · more load as you scroll/)).toBeInTheDocument();
+    });
+
+    it('loads the next brands for the same query as the reader scrolls to the end', async () => {
+      mocks.fetchBrandSummaryPage.mockResolvedValue({
+        items: [secondPageBrand],
+        nextToken: null,
+      });
+      renderWithBrandScope();
+
+      scrollSentinelIntoView();
+
+      expect(await screen.findByText('Parador Lejano')).toBeInTheDocument();
+      expect(mocks.fetchBrandSummaryPage).toHaveBeenCalledWith(expect.objectContaining({ scope: KEYWORD_REPORT_SCOPE }), 'brands-2', expect.any(AbortSignal));
+    });
+
+    it('says the list stops at the first page when the API hands out no token', () => {
+      mocks.useBrandMentions.mockReturnValue({
+        data: {
+          ...firstOfManyBrandsResponse,
+          aggregated: {
+            ...firstOfManyBrandsResponse.aggregated,
+            next_token: undefined,
+          },
+        },
+        loading: false,
+        error: null,
+      });
+      renderWithBrandScope();
+
+      expect(screen.getByText('Showing the top 2 of 140 brands; the Excel export has every mention.')).toBeInTheDocument();
+    });
+
+    it('offers Try again when a page fails', async () => {
+      mocks.fetchBrandSummaryPage.mockRejectedValue(new TestError('HTTP 500'));
+      renderWithBrandScope();
+
+      scrollSentinelIntoView();
+
+      expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    });
   });
 
   it('shows the export loading state while the workbook is being generated', () => {

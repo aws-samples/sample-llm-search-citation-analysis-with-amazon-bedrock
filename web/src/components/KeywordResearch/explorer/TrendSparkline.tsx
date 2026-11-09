@@ -28,7 +28,7 @@ export function TrendSparkline({
   readonly keyword: string 
 }) {
   const series = trendSeries(trend);
-  if (series.length < 2) return <span className="text-gray-400">{UNKNOWN_VALUE}</span>;
+  if (series.length < 2) return <span className="text-gray-500">{UNKNOWN_VALUE}</span>;
   return (
     <span className="inline-flex">
       <svg aria-hidden="true" width={WIDTH} height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="text-gray-500">

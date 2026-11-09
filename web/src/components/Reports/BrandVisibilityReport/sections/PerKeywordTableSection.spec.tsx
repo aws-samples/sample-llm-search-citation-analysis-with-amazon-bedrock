@@ -74,7 +74,7 @@ describe('PerKeywordTableSection tooltips', () => {
 
 describe('PerKeywordTableSection mover highlight', () => {
   it.each([
-    ['an improving', 'bg-emerald-50 dark:bg-emerald-950/20', movingKeyword('k', 2, 'improving')],
+    ['an improving', 'bg-gray-50 dark:bg-gray-950/20', movingKeyword('k', 2, 'improving')],
     ['a declining', 'bg-red-50 dark:bg-red-950/20', movingKeyword('k', -2, 'declining')],
     ['a stable', '', movingKeyword('k', 1.9, 'stable')],
     ['no', '', buildKeywordTrend('k')],

@@ -15,7 +15,7 @@ interface CustomReportsState {
   readonly error: string | null;
 }
 
-/** The saved custom reports, newest change first (`GET /custom-reports`). */
+/** The saved custom reports, newest change first (`GET /custom-reports`), and a way to fetch them again. */
 export function useCustomReports() {
   const { beginRequest } = useLatestRequest();
   const [state, setState] = useState<CustomReportsState>({
@@ -54,5 +54,8 @@ export function useCustomReports() {
     void reload();
   }, [reload]);
 
-  return state;
+  return {
+    ...state,
+    reload,
+  };
 }

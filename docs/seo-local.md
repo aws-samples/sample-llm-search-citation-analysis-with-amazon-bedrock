@@ -1,11 +1,11 @@
 # Local SEO
 
-Local SEO shows how a business appears on Google Maps and in its Google Business Profile, from DataForSEO. The
+The Local SEO page (SEO › Local SEO, `/seo/local`) shows how a business appears on Google Maps and in its Google Business Profile, from DataForSEO. The
 page has four tabs and works in the market chosen in the header. Leave the latitude and longitude empty to search
 around the market's city. This needs the market's city coordinates, which Settings › Markets fills in.
 
 The forms start from Settings instead of asking again: the business name in Business search and Business profile
-is the brand's first name (Settings › Brand Tracking), "your business" in Local results and the rank grid is the
+is the brand's first name (Settings › Brand tracking), "your business" in Local results and the rank grid is the
 brand's own domain when left empty, and the keyword fields suggest the header market's keywords (Settings ›
 Keywords). Anything you type is kept. When Settings lacks the brand name, the own domain or the market city, the
 tab links to the section to fill in.
@@ -19,7 +19,7 @@ reused from the cache says "From cache"; the page shows no prices.
 |---|---|---|
 | Business search | Google business listings near a point, by name and/or category: rating, review count, category, claimed or not, phone, website. Sort by relevance, rating or reviews (businesses without a value sort last). **Open** loads a business's profile. | 24 h |
 | Business profile | One Google Business Profile, named by business name, Google cid or place id: categories, rating, address, phone, website, opening state, photos. Below it, on demand: **Reviews** (rating histogram, latest reviews, how many the owner answered), **Updates and posts**, and **Questions and answers**. Google keeps Q&A for few businesses, and the page says so when there is none. | 24 h (profile, Q&A); reviews and updates are reused for 1 h |
-| Local results | Google Maps or Local Finder results for a keyword around a point, on mobile or desktop, and the position of your business in them. Your business is matched by cid, then place id, then website domain, then name. With nothing entered, the brand's own domains (Settings › Brand) are used. | 12 h |
+| Local results | Google Maps or Local Finder results for a keyword around a point, on mobile or desktop, and the position of your business in them. Your business is matched by cid, then place id, then website domain, then name. With nothing entered, the brand's own domains (Settings › Brand tracking) are used. | 12 h |
 | Local rank grid | Your business's Maps rank at every point of a 3 × 3, 5 × 5 or 7 × 7 grid around a centre, 0.25 to 10 km apart. Cells are green for the top 3, amber for the top 10, red for lower ranks and grey when the business is not in the top 20. A cross marks a point whose search failed (DataForSEO may still charge for it). | 1 h |
 
 Every point of a grid uses the same Maps zoom, derived from the spacing so that one map covers about one grid

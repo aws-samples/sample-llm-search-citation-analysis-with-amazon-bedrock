@@ -55,21 +55,23 @@ export function SiteAuditStartForm({
       <div className="flex flex-col gap-1">
         <label htmlFor={siteId} className="text-sm font-medium text-gray-700">Site</label>
         <select id={siteId} value={site} onChange={(event) => setSite(event.target.value)}
-          className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
           {sites.map((domain) => <option key={domain} value={domain}>{domain}</option>)}
         </select>
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor={pagesId} className="text-sm font-medium text-gray-700">Max pages</label>
         <select id={pagesId} value={maxPages} onChange={(event) => setMaxPages(Number(event.target.value))}
-          className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
           {maxPagesChoices.map((choice) => <option key={choice} value={choice}>{choice.toLocaleString()}</option>)}
         </select>
       </div>
       <Button type="submit" disabled={starting || disabledReason !== null}>
         {starting ? 'Starting…' : 'Start audit'}
       </Button>
-      {disabledReason !== null && <p className="text-sm text-gray-500">{disabledReason}</p>}
+      {disabledReason === null
+        ? <p className="pb-2.5 text-xs text-gray-500">About {crawlMinutes(maxPages)} minutes · free, no paid API</p>
+        : <p className="text-sm text-gray-500">{disabledReason}</p>}
       <ErrorAlert message={error} spacingClassName="w-full " />
       <ConfirmModal
         isOpen={confirming}

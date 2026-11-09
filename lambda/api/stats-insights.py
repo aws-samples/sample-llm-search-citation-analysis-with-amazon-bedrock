@@ -15,11 +15,6 @@ Consolidates 6 separate Lambdas into one to reduce CloudFormation resource count
 - POST /api/reports/insights/regenerate -> regenerate-report-insights handler (Admin)
 """
 
-import sys
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
-
 from shared.consolidated_router import route_map_handler
 
 # Map resource paths to handler module filenames

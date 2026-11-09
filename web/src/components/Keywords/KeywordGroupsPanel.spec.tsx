@@ -7,17 +7,24 @@ import {
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import {
+  chooseGroupAction,
   KEYWORD_GROUPS,
+  openNewGroupForm,
+  queryNewGroupField,
   renderKeywordGroupsPanel,
 } from './KeywordGroupsPanel-fixtures';
 import type { KeywordGroupsPanel } from './KeywordGroupsPanel';
 
-function renderNewGroupInput(overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}) {
+/** Renders the panel, opens "New group" and types `typed` (keys such as {Enter} included). */
+async function renderTypedGroupName(typed: string, overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}) {
   const props = renderKeywordGroupsPanel(overrides);
+  const input = await openNewGroupForm();
+  const user = userEvent.setup();
+  await user.type(input, typed);
   return {
     props,
-    user: userEvent.setup(),
-    input: screen.getByRole('textbox', { name: 'New group name' }),
+    user,
+    input,
   };
 }
 
@@ -30,14 +37,13 @@ async function renderAndClick(buttonName: string) {
 /** Renders the panel and renames Hotel Coruña to "Hotel Coruña Centro" with Enter; returns its props. */
 async function renderRenamedCoruna(overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}) {
   const props = renderKeywordGroupsPanel(overrides);
-  const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: 'Rename group Hotel Coruña' }));
-  await user.type(screen.getByRole('textbox', { name: 'Rename group Hotel Coruña' }), ' Centro{Enter}');
+  await chooseGroupAction('Hotel Coruña', 'Rename');
+  await userEvent.setup().type(screen.getByRole('textbox', { name: 'Rename group Hotel Coruña' }), ' Centro{Enter}');
   return props;
 }
 
 describe('KeywordGroupsPanel', () => {
-  it('holds placeholder group buttons while the groups load for the first time', () => {
+  it('holds placeholder group rows while the groups load for the first time', () => {
     renderKeywordGroupsPanel({
       groups: [],
       loading: true,
@@ -46,7 +52,7 @@ describe('KeywordGroupsPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading groups');
   });
 
-  it('keeps the group buttons without a placeholder while groups reload', () => {
+  it('keeps the group rows without a placeholder while groups reload', () => {
     renderKeywordGroupsPanel({ loading: true });
 
     expect(screen.queryByText('Loading groups')).not.toBeInTheDocument();
@@ -56,51 +62,60 @@ describe('KeywordGroupsPanel', () => {
     renderKeywordGroupsPanel();
 
     expect(screen.getByText(
-      'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'
+      'Group keywords by brand, market, campaign or location. A keyword can belong to several groups.'
     )).toBeInTheDocument();
   });
 
-  it('shows a generic campaign example in the new-group placeholder', () => {
+  it('opens the new-group field only on request, with a generic campaign example', async () => {
     renderKeywordGroupsPanel();
+    expect(queryNewGroupField()).not.toBeInTheDocument();
 
-    expect(screen.getByRole('textbox', { name: 'New group name' })).toHaveAttribute(
-      'placeholder',
-      'New group name (e.g. Spring campaign)'
-    );
+    expect(await openNewGroupForm()).toHaveAttribute('placeholder', 'e.g. Spring campaign');
   });
 
   it('shows every group with its keyword count', () => {
     renderKeywordGroupsPanel();
 
-    expect(screen.getByRole('button', { name: 'Hotel Coruña (3)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Hotel Gran Marino (0)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'All (5)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Ungrouped (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hotel Coruña, 3 keywords' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hotel Gran Marino, 0 keywords' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All, 5 keywords' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ungrouped, 2 keywords' })).toBeInTheDocument();
   });
 
-  it('creates a group from the trimmed input and clears the field on success', async () => {
-    const {
-      props, user, input 
-    } = renderNewGroupInput();
+  it('marks the selected filter as pressed', () => {
+    renderKeywordGroupsPanel({ filter: { groupId: 'coruna' } });
 
-    await user.type(input, '  Hotel Playa  ');
+    expect(screen.getAllByRole('button', { pressed: true }).map((button) => button.getAttribute('aria-label')))
+      .toStrictEqual(['Hotel Coruña, 3 keywords']);
+  });
+
+  it('creates a group from the trimmed input and closes the field on success', async () => {
+    const {
+      props, user
+    } = await renderTypedGroupName('  Hotel Playa  ');
+
     await user.click(screen.getByRole('button', { name: 'Create group' }));
 
     expect(props.onCreate).toHaveBeenCalledWith('Hotel Playa');
-    await waitFor(() => expect(input).toHaveValue(''));
+    await waitFor(() => expect(queryNewGroupField()).not.toBeInTheDocument());
+  });
+
+  it('closes the new-group field on Escape without creating', async () => {
+    const { props } = await renderTypedGroupName('Hotel Playa{Escape}');
+
+    expect(queryNewGroupField()).not.toBeInTheDocument();
+    expect(props.onCreate).not.toHaveBeenCalled();
   });
 
   it('surfaces a failed creation through onNotify and keeps the typed name', async () => {
     const {
-      props, user, input 
-    } = renderNewGroupInput({
+      props, input
+    } = await renderTypedGroupName('Hotel Coruña{Enter}', {
       onCreate: vi.fn().mockResolvedValue({
         success: false,
         message: 'A keyword group with this name already exists'
       }),
     });
-
-    await user.type(input, 'Hotel Coruña{Enter}');
 
     await waitFor(() => expect(props.onNotify).toHaveBeenCalledWith(
       'Could not create group',
@@ -110,18 +125,26 @@ describe('KeywordGroupsPanel', () => {
     expect(input).toHaveValue('Hotel Coruña');
   });
 
-  it('selects a group as the active filter when its chip is clicked', async () => {
-    const props = await renderAndClick('Hotel Coruña (3)');
+  it('selects a group as the active filter when it is clicked', async () => {
+    const props = await renderAndClick('Hotel Coruña, 3 keywords');
 
     expect(props.onFilterChange).toHaveBeenCalledWith({ groupId: 'coruna' });
   });
 
+  it('offers Rename and Delete in each group menu', async () => {
+    renderKeywordGroupsPanel();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Actions for group Hotel Coruña' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toStrictEqual(['Rename', 'Delete']);
+  });
+
   it('renames a group inline', async () => {
     const props = renderKeywordGroupsPanel();
-    const user = userEvent.setup();
+    await chooseGroupAction('Hotel Coruña', 'Rename');
 
-    await user.click(screen.getByRole('button', { name: 'Rename group Hotel Coruña' }));
     const input = screen.getByRole('textbox', { name: 'Rename group Hotel Coruña' });
+    const user = userEvent.setup();
     await user.clear(input);
     await user.type(input, 'Hotel A Coruña{Enter}');
 
@@ -131,7 +154,7 @@ describe('KeywordGroupsPanel', () => {
   it('closes the inline rename once the rename succeeds', async () => {
     await renderRenamedCoruna();
 
-    expect(screen.queryByRole('textbox', { name: 'Rename group Hotel Coruña' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Rename group Hotel Coruña' })).not.toBeInTheDocument());
   });
 
   it('reports a refused rename under "Could not rename group"', async () => {
@@ -142,11 +165,15 @@ describe('KeywordGroupsPanel', () => {
       }),
     });
 
-    expect(props.onNotify).toHaveBeenCalledWith('Could not rename group', 'A group with that name already exists', 'error');
+    await waitFor(() => expect(props.onNotify).toHaveBeenCalledWith(
+      'Could not rename group', 'A group with that name already exists', 'error'
+    ));
   });
 
   it('asks the parent to delete the group with the full group record', async () => {
-    const props = await renderAndClick('Delete group Hotel Gran Marino');
+    const props = renderKeywordGroupsPanel();
+
+    await chooseGroupAction('Hotel Gran Marino', 'Delete');
 
     expect(props.onDelete).toHaveBeenCalledWith(KEYWORD_GROUPS[1]);
   });

@@ -17,3 +17,6 @@ export const SCOPE_KEYWORDS: Keyword[] = [
     created_at: '2026-01-02T00:00:00Z',
   },
 ];
+
+/** Every option the "Analyze" picker offers for `SCOPE_KEYWORDS` and the Coruña group. */
+export const ANALYZE_SCOPE_OPTIONS = ['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts'];

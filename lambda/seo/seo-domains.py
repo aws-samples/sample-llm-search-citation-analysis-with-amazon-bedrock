@@ -30,14 +30,10 @@ import hashlib
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 from botocore.exceptions import ClientError

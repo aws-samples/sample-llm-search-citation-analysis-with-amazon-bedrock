@@ -17,15 +17,17 @@ import {
   renderReconciledDashboard,
 } from './useDashboardData-fixtures';
 import {
-  buildKeyword, buildKeywordsPage
-} from '../api/keywordPages-fixtures';
-import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
+import {
+  buildKeyword, buildKeywordsPage
+} from '../api/keywordPages-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  mockAuthenticatedFetch, stallAuthenticatedFetch
+} from '../test/infrastructureMock';
 
 const olderKeyword = buildKeyword('older', '2026-01-01T00:00:00Z');
 const newerKeyword = buildKeyword('newer', '2026-02-01T00:00:00Z');
@@ -136,7 +138,7 @@ describe('useDashboardData keyword pagination', () => {
   });
 
   it('requests the first keyword page alongside the panels before any response arrives', () => {
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+    stallAuthenticatedFetch();
 
     renderHook(() => useDashboardData());
 

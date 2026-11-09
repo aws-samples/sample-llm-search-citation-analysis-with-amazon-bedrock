@@ -35,7 +35,7 @@ from botocore.exceptions import ClientError
 from shared.request_deadline import Deadline
 from shared.web_search_gateway import WebSearchGatewayError
 from testing.admin_authz_fixtures import caller_event, invoke
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 from testing.provider_response_fixtures import PERPLEXITY_MODELS_LISTING
 from testing.web_search_fixtures import GATEWAY_URL, http_response, tool_reply
 
@@ -52,7 +52,7 @@ mock_dynamodb.Table.return_value = mock_table
 with patch('boto3.client', side_effect=lambda *a, **k: mock_secrets), \
      patch('boto3.resource', side_effect=lambda *a, **k: mock_dynamodb), \
      patch.dict(os.environ, _ENV):
-    _module = load_handler_module(os.path.dirname(__file__), 'manage-providers.py', 'manage_providers')
+    _module = load_handler_module(API_DIR, 'manage-providers.py', 'manage_providers')
 
 #: What `record_provider_failure` + `_disable_provider` leave on the row after
 #: the 2026-08-14 outage reached the auto-disable threshold. `Decimal` because

@@ -1,6 +1,7 @@
 import type {
   AggregatedBrand, BrandMentionsResponse 
 } from '../../../../types';
+import { providerName } from '../../../../constants/providers';
 import {
   emphasisColumn,
   ReportSection,
@@ -28,6 +29,7 @@ export function ProviderDeltaSection({
     title: 'Provider differences',
     loading,
     loadingMessage: 'Loading provider data…',
+    loadingShape: 'table',
     error,
     value: mentions,
   });
@@ -69,7 +71,7 @@ function providerColumns(
   return [
     emphasisColumn('Brand', (brand) => brand.name),
     ...providers.map((provider): ReportTableColumn<AggregatedBrand> => ({
-      header: provider,
+      header: providerName(provider),
       render: (brand) => rankOn(brand, provider),
     })),
     emphasisColumn('Best rank', (brand) => `#${brand.best_rank}`),

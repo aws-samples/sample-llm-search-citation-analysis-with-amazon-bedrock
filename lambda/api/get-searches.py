@@ -19,14 +19,9 @@ is 10-15 KB, and the Recent Searches view and the MCP tool only list runs.
 answers); pages are cut to ``PAGE_BUDGET_BYTES`` either way.
 """
 
-import logging
-import sys
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.config import PROVIDERS
@@ -40,16 +35,13 @@ from shared.partition_pages import (
     newest_merged_page,
     partition_page,
 )
+from shared.scope_params import PERSONA_FILTER_PARAMS
 from shared.search_results import search_results_table_name
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = search_results_table_name()
-table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+table = dynamodb.Table(search_results_table_name())
 _PROVIDER_INDEX = 'ProviderIndex'
 
 DEFAULT_LIMIT = 50
@@ -116,7 +108,7 @@ def _every_provider(event, limit: int, projection, next_token, keep):
 @validate({
     'keyword': {'type': str, 'max_length': 500},
     'provider': {'type': str, 'max_length': 50},
-    'query_prompt_id': {'type': str, 'max_length': 100},
+    **PERSONA_FILTER_PARAMS,
     'limit': optional_limit(default=DEFAULT_LIMIT, max_val=MAX_LIMIT),
     'include_response': {'type': bool, 'default': False},
     **CURSOR_QUERY_PARAM,

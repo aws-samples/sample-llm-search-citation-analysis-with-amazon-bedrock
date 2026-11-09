@@ -19,6 +19,7 @@ export function gateVisibilityHeadline(
     title: 'Headline',
     loading,
     loadingMessage: 'Loading visibility…',
+    loadingShape: 'stats',
     error,
     value: visibility !== null && visibility.keywords_with_data > 0 ? visibility : null,
     emptyMessage,

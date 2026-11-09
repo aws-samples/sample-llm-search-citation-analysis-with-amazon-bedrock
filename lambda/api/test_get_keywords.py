@@ -2,20 +2,19 @@
 
 import base64
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from testing.env import KEYWORDS_TABLE_ENV
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODULE_NAME = 'get_keywords_under_test'
 _INVALID_TOKEN_BODY = {'error': 'Invalid next_token: pass the next_token of the previous page, with the same filters', 'field': 'next_token'}
 
 
-get_keywords_module = handler_fixture(_API_DIR, 'get-keywords.py', _MODULE_NAME, env=KEYWORDS_TABLE_ENV, scope='function')
+get_keywords_module = handler_fixture(API_DIR, 'get-keywords.py', _MODULE_NAME, env=KEYWORDS_TABLE_ENV, scope='function')
 
 
 @pytest.fixture

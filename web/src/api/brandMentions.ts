@@ -12,10 +12,12 @@ import {
   collectCursorPages, withNextToken, type CursorPage
 } from './cursorPages';
 import type {
-  BrandAppearanceRow, ReportScope
+  AggregatedBrand, BrandAppearanceRow, ReportScope
 } from '../types';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { isBrandAppearancesPage } from './brandMentionsDecoders';
+import {
+  isBrandAppearancesPage, isBrandMentionsResponse
+} from './brandMentionsDecoders';
 
 export class InvalidBrandMentionsResponseError extends TypeError {
   constructor(message = 'Brand mentions API returned an invalid response') {
@@ -76,4 +78,27 @@ export async function fetchBrandAppearances(request: BrandAppearancesRequest): P
     async (nextToken: string | null) => fetchAppearancesPage(request, nextToken),
     () => new InvalidBrandMentionsResponseError('Brand mentions API repeated a continuation token')
   );
+}
+
+/**
+ * The summary's brands from `nextToken` on (the `aggregated.next_token` of
+ * the page before, for the same scope, market and filters): the next 100
+ * brands by aggregate score.
+ */
+export async function fetchBrandSummaryPage(
+  request: BrandAppearancesRequest, nextToken: string, signal?: AbortSignal
+): Promise<CursorPage<AggregatedBrand>> {
+  const params = {
+    ...brandMentionsParams(request.scope, request.marketId, request.filters),
+    next_token: nextToken,
+  };
+  const payload = await apiGet<unknown>('/brand-mentions', {
+    params,
+    signal
+  });
+  if (!isBrandMentionsResponse(payload)) throw new InvalidBrandMentionsResponseError();
+  return {
+    items: payload.aggregated.brands,
+    nextToken: payload.aggregated.next_token ?? null,
+  };
 }

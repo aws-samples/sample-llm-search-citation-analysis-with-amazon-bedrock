@@ -11,7 +11,6 @@ stays within the budget and that ``next_token`` hands out every row once.
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -21,14 +20,13 @@ import pytest
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.partition_tables import PagedTable
 from testing.response_size import assert_within_page_budget, long_text, response_bytes
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
 crawled_content_module = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'get-crawled-content.py',
     'get_crawled_content_volume_under_test',
     env={'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled-content'},

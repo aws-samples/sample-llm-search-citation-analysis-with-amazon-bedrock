@@ -42,7 +42,7 @@ const PAGE_LINKS: readonly SeoLink[] = SEO_PAGES.map((page) => ({
 
 function SetupPanel({ deployed }: { readonly deployed: boolean }) {
   return (
-    <section aria-labelledby="seo-setup-title" className="rounded-lg border border-amber-200 bg-amber-50 p-4 sm:p-6 space-y-2">
+    <section aria-labelledby="seo-setup-title" className="rounded-lg border border-gray-200 bg-gray-50 p-4 sm:p-6 space-y-2">
       <h3 id="seo-setup-title" className="text-base font-semibold text-amber-900">{SEO_SETUP_TITLE}</h3>
       {deployed ? (
         <p className="text-sm text-amber-800">
@@ -95,7 +95,7 @@ function SeoLinkGrid({
 }) {
   return (
     <section aria-label={title} className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">{title}</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">{title}</h3>
       <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {links.map((link) => <SeoLinkCard key={link.key} link={link} />)}
       </ul>

@@ -13,6 +13,7 @@ import {
   buildBatchCandidate,
   buildBatchCandidateState,
   mockRejectedStorageWrites,
+  StorageUnavailableError,
   spyOnStorageMutations,
   storeBatchCandidateEntries,
   storeBatchCandidateValue,
@@ -21,13 +22,6 @@ import {
   storedBatchCandidateValue,
   storedLegacyBatchIdsValue,
 } from './contentStudioBatchStorage-fixtures';
-
-class TestStorageError extends Error {
-  constructor() {
-    super('Storage unavailable');
-    this.name = 'TestStorageError';
-  }
-}
 
 const originalLocalStorage = globalThis.localStorage;
 
@@ -52,12 +46,26 @@ describe('Content Studio active batch candidate storage', () => {
     expect(CONTENT_STUDIO_BATCH_STORAGE_VERSION).toBe(2);
   });
 
-  it('returns no candidates without mutating storage when both keys are absent', () => {
+  it.each([
+    {
+      state: 'both keys are absent',
+      arrange: () => undefined,
+      expected: [],
+    },
+    {
+      state: 'the candidate state is already normalized',
+      arrange: () => storeBatchCandidateEntries([buildBatchCandidate('batch-1', 100)]),
+      expected: [buildBatchCandidate('batch-1', 100)],
+    },
+  ])('reads without mutating storage when $state', ({
+    arrange, expected
+  }) => {
+    arrange();
     const {
       removeItemSpy, setItemSpy
     } = spyOnStorageMutations();
 
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
+    expect(readStoredContentStudioBatchCandidates()).toStrictEqual(expected);
     expect(setItemSpy).toHaveBeenCalledTimes(0);
     expect(removeItemSpy).toHaveBeenCalledTimes(0);
   });
@@ -77,12 +85,23 @@ describe('Content Studio active batch candidate storage', () => {
 
   it.each([
     '{broken',
+    JSON.stringify(null),
+    JSON.stringify(42),
+    JSON.stringify(['batch-1']),
     JSON.stringify({
       version: 1,
       entries: [],
     }),
-    JSON.stringify(['batch-1']),
-  ])('clears malformed v2 candidate state when value is %s', (storedState) => {
+    JSON.stringify({
+      version: 1,
+      entries: [buildBatchCandidate('wrong-version', 100)],
+    }),
+    JSON.stringify({
+      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
+      entries: { id: 'not-an-array' },
+    }),
+    JSON.stringify(buildBatchCandidateState([])),
+  ])('clears the v2 key when its state is malformed or empty as %s', (storedState) => {
     storeBatchCandidateValue(storedState);
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
@@ -186,7 +205,7 @@ describe('Content Studio active batch candidate storage', () => {
   });
 
   it('keeps in-memory candidates bounded when browser writes are unavailable', () => {
-    mockRejectedStorageWrites(new TestStorageError());
+    mockRejectedStorageWrites();
 
     expect(addStoredContentStudioBatchCandidate(
       buildBatchCandidate('batch-1', 100)
@@ -197,7 +216,7 @@ describe('Content Studio active batch candidate storage', () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       get: () => {
-        throw new TestStorageError();
+        throw new StorageUnavailableError();
       },
     });
 

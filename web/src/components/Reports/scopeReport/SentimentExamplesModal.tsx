@@ -45,7 +45,7 @@ function LoadMoreButton({ pages }: { readonly pages: SentimentExamplePages }) {
       type="button"
       onClick={pages.loadMore}
       disabled={pages.loadingMore}
-      className="mt-4 px-4 py-2 bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
+      className="mt-4 px-4 py-2 bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-gray-100 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
     >
       {pages.loadingMore ? 'Loading more answers…' : 'Load more answers'}
     </button>
@@ -101,11 +101,7 @@ export function SentimentExamplesModal({
     <div className="print-hidden">
       <Modal isOpen onClose={onClose} size="4xl" title={`${SENTIMENT_TONES[sentiment].label} answers · ${engineLabel(provider)}`}>
         <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">{`${scopeLabel} · each keyword's latest run${truncatedNote}`}</p>
-        {loading && (
-          <output className="block">
-            <SectionPlaceholder variant="loading" message="Loading the answers…" />
-          </output>
-        )}
+        {loading && <SectionPlaceholder variant="loading" message="Loading the answers…" />}
         {!loading && error !== null && (
           <div role="alert">
             <SectionPlaceholder variant="error" message={error} />

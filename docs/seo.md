@@ -1,8 +1,10 @@
-# SEO
+# SEO features: Google organic data next to AI search visibility
 
-The SEO features put Google organic data next to the AI-visibility numbers: where you rank, what a domain ranks
+The SEO features put Google organic data next to the AI-visibility (GEO) numbers: where you rank, what a domain ranks
 for, who links to it, how a business shows on Google Maps, and whether your site is technically fit for search
 engines and answer engines. Search data comes from [DataForSEO](https://dataforseo.com/), a pay-per-use API.
+
+![SEO section overview with cards for Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance and Local SEO](seo.png)
 
 Everything lives in its own stack, `CitationAnalysisSeoStack` (`lib/seo-stack.ts`), with its own API
 (`CitationAnalysis-SeoApi`, Cognito-protected, routes under `/api/seo/`), because the main stack is at
@@ -10,25 +12,25 @@ CloudFormation's 500-resource limit.
 
 ## Where to find it
 
-The sidebar's **SEO** section opens `/seo`. The page is laid out like Settings: a section list on the left (Overview,
-then **Research**: Domain Overview, Backlinks; **Your site**: Rank Tracking, Site Audit, Performance, Local SEO; a
-scrollable row on phones) and the open page on the right. The overview has one card per page and, when
-something is missing, the setup step to do next. Each page has its own URL (`/seo/<page>`), so it can be bookmarked
-and the browser's back button works.
+**SEO** sits in the sidebar's **Research** group, after Keyword Research. It expands to its pages: Overview
+(`/seo`), Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance and Local SEO. The overview has one card
+per page, links to the Keyword Explorer and the SEO vs GEO report and, when something is missing, the setup step to
+do next. Each page has its own URL (`/seo/<page>`), so it can be bookmarked and the browser's back button works; an
+unknown `/seo/...` path opens the overview.
 
 | Page | Path | What it does | Details |
 |---|---|---|---|
-| Rank Tracking | `/seo/rank-tracking` | Google positions of a domain (from Settings › Brand Tracking) for the Settings keywords of the header market or of one keyword group, desktop and/or mobile, checked on a schedule or on demand, with history and the position distribution per check. Admins create trackers, add and remove keywords and start checks. | [seo-rank-tracking.md](seo-rank-tracking.md) |
 | Domain Overview | `/seo/domain` | Organic traffic estimate, ranking keywords, top pages and Google competitors of any domain; traffic snapshots of your and your competitors' domains, run by a schedule on Operations › Schedule. | [seo-domain.md](seo-domain.md) |
 | Backlinks | `/seo/backlinks` | Links pointing to a domain, subdomain, subfolder or page: referring domains, anchors, new and lost links, authority over time. | [seo-backlinks.md](seo-backlinks.md) |
-| Local SEO | `/seo/local` | Google Maps and Local Finder results, Google Business Profiles (reviews, questions, posts) and a local rank grid around a point. | [seo-local.md](seo-local.md) |
+| Rank Tracking | `/seo/rank-tracking` | Google positions of a domain (from Settings › Brand tracking) for the Settings keywords of the header market or of one keyword group, desktop and/or mobile, checked on a schedule or on demand, with history and the position distribution per check. Admins create trackers, add and remove keywords and start checks. | [seo-rank-tracking.md](seo-rank-tracking.md) |
 | Site Audit | `/seo/site-audit` | Crawls your own site and lists technical SEO issues and AI-readiness checks per page. | [seo-site-audit.md](seo-site-audit.md) |
 | Performance | `/seo/performance` | Lighthouse scores and Core Web Vitals of your pages, and IndexNow submissions of changed URLs. | [seo-performance.md](seo-performance.md) |
+| Local SEO | `/seo/local` | Google Maps and Local Finder results, Google Business Profiles (reviews, questions, posts) and a local rank grid around a point. | [seo-local.md](seo-local.md) |
 
 Elsewhere in the dashboard:
 
 - **Keyword Explorer** (Keyword Research › Keyword Explorer): keyword ideas for a seed in the header market with
-  search volume, 12-month trend, keyword difficulty, CPC, competition and intent; filters, CSV export, the Google
+  search volume, 12-month trend, keyword difficulty, CPC, competition and intent; filters, Excel export, the Google
   results page of a keyword (top 20, or 50 on request) and "Track keywords" into a keyword group. Every national
   research stores its rows' metrics in `CitationAnalysis-SeoKeywordMetrics`, so tracking adds no cost. "Use a tracked
   keyword" fills the seed with one of the header market's Settings keywords (no lookup until Search).
@@ -43,7 +45,10 @@ Elsewhere in the dashboard:
 - **Dashboard**: two cards, *SEO vs GEO* (keywords per quadrant) and *Rankings* (tracked keywords in Google's top 3
   and top 10 at each tracker's newest check). Both are free reads of stored data; the dashboard never starts a paid
   call.
-- **MCP tools** `get_keyword_metrics` and `get_seo_geo_comparison` (read only, no DataForSEO call).
+- **MCP tools**: free reads (`get_keyword_metrics`, `get_seo_geo_comparison`, `get_seo_recommendations`,
+  `get_rank_tracking`, `get_domain_snapshots`, `get_backlink_snapshots`, `get_site_audits`, `get_local_job`) and
+  paid DataForSEO lookups split into an estimate and a run (`estimate_seo_*` / `run_seo_*`; the jobs
+  `estimate_seo_job` / `start_seo_job` are for Admins). Details: [mcp.md](mcp.md).
 
 The header market selector applies to every SEO page: lookups run in the selected market (the global market when
 every market is combined).
@@ -57,10 +62,10 @@ every market is combined).
    `CitationAnalysis-Search-google_ai_overview`, by name).
 3. Rebuild the dashboard (`./scripts/build-web.sh` reads `SeoApiUrl` into `VITE_SEO_API_URL`). Without the SEO stack
    the SEO pages say "SEO data is not set up" and the SEO overview says the stack is not deployed.
-4. As an Admin, open **Settings › AI Providers › SEO data › DataForSEO**, enter the login and password and save. The
+4. As an Admin, open **Settings › AI providers › SEO data › DataForSEO**, enter the login and password and save. The
    login is checked with DataForSEO's free account endpoint, which also shows the balance on the card. The secret is
    stored as `citation-analysis/dataforseo-key`. Until then the SEO overview shows a "Set up SEO data" panel.
-5. Enable **Google AI Overviews** in Settings › AI Providers (it uses the DataForSEO login; it has no key of its own).
+5. Enable **Google AI Overviews** in Settings › AI providers (it uses the DataForSEO login; it has no key of its own).
 
 ## Who can do what
 
@@ -77,7 +82,9 @@ its confirmation).
 ## Prices
 
 DataForSEO bills per call; your account is billed directly. The figures below are list prices the code estimates
-with; check DataForSEO's own pricing for current values. Each page's document has its full table.
+with, read from DataForSEO's per-account price table (`GET /v3/appendix/user_data`) in September 2026
+(`lambda/shared/dataforseo_pricing.py`, `lambda/shared/local_seo_pricing.py`); check DataForSEO's own pricing for
+current values. Each page's document has its full table.
 
 | Area | Typical cost |
 |---|---|
@@ -99,9 +106,13 @@ How spending is kept in check (there are no spend caps):
 - Paid lookups run only when you press the button; opening a page, switching tabs or focusing a field costs nothing.
 - Batch and recurring work (rank checks and schedules, snapshots, audits, the rank grid, Lighthouse batches) asks
   for confirmation first, naming the paid calls it starts when the count is known.
-- The dashboard shows no prices: no cost captions, estimates or charged amounts on the SEO screens, the Keyword
-  Explorer or the SEO vs GEO report. The figures in these docs are for reference; the DataForSEO card in
-  Settings › AI Providers shows the account balance.
+- Prices are shown before money is spent where the dashboard can work them out: the Keyword Explorer shows the
+  ceiling of one search under the Search button ("up to $0.05 per search", from `Seo/seoPrices.ts`, which mirrors
+  `lambda/shared/dataforseo_pricing.py`), the Backlinks **Snapshot now** confirmation shows the price the API
+  estimates (`estimated_run_cost_usd`), and the paid **Export to Excel** of the Domain Overview and Backlinks tables
+  shows the price ceiling and request count before Download (exporting the rows on screen is free). Other SEO screens
+  show call counts, not prices. The figures in these docs are for reference; the DataForSEO card in Settings › AI
+  providers shows the account balance.
 - Answers are cached (keyword research 24 h, a seed with no ideas 1 h, results pages and domain lookups 12 h,
   backlinks 6 h), so a repeat is free until the entry expires; an empty answer never replaces cached data.
 - DataForSEO bills a call when it is made, so a billed call that timed out or failed is never re-sent automatically,
@@ -126,4 +137,4 @@ DataForSEO does not serve answers `UNSUPPORTED_MARKET` before any paid call.
 ## Data
 
 The SEO stack's tables (keys, contents, which items expire) and the `seo` bucket's key layout are listed in the
-README, "Data".
+README, [Data](../README.md#data).

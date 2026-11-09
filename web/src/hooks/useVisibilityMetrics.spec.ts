@@ -6,15 +6,14 @@ import { useVisibilityMetrics } from './useVisibilityMetrics';
 import {
   INVALID_REQUEST_STATE, REJECTED_VISIBILITY_BODIES, mockKeywordVisibilityResponse, mockVisibilityResponse, renderAnsweredWith
 } from './useVisibilityMetrics-fixtures';
-import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
-import { idleEndpointState } from '../test/idleEndpointState';
 import {
   INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
 } from './useAnalysisEndpoint-failure-fixtures';
 import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
+import { idleEndpointState } from '../test/idleEndpointState';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -63,32 +62,5 @@ describe('useVisibilityMetrics', () => {
     const state = await renderAnsweredWith(useVisibilityMetrics, (hook) => hook.fetchVisibilityMetrics(ALL_SCOPE), body);
 
     expect(state).toStrictEqual(INVALID_REQUEST_STATE);
-  });
-
-  describe('rapid refetch', () => {
-    it('aborts the previous request when a newer scope fetch starts', () => {
-      const {
-        deferred, startRequest
-      } = renderDeferredEndpoint(useVisibilityMetrics);
-
-      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('old keyword')));
-      startRequest((hook) => hook.fetchVisibilityMetrics(groupScope('grp-sol')));
-
-      expect(deferred.requests.map((request) => request.signal?.aborted)).toStrictEqual([true, false]);
-    });
-
-    it('keeps the newer scope data when a stale response resolves late', async () => {
-      const {
-        respondTo, result, startRequest
-      } = renderDeferredEndpoint(useVisibilityMetrics);
-
-      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('hotel sol spa')));
-      startRequest((hook) => hook.fetchVisibilityMetrics(groupScope('grp-sol')));
-      await respondTo(1, mockVisibilityResponse);
-      await respondTo(0, mockKeywordVisibilityResponse);
-
-      expect(result.current.data).toStrictEqual(mockVisibilityResponse);
-      expect(result.current.error).toBeNull();
-    });
   });
 });

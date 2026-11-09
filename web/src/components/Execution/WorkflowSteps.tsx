@@ -1,22 +1,24 @@
 import type {
   KeywordProgress, StepState
 } from '../../formatting/executionProcessor';
+import {
+  CheckIcon, CloseIcon
+} from '../ui/Icons';
+import { Spinner } from '../ui/Spinner';
+import {
+  describeKeywordProgress, stepWords
+} from './runOutcome';
 
-const STEP_STYLES: Record<StepState['status'], string> = {
-  pending: 'border-gray-200 bg-gray-50',
-  running: 'border-gray-400 bg-gray-50',
-  completed: 'border-emerald-400 bg-emerald-50',
-  failed: 'border-red-400 bg-red-50',
+const MARKER_BASE = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold';
+
+const MARKER_STYLES: Record<StepState['status'], string> = {
+  pending: 'border border-gray-300 bg-white text-gray-500 dark:border-gray-600',
+  running: 'border-2 border-gray-900 bg-white text-gray-900 dark:border-gray-100',
+  completed: 'bg-gray-900 text-white',
+  failed: 'bg-red-600 text-white',
 };
 
-const STEP_INDICATORS: Record<StepState['status'], string> = {
-  pending: 'bg-gray-300',
-  running: 'bg-gray-500 animate-pulse',
-  completed: 'bg-emerald-500',
-  failed: 'bg-red-500',
-};
-
-/** Spelled out under every step so its state never depends on the dot colour alone. */
+/** Spelled out under every step so its state never depends on the marker alone. */
 const STEP_STATUS_LABELS: Record<StepState['status'], string> = {
   pending: 'Pending',
   running: 'In progress',
@@ -24,65 +26,75 @@ const STEP_STATUS_LABELS: Record<StepState['status'], string> = {
   failed: 'Failed',
 };
 
-interface WorkflowStepsProps { steps: StepState[]; }
+const STATUS_TEXT: Record<StepState['status'], string> = {
+  pending: 'text-gray-500',
+  running: 'text-gray-900 font-medium',
+  completed: 'text-emerald-700',
+  failed: 'text-red-700 font-medium',
+};
 
-export const WorkflowSteps = ({ steps }: WorkflowStepsProps) => (
-  <div className="p-4 sm:p-6 border-b border-gray-200 bg-gray-50">
-    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
-      <h3 className="text-sm font-medium text-gray-900">Workflow</h3>
-      <StepLegend />
-    </div>
-    <ol className="flex items-center gap-2 overflow-x-auto pb-2">
-      {steps.map((step, idx) => (
-        <StepItem key={step.name} step={step} isLast={idx === steps.length - 1} />
-      ))}
-    </ol>
-  </div>
-);
+const StepMarker = ({
+  status, position
+}: {
+  readonly status: StepState['status'];
+  readonly position: number 
+}) => {
+  const icon = {
+    completed: <CheckIcon className="h-4 w-4" />,
+    failed: <CloseIcon className="h-4 w-4" />,
+    running: <Spinner size="sm" />,
+    pending: <span>{position}</span>,
+  }[status];
+  return <span aria-hidden="true" className={`${MARKER_BASE} ${MARKER_STYLES[status]}`}>{icon}</span>;
+};
 
-const StepLegend = () => (
-  <div className="flex items-center gap-3 sm:gap-4 text-xs text-gray-500" aria-hidden="true">
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-gray-300 rounded-full"></div><span>Pending</span></div>
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div><span>Running</span></div>
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span>Done</span></div>
-  </div>
-);
+/** A thin neutral bar; the track and value are styled per engine (WebKit/Blink and Firefox). */
+const PROGRESS_CLASS = [
+  'block h-1.5 w-full max-w-[16rem] appearance-none overflow-hidden rounded-full border-0 bg-gray-200',
+  '[&::-webkit-progress-bar]:bg-gray-200 dark:[&::-webkit-progress-bar]:bg-gray-700',
+  '[&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-gray-900 dark:[&::-webkit-progress-value]:bg-gray-100',
+  '[&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-gray-900 dark:[&::-moz-progress-bar]:bg-gray-100',
+].join(' ');
 
-interface StepItemProps {
-  step: StepState;
-  isLast: boolean;
-}
+interface KeywordProgressBarProps { readonly keywords: KeywordProgress; }
 
-const StepItem = ({
-  step, isLast
-}: StepItemProps) => (
-  <li className="flex items-center">
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-w-[140px] ${STEP_STYLES[step.status]}`}>
-      <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${STEP_INDICATORS[step.status]}`} aria-hidden="true" />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-gray-900 truncate">{step.name}</p>
-        {step.description && <p className="text-xs text-gray-400">{step.description}</p>}
-        <p className="text-xs text-gray-500">{STEP_STATUS_LABELS[step.status]}</p>
-        {step.keywords && <KeywordProgressText keywords={step.keywords} />}
-      </div>
-    </div>
-    {!isLast && <div className="w-6 h-px bg-gray-300 mx-1" aria-hidden="true" />}
-  </li>
-);
-
-interface KeywordProgressTextProps { keywords: KeywordProgress; }
-
-/** "<done> of <total> keywords", done = succeeded + failed; the failed count follows when there is one. */
-const KeywordProgressText = ({ keywords }: KeywordProgressTextProps) => {
+/** The keyword step's counts as a bar and in words: done = succeeded + failed. */
+const KeywordProgressBar = ({ keywords }: KeywordProgressBarProps) => {
   const done = keywords.keywords_succeeded + keywords.keywords_failed;
   return (
-    <>
-      <p className="text-xs text-gray-600">
-        {`${done.toLocaleString()} of ${keywords.keywords_total.toLocaleString()} keywords`}
-      </p>
-      {keywords.keywords_failed > 0 && (
-        <p className="text-xs text-red-700">{`${keywords.keywords_failed.toLocaleString()} failed`}</p>
-      )}
-    </>
+    <div className="mt-2">
+      <progress
+        aria-label="Keywords done"
+        max={Math.max(keywords.keywords_total, 1)}
+        value={done}
+        className={PROGRESS_CLASS}
+      />
+      <p className="mt-1 text-xs text-gray-600">{describeKeywordProgress(keywords)}</p>
+    </div>
   );
 };
+
+interface WorkflowStepsProps { readonly steps: StepState[]; }
+
+/**
+ * The run's steps as a numbered stepper in plain words: a marker (number,
+ * spinner, check or cross), the step name and its state in words, and on
+ * the keyword step a bar of keywords done.
+ */
+export const WorkflowSteps = ({ steps }: WorkflowStepsProps) => (
+  <ol aria-label="Run steps" className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6">
+    {steps.map((step, index) => (
+      <li key={step.name} className="flex min-w-0 gap-3 sm:flex-col sm:gap-2">
+        <div className="flex items-center gap-2 sm:w-full">
+          <StepMarker status={step.status} position={index + 1} />
+          {index < steps.length - 1 && <span aria-hidden="true" className="hidden h-px flex-1 bg-gray-200 sm:block" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-gray-900">{stepWords(step.name).label}</p>
+          <p className={`text-xs ${STATUS_TEXT[step.status]}`}>{STEP_STATUS_LABELS[step.status]}</p>
+          {step.keywords && <KeywordProgressBar keywords={step.keywords} />}
+        </div>
+      </li>
+    ))}
+  </ol>
+);

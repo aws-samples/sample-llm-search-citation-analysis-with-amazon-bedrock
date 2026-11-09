@@ -15,8 +15,8 @@ describe('Keyword Research form fields', () => {
   it('associates the seed label with deterministic metadata when the expansion form renders', () => {
     render(<KeywordExpansion {...buildProps()} />);
 
-    const seedField = screen.getByLabelText('Seed Keyword');
-    expect(screen.getByText('Seed Keyword')).toHaveAttribute('for', 'keyword-expansion-seed');
+    const seedField = screen.getByLabelText('Seed keyword');
+    expect(screen.getByText('Seed keyword')).toHaveAttribute('for', 'keyword-expansion-seed');
     expect(seedField).toHaveAttribute('id', 'keyword-expansion-seed');
     expect(seedField).toHaveAttribute('name', 'seed');
   });
@@ -33,8 +33,8 @@ describe('Keyword Research form fields', () => {
   it('associates the count label with deterministic metadata when the expansion form renders', () => {
     render(<KeywordExpansion {...buildProps()} />);
 
-    const countField = screen.getByLabelText('Number of Keywords');
-    expect(screen.getByText('Number of Keywords')).toHaveAttribute('for', 'keyword-expansion-count');
+    const countField = screen.getByLabelText('Number of keywords');
+    expect(screen.getByText('Number of keywords')).toHaveAttribute('for', 'keyword-expansion-count');
     expect(countField).toHaveAttribute('id', 'keyword-expansion-count');
     expect(countField).toHaveAttribute('name', 'count');
   });

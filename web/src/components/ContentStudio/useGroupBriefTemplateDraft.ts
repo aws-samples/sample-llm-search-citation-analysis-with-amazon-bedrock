@@ -5,6 +5,7 @@ import {
   useContentBriefTemplates,
   type ContentBriefTemplateMutationOutcome,
 } from '../../hooks/useContentBriefTemplates';
+import { useMountedRef } from '../../hooks/useMountedRef';
 import type {
   ContentBriefTemplate, ContentBriefTemplateDraft, GroupBriefMode
 } from '../../types';
@@ -78,8 +79,7 @@ export function useGroupBriefTemplateDraft(mode: GroupBriefMode) {
   const [draft, setDraft] = useState<TemplateDraftState>(() => fallbackState(mode));
   const [notice, setNotice] = useState<TemplateNotice | null>(null);
   const [saving, setSaving] = useState(false);
-  // Stryker disable next-line BooleanLiteral: The setup effect establishes mounted state before any consumer effect or event can start a mutation.
-  const mountedRef = useRef(false);
+  const mountedRef = useMountedRef();
   const activeOperationRef = useRef<symbol | null>(null);
   const mutationInFlightRef = useRef<symbol | null>(null);
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
@@ -95,15 +95,10 @@ export function useGroupBriefTemplateDraft(mode: GroupBriefMode) {
   }, []);
   // Stryker restore ArrayDeclaration
 
-  // Stryker disable ArrayDeclaration: This mount lifecycle intentionally runs once per setup and cleanup cycle.
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      // Stryker disable next-line BooleanLiteral: Cleanup and the next setup are synchronous; operation-token clearing is the observable stale-work guard.
-      mountedRef.current = false;
-      activeOperationRef.current = null;
-      mutationInFlightRef.current = null;
-    };
+  // Stryker disable ArrayDeclaration: This cleanup intentionally runs once per setup and cleanup cycle.
+  useEffect(() => () => {
+    activeOperationRef.current = null;
+    mutationInFlightRef.current = null;
   }, []);
   // Stryker restore ArrayDeclaration
 

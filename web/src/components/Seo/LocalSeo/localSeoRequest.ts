@@ -22,8 +22,8 @@ export interface IdentityInput {
 
 export const IDENTITY_LABELS: Record<IdentityKind, string> = {
   name: 'Business name',
-  cid: 'Google cid',
-  place_id: 'Place id',
+  cid: 'Google CID',
+  place_id: 'Place ID',
 };
 
 /** No coordinate typed: the market city is used. */

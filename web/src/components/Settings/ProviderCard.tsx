@@ -7,7 +7,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import { EXTERNAL_LINK_PATHS } from '../ui/iconPaths';
 import { ProviderModelEditor } from './ProviderModelEditor';
 import {
-  getProviderCardBorderClass, getProviderDotClass, ProviderAutoDisabledNote, ProviderStatus, ProviderToggle
+  getProviderDotClass, ProviderAutoDisabledNote, ProviderStatus, ProviderToggle
 } from './ProviderCardParts';
 import {
   ApiKeyEditor, CredentialFieldsEditor
@@ -98,7 +98,7 @@ export const ProviderCard = ({
 }: Props) => {
   const showBalance = controls.isAdmin && provider.id === DATAFORSEO_PROVIDER_ID && provider.configured && isSeoApiConfigured();
   return (
-    <div className={`bg-white rounded-lg border p-4 transition-colors ${getProviderCardBorderClass(provider.configured, provider.enabled)}`}>
+    <div className="bg-white rounded-lg border border-gray-200 p-4 transition-colors">
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-3">
           <div className={`mt-1 w-3 h-3 rounded-full ${getProviderDotClass(provider.configured, provider.enabled)}`} />
@@ -117,7 +117,7 @@ export const ProviderCard = ({
         <div className="flex items-center gap-2">
           {/* Non-admins keep the read-only card, the status badge, and the docs link. */}
           {controls.isAdmin && <AdminControls provider={provider} controls={controls} />}
-          <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title={linkTitle(provider)}>
+          <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:text-gray-600 transition-colors" title={linkTitle(provider)}>
             <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
           </a>
         </div>

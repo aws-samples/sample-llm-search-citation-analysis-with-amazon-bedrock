@@ -1,7 +1,9 @@
 import {
   afterEach, beforeEach, describe, it, expect, vi
 } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook
+} from '@testing-library/react';
 import { useCitationGaps } from './useCitationGaps';
 import {
   mockCitationGapsResponse,
@@ -16,6 +18,9 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createEndpointMockFetch } from '../test/fetchResponses';
+
 type FetchCitationGapsArgs = Parameters<ReturnType<typeof useCitationGaps>['fetchCitationGaps']>;
 
 describe('useCitationGaps', () => {
@@ -28,7 +33,23 @@ describe('useCitationGaps', () => {
   it('returns an idle state when no citation-gap request has started', () => {
     const { result } = renderHook(() => useCitationGaps());
 
-    expect(result.current).toStrictEqual(idleEndpointState('fetchCitationGaps'));
+    expect(result.current).toStrictEqual({
+      ...idleEndpointState('fetchCitationGaps'),
+      noData: false,
+    });
+  });
+
+  it('settles the "No data found for keyword" body as "no data yet", not as an error', async () => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockCitationGapsResponse, { errorResponse: { error: 'No data found for keyword: never analysed' } }));
+    const { result } = renderHook(() => useCitationGaps());
+
+    const returned = await act(() => result.current.fetchCitationGaps(keywordScope('never analysed')));
+
+    expect(returned).toBeNull();
+    expect(result.current).toStrictEqual({
+      ...idleEndpointState('fetchCitationGaps'),
+      noData: true,
+    });
   });
 
   describeEndpointHookContract({
@@ -38,6 +59,7 @@ describe('useCitationGaps', () => {
     fetch: (hook, ...args: FetchCitationGapsArgs) => hook.fetchCitationGaps(...args),
     defaultResponse: mockCitationGapsResponse,
     defaultArgs: [keywordScope('test')],
+    otherState: { noData: false },
     requests: [
       ['https://api.test.com/citation-gaps?keyword=best+hotels&limit=10', 'a keyword scope is given', [keywordScope('best hotels')]],
       ['https://api.test.com/citation-gaps?keyword=test&limit=20', 'a limit is given', [keywordScope('test'), 20]],

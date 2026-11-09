@@ -27,7 +27,7 @@ from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.env import SCHEDULE_ENV
 from testing.events import parse_response
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 from testing.paging import INVALID_NEXT_TOKEN, follow_next_token
 from testing.response_size import assert_within_page_budget
 
@@ -36,7 +36,7 @@ with (
     patch('boto3.resource', return_value=fake_dynamodb_resource()),
     patch.dict(os.environ, SCHEDULE_ENV),
 ):
-    _mod = load_handler_module(os.path.dirname(__file__), 'manage-schedule.py', 'manage_schedule_volume')
+    _mod = load_handler_module(API_DIR, 'manage-schedule.py', 'manage_schedule_volume')
 
 _BASE = datetime(2026, 9, 1, tzinfo=UTC)
 

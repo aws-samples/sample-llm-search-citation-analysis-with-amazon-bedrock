@@ -8,6 +8,7 @@ import { useMarketSelection } from '../Markets/marketSelectionContext';
 import { formatDate } from '../../formatting/dateFormatter';
 import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
+import { Button } from '../ui/Button';
 import { ErrorAlert } from '../ui/ErrorAlert';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
 import {
@@ -30,7 +31,7 @@ const SEVERITY_LABELS: Record<AlertSeverity, string> = {
 
 const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
-  warning: 'border-amber-200 bg-amber-50 text-amber-800',
+  warning: 'border-gray-200 bg-gray-50 text-amber-800',
 };
 
 function countLabel(count: number): string {
@@ -108,14 +109,14 @@ function AlertRow({
             {formatDate(alertItem.run_timestamp)}
           </time>
           {isAdmin && alertItem.status === 'open' && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => { void onAcknowledge(alertItem.id); }}
               disabled={acknowledging}
-              className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {acknowledging ? 'Acknowledging…' : 'Acknowledge'}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -193,7 +194,7 @@ export function AlertsPanel() {
             type="button"
             onClick={() => { setShowAll(!showAll); }}
             aria-expanded={showAll}
-            className="text-sm font-medium text-blue-600 hover:text-blue-800"
+            className="rounded text-sm font-medium text-blue-700 hover:text-blue-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 dark:focus-visible:ring-gray-100"
           >
             {showAll ? `Show the newest ${DASHBOARD_ALERT_PREVIEW}` : `Show all ${sorted.length} alerts`}
           </button>

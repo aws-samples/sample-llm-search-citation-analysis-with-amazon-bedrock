@@ -17,7 +17,7 @@ import {
 } from '../scopeReport/scopeReport-fixtures';
 import { buildHeadingBlock } from './customReport-fixtures';
 import {
-  REPORT_GONE, renderCustomReportRoute, renderWithoutSavedReports, reportsListPayload, sectionHeadingTexts
+  REPORT_GONE, describeMissingReportPage, renderCustomReportRoute, reportsListPayload, sectionHeadingTexts
 } from './customReportPages-fixtures';
 
 vi.mock('../../../api/client', () => import('../../../api/clientMock-fixtures'));
@@ -119,23 +119,11 @@ describe('CustomReportView', () => {
     expect(screen.getByLabelText('Current location')).toHaveTextContent(`${REPORT_PATH}/edit`);
   });
 
-  it('says the report is gone when no saved report has the id', async () => {
-    renderWithoutSavedReports('/reports/custom/report-missing');
-
-    expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
-  });
-
   it('says the report is gone when only other reports are saved', async () => {
     mockApiGet.mockResolvedValue(reportsListPayload(buildCustomReport({ blocks: [] })));
     renderCustomReportRoute('/reports/custom/report-missing');
 
     expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
-  });
-
-  it('offers the way back to Reports when the report is gone', async () => {
-    renderWithoutSavedReports('/reports/custom/report-missing');
-
-    expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
   });
 
   it('offers no way back while the saved reports are loading', () => {
@@ -145,4 +133,6 @@ describe('CustomReportView', () => {
     expect(screen.getByText('Loading the report…')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
   });
+
+  describeMissingReportPage('/reports/custom/report-missing');
 });

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock
 
 import pytest
 
 from shared.router import HandlerLoader
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module
 
 
 @pytest.mark.parametrize(
@@ -41,7 +38,7 @@ def test_dispatches_each_config_path_to_its_handler_file(
     handler_file: str,
 ) -> None:
     router = load_handler_module(
-        _API_DIR,
+        API_DIR,
         'config-mgmt.py',
         'config_mgmt_alert_route_under_test',
     )

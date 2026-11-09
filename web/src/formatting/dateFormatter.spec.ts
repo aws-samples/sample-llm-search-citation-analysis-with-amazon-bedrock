@@ -11,51 +11,56 @@ import {
 } from './dateFormatter';
 import { freezeClockAt } from '../test/frozenClock';
 
-describe('formatDate', () => {
-  it('returns "N/A" when input is null', () => {
-    expect(formatDate(null)).toBe('N/A');
+/** The formatters whose output is the environment's locale string, so specs can only rule out the error labels. */
+const LOCALE_FORMATTERS = [
+  {
+    name: 'formatDate',
+    format: formatDate,
+    invalidLabel: 'Invalid date',
+  },
+  {
+    name: 'formatTime',
+    format: formatTime,
+    invalidLabel: 'Invalid time',
+  },
+];
+
+const DATE_FORMATTERS = [
+  ...LOCALE_FORMATTERS,
+  {
+    name: 'formatDateOnly',
+    format: formatDateOnly,
+    invalidLabel: 'Invalid date',
+  },
+  {
+    name: 'formatRelativeTime',
+    format: formatRelativeTime,
+    invalidLabel: 'Invalid date',
+  },
+];
+
+describe.each(DATE_FORMATTERS)('$name without a usable date', ({
+  format, invalidLabel
+}) => {
+  it.each([null, undefined, ''])('returns "N/A" when input is %j', (input) => {
+    expect(format(input)).toBe('N/A');
   });
 
-  it('returns "N/A" when input is undefined', () => {
-    expect(formatDate(undefined)).toBe('N/A');
-  });
-
-  it('returns "N/A" when input is empty string', () => {
-    expect(formatDate('')).toBe('N/A');
-  });
-
-  it('returns "Invalid date" when input is not a valid date string', () => {
-    expect(formatDate('not-a-date')).toBe('Invalid date');
-  });
-
-  it('returns formatted date string when input is valid ISO date', () => {
-    const result = formatDate('2026-01-23T10:30:00Z');
-
-    // toLocaleString output varies by environment, so check it's not an error value
-    expect(result).not.toBe('N/A');
-    expect(result).not.toBe('Invalid date');
-    expect(result.length).toBeGreaterThan(0);
+  it(`returns "${invalidLabel}" when input is not a valid date string`, () => {
+    expect(format('not-a-date')).toBe(invalidLabel);
   });
 });
 
-describe('formatTime', () => {
-  it('returns "N/A" when input is null', () => {
-    expect(formatTime(null)).toBe('N/A');
-  });
+describe.each(LOCALE_FORMATTERS)('$name', ({
+  format, invalidLabel
+}) => {
+  it('returns a formatted string when input is a valid ISO date', () => {
+    const result = format('2026-01-23T10:30:00Z');
 
-  it('returns "N/A" when input is undefined', () => {
-    expect(formatTime(undefined)).toBe('N/A');
-  });
-
-  it('returns "Invalid time" when input is not a valid date string', () => {
-    expect(formatTime('invalid')).toBe('Invalid time');
-  });
-
-  it('returns formatted time string when input is valid ISO date', () => {
-    const result = formatTime('2026-01-23T10:30:00Z');
-
+    // toLocaleString output varies by environment, so check it's not an error value
     expect(result).not.toBe('N/A');
-    expect(result).not.toBe('Invalid time');
+    expect(result).not.toBe(invalidLabel);
+    expect(result.length).toBeGreaterThan(0);
   });
 });
 
@@ -126,14 +131,6 @@ describe('formatDateOnly', () => {
     expect(formatDateOnly(input)).toBe(new Date(input).toLocaleDateString());
   });
 
-  it('returns N/A when the date is null or undefined', () => {
-    expect(formatDateOnly(null)).toBe('N/A');
-    expect(formatDateOnly(undefined)).toBe('N/A');
-  });
-
-  it('returns Invalid date for an unparseable string', () => {
-    expect(formatDateOnly('not-a-date')).toBe('Invalid date');
-  });
 });
 
 describe('formatApproximateDuration', () => {
@@ -180,18 +177,6 @@ describe('formatApproximateDuration', () => {
 
 describe('formatRelativeTime', () => {
   freezeClockAt('2026-01-23T12:00:00Z');
-
-  it('returns "N/A" when input is null', () => {
-    expect(formatRelativeTime(null)).toBe('N/A');
-  });
-
-  it('returns "N/A" when input is undefined', () => {
-    expect(formatRelativeTime(undefined)).toBe('N/A');
-  });
-
-  it('returns "Invalid date" when input is not a valid date string', () => {
-    expect(formatRelativeTime('not-a-date')).toBe('Invalid date');
-  });
 
   it('returns "2 hours ago" for a timestamp two hours in the past', () => {
     expect(formatRelativeTime('2026-01-23T10:00:00Z')).toBe('2 hours ago');

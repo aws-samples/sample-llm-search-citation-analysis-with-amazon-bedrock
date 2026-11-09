@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi 
+  beforeEach, describe, it, expect, vi
 } from 'vitest';
 import {
   fireEvent, render, screen, waitFor
@@ -13,8 +13,9 @@ import {
   answerTwoCitationPages, buildCitationsPage, FIRST_OF_TWO, SECOND_OF_TWO
 } from '../../hooks/useMarketCitations-fixtures';
 import {
-  ARTICLE_PAGE, renderCitationsView, setupVideoFilter
+  answerTwoCitationPagesFailingOnce, ARTICLE_PAGE, renderCitationsView, renderScrolledCitationsView, setupVideoFilter
 } from './CitationsView-fixtures';
+import { installIntersectionObserverMock } from '../../test/intersectionObserverMock';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
 vi.mock('../../exporters/excelGenerator', () => import('../../test/excelExportMock'));
@@ -49,7 +50,7 @@ describe('CitationsView', () => {
     await screen.findByText('example.com');
     const statCards = [...(screen.getByText('Total URLs').parentElement?.parentElement?.children ?? [])];
 
-    expect(statCards.map((card) => card.textContent)).toStrictEqual(['Total URLs2', 'Citations7', 'Avg/URL3.5']);
+    expect(statCards.map((card) => card.textContent)).toStrictEqual(['Total URLs2', 'Citations7', 'Citations per URL3.5']);
   });
 
   it('renders the domain of each citation on the page', async () => {
@@ -74,7 +75,7 @@ describe('CitationsView', () => {
     setupVideoFilter();
 
     await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/citations?content_type=video&limit=25&offset=0', expect.anything(),
+      'https://api.test.com/citations?content_type=video&limit=50&offset=0', expect.anything(),
     ));
   });
 
@@ -108,5 +109,41 @@ describe('CitationsView', () => {
     await waitFor(() => expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/citations?limit=1000&include_keywords=true', expect.anything(),
     ));
+  });
+
+  describe('as the reader scrolls', () => {
+    beforeEach(installIntersectionObserverMock);
+
+    it('appends the next page under the rows already shown, ranked after them', async () => {
+      await renderScrolledCitationsView();
+
+      expect(await screen.findByText('b.example')).toBeInTheDocument();
+      expect(screen.getAllByRole('row').slice(1).map((row) => /^\d+/.exec(row.textContent ?? '')?.[0])).toStrictEqual(['1', '2']);
+      expect(screen.getByText('Showing 2 of 40 URLs · more load as you scroll')).toBeInTheDocument();
+    });
+
+    it('starts again from the top when a filter changes', async () => {
+      await renderScrolledCitationsView();
+      await screen.findByText('b.example');
+
+      setupVideoFilter();
+
+      await waitFor(() => expect(screen.queryByText('b.example')).not.toBeInTheDocument());
+      expect(screen.getByText('a.example')).toBeInTheDocument();
+    });
+
+    it('offers Try again after a failed page and loads it when pressed', async () => {
+      await renderScrolledCitationsView(answerTwoCitationPagesFailingOnce);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+      expect(await screen.findByText('b.example')).toBeInTheDocument();
+    });
+
+    it('says when every URL is shown', async () => {
+      renderCitationsView();
+
+      expect(await screen.findByText('The only URL is shown.')).toBeInTheDocument();
+    });
   });
 });

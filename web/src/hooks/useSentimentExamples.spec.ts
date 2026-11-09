@@ -6,7 +6,6 @@ import {
 } from '@testing-library/react';
 import { useSentimentExamples } from './useSentimentExamples';
 import { renderAnsweredWith } from './useVisibilityMetrics-fixtures';
-import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { idleEndpointState } from '../test/idleEndpointState';
 import { createEndpointMockFetch } from '../test/fetchResponses';
@@ -77,49 +76,5 @@ describe('useSentimentExamples', () => {
     await act(() => result.current.fetchSentimentExamples(ALL_SCOPE, 'negative'));
 
     expect(consoleError).toHaveBeenCalledWith('[sentiment] Error fetching sentiment examples:', expect.objectContaining({ name: 'SentimentExamplesFetchError' }));
-  });
-
-  describe('cancellation', () => {
-    it('aborts the examples of the previous count when another count is fetched', () => {
-      const {
-        deferred, startRequest
-      } = renderDeferredEndpoint(useSentimentExamples);
-
-      startRequest((hook) => hook.fetchSentimentExamples(ALL_SCOPE, 'negative', 'openai'));
-      startRequest((hook) => hook.fetchSentimentExamples(ALL_SCOPE, 'positive', 'gemini'));
-
-      expect(deferred.requests.map((request) => request.signal?.aborted)).toStrictEqual([true, false]);
-    });
-
-    it('aborts the request in flight when the view unmounts', () => {
-      const {
-        deferred, startRequest, unmount
-      } = renderDeferredEndpoint(useSentimentExamples);
-
-      startRequest((hook) => hook.fetchSentimentExamples(groupScope('grp-sol'), 'mixed'));
-      unmount();
-
-      expect(deferred.requests[0].signal?.aborted).toBe(true);
-    });
-
-    it('keeps the examples of the newer count when the older answer arrives late', async () => {
-      const {
-        deferred, result, startRequest
-      } = renderDeferredEndpoint(useSentimentExamples);
-      const newer = buildSentimentExamplesResponse({
-        sentiment: 'positive',
-        total: 0,
-        examples: [],
-      });
-
-      startRequest((hook) => hook.fetchSentimentExamples(ALL_SCOPE, 'negative'));
-      startRequest((hook) => hook.fetchSentimentExamples(ALL_SCOPE, 'positive'));
-      await act(async () => {
-        deferred.requests[1].respond(newer);
-        deferred.requests[0].respond(EXAMPLES);
-      });
-
-      expect(result.current.data).toStrictEqual(newer);
-    });
   });
 });

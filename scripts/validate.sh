@@ -232,6 +232,18 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   done
 fi
 
+# ---- Node version ----
+# .nvmrc pins the Node.js major: the newest one Lambda runs as a managed runtime. CI installs it from
+# the same file (actions/setup-node node-version-file). A newer local Node changes built-ins the tests
+# rely on (Node 25+ ships its own localStorage over jsdom's), so any other major is refused up front.
+NODE_MAJOR_PINNED="$(tr -d '[:space:]' < "$ROOT/.nvmrc")"
+NODE_MAJOR_LOCAL="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none)"
+if [[ "$NODE_MAJOR_LOCAL" != "$NODE_MAJOR_PINNED" && "$LIST" -eq 0 && "$HELP" -eq 0 ]]; then
+  printf 'validate: Node.js %s is required (.nvmrc), found %s. Switch with `nvm use` or `fnm use`.\n' \
+    "$NODE_MAJOR_PINNED" "$NODE_MAJOR_LOCAL" >&2
+  exit 2
+fi
+
 # ---- Run ----
 LOG_DIR="${VALIDATE_LOG_DIR:-$LOG_ROOT/$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$LOG_DIR"

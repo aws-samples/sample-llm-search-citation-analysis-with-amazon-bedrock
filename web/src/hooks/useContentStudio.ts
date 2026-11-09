@@ -26,6 +26,7 @@ import { useContentStudioBatchTracking } from './useContentStudioBatchTracking';
 import {
   CONTENT_HISTORY_PAGE_SIZE, useContentHistoryPaging
 } from './useContentHistoryPaging';
+import { useMountedRef } from './useMountedRef';
 
 const GENERATING_POLL_INTERVAL = 10000;
 const MAX_CONSECUTIVE_STATUS_FAILURES = 3;
@@ -74,23 +75,17 @@ export function useContentStudio() {
   const pollingFailureCountsRef = useRef(new Map<string, number>());
   const loadingOperationsRef = useRef(new Set<symbol>());
   const generationOperationsRef = useRef(new Set<symbol>());
-  // Stryker disable next-line BooleanLiteral: The setup effect establishes mounted state before consumer effects or events can start work.
-  const mountedRef = useRef(false);
+  const mountedRef = useMountedRef();
 
-  // Stryker disable ArrayDeclaration: This mount lifecycle intentionally runs once per setup and cleanup cycle.
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      // Stryker disable next-line BooleanLiteral: Cleanup and StrictMode setup are synchronous; operation tokens are the observable stale-work guard.
-      mountedRef.current = false;
-      latestIdeasReadRef.current = null;
-      latestHistoryReadRef.current = null;
-      historyRequestRef.current?.abort();
-      historyRequestRef.current = null;
-      latestGenerationRef.current = null;
-      loadingOperationsRef.current.clear();
-      generationOperationsRef.current.clear();
-    };
+  // Stryker disable ArrayDeclaration: This cleanup intentionally runs once per setup and cleanup cycle.
+  useEffect(() => () => {
+    latestIdeasReadRef.current = null;
+    latestHistoryReadRef.current = null;
+    historyRequestRef.current?.abort();
+    historyRequestRef.current = null;
+    latestGenerationRef.current = null;
+    loadingOperationsRef.current.clear();
+    generationOperationsRef.current.clear();
   }, []);
   // Stryker restore ArrayDeclaration
 

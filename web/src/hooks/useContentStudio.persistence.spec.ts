@@ -29,6 +29,7 @@ import {
   waitForContentStudioRequests,
 } from './useContentStudio-test-fixtures';
 import { requestUrlsContaining } from './useContentStudio-request-fixtures';
+import { countClearTimeoutsOnUnmount } from '../test/clearTimeoutOnUnmount';
 import {
   activeBatchIds,
   batchStatusRequestCounts,
@@ -53,6 +54,7 @@ import {
   storeActiveContentStudioBatchIds,
   storedActiveContentStudioBatchCandidates,
   storedActiveContentStudioBatchIds,
+  waitForStoredBatchCandidatesCleared,
 } from './useContentStudio-fixtures';
 import { useContentStudio } from './useContentStudio';
 
@@ -126,9 +128,7 @@ describe('useContentStudio recovered batch persistence', () => {
     const fetch = createMockFetch({ missingBatchIds: ['expired-batch'] });
     const { result } = renderContentStudio(fetch);
 
-    await waitFor(() => {
-      expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
-    });
+    await waitForStoredBatchCandidatesCleared();
 
     expect(result.current.activeBatches).toStrictEqual([]);
     expect(requestUrlsContaining(fetch, '/history')).toContain(
@@ -146,9 +146,7 @@ describe('useContentStudio recovered batch persistence', () => {
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     expect(result.current.activeBatches).toStrictEqual([mockBatchStatusResponse]);
     historyRequest.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
-    await waitFor(() => {
-      expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
-    });
+    await waitForStoredBatchCandidatesCleared();
   });
 
   it('polls only the running batch after mixed recovered outcomes', async () => {
@@ -225,26 +223,21 @@ describe('useContentStudio aggregate batch timer', () => {
       batchStatusResponse: mockBatchStatusResponse,
     });
     renderContentStudio(fetch);
-    await waitFor(() => {
-      expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
-    });
+    await waitForStoredBatchCandidatesCleared();
 
     expect(clearIntervalSpy).toHaveBeenCalledWith(expect.anything());
   });
 
   it('clears the aggregate interval when the hook unmounts', async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
-    const {
-      fetch, unmount
-    } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
-    });
-    const callsBeforeUnmount = clearIntervalSpy.mock.calls.length;
+    const cleared = await countClearTimeoutsOnUnmount(async () => {
+      const rendered = renderTwoRunningBatches();
+      await waitFor(() => {
+        expect(batchStatusRequestUrls(rendered.fetch, 'batch-1')).toHaveLength(1);
+      });
+      return rendered;
+    }, 'clearInterval');
 
-    unmount();
-
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
+    expect(cleared).toBe(1);
   });
 });
 

@@ -38,7 +38,7 @@ def handler_fixture(
     Assign the result to a module attribute -- pytest registers the fixture
     under that name::
 
-        promotion_handler = handler_fixture(_API_DIR, 'promote-keywords.py', _MODULE_NAME, env=KEYWORDS_TABLE_ENV)
+        promotion_handler = handler_fixture(API_DIR, 'promote-keywords.py', _MODULE_NAME, env=KEYWORDS_TABLE_ENV)
     """
 
     @pytest.fixture(scope=scope)

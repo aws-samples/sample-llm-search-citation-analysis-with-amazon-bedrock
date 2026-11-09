@@ -16,7 +16,6 @@ estimates read within a bounded number of calls, flagged as approximate.
 from __future__ import annotations
 
 import itertools
-import os
 from collections.abc import Mapping
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -26,10 +25,11 @@ from testing.dynamodb_stubs import described, fake_table
 from testing.env import STATS_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 from testing.response_size import assert_within_page_budget
 from testing.search_results_fixtures import key_parts
 
-stats_module = handler_fixture(os.path.dirname(__file__), 'get-stats.py', 'get_stats_volume_under_test', env=STATS_ENV)
+stats_module = handler_fixture(API_DIR, 'get-stats.py', 'get_stats_volume_under_test', env=STATS_ENV)
 
 _GIB = 1024 ** 3
 _KEYWORDS = [f'vuelos baratos destino {index:04d}' for index in range(1_000)]

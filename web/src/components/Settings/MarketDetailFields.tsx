@@ -89,7 +89,7 @@ const DETAIL_FIELDS: readonly FieldSpec[] = [
   },
 ];
 
-const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
+const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100 dark:disabled:bg-gray-800 dark:disabled:text-gray-400';
 
 interface BrandListFieldProps {
   readonly id: string;
@@ -107,7 +107,7 @@ function BrandListField({
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <textarea id={id} rows={3} value={value} onChange={(event) => onChange(event.target.value)}
         aria-describedby={`${id}-hint`} className={INPUT_CLASS} />
-      <p id={`${id}-hint`} className="text-xs text-gray-400 mt-1">{hint}</p>
+      <p id={`${id}-hint`} className="text-xs text-gray-500 mt-1">{hint}</p>
     </div>
   );
 }
@@ -131,14 +131,14 @@ export function MarketDetailFields({
         return (
           <div key={field.key}>
             <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
-              {field.label}{field.required === true && <span className="text-gray-400"> (required)</span>}
+              {field.label}{field.required === true && <span className="text-gray-500"> (required)</span>}
             </label>
             <input id={id} type="text" value={values[field.key]} placeholder={field.placeholder}
               onChange={(event) => updateValue(field.key, event.target.value)}
               disabled={field.key === 'market_id' && idLocked}
               aria-describedby={field.hint === undefined ? undefined : `${id}-hint`}
               className={INPUT_CLASS} />
-            {field.hint !== undefined && <p id={`${id}-hint`} className="text-xs text-gray-400 mt-1">{field.hint}</p>}
+            {field.hint !== undefined && <p id={`${id}-hint`} className="text-xs text-gray-500 mt-1">{field.hint}</p>}
           </div>
         );
       })}

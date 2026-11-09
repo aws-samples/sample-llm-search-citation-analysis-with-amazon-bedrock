@@ -17,9 +17,9 @@ import { ErrorAlert } from '../ui/ErrorAlert';
 // Stryker disable next-line ObjectLiteral: replacing the Tailwind-only status palette has no behavioral effect
 const SUBSCRIPTION_CLASSES: Record<AlertSubscriptionStatus, string> = {
   // Stryker disable next-line StringLiteral: confirmed status colors are presentation-only
-  confirmed: 'rounded border px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 border-emerald-200',
+  confirmed: 'rounded border px-2 py-0.5 text-xs font-medium bg-gray-50 text-emerald-700 border-gray-200',
   // Stryker disable next-line StringLiteral: pending status colors are presentation-only
-  pending_confirmation: 'rounded border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-800 border-amber-200',
+  pending_confirmation: 'rounded border px-2 py-0.5 text-xs font-medium bg-gray-50 text-amber-800 border-gray-200',
   // Stryker disable next-line StringLiteral: unsubscribed status colors are presentation-only
   not_subscribed: 'rounded border px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 border-gray-200',
   // Stryker disable next-line StringLiteral: unknown status colors are presentation-only
@@ -51,7 +51,7 @@ function ThresholdField({
 }: ThresholdFieldProps) {
   return (
     <label htmlFor={id} className="block">
-      <span className="text-sm font-medium text-gray-800">{label}</span>
+      <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{label}</span>
       <span className="mt-1 flex items-center gap-2">
         <input
           id={id}
@@ -183,7 +183,7 @@ export function AlertSettingsForm({
         </div>
 
         <label htmlFor="alert-notification-emails" className="block">
-          <span className="text-sm font-medium text-gray-800">Notification emails</span>
+          <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Notification emails</span>
           <textarea
             id="alert-notification-emails"
             rows={4}
@@ -191,7 +191,7 @@ export function AlertSettingsForm({
             onChange={(event) => updateValue('notificationEmailsText', event.target.value)}
             aria-describedby="alert-email-guidance"
             placeholder="alerts@example.com"
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500 dark:disabled:bg-gray-800 dark:disabled:text-gray-400"
           />
         </label>
 

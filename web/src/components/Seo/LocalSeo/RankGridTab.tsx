@@ -23,7 +23,7 @@ import {
   EMPTY_POINT, hasSearchPoint, pointFields, rankBand, targetFields, type IdentityInput
 } from './localSeoRequest';
 import {
-  TargetTabHints, marketHasPoint, targetLabel, type LocalTabProps
+  TARGET_LABEL, TargetTabHints, marketHasPoint, targetPlaceholder, type LocalTabProps
 } from './localSeoSettings';
 import { JobProgress } from './ProfileActivity';
 
@@ -46,9 +46,9 @@ const SIZES = [
 }[];
 
 const BAND_CLASSES: Record<ReturnType<typeof rankBand>, string> = {
-  top3: 'bg-emerald-500 text-white',
-  top10: 'bg-amber-300 text-gray-900',
-  low: 'bg-red-400 text-white',
+  top3: 'bg-emerald-700 text-white',
+  top10: 'bg-gray-300 text-amber-950',
+  low: 'bg-red-600 text-white',
   missing: 'bg-gray-200 text-gray-600',
 };
 
@@ -149,9 +149,9 @@ export function RankGridTab({
         onSubmit={() => { setConfirming(true); }}
       >
         <TextField label="Keyword" value={keyword} onChange={setKeyword} suggestions={settings.keywords} />
-        <IdentityFields identity={target} onChange={setTarget} label={targetLabel(settings)} />
-        <PointFields point={point} onChange={setPoint} market={market} />
+        <IdentityFields identity={target} onChange={setTarget} label={TARGET_LABEL} placeholder={targetPlaceholder(settings)} />
         <SelectField label="Grid" value={size} options={SIZES} onChange={setSize} />
+        <PointFields point={point} onChange={setPoint} market={market} />
         <TextField label="Spacing (km, 0.25 to 10)" inputMode="decimal" value={spacing} onChange={setSpacing} />
       </LocalForm>
       <JobProgress state={state} />

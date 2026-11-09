@@ -70,7 +70,7 @@ export function AccessSwitch({
         aria-labelledby={labelId}
         disabled={disabled}
         onClick={onToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800 disabled:cursor-not-allowed disabled:opacity-50 ${
           enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-500'
         }`}
       >
@@ -91,7 +91,7 @@ export interface DialogFeedback {
 /** The result of the dialog's last action: announced success or an alert. */
 export function DialogFeedbackNotice({ feedback }: { readonly feedback: DialogFeedback | null }) {
   if (feedback?.tone === 'success') {
-    return <output className="block rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{feedback.text}</output>;
+    return <output className="block rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-emerald-700">{feedback.text}</output>;
   }
   return <ErrorAlert message={feedback?.text ?? null} />;
 }

@@ -79,7 +79,7 @@ function ReviewsSummary({ result }: { readonly result: ReviewsResult }) {
         {result.reviews.length} latest reviews · owner replied to {rate === null ? '–' : `${Math.round(rate * 100)}%`}
       </p>
       <Histogram counts={result.summary.histogram} />
-      <ul className="divide-y divide-gray-100">
+      <ul className="divide-y divide-gray-100 dark:divide-gray-700">
         {result.reviews.slice(0, 10).map((review, position) => (
           <li key={review.review_id ?? `${review.timestamp ?? ''}-${String(position)}`} className="py-2 text-sm">
             <p className="font-medium text-gray-900">{review.rating ?? '–'}★ {review.profile_name ?? 'Anonymous'} · {review.time_ago ?? ''}</p>
@@ -95,7 +95,7 @@ function ReviewsSummary({ result }: { readonly result: ReviewsResult }) {
 function UpdatesList({ result }: { readonly result: UpdatesResult }) {
   if (result.updates.length === 0) return <p className="text-sm text-gray-600">This business has published no updates.</p>;
   return (
-    <ul className="divide-y divide-gray-100">
+    <ul className="divide-y divide-gray-100 dark:divide-gray-700">
       {result.updates.map((update, position) => (
         <li key={update.url ?? `${update.timestamp ?? ''}-${String(position)}`} className="py-2 text-sm">
           <p className="text-xs text-gray-500">{update.post_date ?? update.timestamp ?? ''}</p>
@@ -204,7 +204,7 @@ function QuestionsPanel({
         <p className="text-sm text-gray-600">Google returned no questions and answers for this business.</p>
       )}
       {state.status === 'success' && state.response.questions.length > 0 && (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-gray-100 dark:divide-gray-700">
           {state.response.questions.map((question, position) => (
             <li key={question.question_id ?? String(position)} className="py-2 text-sm">
               <p className="font-medium text-gray-900">{question.question_text}</p>

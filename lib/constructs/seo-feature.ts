@@ -6,7 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { Construct } from 'constructs';
-import { monthLogGroup } from './api-functions';
+import { loggedStateMachine } from './logged-state-machine';
 import type { SeoRoutes } from './seo-api';
 import { citationAnalysisTable } from './tables';
 
@@ -163,22 +163,17 @@ export abstract class SeoFeatureConstruct extends Construct implements SeoFeatur
   }
 
   /**
-   * A state machine with full execution logs (one-month
+   * A `loggedStateMachine`: full execution logs (one-month
    * `/aws/vendedlogs/states/<name>` log group, removed with the stack) and
    * X-Ray traces, as every state machine of the app has.
    */
   protected stateMachine(spec: SeoStateMachineSpec): stepfunctions.StateMachine {
-    const destination = monthLogGroup(
-      this, spec.logGroupId ?? 'StateMachineLogGroup', `/aws/vendedlogs/states/${spec.stateMachineName}`,
-      cdk.RemovalPolicy.DESTROY,
-    );
-    return new stepfunctions.StateMachine(this, spec.id ?? 'StateMachine', {
+    return loggedStateMachine(this, spec.id ?? 'StateMachine', {
+      logGroupId: spec.logGroupId ?? 'StateMachineLogGroup',
       stateMachineName: spec.stateMachineName,
-      definitionBody: stepfunctions.DefinitionBody.fromChainable(spec.definition),
-      timeout: spec.timeout,
+      definition: spec.definition,
       role: spec.role,
-      tracingEnabled: true,
-      logs: { destination, level: stepfunctions.LogLevel.ALL, includeExecutionData: true },
+      timeout: spec.timeout,
     });
   }
 }

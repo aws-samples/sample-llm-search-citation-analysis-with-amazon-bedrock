@@ -36,6 +36,7 @@ export function TopSourcesSection({
     title: TITLE,
     loading,
     loadingMessage: 'Loading citation sources…',
+    loadingShape: 'table',
     error,
   });
   if (pending) return pending;
@@ -65,13 +66,11 @@ export function TopSourcesSection({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SourceList
           heading="Supporting first-party brands"
-          tone="positive"
           items={supporting}
           emptyMessage="No sources currently cite your brand for this keyword."
         />
         <SourceList
           heading="Citing competitors only"
-          tone="negative"
           items={competitorOnly}
           emptyMessage="No sources cite competitors without also citing first-party brands. Strong position."
         />
@@ -89,12 +88,10 @@ export function TopSourcesSection({
 
 function SourceList({
   heading,
-  tone,
   items,
   emptyMessage,
 }: {
   readonly heading: string;
-  readonly tone: 'positive' | 'negative';
   readonly items: ReadonlyArray<{
     url: string;
     domain: string;
@@ -103,15 +100,8 @@ function SourceList({
   }>;
   readonly emptyMessage: string;
 }) {
-  const accentClass =
-    tone === 'positive'
-      ? 'border-emerald-200 dark:border-emerald-800'
-      : 'border-amber-200 dark:border-amber-800';
-
   return (
-    <div
-      className={`border ${accentClass} rounded-lg p-4 bg-white dark:bg-gray-800`}
-    >
+    <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4 bg-white dark:bg-gray-800">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
         {heading}
       </h3>

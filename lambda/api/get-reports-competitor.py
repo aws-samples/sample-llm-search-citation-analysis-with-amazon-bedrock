@@ -54,14 +54,10 @@ from __future__ import annotations
 
 import logging
 import math
-import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-
-# Shared layer path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.constants import priority_rank

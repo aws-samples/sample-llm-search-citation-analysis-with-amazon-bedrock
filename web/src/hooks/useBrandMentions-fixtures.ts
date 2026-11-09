@@ -43,7 +43,6 @@ export function buildBrandAppearance(overrides: Partial<BrandAppearance> = {}): 
 export const ONE_BRAND_ONE_COMPETITOR = {
   total_unique_brands: 2,
   matching_brands: 2,
-  brands_truncated: false,
   summary: {
     first_party_count: 1,
     competitor_count: 1,

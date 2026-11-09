@@ -1,6 +1,5 @@
 """The ``market_id`` and ``concept_id`` references of manual keyword management (2.37.0)."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,9 +10,10 @@ from testing.env import KEYWORDS_TABLE_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.markets_fixtures import BRAZIL, CHILE, markets_item
+from testing.module_loader import API_DIR
 
 manage_module = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)), 'manage-keywords.py', 'manage_keywords_under_test_markets',
+    API_DIR, 'manage-keywords.py', 'manage_keywords_under_test_markets',
     env=KEYWORDS_TABLE_ENV, scope='function',
 )
 

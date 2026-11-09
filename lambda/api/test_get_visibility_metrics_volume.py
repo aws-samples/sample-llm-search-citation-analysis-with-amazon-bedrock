@@ -12,7 +12,6 @@ then the first-party and tracked brands ranked below them, with
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import patch
 
@@ -20,15 +19,12 @@ import pytest
 
 from shared.visibility_views import BRANDS_LIMIT
 from testing.events import api_gateway_event, parse_response
-from testing.handler_fixtures import handler_fixture
-from testing.report_scope_fixtures import AIRLINE_BRAND_CONFIG, REPORT_TABLES_ENV
+from testing.report_scope_fixtures import AIRLINE_BRAND_CONFIG, report_handler_fixture
 from testing.response_size import assert_within_page_budget
 from testing.search_results_fixtures import active_keywords_table, report_dynamodb, search_results_table
 from testing.sentiment_examples_fixtures import stored_answer, stored_brand
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-visibility_handler = handler_fixture(_API_DIR, 'get-visibility-metrics.py', 'get_visibility_metrics_volume_under_test', env=REPORT_TABLES_ENV)
+visibility_handler = report_handler_fixture('get-visibility-metrics.py', 'get_visibility_metrics_volume_under_test')
 
 _ENGINES = ('openai', 'perplexity', 'gemini', 'claude')
 _KEYWORDS = [f'hoteles con encanto en la región {index:03d}' for index in range(100)]

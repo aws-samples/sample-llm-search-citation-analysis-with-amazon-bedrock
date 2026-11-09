@@ -7,7 +7,7 @@ vi.mock('./client', () => ({apiGet: vi.fn(),}));
 
 import { apiGet } from './client';
 
-const mockApiGet = apiGet as ReturnType<typeof vi.fn>;
+const mockApiGet = vi.mocked(apiGet);
 
 describe('dashboard API', () => {
   describe('fetchCrawlHistory', () => {

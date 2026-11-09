@@ -12,13 +12,9 @@ history only lists crawls).
 """
 
 import logging
-import sys
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, encode_cursor

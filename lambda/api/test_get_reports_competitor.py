@@ -15,10 +15,9 @@ import pytest
 from shared.scope_params import ReportScope
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import parse_response
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 from testing.window_budget_fixtures import spent_request_budget
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 # The tables the module resolves at import (both always set on the StatsInsights Lambda).
 _ENV = {'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search', 'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}
 
@@ -88,7 +87,7 @@ def mod(monkeypatch: pytest.MonkeyPatch):
     listing answers the rank fixture's keywords, for the test's lifetime.
     """
     with patch.dict(os.environ, _ENV):
-        module = load_handler_module(_API_DIR, 'get-reports-competitor.py')
+        module = load_handler_module(API_DIR, 'get-reports-competitor.py')
 
     monkeypatch.setattr(module, '_keyword_evidence', lambda keyword, config: module.KeywordEvidence(
         keyword, DEFAULT_RANKS.get(keyword, {}), DEFAULT_GAPS.get(keyword, {}).get('gaps', []),
@@ -102,7 +101,7 @@ def raw_mod():
     """The module without the helper stubs — for testing the real
     DynamoDB-backed _list_tracked_keywords / _latest_brand_ranks."""
     with patch.dict(os.environ, _ENV):
-        return load_handler_module(_API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_unstubbed')
+        return load_handler_module(API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_unstubbed')
 
 
 # Adidas outranks Nike on a keyword: the setup under which Adidas's rollup

@@ -1,7 +1,5 @@
-import { expect } from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
+import { waitForLoaded } from '../test/loadedHook';
 import { createMockEndpoint } from './injectableApi-fixtures';
 import {
   useOnboardingStatus, type OnboardingStatusApi 
@@ -125,6 +123,6 @@ export function renderOnboardingStatus(enabled: boolean, options: OnboardingMock
 /** Renders the enabled hook and waits until every setup check has resolved. */
 export async function renderLoadedOnboardingStatus(options: OnboardingMockApiOptions = {}) {
   const rendered = renderOnboardingStatus(true, options);
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  await waitForLoaded(rendered.result);
   return rendered;
 }

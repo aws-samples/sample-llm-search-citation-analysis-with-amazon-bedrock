@@ -141,14 +141,16 @@ function ConfiguredDomainOverview() {
   return (
     <div className="space-y-4">
       <PageHeaderCard title="Domain Overview" relaxed={false}
-        description="What a domain ranks for on Google in the header market: organic keywords, estimated traffic and its value, top pages and SERP competitors.">
+        description="What a domain ranks for on Google in the market selected at the top of the page: organic keywords, estimated traffic and its value, top pages and SERP competitors.">
         <DomainSearchForm busy={overviewState.status === 'loading'} domains={domains} onAnalyze={analyze} />
       </PageHeaderCard>
       {analysis === null && (
         <CenteredEmpty
           icon={<SearchIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />}
           title={domains.ownDomain === null ? 'Enter a domain to get started' : `Analyze ${domains.ownDomain} or enter another domain`}
-          hint="See the domain's organic keywords, estimated traffic, top pages and SERP competitors in the header market."
+          hint={domains.ownDomain === null
+            ? 'Type a domain or a URL, then press Analyze.'
+            : 'Leave the field empty to analyze your own domain, or click one of the domains under it.'}
         />
       )}
       {overviewState.status === 'loading' && <OverviewSkeleton />}

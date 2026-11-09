@@ -6,13 +6,9 @@ continuation token, so clients can read every keyword however large the table
 grows without a single response approaching the Lambda payload cap.
 """
 
-import sys
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.cursors import CURSOR_ERROR_MESSAGE, decode_cursor, encode_cursor

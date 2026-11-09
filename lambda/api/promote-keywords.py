@@ -15,12 +15,8 @@ keywords that is about 3 pages, under 2 s.
 """
 
 import logging
-import sys
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import error_response, success_response, validation_error
 from shared.bounded_writes import map_writes

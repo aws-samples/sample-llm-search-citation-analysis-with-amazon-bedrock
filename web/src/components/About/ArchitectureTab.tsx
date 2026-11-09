@@ -2,7 +2,7 @@ const AI_PROVIDERS = [
   {
     name: 'OpenAI',
     model: 'GPT-5 mini',
-    color: 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+    color: 'bg-gray-50 border-gray-200 text-emerald-800' 
   },
   {
     name: 'Perplexity',
@@ -17,7 +17,7 @@ const AI_PROVIDERS = [
   {
     name: 'Anthropic',
     model: 'Claude',
-    color: 'bg-orange-50 border-orange-200 text-orange-800' 
+    color: 'bg-gray-50 border-gray-200 text-amber-800' 
   },
 ];
 
@@ -71,6 +71,23 @@ const CAPABILITIES = [
   },
 ];
 
+/** One tier of the request path in the diagram: its service and what it does. */
+function TierBox({
+  title, subtitle
+}: {
+  readonly title: string;
+  readonly subtitle: string;
+}) {
+  return (
+    <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
+      <div className="text-center">
+        <div className="font-semibold">{title}</div>
+        <div className="text-xs text-gray-500">{subtitle}</div>
+      </div>
+    </div>
+  );
+}
+
 export function ArchitectureTab() {
   return (
     <div className="space-y-6">
@@ -85,25 +102,15 @@ export function ArchitectureTab() {
         <div className="flex flex-col items-center">
           <div className="flex items-center gap-4 mb-4">
             <div className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 shadow-sm">
-              👤 User
+              User
             </div>
           </div>
           <div className="w-px h-6 bg-gray-300"></div>
           
-          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
-            <div className="text-center">
-              <div className="font-semibold">React Dashboard</div>
-              <div className="text-xs text-gray-500">CloudFront + S3</div>
-            </div>
-          </div>
+          <TierBox title="React Dashboard" subtitle="CloudFront + S3" />
           <div className="w-px h-6 bg-gray-300"></div>
 
-          <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
-            <div className="text-center">
-              <div className="font-semibold">API Gateway</div>
-              <div className="text-xs text-gray-500">REST API + Cognito Auth</div>
-            </div>
-          </div>
+          <TierBox title="API Gateway" subtitle="REST API + Cognito Auth" />
           <div className="w-px h-6 bg-gray-300"></div>
 
           <div className="flex items-center gap-4 mb-2">
@@ -128,7 +135,7 @@ export function ArchitectureTab() {
 
           <div className="flex flex-wrap justify-center gap-3 mb-4">
             {['Parse', 'Search', 'Dedupe', 'Crawl', 'Summarize'].map((fn) => (
-              <div key={fn} className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs font-medium text-amber-800">
+              <div key={fn} className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-medium text-amber-800">
                 λ {fn}
               </div>
             ))}
@@ -138,19 +145,19 @@ export function ArchitectureTab() {
           <div className="flex flex-wrap justify-center gap-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm">
               <div className="font-semibold text-blue-800">DynamoDB</div>
-              <div className="text-xs text-blue-600">Data Storage</div>
+              <div className="text-xs text-blue-700">Data Storage</div>
             </div>
-            <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-sm">
-              <div className="font-semibold text-purple-800">Bedrock</div>
-              <div className="text-xs text-purple-600">Brand Extraction</div>
+            <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-2 text-sm">
+              <div className="font-semibold text-violet-800">Bedrock</div>
+              <div className="text-xs text-violet-700">Brand Extraction</div>
             </div>
-            <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-sm">
-              <div className="font-semibold text-purple-800">Bedrock AgentCore</div>
-              <div className="text-xs text-purple-600">Browser Crawling</div>
+            <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-2 text-sm">
+              <div className="font-semibold text-violet-800">Bedrock AgentCore</div>
+              <div className="text-xs text-violet-700">Browser Crawling</div>
             </div>
-            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm">
-              <div className="font-semibold text-green-800">S3</div>
-              <div className="text-xs text-green-600">Raw Responses</div>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm">
+              <div className="font-semibold text-emerald-800">S3</div>
+              <div className="text-xs text-emerald-700">Raw Responses</div>
             </div>
           </div>
         </div>

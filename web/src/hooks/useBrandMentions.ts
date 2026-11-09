@@ -21,6 +21,8 @@ const brandMentionsEndpoint = {
   // them as an invalid format instead. Kept as-is to preserve the hook's
   // observable error messages.
   rejectBackendErrorBody: false,
+  // A keyword with no analysis run is answered with 404: no answers yet, not a failure.
+  noData: { status: 404 },
   buildRequest: (scope: ReportScope, marketId: string | null, filters: BrandMentionsFilters) => ({
     path: '/brand-mentions',
     params: new URLSearchParams(brandMentionsParams(scope, marketId, filters)),
@@ -39,7 +41,7 @@ export const useBrandMentions = (
   selectedTimestamp: string | null = null
 ) => {
   const {
-    data, loading, error, fetchData, reset
+    data, loading, error, noData, fetchData, reset
   } = useAnalysisEndpoint(brandMentionsEndpoint);
   // The scope object is rebuilt by callers on every render; key the effect on
   // its encoded form so a same-value scope does not refetch.
@@ -62,5 +64,7 @@ export const useBrandMentions = (
     data,
     loading,
     error,
+    /** The keyword has no analysis run yet (`data` and `error` are null). */
+    noData,
   };
 };

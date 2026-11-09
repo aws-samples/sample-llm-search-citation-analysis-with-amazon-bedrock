@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import KeysView
 from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
-
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group

@@ -9,6 +9,7 @@ import {
   getErrorMessage, isAbortError
 } from '../../infrastructure';
 import type { RankTrackerSchedule } from '../../types';
+import { formatRunTime } from './scheduleNextRun';
 
 /** The rank tracking page, opened on one tracker. */
 export function trackerLink(trackerId: string): string {
@@ -17,17 +18,7 @@ export function trackerLink(trackerId: string): string {
 
 /** "Mon, 9 Nov 2026, 04:30" in the browser's zone, or "unknown" when the API could not read the time. */
 export function describeNextCheck(nextRunAt: string | null): string {
-  if (nextRunAt === null) return 'unknown';
-  const when = new Date(nextRunAt);
-  if (Number.isNaN(when.getTime())) return 'unknown';
-  return when.toLocaleString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatRunTime(nextRunAt === null ? null : new Date(nextRunAt));
 }
 
 const RankTrackerRow = ({ schedule }: { readonly schedule: RankTrackerSchedule }) => (

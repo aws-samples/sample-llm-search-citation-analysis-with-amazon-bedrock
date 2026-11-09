@@ -51,7 +51,7 @@ export function SeoGeoTrafficSection({
   state, scopeLabel
 }: SeoGeoSectionProps) {
   return (
-    <SeoGeoSectionFrame title={TITLE} subtitle={(response) => snapshotNote(response.traffic_snapshot_at)} state={state}>
+    <SeoGeoSectionFrame title={TITLE} loadingShape="chart" subtitle={(response) => snapshotNote(response.traffic_snapshot_at)} state={state}>
       {(response) => (
         <div className="space-y-4">
           <ChartPanel title={TITLE} info={CHART_INFO} subtitle="Indigo: estimated search traffic. Amber: AI mentions.">

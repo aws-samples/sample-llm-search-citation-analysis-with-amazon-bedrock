@@ -25,13 +25,9 @@ SERP depths are 20 | 50, not 100: a depth-100 live call does not reliably fit th
 import functools
 import logging
 import math
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 from seo_http import KEYWORD_FIELD, MARKET_ID_FIELD, CachePolicy, MarketRequest, market_request, seo_route

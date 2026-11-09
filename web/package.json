@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.43.0",
+  "version": "2.43.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -63,5 +63,8 @@
     "qs@<=6.16.0": "6.16.2",
     "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
     "zod@<4.6.6": "4.6.7"
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

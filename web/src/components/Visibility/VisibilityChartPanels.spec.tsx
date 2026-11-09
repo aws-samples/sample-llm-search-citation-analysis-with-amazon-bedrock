@@ -125,7 +125,7 @@ describe('SourcesPanel', () => {
   });
 
   it.each([
-    ['badges and tints', 'hotelsol.com', 'bg-emerald-50'],
+    ['badges and tints', 'hotelsol.com', 'bg-violet-50'],
     ['leaves untinted', 'booking.com', ''],
   ])('%s the row of %s by whether the brand owns it', (_label, domain, rowClass) => {
     renderGroupSources();

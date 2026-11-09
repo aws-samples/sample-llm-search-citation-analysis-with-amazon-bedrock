@@ -2,16 +2,20 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  fireEvent, render, screen
+  fireEvent, render, screen, waitFor, within
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { mockApiGet } from '../../../api/clientMock-fixtures';
+import {
+  mockApiDelete, mockApiGet
+} from '../../../api/clientMock-fixtures';
 import type { CustomReport } from '../../../api/customReports';
 import { buildCustomReport } from '../../../api/customReports-fixtures';
 import { ApiRequestError } from '../../../infrastructure';
 import { CurrentLocation } from '../scopeReport/scopeReport-fixtures';
 import { CustomReportsPanel } from './CustomReportsPanel';
-import { reportsListPayload } from './customReportPages-fixtures';
+import {
+  confirmReportDeletion, reportsListPayload
+} from './customReportPages-fixtures';
 
 vi.mock('../../../api/client', () => import('../../../api/clientMock-fixtures'));
 
@@ -33,18 +37,44 @@ function renderPanel() {
   );
 }
 
+async function setupOpenActionsMenu(title: string) {
+  fireEvent.click(await screen.findByRole('button', { name: `Actions for ${title}` }));
+  return screen.getByRole('menu', { name: `Actions for ${title}` });
+}
+
+/** Lists the board pack, renders the panel and picks `item` from the report's menu. */
+async function setupBoardPackChoice(item: string) {
+  setupListing(BOARD_PACK);
+  renderPanel();
+  fireEvent.click(within(await setupOpenActionsMenu('Board pack')).getByRole('menuitem', { name: item }));
+}
+
 describe('CustomReportsPanel', () => {
-  it.each([
-    ['links every saved report to its page', 'Board pack', '/reports/custom/report-board'],
-    ['links every saved report to its editor', 'Edit Board pack', '/reports/custom/report-board/edit'],
-  ])('%s', async (_outcome, name, href) => {
+  it('links every saved report to its page', async () => {
     setupListing(BOARD_PACK);
     renderPanel();
 
-    expect(await screen.findByRole('link', { name })).toHaveAttribute('href', href);
+    expect(await screen.findByRole('link', { name: 'Board pack' })).toHaveAttribute('href', '/reports/custom/report-board');
   });
 
-  it('says how many blocks and which period a report has, and who changed it last', async () => {
+  it('offers to open, edit or delete a report from its menu', async () => {
+    setupListing(BOARD_PACK);
+    renderPanel();
+    const menu = await setupOpenActionsMenu('Board pack');
+
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toStrictEqual(['Open', 'Edit', 'Delete']);
+  });
+
+  it.each([
+    ['Open', '/reports/custom/report-board'],
+    ['Edit', '/reports/custom/report-board/edit'],
+  ])('goes to the report from %s', async (item, path) => {
+    await setupBoardPackChoice(item);
+
+    expect(screen.getByLabelText('Current location')).toHaveTextContent(path);
+  });
+
+  it('says how many blocks and which period a report has, and when it changed, without naming who changed it', async () => {
     setupListing(buildCustomReport({
       blocks: [{ type: 'sources_headline' }],
       days: 30,
@@ -52,14 +82,44 @@ describe('CustomReportsPanel', () => {
     }));
     renderPanel();
 
-    expect(await screen.findByText(/^1 block · last 30 days · updated .+ by ana@example\.com$/u)).toBeInTheDocument();
+    expect(await screen.findByText(/^1 block · last 30 days · updated \S+$/u)).toBeInTheDocument();
+    expect(screen.queryByText(/ana@example\.com/u)).not.toBeInTheDocument();
+  });
+
+  it('deletes a report once the reader confirms, then lists the reports again', async () => {
+    mockApiDelete.mockResolvedValue({});
+    await setupBoardPackChoice('Delete');
+    setupListing();
+    confirmReportDeletion();
+
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Board pack' })).not.toBeInTheDocument());
+    expect(mockApiDelete).toHaveBeenCalledWith('/custom-reports/report-board', { allowStructured4xx: true });
+  });
+
+  it('keeps the report when the reader cancels the delete', async () => {
+    await setupBoardPackChoice('Delete');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+    expect(mockApiDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Board pack' })).toBeInTheDocument();
+  });
+
+  it('says why a delete failed', async () => {
+    mockApiDelete.mockRejectedValue(new ApiRequestError('Report is locked', {
+      statusCode: 409,
+      responseMessage: 'Report is locked',
+    }));
+    await setupBoardPackChoice('Delete');
+    confirmReportDeletion();
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Report is locked');
   });
 
   it('invites the reader to create one when none is saved', async () => {
     setupListing();
     renderPanel();
 
-    expect(await screen.findByText('No custom report yet. Create one from the sections of every report below.')).toBeInTheDocument();
+    expect(await screen.findByText(/^No custom report yet\. Use New custom report/u)).toBeInTheDocument();
   });
 
   it('shows why the list could not load', async () => {
@@ -77,13 +137,5 @@ describe('CustomReportsPanel', () => {
     renderPanel();
 
     expect(screen.getByText('Loading your reports')).toBeInTheDocument();
-  });
-
-  it('opens the builder from its create button', async () => {
-    setupListing();
-    renderPanel();
-    fireEvent.click(await screen.findByRole('button', { name: 'Create custom report' }));
-
-    expect(screen.getByLabelText('Current location')).toHaveTextContent('/reports/custom/new');
   });
 });

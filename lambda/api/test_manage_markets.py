@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -17,9 +16,10 @@ from testing.admin_authz_fixtures import caller_event, invoke
 from testing.dynamodb_stubs import fake_table
 from testing.handler_fixtures import handler_fixture
 from testing.markets_fixtures import BRAZIL, CHILE, markets_item, valid_market
+from testing.module_loader import API_DIR
 
 markets_module = handler_fixture(
-    os.path.dirname(os.path.abspath(__file__)), 'manage-markets.py', 'manage_markets_under_test', scope='function',
+    API_DIR, 'manage-markets.py', 'manage_markets_under_test', scope='function',
     env={'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config', 'DYNAMODB_TABLE_KEYWORDS': 'test-keywords', 'CORS_ORIGIN_PARAM': ''},
 )
 

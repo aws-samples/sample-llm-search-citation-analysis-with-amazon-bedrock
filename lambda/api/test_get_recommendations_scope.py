@@ -26,6 +26,7 @@ import pytest
 from shared.models import BedrockDeadlineError
 from shared.request_deadline import Deadline
 from testing.events import parse_response
+from testing.module_loader import API_DIR
 from testing.report_scope_fixtures import (
     REPORT_TABLES_ENV,
     ScopedReport,
@@ -35,8 +36,6 @@ from testing.report_scope_fixtures import (
     scoped_report,
 )
 from testing.search_results_fixtures import key_parts
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
 
 BRAND_CONFIG = {'tracked_brands': {'first_party': ['Hotel Coruna'], 'competitors': ['Rival Inn']}}
 
@@ -55,7 +54,7 @@ MARINO_KEYWORDS = ['best hotels galicia', 'hotel marino beach']
 
 @pytest.fixture(scope='module')
 def recommendations() -> ModuleType:
-    return load_scoped_handler(_HERE, 'get-recommendations.py')
+    return load_scoped_handler(API_DIR, 'get-recommendations.py')
 
 
 @contextmanager

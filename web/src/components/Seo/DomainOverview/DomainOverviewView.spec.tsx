@@ -205,7 +205,7 @@ describe('ranked keywords', () => {
   it('shows the intent of a ranked keyword as a chip in the commercial tone', async () => {
     await analyzeDomain();
 
-    expect(screen.getByText('Commercial')).toHaveClass('bg-purple-50', 'text-purple-700');
+    expect(screen.getByText('Commercial')).toHaveClass('bg-violet-50', 'text-violet-700');
   });
 });
 

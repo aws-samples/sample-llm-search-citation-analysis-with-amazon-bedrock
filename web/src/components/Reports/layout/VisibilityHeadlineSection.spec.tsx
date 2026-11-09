@@ -8,6 +8,7 @@ import { VisibilityHeadlineSection } from './VisibilityHeadlineSection';
 import type { VisibilityHeadlineProps } from './reportSlices';
 import { OWNED_DOMAINS_MISSING } from './KpiHeadline';
 import { NO_PREVIOUS_RUN } from './periodComparison';
+import { itShowsNoComparison } from './kpiHeadline-fixtures';
 import {
   buildPeriodChange, buildTrendView, buildVisibility
 } from './reportPayload-fixtures';
@@ -55,16 +56,14 @@ describe('VisibilityHeadlineSection', () => {
     expect(statFootnote('Visibility score')).toBe('-8.2 pts vs previous run (1 keyword)');
   });
 
-  it.each([
+  describe.each([
     ['the trend has a change', buildTrendView({ change: buildPeriodChange() })],
     ['the trend request failed', null],
-  ])('says there is no earlier run when the keyword was analysed once, even if %s', (_label, trends) => {
-    renderHeadline({
+  ])('when the keyword was analysed once, even if %s', (_label, trends) => {
+    itShowsNoComparison(() => renderHeadline({
       visibility: buildVisibility({ change: null }),
-      trends 
-    });
-
-    expect(statFootnote('Mention rate')).toBe(NO_PREVIOUS_RUN);
+      trends,
+    }), NO_PREVIOUS_RUN);
   });
 
   it('asks for owned domains under the citation rate when none are set', () => {

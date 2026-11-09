@@ -1,5 +1,5 @@
 import {
-  expect, it
+  describe, expect, it
 } from 'vitest';
 import {
   render, within
@@ -14,6 +14,7 @@ import {
 import {
   KpiHeadline, type KpiComparison
 } from './KpiHeadline';
+import { NO_PREVIOUS_PERIOD } from './periodComparison';
 import { ReportSection } from './ReportSection';
 import {
   kpiRowTooltips, sectionTable, statCard, statFigure, statFootnote
@@ -180,5 +181,26 @@ export function itAsksForOwnedDomains(mount: MountHeadline, footnote: (change: s
     await mount();
 
     expect(statFootnote('Mention rate')).toBe(footnote('-10.0 pts'));
+  });
+}
+
+/** What a period headline is mounted with to drop its comparison or its owned domains. */
+interface PeriodHeadlineOverrides {
+  readonly change?: null;
+  readonly citations_configured?: boolean;
+}
+
+/**
+ * A period headline (`TrendHeadlineSection`, alone or inside a report) over
+ * `buildTrendView()`, compared day over day across 3 keywords: before a second
+ * period, and before owned domains are set.
+ */
+export function itShowsPeriodHeadlineGaps(mount: (overrides: PeriodHeadlineOverrides) => unknown): void {
+  describe('before a second period', () => {
+    itShowsNoComparison(() => mount({ change: null }), NO_PREVIOUS_PERIOD);
+  });
+
+  describe('before owned domains are set', () => {
+    itAsksForOwnedDomains(() => mount({ citations_configured: false }), (change) => `${change} vs previous day (3 keywords)`);
   });
 }

@@ -15,15 +15,10 @@ out (``keywords_truncated`` too), and ``truncated`` is true whenever the
 budget cut anything, the ``available_runs`` listing included.
 """
 
-import logging
-import sys
 from dataclasses import dataclass
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import latest_run_timestamp
 from shared.api_response import not_found_response, success_response, validation_error
@@ -40,17 +35,27 @@ from shared.brand_mention_views import (
     provider_entry,
     read_run_rows,
 )
-from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM, decode_offset_cursor, encode_offset_cursor
+from shared.cursors import (
+    CURSOR_ERROR_MESSAGE,
+    CURSOR_QUERY_PARAM,
+    decode_bound_offset_cursor,
+    decode_offset_cursor,
+    encode_offset_cursor,
+    query_binding,
+)
 from shared.decorators import api_handler, optional_limit, optional_provider, validate
 from shared.request_deadline import current_deadline
 from shared.response_budget import take_within_budget
-from shared.scope_params import SCOPE_QUERY_PARAMS, ReportScope, keywords_table_name
+from shared.scope_params import (
+    BRAND_FILTER_PARAMS,
+    PERSONA_FILTER_PARAMS,
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    keywords_table_name,
+)
 from shared.scoped_reports import ScopeRead, capped_scope, read_scope_keywords, required_report_scope, scope_read_fields
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -68,6 +73,33 @@ class _RowFilters:
     timestamp: str | None
     query_prompt_id: str | None
     provider: str | None
+
+
+@dataclass(frozen=True)
+class _SummaryRequest:
+    """What one summary reads (run and row filters, classification) and where its brand page starts.
+
+    ``binding`` names the query a ``next_token`` belongs to (``_summary_binding``).
+    """
+
+    filters: _RowFilters
+    classification: str | None
+    offset: int
+    binding: str
+
+
+def _summary_binding(scope: ReportScope, filters: _RowFilters, classification: str | None) -> str:
+    """What a summary ``next_token`` belongs to: the scope, the run and every row and brand filter."""
+    return query_binding({
+        'kind': scope.kind,
+        'scope': scope.scope,
+        'market_id': scope.market_id,
+        'keywords': scope.keywords,
+        'timestamp': filters.timestamp,
+        'provider': filters.provider,
+        'query_prompt_id': filters.query_prompt_id,
+        'classification': classification,
+    })
 
 
 def _keyword_run(keyword: str, filters: _RowFilters, run_depth: int) -> tuple[list[dict[str, Any]], list[str]]:
@@ -124,8 +156,7 @@ def _scope_fields(loaded: ScopeRead[KeywordRun], scope_fields: dict[str, Any]) -
 def get_scope_brand_mentions(
     scope: ReportScope,
     brand_config: dict[str, Any],
-    filters: _RowFilters,
-    classification: str | None,
+    request: _SummaryRequest,
 ) -> dict[str, Any]:
     """The summary of every keyword's selected run in a multi-keyword scope (its first ``SCOPE_KEYWORDS_CAP`` keywords).
 
@@ -133,6 +164,7 @@ def get_scope_brand_mentions(
     one, only rows of that shared run count, so keywords absent from it have
     no data. Engine answers (``by_provider``) are not part of a scope answer.
     """
+    filters = request.filters
     keywords, scope_fields = capped_scope(scope)
     loaded = _load_scope(keywords, filters, with_runs=True)
     rows = [row for keyword_rows, _runs in loaded.values.values() for row in keyword_rows]
@@ -145,17 +177,17 @@ def get_scope_brand_mentions(
         'keywords_with_data': sum(1 for keyword_rows, _runs in loaded.values.values() if keyword_rows),
         'config': brand_config,
         'by_provider': [],
-        'aggregated': brand_summary(rows, classification),
+        'aggregated': brand_summary(rows, request.classification, offset=request.offset, binding=request.binding),
     }
 
 
 def get_keyword_brand_mentions(
     keyword: str,
     brand_config: dict[str, Any],
-    filters: _RowFilters,
-    classification: str | None,
+    request: _SummaryRequest,
 ) -> dict[str, Any] | None:
     """The summary of one keyword's selected run with each engine's answer; ``None`` when there is no such run."""
+    filters = request.filters
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
     latest = latest_run_timestamp(table, keyword)
     if latest is None:
@@ -175,7 +207,9 @@ def get_keyword_brand_mentions(
         'truncated': current_deadline().cut,
         'config': brand_config,
         'by_provider': [provider_entry(row) for row in rows],
-        'aggregated': brand_summary(rows, classification, KEYWORD_APPEARANCE_LIMIT),
+        'aggregated': brand_summary(
+            rows, request.classification, KEYWORD_APPEARANCE_LIMIT, offset=request.offset, binding=request.binding,
+        ),
     }
 
 
@@ -221,9 +255,9 @@ def get_appearance_page(
     'timestamp': {'type': str, 'max_length': 50},
     'provider': optional_provider(),
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
-    'query_prompt_id': {'type': str, 'max_length': 100},
+    **PERSONA_FILTER_PARAMS,
     'view': {'type': str, 'choices': list(VIEWS), 'default': 'summary'},
-    'brand': {'type': str, 'max_length': 200},
+    **BRAND_FILTER_PARAMS,
     'limit': optional_limit(default=500, max_val=2000),
 })
 @required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
@@ -242,10 +276,12 @@ def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, time
         - view: ``summary`` (default) or ``appearances``
         - brand, limit, next_token: the ``appearances`` page (one brand when
           ``brand`` is given; ``limit`` rows at most, 500 by default)
+        - next_token (``summary``): the next ``BRAND_LIMIT`` brands; a token
+          from another scope, run or filter answers 400
 
     ``summary``: ``{keyword, timestamp, available_runs, truncated, config, by_provider,
     aggregated: {brands, total_unique_brands, matching_brands,
-    brands_truncated, summary}}`` (+ ``scope``, ``keywords_truncated``, ``keywords_analyzed``,
+    brands_truncated, next_token, summary}}`` (+ ``scope``, ``keywords_truncated``, ``keywords_analyzed``,
     ``keywords_with_data`` for a scope). ``appearances``: ``{keyword,
     timestamp, brand, appearances, total_appearances, next_token,
     keywords_truncated, truncated}`` (+ ``scope`` for a scope).
@@ -257,11 +293,16 @@ def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, time
             return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
         return success_response(get_appearance_page(report_scope, filters, classification, brand, (offset, limit)), event)
 
+    binding = _summary_binding(report_scope, filters, classification)
+    brand_offset = decode_bound_offset_cursor(next_token, binding)
+    if brand_offset is None:
+        return validation_error(CURSOR_ERROR_MESSAGE, event, 'next_token')
+    request = _SummaryRequest(filters, classification, brand_offset, binding)
     brand_config = get_brand_config()
     if not report_scope.is_single_keyword:
-        return success_response(get_scope_brand_mentions(report_scope, brand_config, filters, classification), event)
+        return success_response(get_scope_brand_mentions(report_scope, brand_config, request), event)
 
-    result = get_keyword_brand_mentions(report_scope.keywords[0], brand_config, filters, classification)
+    result = get_keyword_brand_mentions(report_scope.keywords[0], brand_config, request)
     if result is None:
         return not_found_response('Results for keyword', event)
     return success_response(result, event)

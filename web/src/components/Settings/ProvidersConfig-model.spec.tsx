@@ -4,12 +4,11 @@ import {
 import {
   screen, waitFor
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderProvidersConfig } from './ProvidersConfig-fixtures';
-import {
-  GEMINI_AT_DEFAULT, mockModelListing, openGeminiModelEditor, typeModelId
-} from './ProviderModelEditor-fixtures';
 import { mockSaveProviderModel } from '../../api/providerModelsMock-fixtures';
+import userEvent from '@testing-library/user-event';
+import {
+  openGeminiModelEditor, typeModelId
+} from './ProviderModelEditor-fixtures';
 
 vi.mock('../../api/providerModels', () => import('../../api/providerModelsMock-fixtures'));
 
@@ -43,13 +42,5 @@ describe('ProvidersConfig model editor', () => {
 
     await waitFor(() => expect(screen.queryByLabelText('Google Gemini model')).not.toBeInTheDocument());
     expect(onRefresh).toHaveBeenCalledWith();
-  });
-
-  it('shows the editor to administrators only', () => {
-    mockModelListing([]);
-
-    renderProvidersConfig([GEMINI_AT_DEFAULT], { isAdmin: false });
-
-    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
   });
 });

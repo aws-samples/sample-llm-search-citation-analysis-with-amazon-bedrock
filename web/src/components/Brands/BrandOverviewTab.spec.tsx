@@ -58,7 +58,7 @@ describe('BrandOverviewTab', () => {
   it('lists the loaded appearances in place of the preview', async () => {
     await setupShowAll();
 
-    expect(await screen.findByText('CLAUDE')).toBeInTheDocument();
+    expect(await screen.findByText('Anthropic Claude')).toBeInTheDocument();
     expect(queryShowAllElement()).not.toBeInTheDocument();
   });
 

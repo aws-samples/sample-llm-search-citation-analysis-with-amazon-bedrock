@@ -19,7 +19,6 @@ them newest-first (``reverseOrder=True``), which is why the timeline keeps the
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -29,9 +28,9 @@ import pytest
 from botocore.exceptions import ClientError, ParamValidationError
 
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module_offline
+from testing.module_loader import API_DIR, load_handler_module_offline
 
-_mod = load_handler_module_offline(os.path.dirname(__file__), 'get-execution-status.py')
+_mod = load_handler_module_offline(API_DIR, 'get-execution-status.py')
 
 _STATE_MACHINE_ARN = 'arn:aws:states:us-east-1:123456789012:stateMachine:CitationAnalysis-Workflow'
 _EXECUTION_ARN = 'arn:aws:states:us-east-1:123456789012:execution:CitationAnalysis-Workflow:run-1'

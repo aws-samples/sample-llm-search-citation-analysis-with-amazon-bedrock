@@ -2,12 +2,15 @@
  * Hook for managing query prompt templates (personas).
  */
 import {
-  useState, useCallback, useEffect 
+  useState, useCallback
 } from 'react';
 import {
   authenticatedFetch, API_BASE_URL 
 } from '../infrastructure';
 import type { QueryPrompt } from '../types';
+import {
+  useGuardedLoad, type GuardedLoadSource
+} from './useGuardedLoad';
 
 class QueryPromptError extends Error {
   constructor(message: string) {
@@ -16,30 +19,34 @@ class QueryPromptError extends Error {
   }
 }
 
+/**
+ * The prompt list, or an empty one when it cannot be read: a failed list read
+ * is only logged, so `error` stays reserved for the mutations.
+ */
+async function loadPrompts(): Promise<QueryPrompt[]> {
+  try {
+    const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts`);
+    if (!response.ok) throw new QueryPromptError(`HTTP ${response.status}`);
+    const data: unknown = await response.json();
+    return Array.isArray(data) ? data as QueryPrompt[] : [];
+  } catch (err) {
+    console.warn('Could not fetch query prompts:', err);
+    return [];
+  }
+}
+
+const QUERY_PROMPTS_SOURCE: GuardedLoadSource<QueryPrompt[]> = {
+  initial: [],
+  load: loadPrompts,
+  // Stryker disable next-line all: loadPrompts never rejects, so no load error is ever shown.
+  errorMessage: () => 'Could not fetch query prompts',
+};
+
 export function useQueryPrompts() {
-  const [prompts, setPrompts] = useState<QueryPrompt[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: prompts, setData: setPrompts, loading
+  } = useGuardedLoad(QUERY_PROMPTS_SOURCE);
   const [error, setError] = useState<string | null>(null);
-
-  const fetchPrompts = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts`);
-      if (!response.ok) throw new QueryPromptError(`HTTP ${response.status}`);
-      const data: unknown = await response.json();
-      setPrompts(Array.isArray(data) ? data as QueryPrompt[] : []);
-    } catch (err) {
-      console.warn('Could not fetch query prompts:', err);
-      setPrompts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchPrompts();
-  }, [fetchPrompts]);
 
   const createPrompt = useCallback(async (name: string, template: string, description?: string) => {
     setError(null);

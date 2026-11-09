@@ -18,16 +18,12 @@ analysed, as before.
 
 import logging
 import os
-import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.brand_visibility import load_recent_search_results, tracked_brand_names

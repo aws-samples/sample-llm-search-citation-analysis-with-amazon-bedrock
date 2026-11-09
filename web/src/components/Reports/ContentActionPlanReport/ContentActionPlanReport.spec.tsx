@@ -13,16 +13,15 @@ vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPr
 
 import { useContentActionPlan } from './useContentActionPlan';
 
-const mockUse = useContentActionPlan as ReturnType<typeof vi.fn>;
+const mockUse = vi.mocked(useContentActionPlan);
 
-const POPULATED = {
+const POPULATED: ReturnType<typeof useContentActionPlan> = {
   gaps: {
     total_gaps: 18,
     total_high_priority: 5,
     summary: {
       gap_count: 18,
       high_priority_gaps: 5,
-      total_sources: 50,
       covered_count: 32,
       coverage_rate: 64 
     },
@@ -37,7 +36,6 @@ const POPULATED = {
         first_party_brands: [],
         competitor_brands: ['Nike', 'Adidas'],
         providers: ['openai', 'perplexity', 'gemini'],
-        gap_type: 'competitor_only',
       },
     ],
     keyword_summaries: [
@@ -77,7 +75,6 @@ const POPULATED = {
     {
       id: 'h1',
       keyword: 'best running shoes',
-      idea_type: 'visibility_gap',
       idea_title: 'Comprehensive Guide to Running Shoes',
       content_angle: 'comprehensive_guide',
       generated_content: {

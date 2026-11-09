@@ -36,7 +36,7 @@ function BriefSummary({ job }: { readonly job: KeywordResearchItem }) {
     ['Market', `${config.country.toUpperCase()} · ${config.language}`],
     ['Researched as', `${subjectLabel(config.subject)} · for ${config.audience}`],
     ['Expand by', config.dimensions.map((dimension) => dimensionLabel(dimension, catalog)).join(', ')],
-    ['Target', `${config.target_count} keywords · up to ${config.max_rounds} round${config.max_rounds === 1 ? '' : 's'}`],
+    ['Target', `${config.target_count} keywords · up to ${config.max_rounds} round${Number(config.max_rounds) === 1 ? '' : 's'}`],
     ['Tracking', trackingSummary],
   ];
   if (config.instruction) items.push(['Instruction', config.instruction]);

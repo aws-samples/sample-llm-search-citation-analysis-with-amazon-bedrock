@@ -71,10 +71,12 @@ function kpiTableColumns(kpis: BrandKpis, comparison: KpiComparison | null): Rea
     },
     {
       header: 'Value',
+      numeric: true,
       render: (spec) => formatKpi(spec.id, kpis[spec.id]),
     },
     {
       header: 'Change',
+      numeric: true,
       render: (spec) => (comparison === null ? '—' : formatKpiDelta(spec.id, comparison.deltas[spec.id])),
     },
     {

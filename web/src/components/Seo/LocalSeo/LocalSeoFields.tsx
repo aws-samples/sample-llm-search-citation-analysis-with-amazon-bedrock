@@ -6,7 +6,7 @@ import {
   IDENTITY_LABELS, type IdentityInput, type IdentityKind, type PointInput
 } from './localSeoRequest';
 
-const INPUT_CLASS = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none';
+const INPUT_CLASS = 'mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-900';
 const IDENTITY_KINDS: readonly IdentityKind[] = ['name', 'cid', 'place_id'];
 
 interface FieldProps {
@@ -121,10 +121,12 @@ interface IdentityFieldsProps {
   readonly identity: IdentityInput;
   readonly onChange: (identity: IdentityInput) => void;
   readonly label?: string;
+  /** Shown in the empty value field, e.g. what an empty field matches. */
+  readonly placeholder?: string;
 }
 
 export function IdentityFields({
-  identity, onChange, label = 'Business'
+  identity, onChange, label = 'Business', placeholder
 }: IdentityFieldsProps) {
   return (
     <>
@@ -143,6 +145,7 @@ export function IdentityFields({
       <TextField
         label={IDENTITY_LABELS[identity.kind]}
         value={identity.value}
+        placeholder={placeholder}
         onChange={(value) => { onChange({
           ...identity,
           value 

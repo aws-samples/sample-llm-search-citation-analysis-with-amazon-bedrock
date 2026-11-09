@@ -33,9 +33,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.admin_authz_fixtures import caller_event, status_of
-from testing.module_loader import load_handler_module, module_name_for
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module, module_name_for
 
 # Env each module needs to import. All modules fail fast on missing table names,
 # and CORS_ORIGIN_PARAM='' keeps `get_cors_origin` from reaching SSM.
@@ -161,7 +159,7 @@ def _load(filename: str) -> LoadedModule:
     with patch('boto3.client', side_effect=lambda *a, **k: aws), \
          patch('boto3.resource', side_effect=lambda *a, **k: aws), \
          patch.dict(os.environ, _SHARED_ENV):
-        module = load_handler_module(_API_DIR, filename, module_name_for(filename, '_admin_authz'))
+        module = load_handler_module(API_DIR, filename, module_name_for(filename, '_admin_authz'))
 
     return LoadedModule(module, aws)
 

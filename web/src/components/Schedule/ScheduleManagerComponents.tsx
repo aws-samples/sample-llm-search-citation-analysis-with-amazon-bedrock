@@ -1,53 +1,48 @@
 import type {
-  KeywordGroup, Schedule 
+  KeywordGroup, Schedule
 } from '../../types';
 import {
-  describeScheduleScope, describeScheduleTiming 
+  describeScheduleScope, describeScheduleTiming
 } from './scheduleFormModel';
+import { describeNextRun } from './scheduleNextRun';
 import {
-  ClockIcon, PlusIcon, TrashIcon 
+  ClockIcon, PlusIcon
 } from '../ui';
+import { Button } from '../ui/Button';
+import { ActionMenu } from '../ui/ActionMenu';
 import { Skeleton } from '../ui/Skeleton';
 import { ScheduleListSkeleton } from './ScheduleListSkeleton';
+import { ScheduleSwitch } from './ScheduleSwitch';
 import { useMarketSelection } from '../Markets/marketSelectionContext';
 import {
   kindOf, scheduleKindInfo
 } from './scheduleKinds';
 
 interface ScheduleHeaderProps {
-  showForm: boolean;
   onNew: () => void;
-  onCancel: () => void;
   /** POST /api/schedules is Admin-only, so non-admins get no create affordance. */
   isAdmin: boolean;
   /** Membership is still being read; the button's place is held so the header does not grow. */
   adminLoading?: boolean;
+  /** The empty state carries the only New schedule button, so the header leaves it out. */
+  showNewButton?: boolean;
 }
 
+const NewScheduleButton = ({ onNew }: Pick<ScheduleHeaderProps, 'onNew'>) => (
+  <Button onClick={onNew} leadingIcon={<PlusIcon className="w-4 h-4" />}>New schedule</Button>
+);
+
 export const ScheduleHeader = ({
-  showForm, onNew, onCancel, isAdmin, adminLoading = false
+  onNew, isAdmin, adminLoading = false, showNewButton = true
 }: ScheduleHeaderProps) => (
   <div className="p-4 sm:p-6 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
       <div>
-        <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Analysis runs and paid SEO snapshots. Click a schedule to edit it. Group scopes are resolved when the schedule runs.
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900">Schedules</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Run an analysis or SEO snapshots automatically, every day, week or month.</p>
       </div>
       {adminLoading && <Skeleton className="h-9 w-full sm:w-36 rounded-lg" />}
-      {isAdmin && (
-        <button
-          onClick={showForm ? onCancel : onNew}
-          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${
-            showForm
-              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              : 'bg-gray-900 text-white hover:bg-gray-800'
-          }`}
-        >
-          {showForm ? 'Cancel' : <><PlusIcon className="w-4 h-4" /><span className="hidden sm:inline">New Schedule</span><span className="sm:hidden">New</span></>}
-        </button>
-      )}
+      {isAdmin && showNewButton && <NewScheduleButton onNew={onNew} />}
     </div>
   </div>
 );
@@ -55,148 +50,153 @@ export const ScheduleHeader = ({
 interface ScheduleListProps {
   schedules: Schedule[];
   groups: KeywordGroup[];
+  onNew: () => void;
   onEdit: (schedule: Schedule) => void;
   onRun: (schedule: Schedule) => void;
   onDelete: (schedule: Schedule) => void;
+  onToggle: (schedule: Schedule, enabled: boolean) => void;
   runningId: string | null;
-  /** Reads stay open; edit, run and delete are Admin-only. */
+  /** Reads stay open; edit, run, toggle and delete are Admin-only. */
   isAdmin: boolean;
   /** The first `GET /schedules` has not answered yet. */
   loading?: boolean;
 }
 
-/** Placeholder rows before the first answer, then the empty state or nothing. */
-const EmptyOrLoading = ({
-  loading, isAdmin
-}: Pick<ScheduleListProps, 'loading' | 'isAdmin'>) => (
-  loading ? <ScheduleListSkeleton /> : <EmptyState isAdmin={isAdmin} />
-);
-
 export const ScheduleList = ({
-  schedules, groups, onEdit, onRun, onDelete, runningId, isAdmin, loading = false
-}: ScheduleListProps) => (
-  <div className="p-4 sm:p-6">
-    {schedules.length === 0 ? (
-      <EmptyOrLoading loading={loading} isAdmin={isAdmin} />
-    ) : (
-      <div className="space-y-3">
-        {schedules.map((schedule) => (
-          <ScheduleItem
-            key={schedule.id}
-            schedule={schedule}
-            groups={groups}
-            onEdit={onEdit}
-            onRun={onRun}
-            onDelete={onDelete}
-            running={runningId === schedule.id}
-            isAdmin={isAdmin}
-          />
-        ))}
-      </div>
-    )}
-  </div>
-);
+  schedules, groups, onNew, onEdit, onRun, onDelete, onToggle, runningId, isAdmin, loading = false
+}: ScheduleListProps) => {
+  if (schedules.length === 0) {
+    return <div className="p-4 sm:p-6">{loading ? <ScheduleListSkeleton /> : <EmptyState isAdmin={isAdmin} onNew={onNew} />}</div>;
+  }
+  return (
+    <ul className="p-4 sm:p-6 space-y-3">
+      {schedules.map((schedule) => (
+        <ScheduleItem key={schedule.id} schedule={schedule} groups={groups} onEdit={onEdit} onRun={onRun}
+          onDelete={onDelete} onToggle={onToggle} running={runningId === schedule.id} isAdmin={isAdmin} />
+      ))}
+    </ul>
+  );
+};
 
-const EmptyState = ({ isAdmin }: { isAdmin: boolean }) => (
-  <div className="text-center py-12 text-gray-400">
+const EmptyState = ({
+  isAdmin, onNew
+}: Pick<ScheduleListProps, 'isAdmin' | 'onNew'>) => (
+  <div className="text-center py-12">
     <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-    <p className="text-sm">No schedules configured</p>
-    {/* "Create a schedule" would point a non-admin at a hidden button and a
-        route that refuses them. */}
-    <p className="text-xs mt-1">
+    <p className="text-sm font-medium text-gray-900">No schedules yet</p>
+    {/* "Create a schedule" would point a non-admin at a hidden button and a route that refuses them. */}
+    <p className="text-sm text-gray-500 mt-1 mb-4">
       {isAdmin
-        ? 'Create a schedule to run analysis automatically'
-        : 'An administrator can add a schedule to run analysis automatically'}
+        ? 'Create a schedule to run analysis automatically, for example every Monday at 09:00.'
+        : 'An administrator can add a schedule to run analysis automatically.'}
     </p>
+    {isAdmin && <NewScheduleButton onNew={onNew} />}
   </div>
 );
 
-interface ScheduleItemProps extends Pick<ScheduleListProps, 'groups' | 'onEdit' | 'onRun' | 'onDelete' | 'isAdmin'> {
+interface ScheduleItemProps extends Pick<ScheduleListProps, 'groups' | 'onEdit' | 'onRun' | 'onDelete' | 'onToggle' | 'isAdmin'> {
   schedule: Schedule;
   running: boolean;
 }
 
 /** What a schedule runs, with the markets it is narrowed to; snapshot kinds cover every tracked domain. */
-const ScheduleScopeLine = ({
-  schedule, groups
-}: Pick<ScheduleItemProps, 'schedule' | 'groups'>) => {
+function useScopeDescription(schedule: Schedule, groups: KeywordGroup[]): string {
   const { catalog } = useMarketSelection();
-  const description = kindOf(schedule) === 'analysis'
+  return kindOf(schedule) === 'analysis'
     ? describeScheduleScope(schedule.scope, groups, schedule.keywords, catalog.markets)
     : `${scheduleKindInfo(schedule.kind).label}: ${schedule.scope_summary ?? 'every owned and competitor domain'}`;
-  return <p className="text-xs text-gray-500 mt-1 truncate" title={description}>{description}</p>;
-};
+}
 
 /**
- * One schedule card. For admins the title is a button that opens the editor
- * (click-to-edit); run and delete sit beside it.
+ * The row switch saves the schedule with only `enabled` flipped, so it needs a
+ * stored form (a hand-written cron has none) and a scope (a legacy keyword-text
+ * schedule has to be re-scoped in the editor first).
  */
-const ScheduleItem = ({
-  schedule, groups, onEdit, onRun, onDelete, running, isAdmin 
-}: ScheduleItemProps) => (
-  <div className="flex items-start justify-between gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-    <div className="flex-1 min-w-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium text-gray-900 text-sm">
-          {isAdmin ? (
-            <button
-              type="button"
-              onClick={() => onEdit(schedule)}
-              className="text-left hover:underline focus:outline-none focus:ring-2 focus:ring-gray-900 rounded"
-              aria-label={`Edit schedule ${schedule.display_name}`}
-            >
-              {schedule.display_name}
-            </button>
-          ) : schedule.display_name}
-        </h3>
-        <span
-          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-            schedule.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
-          }`}
-        >
-          {schedule.enabled ? 'Enabled' : 'Disabled'}
-        </span>
-        {kindOf(schedule) !== 'analysis' && (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Each run calls DataForSEO">
-            Paid
-          </span>
-        )}
-        {schedule.legacy && (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Created with the previous version; save it once to upgrade">
-            Legacy
-          </span>
-        )}
-      </div>
-      <p className="text-sm text-gray-600 mt-1">{describeScheduleTiming(schedule)}</p>
-      <ScheduleScopeLine schedule={schedule} groups={groups} />
-    </div>
-    {isAdmin && (
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => onEdit(schedule)}
-          className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
-        >
-          Edit
+function canToggleInList(schedule: Schedule): boolean {
+  return schedule.form !== null && (kindOf(schedule) !== 'analysis' || schedule.scope !== null);
+}
+
+const Tag = ({
+  children, title
+}: {
+  readonly children: string;
+  readonly title: string 
+}) => (
+  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-amber-700" title={title}>{children}</span>
+);
+
+const ScheduleTitle = ({
+  schedule, isAdmin, onEdit
+}: Pick<ScheduleItemProps, 'schedule' | 'isAdmin' | 'onEdit'>) => (
+  <div className="flex flex-wrap items-center gap-2">
+    <h3 className="font-medium text-gray-900 text-sm break-words min-w-0">
+      {isAdmin ? (
+        <button type="button" onClick={() => onEdit(schedule)} aria-label={`Edit schedule ${schedule.display_name}`}
+          className="text-left hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 rounded">
+          {schedule.display_name}
         </button>
-        <button
-          type="button"
-          onClick={() => onRun(schedule)}
-          disabled={running}
-          className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          aria-label={`Run schedule ${schedule.display_name} now`}
-        >
-          {running ? 'Starting…' : 'Run now'}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(schedule)}
-          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-          aria-label={`Delete schedule ${schedule.display_name}`}
-        >
-          <TrashIcon className="w-4 h-4" />
-        </button>
-      </div>
-    )}
+      ) : schedule.display_name}
+    </h3>
+    {kindOf(schedule) !== 'analysis' && <Tag title="Each run calls DataForSEO">Paid</Tag>}
+    {schedule.legacy && <Tag title="Created with the previous version; save it once to upgrade">Legacy</Tag>}
   </div>
 );
+
+/** On/off for admins where the row can save it; a plain state word otherwise. */
+const EnabledControl = ({
+  schedule, isAdmin, onToggle
+}: Pick<ScheduleItemProps, 'schedule' | 'isAdmin' | 'onToggle'>) => {
+  const word = schedule.enabled ? 'On' : 'Off';
+  if (!isAdmin || !canToggleInList(schedule)) {
+    return <span className="text-xs font-medium text-gray-500">{schedule.enabled ? 'Enabled' : 'Disabled'}</span>;
+  }
+  return (
+    <ScheduleSwitch checked={schedule.enabled} onChange={(enabled) => onToggle(schedule, enabled)}
+      ariaLabel={`${schedule.display_name} enabled`}>
+      <span className="w-6 text-xs text-gray-500" aria-hidden="true">{word}</span>
+    </ScheduleSwitch>
+  );
+};
+
+/** One schedule: name, timing and scope in words, the next run, the on/off switch and a ⋯ menu. */
+const ScheduleItem = ({
+  schedule, groups, onEdit, onRun, onDelete, onToggle, running, isAdmin
+}: ScheduleItemProps) => {
+  const scope = useScopeDescription(schedule, groups);
+  const next = schedule.enabled && schedule.form !== null ? describeNextRun(schedule.form) : null;
+  return (
+    <li className="flex items-start justify-between gap-3 p-4 border border-gray-200 rounded-lg">
+      <div className="flex-1 min-w-0">
+        <ScheduleTitle schedule={schedule} isAdmin={isAdmin} onEdit={onEdit} />
+        <p className="text-sm text-gray-700 mt-1">{describeScheduleTiming(schedule)}</p>
+        <p className="text-xs text-gray-500 mt-1 truncate" title={scope}>{scope}</p>
+        {next !== null && <p className="text-xs text-gray-500 mt-1">{next}</p>}
+        {running && <p className="text-xs text-gray-500 mt-1" aria-live="polite">Starting…</p>}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        <EnabledControl schedule={schedule} isAdmin={isAdmin} onToggle={onToggle} />
+        {isAdmin && (
+          <ActionMenu
+            label={`Actions for ${schedule.display_name}`}
+            items={[
+              {
+                label: 'Edit',
+                onSelect: () => onEdit(schedule),
+              },
+              {
+                label: running ? 'Starting…' : 'Run now',
+                onSelect: () => onRun(schedule),
+                disabled: running,
+              },
+              {
+                label: 'Delete',
+                onSelect: () => onDelete(schedule),
+                tone: 'danger',
+              },
+            ]}
+          />
+        )}
+      </div>
+    </li>
+  );
+};

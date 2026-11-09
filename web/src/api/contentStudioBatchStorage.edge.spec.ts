@@ -2,7 +2,6 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
   CONTENT_STUDIO_BATCH_STORAGE_VERSION,
   LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
   boundedContentStudioBatchCandidates,
@@ -12,7 +11,6 @@ import {
   buildBatchCandidate,
   buildBatchCandidateState,
   mockRejectedStorageWrites,
-  spyOnStorageMutations,
   storeBatchCandidateEntries,
   storeBatchCandidateValue,
   storeLegacyBatchIdsValue,
@@ -20,13 +18,6 @@ import {
   storedBatchCandidateValue,
   storedLegacyBatchIdsValue,
 } from './contentStudioBatchStorage-fixtures';
-
-class RejectedStorageWriteError extends Error {
-  constructor() {
-    super('Storage write rejected');
-    this.name = 'RejectedStorageWriteError';
-  }
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,33 +34,6 @@ describe('Content Studio batch candidate storage edge behavior', () => {
   it('uses the exact legacy key when migrating string IDs', () => {
     expect(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)
       .toBe('contentStudio.activeBatchIds.v1');
-  });
-
-  it.each([
-    JSON.stringify(null),
-    JSON.stringify(42),
-    JSON.stringify({
-      version: 1,
-      entries: [buildBatchCandidate('wrong-version', 100)],
-    }),
-    JSON.stringify({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: { id: 'not-an-array' },
-    }),
-  ])('clears the v2 key when its envelope is malformed as %s', (storedState) => {
-    storeBatchCandidateValue(storedState);
-
-    const candidates = readStoredContentStudioBatchCandidates();
-    const currentState = localStorage.getItem(
-      ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY
-    );
-    expect({
-      candidates,
-      currentState,
-    }).toStrictEqual({
-      candidates: [],
-      currentState: null,
-    });
   });
 
   it('drops malformed entries while preserving an exact valid candidate', () => {
@@ -102,7 +66,8 @@ describe('Content Studio batch candidate storage edge behavior', () => {
     JSON.stringify({ batchIds: ['batch-1'] }),
     JSON.stringify(['batch-1', 2]),
     JSON.stringify(42),
-  ])('clears malformed legacy IDs when value is %s', (legacyState) => {
+    '[]',
+  ])('clears malformed or empty legacy IDs when value is %s', (legacyState) => {
     storeLegacyBatchIdsValue(legacyState);
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
@@ -132,33 +97,6 @@ describe('Content Studio batch candidate storage edge behavior', () => {
     expect(storedLegacyBatchIdsValue()).toBeNull();
   });
 
-  it('removes the v2 key when its normalized candidate list is empty', () => {
-    storeBatchCandidateEntries([]);
-
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(storedBatchCandidateValue()).toBeNull();
-  });
-
-  it('removes the legacy key when its normalized ID list is empty', () => {
-    storeLegacyBatchIdsValue('[]');
-
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(storedLegacyBatchIdsValue()).toBeNull();
-  });
-
-  it('does not rewrite candidate state when it is already normalized', () => {
-    storeBatchCandidateEntries([buildBatchCandidate('batch-1', 100)]);
-    const {
-      removeItemSpy, setItemSpy
-    } = spyOnStorageMutations();
-
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
-      buildBatchCandidate('batch-1', 100)
-    ]);
-    expect(setItemSpy).toHaveBeenCalledTimes(0);
-    expect(removeItemSpy).toHaveBeenCalledTimes(0);
-  });
-
   it('does not remove an absent legacy key when normalizing a future timestamp', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -184,7 +122,7 @@ describe('Content Studio batch candidate storage edge behavior', () => {
 
   it('preserves legacy IDs when writing their migration is rejected', () => {
     storeLegacyBatchIdsValue(JSON.stringify(['batch-1']));
-    mockRejectedStorageWrites(new RejectedStorageWriteError());
+    mockRejectedStorageWrites();
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 0)

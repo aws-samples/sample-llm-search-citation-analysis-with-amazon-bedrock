@@ -8,8 +8,6 @@ existing importers (``handler.py``, ``search_clients.py``) and keeps the
 search-specific citation URL helpers.
 """
 
-import logging
-
 from shared.ai_clients import (
     ClaudeClient,
     GeminiClient,
@@ -28,10 +26,6 @@ __all__ = [
     "extract_citations_from_response",
     "retry_with_backoff",
 ]
-
-# Configure logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def clean_url(url: str) -> str:

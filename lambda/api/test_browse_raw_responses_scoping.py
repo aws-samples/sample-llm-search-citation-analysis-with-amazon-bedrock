@@ -25,9 +25,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODULE_NAME = 'browse_raw_responses_under_test'
 
 RESPONSES_BUCKET = 'test-raw-responses'
@@ -63,7 +62,7 @@ def _load_handler() -> tuple[Any, MagicMock]:
     }
 
     with patch('boto3.client', return_value=s3), patch.dict(os.environ, _TEST_ENV):
-        module = load_handler_module(_API_DIR, 'browse-raw-responses.py', _MODULE_NAME)
+        module = load_handler_module(API_DIR, 'browse-raw-responses.py', _MODULE_NAME)
 
     return module, s3
 

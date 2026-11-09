@@ -8,15 +8,10 @@ checked against the Keywords table so only real, active keywords are run, and
 then passed to the execution for ParseKeywords to resolve at run time.
 """
 
-import logging
 import os
-import sys
 from typing import Any
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.analysis_runs import (
     RunInputTooLargeError,
@@ -31,9 +26,6 @@ from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, json_object_body
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 stepfunctions = boto3.client('stepfunctions')
 dynamodb = boto3.resource('dynamodb')

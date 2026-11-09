@@ -58,9 +58,9 @@ export const ProviderHealthBanner = ({ onNavigateToProviders }: ProviderHealthBa
   return (
     <div
       role="alert"
-      className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4"
+      className="mb-4 flex items-start gap-3 rounded-lg border border-gray-300 bg-gray-50 p-4"
     >
-      <StrokeIcon className="w-5 h-5 mt-0.5 shrink-0 text-amber-600" paths={EXCLAMATION_TRIANGLE_PATHS} />
+      <StrokeIcon className="w-5 h-5 mt-0.5 shrink-0 text-amber-600" paths={EXCLAMATION_TRIANGLE_PATHS} aria-hidden="true" />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-amber-900">{headline}</p>
@@ -70,19 +70,21 @@ export const ProviderHealthBanner = ({ onNavigateToProviders }: ProviderHealthBa
           ))}
         </ul>
         <button
+          type="button"
           onClick={() => onNavigateToProviders()}
-          className="mt-2 text-sm font-medium text-amber-900 underline hover:text-amber-950"
+          className="mt-2 rounded text-sm font-medium text-amber-900 underline hover:text-amber-950 dark:hover:text-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
         >
           Review AI provider settings
         </button>
       </div>
 
       <button
+        type="button"
         onClick={handleDismiss}
         aria-label="Dismiss provider warning"
-        className="p-1 -mt-1 -mr-1 shrink-0 text-amber-600 hover:text-amber-900 hover:bg-amber-100 rounded transition-colors"
+        className="p-1 -mt-1 -mr-1 shrink-0 text-amber-600 hover:text-amber-900 hover:bg-gray-100 rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
       >
-        <StrokeIcon className="w-4 h-4" paths={CLOSE_PATHS} />
+        <StrokeIcon className="w-4 h-4" paths={CLOSE_PATHS} aria-hidden="true" />
       </button>
     </div>
   );

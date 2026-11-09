@@ -8,7 +8,7 @@ import {
 import type { Keyword } from '../../types';
 import { KeywordsManager } from './KeywordsManager';
 import {
-  createKeywordsManagerProps, existingKeywordFixture
+  chooseKeywordAction, createKeywordsManagerProps, existingKeywordFixture
 } from './KeywordsManager-fixtures';
 import {
   buildMarketSelectionMock, renderWithMarketSelection
@@ -63,7 +63,7 @@ export function answerBrazilianSuggestion(): void {
 
 /** Opens "Add to markets…" for "hotels", ticks Brazil and asks for suggestions. */
 export async function requestBrazilianSuggestion(): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: 'Add hotels to markets' }));
+  await chooseKeywordAction('hotels', 'Add to markets…');
   await userEvent.click(screen.getByRole('checkbox', { name: /Brazil/u }));
   await userEvent.click(screen.getByRole('button', { name: 'Suggest keywords' }));
 }
@@ -71,5 +71,5 @@ export async function requestBrazilianSuggestion(): Promise<void> {
 /** The manager over `CHILEAN_KEYWORD` alone, its row open for editing. */
 export async function startEditingChileanKeyword(): Promise<void> {
   await renderMarketKeywordsManager([CHILEAN_KEYWORD]);
-  await userEvent.click(screen.getByRole('button', { name: 'Edit hoteles en santiago' }));
+  await chooseKeywordAction('hoteles en santiago', 'Edit');
 }

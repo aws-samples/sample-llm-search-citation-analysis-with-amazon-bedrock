@@ -22,12 +22,7 @@ left unread are left out (``keywords_analyzed`` counts the ones read) and
 ``keywords_truncated`` is true.
 """
 
-import logging
-import sys
 from typing import Any
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import history_since
 from shared.api_response import success_response
@@ -47,9 +42,6 @@ from shared.scoped_reports import load_window_answers as load_scoped_window_answ
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 from shared.visibility_views import trend_view
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 #: Keywords one trend reads at most, scoped or not: the window's rows are shared between them.
 TREND_KEYWORDS_CAP = SCOPE_KEYWORDS_CAP

@@ -19,6 +19,9 @@ import { describeReportScope } from '../../ui/reportScope';
 import { ReportLayout } from '../layout/ReportLayout';
 import { KpiDefinitionsSection } from '../layout/KpiDefinitionsSection';
 import {
+  REPORT_CONTROL_LABEL_CLASS, REPORT_CONTROL_SELECT_CLASS
+} from '../layout/reportControls';
+import {
   daysFromSearch, SCOPE_REPORT_PERIODS, scopeFromSearch, scopeReportPath, type ScopeReportDays
 } from './scopeReportRoute';
 import {
@@ -73,17 +76,44 @@ export function PeriodSelector({
   const id = useId();
   const pick = (value: string) => onChange(SCOPE_REPORT_PERIODS.find((period) => String(period) === value) ?? days);
   return (
-    <div>
-      <label htmlFor={id} className="block text-xs font-medium text-gray-500 mb-1.5">Trend period</label>
+    <div className="w-40 shrink-0">
+      <label htmlFor={id} className={REPORT_CONTROL_LABEL_CLASS}>Trend period</label>
       <select
         id={id}
         value={days}
         onChange={(event) => pick(event.target.value)}
-        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50"
+        className={REPORT_CONTROL_SELECT_CLASS}
       >
         {PERIOD_OPTIONS}
       </select>
     </div>
+  );
+}
+
+interface ScopeAndPeriodProps {
+  readonly keywords: ReadonlyArray<Keyword>;
+  readonly groups: KeywordGroup[];
+  readonly scope: ReportScope;
+  readonly days: ScopeReportDays;
+  readonly onScopeChange: (scope: ReportScope) => void;
+  readonly onDaysChange: (days: ScopeReportDays) => void;
+}
+
+/** The scope and trend period pickers of a report's toolbar, in the scope reports and in custom reports. */
+export function ScopeAndPeriodSelectors({
+  keywords, groups, scope, days, onScopeChange, onDaysChange
+}: ScopeAndPeriodProps) {
+  return (
+    <>
+      <KeywordScopeSelector
+        keywords={[...keywords]}
+        groups={groups}
+        value={scope}
+        onChange={onScopeChange}
+        className="w-full sm:w-80"
+      />
+      <PeriodSelector days={days} onChange={onDaysChange} />
+    </>
   );
 }
 
@@ -120,18 +150,7 @@ export function ScopeReport({
         marketId: selectedMarketId,
         markets: catalog.markets,
       }))}
-      actions={(
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <KeywordScopeSelector
-            keywords={[...keywords]}
-            groups={groups}
-            value={scope}
-            onChange={showScope}
-            className="min-w-[16rem]"
-          />
-          <PeriodSelector days={days} onChange={showDays} />
-        </div>
-      )}
+      actions={<ScopeAndPeriodSelectors keywords={keywords} groups={groups} scope={scope} days={days} onScopeChange={showScope} onDaysChange={showDays} />}
     >
       {children(report)}
       <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />

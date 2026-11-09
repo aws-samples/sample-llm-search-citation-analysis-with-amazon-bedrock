@@ -15,6 +15,7 @@ from shared.brand_mention_views import (
     provider_entry,
     read_run_rows,
 )
+from shared.cursors import decode_bound_offset_cursor
 from testing.search_results_fixtures import search_result_row, search_results_table
 from testing.window_budget_fixtures import active_deadline, expired_deadline, ticking_deadline
 
@@ -31,6 +32,11 @@ def _row(
     provider: str, brands: list[dict[str, Any]], timestamp: str = RUN_3, keyword: str = 'hotel spa', response: str = '',
 ) -> dict[str, Any]:
     return search_result_row(keyword, provider, brands, timestamp=timestamp, metadata={'model': f'{provider}-m'}, response=response)
+
+
+def _past_the_brand_limit() -> list[dict[str, Any]]:
+    """One answer naming ``BRAND_LIMIT + 5`` brands, ranked 0, 1, 2, ... so their order is fixed."""
+    return [_row('openai', [_brand(f'Brand {index}', rank=index) for index in range(BRAND_LIMIT + 5)])]
 
 
 class TestListRuns:
@@ -90,7 +96,7 @@ class TestBrandSummary:
     def test_drops_the_duplicated_per_classification_lists(self):
         summary = brand_summary([_row('openai', [_brand('Mine', 'first_party')])], None)
 
-        assert sorted(summary) == ['brands', 'brands_truncated', 'matching_brands', 'summary', 'total_unique_brands']
+        assert sorted(summary) == ['brands', 'brands_truncated', 'matching_brands', 'next_token', 'summary', 'total_unique_brands']
 
     def test_counts_classifications_of_every_brand_when_filtered(self):
         rows = [_row('openai', [_brand('Mine', 'first_party'), _brand('Rival'), _brand('Other', 'other')])]
@@ -102,11 +108,27 @@ class TestBrandSummary:
         )
 
     def test_caps_the_brand_list_and_reports_the_total(self):
-        rows = [_row('openai', [_brand(f'Brand {index}', rank=index) for index in range(BRAND_LIMIT + 5)])]
+        rows = _past_the_brand_limit()
 
         summary = brand_summary(rows, None)
 
         assert (len(summary['brands']), summary['matching_brands'], summary['brands_truncated']) == (BRAND_LIMIT, BRAND_LIMIT + 5, True)
+
+    def test_pages_the_brand_list_from_an_offset(self):
+        rows = _past_the_brand_limit()
+
+        summary = brand_summary(rows, None, offset=BRAND_LIMIT, binding='q')
+
+        assert ([entry['overall_rank'] for entry in summary['brands']], summary['brands_truncated'], summary['next_token']) == (
+            list(range(BRAND_LIMIT + 1, BRAND_LIMIT + 6)), False, None,
+        )
+
+    def test_hands_out_a_next_token_bound_to_the_query_while_brands_remain(self):
+        rows = _past_the_brand_limit()
+
+        token = brand_summary(rows, None, binding='q')['next_token']
+
+        assert (decode_bound_offset_cursor(token, 'q'), decode_bound_offset_cursor(token, 'other')) == (BRAND_LIMIT, None)
 
     def test_previews_the_best_ranked_appearances(self):
         rows = [_row(f'p{rank}', [_brand('Rival', rank=rank)]) for rank in (7, 3, 9, 1, 5, 2, 8)]

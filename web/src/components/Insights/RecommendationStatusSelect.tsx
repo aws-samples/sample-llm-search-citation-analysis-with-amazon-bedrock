@@ -33,7 +33,7 @@ export const RecommendationStatusSelect = ({
       const status = asStatus(event.target.value);
       if (status !== undefined) onChange(recommendation, status);
     }}
-    className="text-xs rounded-lg border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50"
+    className="text-xs rounded-lg border border-gray-300 bg-white px-2 py-1 text-gray-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-gray-900"
   >
     {RECOMMENDATION_STATUSES.map((status) => (
       <option key={status} value={status}>{RECOMMENDATION_STATUS_LABELS[status]}</option>

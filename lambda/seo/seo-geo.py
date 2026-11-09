@@ -6,11 +6,7 @@ search volumes and the market's latest domain snapshots, and the rules in ``shar
 ``shared.seo_geo_traffic`` build the rows and the estimated-traffic comparison.
 """
 
-import sys
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 from seo_geo_data import SCOPE_QUERY_SCHEMA, load_seo_geo, seo_geo_payload
 from seo_http import seo_route

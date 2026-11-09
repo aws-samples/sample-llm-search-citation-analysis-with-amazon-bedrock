@@ -25,6 +25,7 @@ export function gateRollup(title: string, {
     title,
     loading,
     loadingMessage: 'Loading…',
+    loadingShape: 'table',
     error,
     value: rollup,
   });

@@ -10,16 +10,13 @@ filtering), are only retrieved. All domains are fictional.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
 
-from testing.handler_fixtures import handler_fixture
-from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
+from testing.search_handler_fixtures import search_handler_fixture
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_cited_sources', env=SEARCH_HANDLER_ENV)
+search_handler = search_handler_fixture('search_handler_cited_sources')
 
 _RESULT_URLS = [
     'https://www.example-air.example/fleet',

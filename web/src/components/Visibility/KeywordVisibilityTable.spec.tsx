@@ -10,8 +10,9 @@ import {
   KEYWORD_WITHOUT_DATA, buildKeywordRow
 } from './visibilityOverview-fixtures';
 import {
-  SORTABLE_KEYWORD_ROWS, aboutButton, ariaSortValues, bodyRowCells, clickButtonsInTurn, firstColumnCells, sortButtonLabels
+  OVER_LIMIT_COUNT, SORTABLE_KEYWORD_ROWS, aboutButton, ariaSortValues, bodyRowCells, clickButtonsInTurn, firstColumnCells, numberedKeywordRows, sortButtonLabels
 } from './visibilityTables-fixtures';
+import { VISIBILITY_ROW_LIMIT } from './useRowLimit';
 import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
 import { buildKpis } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import type { KeywordVisibilityRow } from '../../types';
@@ -137,5 +138,31 @@ describe('KeywordVisibilityTable', () => {
     await renderSortedBy(clicks);
 
     expect(ariaSortValues(getKeywordTableElement())).toStrictEqual(expected);
+  });
+
+  it('shows the top rows of a long scope until the reader opens the full list', async () => {
+    renderTable(numberedKeywordRows(OVER_LIMIT_COUNT));
+
+    expect(firstColumnCells(getKeywordTableElement())).toHaveLength(VISIBILITY_ROW_LIMIT);
+    expect(screen.getByText(`Showing ${VISIBILITY_ROW_LIMIT} of ${OVER_LIMIT_COUNT} keywords.`)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: `Show all ${OVER_LIMIT_COUNT} keywords` }));
+
+    expect(firstColumnCells(getKeywordTableElement())).toHaveLength(OVER_LIMIT_COUNT);
+    expect(screen.getByRole('button', { name: `Show the top ${VISIBILITY_ROW_LIMIT}` })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('sorts the whole scope before cutting it to the top rows', async () => {
+    renderTable(numberedKeywordRows(OVER_LIMIT_COUNT));
+
+    await clickButtonsInTurn(['Visibility score']);
+
+    expect(firstColumnCells(getKeywordTableElement())[0]).toBe(`keyword ${OVER_LIMIT_COUNT}`);
+  });
+
+  it('offers no toggle when every keyword fits', () => {
+    renderTable(numberedKeywordRows(VISIBILITY_ROW_LIMIT));
+
+    expect(screen.queryByRole('button', { name: /^Show all/ })).not.toBeInTheDocument();
   });
 });

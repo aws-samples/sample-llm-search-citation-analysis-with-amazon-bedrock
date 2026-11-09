@@ -1,12 +1,9 @@
-import {
-  expect, vi 
-} from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { vi } from 'vitest';
+import { renderHook } from '@testing-library/react';
 import type { AuthSession } from 'aws-amplify/auth';
 import type { CognitoUser } from '../api/users';
 import { ApiRequestError } from '../infrastructure/errors/apiErrors';
+import { waitForLoaded } from '../test/loadedHook';
 import { useUserManagement } from './useUserManagement';
 
 /** A confirmed, enabled Member unless `overrides` say otherwise. */
@@ -113,7 +110,7 @@ function createRejectingApi(rejection: unknown) {
 /** Renders the hook and waits for the initial users load to settle. */
 export async function renderLoadedUserManagement() {
   const { result } = renderHook(() => useUserManagement());
-  await waitFor(() => expect(result.current.loading).toBe(false));
+  await waitForLoaded(result);
   return result;
 }
 

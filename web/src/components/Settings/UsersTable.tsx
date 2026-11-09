@@ -69,14 +69,14 @@ export function UsersTable({
 }: UsersTableProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead className="bg-gray-50">
           <tr>
             {COLUMNS.map((column) => <th key={column} scope="col" className={HEADER_CELL}>{column}</th>)}
             <th scope="col" className="px-6 py-3"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="bg-white divide-y divide-gray-200 dark:divide-gray-700">
           {users.length === 0 ? (
             <tr>
               <td colSpan={COLUMNS.length + 1} className="px-6 py-8 text-center text-sm text-gray-500">{emptyMessage}</td>

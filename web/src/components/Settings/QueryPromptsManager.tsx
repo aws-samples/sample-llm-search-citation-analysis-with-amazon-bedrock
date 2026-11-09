@@ -34,7 +34,7 @@ function PromptPreview({ template }: { readonly template: string }) {
   const preview = template.replace('{keyword}', SAMPLE_KEYWORD);
   return (
     <div className="mt-2 p-2 bg-gray-50 rounded text-xs text-gray-600">
-      <span className="text-gray-400">Preview: </span>{preview}
+      <span className="text-gray-500">Preview: </span>{preview}
     </div>
   );
 }
@@ -99,22 +99,6 @@ function PersonaForm({
         />
       </div>
       <div>
-        <label htmlFor="persona-description" className="block text-sm font-medium text-gray-700 mb-1">
-          Persona Description
-        </label>
-        <textarea
-          id="persona-description"
-          value={description}
-          onChange={e => setDescription(e.target.value)}
-          placeholder="e.g. I am a father of 3 kids, we live in Switzerland and we are looking for family-friendly travel destinations with activities for children aged 5-12..."
-          className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900 min-h-[60px]"
-          maxLength={1000}
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Describe who this persona is. This helps you remember the context behind each persona.
-        </p>
-      </div>
-      <div>
         <label htmlFor="persona-template" className="block text-sm font-medium text-gray-700 mb-1">
           Query Template
         </label>
@@ -127,13 +111,29 @@ function PersonaForm({
           maxLength={2000}
           required
         />
-        <p className="text-xs text-gray-400 mt-1">
+        <p className="text-xs text-gray-500 mt-1">
           This is the actual prompt sent to AI providers. Use <code className="bg-gray-100 px-1 rounded">{'{keyword}'}</code> where the search keyword should be inserted.
         </p>
         {validationError && (
-          <p className="text-xs text-red-600 mt-1">{validationError}</p>
+          <p className="text-xs text-red-600 dark:text-red-400 mt-1">{validationError}</p>
         )}
         <PromptPreview template={template} />
+      </div>
+      <div>
+        <label htmlFor="persona-description" className="block text-sm font-medium text-gray-700 mb-1">
+          Persona Description <span className="font-normal text-gray-500">(optional)</span>
+        </label>
+        <textarea
+          id="persona-description"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="e.g. I am a father of 3 kids, we live in Switzerland and we are looking for family-friendly travel destinations with activities for children aged 5-12..."
+          className="w-full p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-900 min-h-[60px]"
+          maxLength={1000}
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          Describe who this persona is. This helps you remember the context behind each persona.
+        </p>
       </div>
       <div className="flex gap-2">
         <Button
@@ -208,9 +208,10 @@ function PersonaRow({
     );
   }
 
-  const statusClass = isEnabled ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500';
+  const statusClass = isEnabled ? 'bg-gray-50 text-emerald-700' : 'bg-gray-100 text-gray-500';
   const statusLabel = isEnabled ? 'Enabled' : 'Disabled';
-  const rowClass = isEnabled ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60';
+  // No opacity on a disabled row: it took the text below 4.5:1; the badge and the grey surface say it is off.
+  const rowClass = isEnabled ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50';
 
   const toggleTitle = isEnabled ? 'Disable persona' : 'Enable persona';
   const ToggleIcon = isEnabled ? PauseIcon : PlayIcon;
@@ -228,7 +229,7 @@ function PersonaRow({
           {prompt.description && (
             <p className="text-xs text-gray-600 mt-1">{prompt.description}</p>
           )}
-          <p className="text-xs text-gray-400 mt-1 truncate">{prompt.template}</p>
+          <p className="text-xs text-gray-500 mt-1 truncate">{prompt.template}</p>
         </div>
         {/* PATCH/PUT/DELETE /api/query-prompts/{id} are all Admin-only
             server-side. The row itself stays readable — personas explain the
@@ -279,12 +280,12 @@ interface QueryPromptsManagerProps {
 
 function PersonaEmptyState({ isAdmin }: QueryPromptsManagerProps) {
   return (
-    <div className="text-center py-8 text-gray-400">
+    <div className="text-center py-8 text-gray-500">
       <p className="text-sm">No personas configured yet.</p>
       {isAdmin ? (
         <>
           <p className="text-xs mt-1">Create a persona to see how AI responses change based on user context.</p>
-          <p className="text-xs mt-2 text-gray-300">
+          <p className="text-xs mt-2 text-gray-500 italic">
             Example: "I am a father of 3 living in Switzerland looking for family travel destinations"
           </p>
         </>
@@ -388,7 +389,7 @@ export function QueryPromptsManager({ isAdmin }: QueryPromptsManagerProps) {
       />
 
       {prompts.length > 0 && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           {prompts.filter(p => p.enabled === 'true').length} of {prompts.length} personas enabled
           · Each analysis run will execute {prompts.filter(p => p.enabled === 'true').length || 1} queries per keyword per provider
         </p>

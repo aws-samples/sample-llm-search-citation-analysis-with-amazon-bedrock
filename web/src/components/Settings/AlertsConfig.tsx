@@ -18,7 +18,7 @@ function AlertOutcomeNotice({
   outcome, warnings = []
 }: AlertOutcomeNoticeProps) {
   // Stryker disable next-line StringLiteral: success outcome colors are presentation-only
-  const successClassName = 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  const successClassName = 'border-gray-200 bg-gray-50 text-emerald-700';
   // Stryker disable next-line StringLiteral: failure outcome colors are presentation-only
   const failureClassName = 'border-red-200 bg-red-50 text-red-700';
   // Stryker disable next-line StringLiteral: base Tailwind outcome classes are presentation-only

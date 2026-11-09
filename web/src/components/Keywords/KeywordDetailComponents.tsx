@@ -155,7 +155,7 @@ export const DetailHeader = ({
     </div>
     <button
       onClick={onClose}
-      className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm shrink-0"
+      className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors text-sm shrink-0"
     >
       <CloseIcon className="w-3.5 h-3.5" />Close
     </button>
@@ -233,7 +233,7 @@ export const SearchItem = ({
           >
             {search.citations?.length ?? 0} citations
           </span>
-          <span className="text-gray-400" aria-hidden="true">
+          <span className="text-gray-500" aria-hidden="true">
             <ChevronDownIcon className={`w-4 h-4 ${isExpanded ? '' : '-rotate-90'}`} />
           </span>
         </div>
@@ -334,7 +334,7 @@ const CitationsSection = ({ citations }: { citations: string[] }) => (
     <div className="space-y-1">
       {citations.map((citation) => (
         <div key={citation} className="flex items-start gap-2 text-sm">
-          <span className="text-gray-400">•</span>
+          <span className="text-gray-500">•</span>
           <a
             href={safeHref(citation)}
             target="_blank"

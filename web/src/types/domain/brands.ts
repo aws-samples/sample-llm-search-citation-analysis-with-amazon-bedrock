@@ -147,13 +147,14 @@ export interface BrandMentionsResponse {
   /** Per-provider responses; empty for a group / all answer. */
   by_provider: ProviderBrandData[];
   aggregated: {
-    /** The best 100 brands of the requested classification, best aggregate score first. */
+    /** One page (up to 100) of the brands of the requested classification, best aggregate score first. */
     brands: AggregatedBrand[];
     /** Every brand of the rows, whatever the classification filter. */
     total_unique_brands: number;
-    /** Brands of the requested classification, before the cap of `brands`. */
+    /** Brands of the requested classification, over every page of `brands`. */
     matching_brands: number;
-    brands_truncated: boolean;
+    /** The token of the next page of brands; `null` on the last page, absent from older API builds. */
+    next_token?: string | null;
     summary: {
       first_party_count: number;
       competitor_count: number;

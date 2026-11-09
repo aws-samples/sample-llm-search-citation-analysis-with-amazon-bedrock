@@ -35,7 +35,9 @@ import { advanceFakeTime } from '../test/fakeTime';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  stallAuthenticatedFetch, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 import { spyOnAbortAfterPendingUnmount } from '../test/abortOnUnmount';
 
 /** `/citations` answering API Gateway's 504 while the other reads succeed. */
@@ -55,7 +57,7 @@ describe('useDashboardData', () => {
   });
 
   it('returns loading true while the initial dashboard request is pending', () => {
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+    stallAuthenticatedFetch();
 
     const { result } = renderHook(() => useDashboardData());
 

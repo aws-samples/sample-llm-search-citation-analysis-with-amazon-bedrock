@@ -15,7 +15,6 @@ the group's first ``SCOPE_KEYWORDS_CAP`` keywords (``keywords_truncated``).
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 import pytest
@@ -24,11 +23,11 @@ from hypothesis import strategies as st
 
 from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords, volume_rows
+from testing.module_loader import API_DIR
 from testing.paging import follow_next_token
 from testing.report_scope_fixtures import load_scoped_handler, scoped_report
 from testing.response_size import assert_within_page_budget
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
 _GROUP_KEYWORDS = 200
 #: The keywords of the group a scope answer reads: the first SCOPE_KEYWORDS_CAP.
 _READ_KEYWORDS = SCOPE_KEYWORDS_CAP
@@ -37,7 +36,7 @@ _PAGE_KEYWORDS = 3
 
 @pytest.fixture(scope='module')
 def brand_mentions():
-    return load_scoped_handler(_HERE, 'get-brand-mentions.py', '_volume')
+    return load_scoped_handler(API_DIR, 'get-brand-mentions.py', '_volume')
 
 
 @pytest.fixture(scope='module')

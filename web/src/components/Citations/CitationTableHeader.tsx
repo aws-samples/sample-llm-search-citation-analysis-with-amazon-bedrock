@@ -25,6 +25,11 @@ function sortableClass(isActive: boolean): string {
   return isActive ? `${base} text-gray-900` : `${base} text-gray-500`;
 }
 
+function sortState(sort: SortConfig, column: SortColumn): 'ascending' | 'descending' | 'none' {
+  if (sort.column !== column) return 'none';
+  return sort.direction === 'asc' ? 'ascending' : 'descending';
+}
+
 const SortableHeader = ({
   column, label, sort, onSort
 }: CitationTableHeaderProps & {
@@ -33,12 +38,16 @@ const SortableHeader = ({
 }) => (
   <th
     className={sortableClass(sort.column === column)}
-    onClick={() => onSort(column)}
+    aria-sort={sortState(sort, column)}
   >
-    <div className="flex items-center gap-1">
+    <button
+      type="button"
+      onClick={() => onSort(column)}
+      className="flex items-center gap-1 uppercase rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+    >
       {label}
       <SortIcon active={sort.column === column} direction={sort.direction} />
-    </div>
+    </button>
   </th>
 );
 

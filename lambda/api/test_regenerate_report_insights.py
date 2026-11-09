@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,14 +10,14 @@ from botocore.exceptions import EndpointConnectionError
 
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _PATH = '/api/reports/insights/regenerate'
 _WORKER = 'CitationAnalysis-ReportInsights'
 _GROUP_KEYWORDS = [{'id': 'k1', 'keyword': 'hotel coruña', 'group_ids': {'group-coruna'}}]
 
 regenerate_module = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'regenerate-report-insights.py',
     'regenerate_report_insights_under_test',
     env={'REPORT_INSIGHTS_FUNCTION_NAME': _WORKER, 'DYNAMODB_TABLE_KEYWORDS': 'keywords', 'CORS_ORIGIN_PARAM': ''},

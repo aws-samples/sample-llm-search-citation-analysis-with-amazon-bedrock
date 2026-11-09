@@ -54,7 +54,15 @@ export function spyOnStorageMutations() {
   };
 }
 
-export function mockRejectedStorageWrites(error: Error): void {
+/** What a browser's storage throws when it refuses a read or write (quota, privacy mode). */
+export class StorageUnavailableError extends Error {
+  constructor() {
+    super('Storage unavailable');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+export function mockRejectedStorageWrites(error: Error = new StorageUnavailableError()): void {
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw error;
   });

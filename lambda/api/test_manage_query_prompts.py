@@ -14,7 +14,7 @@ import pytest
 
 from testing.admin_authz_fixtures import caller_event, invoke, status_of
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.module_loader import load_handler_module
+from testing.module_loader import API_DIR, load_handler_module
 
 # Mock the DynamoDB table at module level; boto3.resource is patched before
 # the handler module's import-time code runs, so the module's table IS the mock.
@@ -23,7 +23,7 @@ mock_dynamodb = fake_dynamodb_resource(mock_table)
 
 with patch('boto3.resource', return_value=mock_dynamodb):
     with patch.dict(os.environ, {'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-table', 'CORS_ORIGIN_PARAM': ''}):
-        _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-query-prompts.py', 'manage_query_prompts')
+        _handler_mod = load_handler_module(API_DIR, 'manage-query-prompts.py', 'manage_query_prompts')
 
 PERSONA = {'name': 'Persona', 'template': 'about {keyword}'}
 RENAME = {'name': 'Renamed'}

@@ -1,100 +1,164 @@
+import { useState } from 'react';
 import {
   Link, useNavigate
 } from 'react-router-dom';
-import type { CustomReport } from '../../../api/customReports';
-import { formatDateOnly } from '../../../formatting/dateFormatter';
 import {
-  Button, PencilIcon, PlusIcon
-} from '../../ui';
+  deleteCustomReport, type CustomReport
+} from '../../../api/customReports';
+import { formatDateOnly } from '../../../formatting/dateFormatter';
+import { getErrorMessage } from '../../../infrastructure';
+import { ActionMenu } from '../../ui/ActionMenu';
+import { ErrorAlert } from '../../ui/ErrorAlert';
 import { SectionPlaceholder } from '../layout';
 import {
   Skeleton, SkeletonRegion
 } from '../../ui/Skeleton';
 import {
-  customReportEditPath, customReportPath, NEW_CUSTOM_REPORT_PATH
+  customReportEditPath, customReportPath
 } from './customReportRoute';
+import { DeleteReportModal } from './DeleteReportModal';
 import { useCustomReports } from './useCustomReports';
 
 function blockCount(report: CustomReport): string {
   return report.blocks.length === 1 ? '1 block' : `${report.blocks.length} blocks`;
 }
 
-function SavedReportRow({ report }: { readonly report: CustomReport }) {
+interface RowProps {
+  readonly report: CustomReport;
+  readonly onDelete: (report: CustomReport) => void;
+}
+
+/** A saved report: its name (the link that opens it), what it holds, and its Open / Edit / Delete menu. */
+function SavedReportRow({
+  report, onDelete
+}: RowProps) {
+  const navigate = useNavigate();
   return (
-    <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <li className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
       <div className="min-w-0">
-        <Link to={customReportPath(report.id)} className="text-sm font-medium text-gray-900 hover:underline">
+        <Link
+          to={customReportPath(report.id)}
+          className="break-words rounded text-sm font-medium text-gray-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 dark:text-white"
+        >
           {report.title}
         </Link>
-        <p className="text-xs text-gray-500">
-          {`${blockCount(report)} · last ${report.days} days · updated ${formatDateOnly(report.updated_at)} by ${report.updated_by}`}
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+          {`${blockCount(report)} · last ${report.days} days · updated ${formatDateOnly(report.updated_at)}`}
         </p>
       </div>
-      <Link
-        to={customReportEditPath(report.id)}
-        aria-label={`Edit ${report.title}`}
-        className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
-      >
-        <PencilIcon className="h-4 w-4" />
-        Edit
-      </Link>
+      <ActionMenu
+        label={`Actions for ${report.title}`}
+        items={[
+          {
+            label: 'Open',
+            onSelect: () => navigate(customReportPath(report.id)),
+          },
+          {
+            label: 'Edit',
+            onSelect: () => navigate(customReportEditPath(report.id)),
+          },
+          {
+            label: 'Delete',
+            tone: 'danger',
+            onSelect: () => onDelete(report),
+          },
+        ]}
+      />
     </li>
   );
 }
 
 /**
  * One saved-report row's worth of placeholder, in the list's place, so the
- * report cards below move at most by the rows beyond the first when the list
- * arrives (and not at all for a single saved report).
+ * page moves at most by the rows beyond the first when the list arrives.
  */
 function SavedReportsSkeleton() {
   return (
-    <SkeletonRegion label="Loading your reports" className="mt-2">
-      <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <SkeletonRegion label="Loading your reports">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div>
           <div className="flex h-5 items-center"><Skeleton className="h-3.5 w-48" /></div>
-          <div className="flex h-4 items-center"><Skeleton className="h-3 w-72 max-w-full" /></div>
+          <div className="mt-0.5 flex h-4 items-center"><Skeleton className="h-3 w-64 max-w-full" /></div>
         </div>
-        <Skeleton className="h-4 w-12" />
+        <Skeleton className="h-6 w-7" />
       </div>
     </SkeletonRegion>
   );
 }
 
-function SavedReports() {
-  const {
-    reports, loading, error
-  } = useCustomReports();
-  if (loading && reports.length === 0) return <SavedReportsSkeleton />;
-  if (error !== null) return <SectionPlaceholder variant="error" message={error} />;
+/** Deletes a saved report after the reader confirms, then lists the reports again. */
+function useReportDeletion(reload: () => Promise<void>) {
+  const [pending, setPending] = useState<CustomReport | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const confirm = async (report: CustomReport) => {
+    setProblem(null);
+    try {
+      await deleteCustomReport(report.id);
+      await reload();
+    } catch (error) {
+      setProblem(getErrorMessage(error));
+    }
+  };
+  return {
+    pending,
+    problem,
+    ask: setPending,
+    cancel: () => setPending(null),
+    confirm,
+  };
+}
+
+function SavedReportsBody({
+  reports, onDelete
+}: {
+  readonly reports: readonly CustomReport[];
+  readonly onDelete: (report: CustomReport) => void;
+}) {
   if (reports.length === 0) {
-    return <p className="mt-3 text-sm text-gray-500">No custom report yet. Create one from the sections of every report below.</p>;
+    return (
+      <p className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400 sm:px-6">
+        No custom report yet. Use New custom report to combine the sections you need from every report, with your own headings and notes.
+      </p>
+    );
   }
   return (
-    <ul className="mt-2 divide-y divide-gray-200">
-      {reports.map((report) => <SavedReportRow key={report.id} report={report} />)}
+    <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+      {reports.map((report) => <SavedReportRow key={report.id} report={report} onDelete={onDelete} />)}
     </ul>
   );
 }
 
-/**
- * The custom reports on the Reports page: every saved one, newest change
- * first, and the way to build a new one.
- */
-export function CustomReportsPanel() {
-  const navigate = useNavigate();
+function SavedReports() {
+  const {
+    reports, loading, error, reload
+  } = useCustomReports();
+  const deletion = useReportDeletion(reload);
+  const pending = deletion.pending;
+  if (loading && reports.length === 0) return <SavedReportsSkeleton />;
+  if (error !== null) return <div className="p-4 sm:px-6"><SectionPlaceholder variant="error" message={error} /></div>;
   return (
-    <section aria-labelledby="custom-reports-heading" className="rounded-lg border border-gray-200 bg-white p-4 sm:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 id="custom-reports-heading" className="text-base font-semibold text-gray-900">Custom reports</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Your own report: pick the sections you need from every report, add headings, text, images or videos, and put them in order.
-          </p>
-        </div>
-        <Button leadingIcon={<PlusIcon className="h-4 w-4" />} onClick={() => navigate(NEW_CUSTOM_REPORT_PATH)}>
-          Create custom report
-        </Button>
+    <>
+      <ErrorAlert message={deletion.problem} spacingClassName="mx-4 mt-3 sm:mx-6 " />
+      <SavedReportsBody reports={reports} onDelete={deletion.ask} />
+      {pending !== null && (
+        <DeleteReportModal
+          report={pending}
+          isOpen
+          onClose={deletion.cancel}
+          onConfirm={() => void deletion.confirm(pending)}
+        />
+      )}
+    </>
+  );
+}
+
+/** The saved custom reports on the Reports page, newest change first, each with its Open / Edit / Delete menu. */
+export function CustomReportsPanel() {
+  return (
+    <section aria-labelledby="custom-reports-heading" className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700 sm:px-6">
+        <h3 id="custom-reports-heading" className="text-sm font-semibold text-gray-900 dark:text-white">Your custom reports</h3>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">The sections you picked from every report, in your order, with your own headings, text, images and videos.</p>
       </div>
       <SavedReports />
     </section>

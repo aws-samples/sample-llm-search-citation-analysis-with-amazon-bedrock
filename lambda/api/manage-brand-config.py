@@ -9,15 +9,11 @@ Includes brand expansion using LLM to suggest related sub-brands.
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import boto3
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared import kpi_engine
 from shared.api_response import success_response, validation_error

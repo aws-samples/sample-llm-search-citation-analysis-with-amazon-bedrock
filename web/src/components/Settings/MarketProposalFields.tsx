@@ -4,8 +4,8 @@ import {
   countryOptions, languageOptions, type LocaleOption
 } from './marketLocales';
 
-const SELECT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
-const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100';
+const SELECT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100 dark:disabled:bg-gray-800 dark:disabled:text-gray-400';
+const INPUT_CLASS = 'w-full p-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-100 dark:disabled:bg-gray-800 dark:disabled:text-gray-400';
 
 const COUNTRIES = countryOptions();
 const LANGUAGES = languageOptions();
@@ -55,7 +55,7 @@ function ChoiceSelect({
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
-        {label} <span className="text-gray-400">(required)</span>
+        {label} <span className="text-gray-500">(required)</span>
       </label>
       <select id={id} value={value} className={SELECT_CLASS} onChange={(event) => onChange(event.target.value)}>
         <option value="">{prompt}</option>

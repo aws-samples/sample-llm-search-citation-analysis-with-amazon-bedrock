@@ -19,16 +19,11 @@ Batches and every IndexNow write are Admin only; IndexNow itself is free.
 
 import logging
 import re
-import sys
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
-
 from seo_http import brand_config, seo_error, seo_route
 
 from shared import indexnow, indexnow_store

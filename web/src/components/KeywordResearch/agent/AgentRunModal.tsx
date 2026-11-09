@@ -9,10 +9,13 @@ interface AgentRunModalProps extends Omit<ComponentProps<typeof AgentRunDetail>,
   readonly onClose: () => void;
 }
 
-/** "Hotels · started 18/09/2026, 12:00:00 by ana" */
+/** A Cognito user id (`sub`): an internal id, not a name the reader recognises. */
+const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** "Hotels · started 18/09/2026, 12:00:00 by ana"; a bare user id is left out. */
 function describeRunOrigin(job: KeywordResearchItem): string {
   const template = job.template_name ? `${job.template_name} · ` : '';
-  const by = job.created_by ? ` by ${job.created_by}` : '';
+  const by = job.created_by && !USER_ID_PATTERN.test(job.created_by) ? ` by ${job.created_by}` : '';
   return `${template}started ${new Date(job.created_at).toLocaleString()}${by}`;
 }
 

@@ -9,6 +9,7 @@ import {
 } from './groupKpiHistory-fixtures';
 import { exportWorkbook } from '../../../exporters/excelGenerator';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import { definitionsSheet } from '../layout/kpiSheets';
 import {
   EMPTY_KPI_CELLS, EXPORTED_AT as GENERATED_AT, KPI_CHANGE_HEADERS, KPI_VALUE_HEADERS, kpiChangeCells, kpiValueCells,
   selectedRunSheets, sheetRows, summaryCells, unknownValueSheets
@@ -44,10 +45,7 @@ describe('groupKpiReportSheets', () => {
   });
 
   it('writes out every KPI, group run and trend definition', () => {
-    expect(sheetRows(selectedRunSheets(), 'Definitions')).toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => ({
-      KPI: entry.label,
-      'How it is measured': entry.definition,
-    })));
+    expect(selectedRunSheets().find((entry) => entry.name === 'Definitions')).toStrictEqual(definitionsSheet(GROUP_REPORT_DEFINITIONS));
   });
 
   it('attaches one row per brand appearance of the selected run', () => {

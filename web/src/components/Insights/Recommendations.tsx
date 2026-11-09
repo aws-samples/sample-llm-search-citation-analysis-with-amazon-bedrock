@@ -11,7 +11,7 @@ import { RecommendationsSkeleton } from './InsightsSkeletons';
 import { RefreshIcon } from '../ui';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  BOLT_PATHS, INFO_CIRCLE_PATHS, SPARKLES_PATHS
+  INFO_CIRCLE_PATHS, SPARKLES_PATHS
 } from '../ui/iconPaths';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
 import { InsightsScopeSelector } from './InsightsScopeSelector';
@@ -38,20 +38,20 @@ interface PrioritySummaryProps {
 
 const PrioritySummary = ({ byPriority }: PrioritySummaryProps) => (
   <div className="grid grid-cols-3 gap-3 sm:gap-4">
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-red-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">High Priority</div>
       <div className="text-xl sm:text-2xl font-bold text-red-600">{byPriority.high}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Urgent actions needed</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Urgent actions needed</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-yellow-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">Medium</div>
-      <div className="text-xl sm:text-2xl font-bold text-yellow-600">{byPriority.medium}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Should address soon</div>
+      <div className="text-xl sm:text-2xl font-bold text-amber-700">{byPriority.medium}</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Should address soon</div>
     </div>
-    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-green-500">
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border border-gray-200">
       <div className="text-xs sm:text-sm text-gray-500">Low</div>
-      <div className="text-xl sm:text-2xl font-bold text-green-600">{byPriority.low}</div>
-      <div className="text-xs text-gray-400 hidden sm:block">Nice to have</div>
+      <div className="text-xl sm:text-2xl font-bold text-emerald-600">{byPriority.low}</div>
+      <div className="text-xs text-gray-500 hidden sm:block">Nice to have</div>
     </div>
   </div>
 );
@@ -70,19 +70,10 @@ const Header = ({
     title="Action Center"
     description={(
       <>
-        Get prioritized, actionable recommendations to improve your AI search visibility. 
-        Each recommendation is based on analysis of your visibility gaps, competitor performance, 
-        and citation patterns. Enable "AI Enhanced" for deeper, LLM-powered insights.
+        What to do next to raise your AI search visibility, highest priority first. Rules build each item from your
+        visibility gaps, competitor mentions and citations. Turn on AI Enhanced to add suggestions written by a
+        Bedrock model.
       </>
-    )}
-    note={(
-      <div className="mt-3 flex items-center gap-2 text-sm">
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm">
-          <StrokeIcon className="w-3.5 h-3.5" paths={BOLT_PATHS} strokeWidth={2} />
-          <span className="hidden sm:inline">Start with high-priority items for biggest impact</span>
-          <span className="sm:hidden">Start with high-priority items</span>
-        </span>
-      </div>
     )}
   >
     {scopeSelector}
@@ -97,8 +88,9 @@ const Header = ({
         <span className="text-gray-700 font-medium">AI Enhanced</span>
       </label>
       <button
+        type="button"
         onClick={onRefresh}
-        className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+        className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors flex items-center justify-center gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500"
       >
         <RefreshIcon className="w-4 h-4" />
         Refresh
@@ -118,7 +110,7 @@ const LlmEnhancedSection = ({
 }) => (
   <div className="mt-8">
     <h3 className="text-lg font-medium mb-4 flex items-center gap-2 text-gray-900">
-      <StrokeIcon className="w-5 h-5 text-indigo-500" paths={SPARKLES_PATHS} />
+      <StrokeIcon className="w-5 h-5 text-blue-500" paths={SPARKLES_PATHS} />
       AI-Enhanced Recommendations
     </h3>
     <div className="space-y-4">
@@ -143,7 +135,7 @@ const LLM_HINTS = {
 } as const;
 
 const LlmHint = ({ timedOut }: { readonly timedOut: boolean }) => (
-  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-700">
+  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-blue-700">
     <div className="flex items-center gap-2">
       <StrokeIcon className="w-4 h-4" paths={INFO_CIRCLE_PATHS} />
       {timedOut ? LLM_HINTS.timedOut : LLM_HINTS.empty}

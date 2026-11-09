@@ -18,7 +18,7 @@ import {
 const SCORE_KEYS = Object.keys(SCORE_LABELS) as (keyof LighthouseScores)[];
 const SEVERITY_CLASSES: Record<LighthouseAudit['severity'], string> = {
   critical: 'bg-red-100 text-red-800',
-  warning: 'bg-amber-100 text-amber-800',
+  warning: 'bg-gray-100 text-amber-800',
   info: 'bg-gray-100 text-gray-700',
 };
 
@@ -46,7 +46,7 @@ function MetricRow({
   const rating = value === null ? null : metricRating(value, metric);
   return (
     <tr>
-      <th scope="row" className="px-3 py-2 text-left font-normal text-gray-800">
+      <th scope="row" className="px-3 py-2 text-left font-normal text-gray-800 dark:text-gray-200">
         {metric.label}
         {metric.coreWebVital && <span className="ml-2 text-xs text-gray-500">Core Web Vital</span>}
       </th>
@@ -70,7 +70,7 @@ function AuditDescription({ text }: { readonly text: string }) {
         const key = `${index}-${part.text}`;
         return href === undefined
           ? <span key={key}>{part.text}</span>
-          : <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900">{part.text}</a>;
+          : <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900 dark:hover:text-gray-50">{part.text}</a>;
       })}
     </p>
   );
@@ -103,7 +103,7 @@ function CompletedReport({ result }: { readonly result: CompletedResult }) {
           title="The six page speed metrics of this result" />
       </div>
       <table className="min-w-full text-sm" aria-label="Page speed metrics">
-        <tbody className="divide-y divide-gray-100">
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
           {METRICS.map((metric) => <MetricRow key={metric.key} metric={metric} value={result.metrics[metric.key]} />)}
         </tbody>
       </table>
@@ -116,7 +116,7 @@ function CompletedReport({ result }: { readonly result: CompletedResult }) {
         </div>
         {result.failed_audits.length === 0
           ? <p className="text-sm text-gray-600">No failed audit: nothing to fix on this page.</p>
-          : <ul className="divide-y divide-gray-100">{result.failed_audits.map((audit) => <AuditItem key={audit.id} audit={audit} />)}</ul>}
+          : <ul className="divide-y divide-gray-100 dark:divide-gray-700">{result.failed_audits.map((audit) => <AuditItem key={audit.id} audit={audit} />)}</ul>}
       </div>
     </div>
   );

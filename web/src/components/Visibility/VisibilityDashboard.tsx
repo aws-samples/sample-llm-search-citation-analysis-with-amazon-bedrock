@@ -76,24 +76,27 @@ export function VisibilityDashboard({ keywords }: Props) {
         title="Visibility Dashboard"
         description="Track how visible your brand is across AI search engines compared to competitors — for one keyword, a keyword group, or everything."
       >
-        <KeywordScopeSelector
-          keywords={activeKeywords}
-          groups={groups}
-          value={scope}
-          onChange={setScope}
-          label="Analyze"
-        />
-        <PersonaSelector
-          id="visibility-persona-filter"
-          name="visibility-persona-filter"
-          selectedPersonaId={selectedPersonaId}
-          onPersonaChange={setSelectedPersonaId}
-        />
-        <BrandedFilterSelect value={branded} onChange={setBranded} />
+        {/* What, then whose prompts, then which queries: one row on wide screens. */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <KeywordScopeSelector
+            keywords={activeKeywords}
+            groups={groups}
+            value={scope}
+            onChange={setScope}
+            label="Analyze"
+          />
+          <PersonaSelector
+            id="visibility-persona-filter"
+            name="visibility-persona-filter"
+            selectedPersonaId={selectedPersonaId}
+            onPersonaChange={setSelectedPersonaId}
+          />
+          <BrandedFilterSelect value={branded} onChange={setBranded} />
+        </div>
       </PageHeaderCard>
 
       {visError && !visLoading && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">{visError}</div>
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-amber-800">{visError}</div>
       )}
 
       {activeKeywords.length > 0 && <InsightsSummary scope={scope} days={rangeDays} />}

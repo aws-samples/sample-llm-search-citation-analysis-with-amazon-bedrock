@@ -2,6 +2,11 @@
   "minTokens": 25,
   "minLines": 3,
   "mode": "weak",
+  "ignorePattern": [
+    "(?m)^[ \\t]*import\\b[^;]*?\\bfrom[ \\t]*['\"][^'\"\\n]+['\"][ \\t]*;",
+    "(?m)^[ \\t]*import[ \\t]*['\"][^'\"\\n]+['\"][ \\t]*;",
+    "(?m)^[ \\t]*export[ \\t]+(type[ \\t]+)?(\\*|\\*[ \\t]+as[ \\t]+\\w+|\\{[^}]*\\})[ \\t]*from[ \\t]*['\"][^'\"\\n]+['\"][ \\t]*;"
+  ],
   "crossFormats": "typescript,tsx",
   "baseline": ".jscpd-baseline/typescript-tests.json",
   "failOnNewClones": 0,

@@ -24,12 +24,13 @@ export const ThemeToggle = () => {
 
   return (
     <button
+      type="button"
       onClick={toggleTheme}
-      className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
       title={getLabel()}
       aria-label={`Current: ${getLabel()}. Click to change.`}
     >
-      <StrokeIcon className="w-5 h-5" paths={getIconPaths()} />
+      <StrokeIcon className="w-5 h-5" paths={getIconPaths()} aria-hidden="true" />
     </button>
   );
 };

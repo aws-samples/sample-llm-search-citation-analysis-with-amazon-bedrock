@@ -32,7 +32,6 @@ keywords page stops before the first of them (``truncated``, ``next_token``
 resumes there).
 """
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import takewhile
@@ -70,9 +69,6 @@ from shared.scoped_reports import (
 )
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # One Query per keyword, SCOPE_MAX_WORKERS at a time, over at most
 # SCOPE_KEYWORDS_CAP keywords (the /visibility group bounds).

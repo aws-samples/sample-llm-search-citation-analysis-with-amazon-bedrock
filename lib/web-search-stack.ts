@@ -10,7 +10,8 @@ import {
 /**
  * The AgentCore Gateway with the managed `web-search` connector behind the
  * `agentcore` provider (Amazon Bedrock Web Search). Web Search exists only in
- * us-east-1, eu-west-1 and ap-northeast-1, so this is a separate stack with a
+ * us-east-1, us-west-2, eu-west-1 and ap-northeast-1 (of the regions this
+ * sample allows), so this is a separate stack with a
  * fixed region (`readWebSearchRegion`). It holds no data, so nothing is retained.
  */
 export class CitationAnalysisWebSearchStack extends cdk.Stack {

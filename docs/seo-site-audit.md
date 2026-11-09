@@ -1,6 +1,6 @@
-# Site audit
+# Site Audit: technical SEO and AI readiness
 
-The site audit crawls the brand's own website and reports technical SEO issues and **AI readiness**: whether
+The Site Audit page (SEO › Site Audit, `/seo/site-audit`) crawls the brand's own website and reports technical SEO issues and **AI readiness**: whether
 answer engines (ChatGPT search, Claude, Perplexity, Google AI Overviews, Copilot) can reach, read and quote it.
 
 ## Cost
@@ -11,15 +11,15 @@ minutes of Lambda time.
 
 ## Who can do what
 
-- **Admins** start and cancel audits (Seo › Site audit). One audit runs at a time.
-- **Every signed-in user** reads the audits, their issues and the affected pages, and exports the issue list
-  as CSV.
+- **Admins** start and cancel audits (SEO › Site Audit). One audit runs at a time.
+- **Every signed-in user** reads the audits, their issues and the affected pages, and exports the issue types,
+  the affected pages of an issue and the AI crawler access to Excel.
 
 ## What is crawled
 
-- The start URL must be on one of the brand's own domains (Settings › Brand Tracking › owned domains) or a
+- The start URL must be on one of the brand's own domains (Settings › Brand tracking › owned domains) or a
   subdomain. The start form offers exactly those domains, the first one preselected; without one it links to
-  Settings › Brand Tracking instead. An apex domain that redirects to `www` is crawled on `www`.
+  Settings › Brand tracking instead. An apex domain that redirects to `www` is crawled on `www`.
 - The crawler identifies itself as `CitationAnalysisAudit/1.0`, obeys robots.txt (its own
   `User-agent: CitationAnalysisAudit` group if there is one, else `*`) and sends **one request per second**. When
   the site answers 429 it slows down (Retry-After is honoured); after more than three 429s in a row, or 30
@@ -82,7 +82,7 @@ JavaScript shell.
 | Content may require JavaScript | Warning | the raw HTML is an app shell |
 
 The panel also lists every AI crawler with its access (allowed, partly blocked, blocked) and the robots.txt
-rule and line that decided it. The crawler list is a code constant (`shared/audit_geo.py`, checked 2026-10)
+rule and line that decided it. The crawler list is a code constant (`lambda/shared/audit_geo.py`, checked 2026-10)
 because these tokens change often.
 
 Four further checks (content, metadata, H1 and navigation that only appear after JavaScript runs) are

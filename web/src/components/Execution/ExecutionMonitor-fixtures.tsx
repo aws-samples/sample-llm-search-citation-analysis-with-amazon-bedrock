@@ -1,4 +1,7 @@
 import { vi } from 'vitest';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import {
   buildGroup, buildKeyword
 } from '../../api/keywordGroups-fixtures';
@@ -57,8 +60,23 @@ export function renderMarketMonitor(withMarkets = true) {
     message: 'started',
   });
   renderWithMarketSelection(
-    <ExecutionMonitor execution={null} triggerAnalysis={triggerAnalysis} keywordsCount={2} keywords={MARKET_KEYWORDS} />,
+    <MemoryRouter>
+      <ExecutionMonitor execution={null} triggerAnalysis={triggerAnalysis} keywordsCount={2} keywords={MARKET_KEYWORDS} />
+    </MemoryRouter>,
     buildMarketSelectionMock(withMarkets ? {} : { catalog: { markets: [] } })
   );
   return triggerAnalysis;
+}
+
+/** Opens the collapsed "Limit to markets" filter and ticks the named markets (none: only opens it). */
+export async function tickMarkets(...names: string[]): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: /Limit to markets/u }));
+  for (const name of names) {
+    await userEvent.click(screen.getByRole('checkbox', { name }));
+  }
+}
+
+/** Presses Start analysis once the monitor shows it. */
+export async function pressStart(): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: /Start analysis/u }));
 }

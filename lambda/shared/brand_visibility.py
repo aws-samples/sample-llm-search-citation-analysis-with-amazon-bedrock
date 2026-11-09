@@ -11,7 +11,6 @@ keyword discovery, query limits, or the matching rules (audit items 9 and
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -21,9 +20,6 @@ from boto3.dynamodb.conditions import Key
 from shared.keyword_groups import ACTIVE_KEYWORD_STATUS
 from shared.scope_params import map_scope_keywords
 from shared.utils import brand_names_match
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # Most recent SearchResults rows fetched per keyword.
 RESULTS_PER_KEYWORD = 20

@@ -134,7 +134,7 @@ export function BlockCatalogPanel({
       </div>
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">Find a block</label>
-        <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+        <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
         <input
           id={searchId}
           type="search"

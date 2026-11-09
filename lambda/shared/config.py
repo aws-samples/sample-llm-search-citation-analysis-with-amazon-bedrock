@@ -64,6 +64,26 @@ SEARCH_PROVIDERS: list[str] = [
 # All providers combined (for backward compatibility)
 PROVIDERS: list[str] = LLM_PROVIDERS + SEARCH_PROVIDERS
 
+# Names shown to users; the dashboard's `web/src/constants/providers.ts` uses the same ones.
+PROVIDER_DISPLAY_NAMES: dict[str, str] = {
+    Provider.OPENAI: 'OpenAI',
+    Provider.PERPLEXITY: 'Perplexity',
+    Provider.GEMINI: 'Google Gemini',
+    Provider.CLAUDE: 'Anthropic Claude',
+    Provider.GOOGLE_AI_OVERVIEW: 'Google AI Overviews',
+    Provider.BRAVE: 'Brave Search',
+    Provider.TAVILY: 'Tavily',
+    Provider.EXA: 'Exa',
+    Provider.SERPAPI: 'SerpAPI',
+    Provider.FIRECRAWL: 'Firecrawl',
+    Provider.AGENTCORE: 'Amazon Bedrock Web Search',
+}
+
+
+def provider_display_name(provider: str) -> str:
+    """A provider's display name ("Google Gemini"), or its id for an unknown provider."""
+    return PROVIDER_DISPLAY_NAMES.get(provider, provider)
+
 
 @dataclass
 class LambdaConfig:

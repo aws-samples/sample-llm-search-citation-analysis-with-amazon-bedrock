@@ -6,26 +6,25 @@ The scope behaviour shared with the other report routes lives in
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
 
+from shared.brand_mention_views import BRAND_LIMIT
 from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.brand_mentions_fixtures import VOLUME_GROUP_ID, volume_keyword_text, volume_keywords
 from testing.events import parse_response
+from testing.module_loader import API_DIR
 from testing.report_scope_fixtures import OLD_TS, RUN_TS, load_scoped_handler, scoped_report
 from testing.report_scope_fixtures import brand as _brand
 from testing.report_scope_fixtures import result as _result
 from testing.search_results_fixtures import key_parts
 from testing.window_budget_fixtures import spent_request_budget
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
 
 @pytest.fixture(scope='module')
 def brand_mentions():
-    return load_scoped_handler(_HERE, 'get-brand-mentions.py', '_views')
+    return load_scoped_handler(API_DIR, 'get-brand-mentions.py', '_views')
 
 
 @pytest.fixture
@@ -130,6 +129,84 @@ def test_summary_brands_name_their_appearance_count(brand_mentions):
         brand = report.body({'keyword': 'hotel coruna spa'})['aggregated']['brands'][0]
 
     assert (brand['appearance_count'], brand['provider_ranks']) == (3, {'a': 1, 'b': 1, 'c': 1})
+
+
+class TestSummaryPages:
+    """The summary's brand list in pages of ``BRAND_LIMIT``, continued by a ``next_token`` bound to the query."""
+
+    BRANDS = BRAND_LIMIT * 2 + 10
+
+    @pytest.fixture
+    def many_brands(self, brand_mentions):
+        # Every brand once, each with fewer mentions than the one before, so the aggregate order is fixed.
+        named = [_brand(f'Brand {index:03d}', 'competitor', mentions=self.BRANDS - index) for index in range(self.BRANDS)]
+        rows = {
+            'hotel coruna spa': [_result('hotel coruna spa', 'openai', named)],
+            'best hotels galicia': [_result('best hotels galicia', 'openai', [_brand('Hotel Coruna', 'first_party')])],
+            'hotel marino beach': [],
+        }
+        with scoped_report(brand_mentions, {'tracked_brands': {}}, search_rows=rows) as report:
+            yield report
+
+    def _all_pages(self, report: Any, params: dict[str, str]) -> list[dict[str, Any]]:
+        pages = [report.body(params)]
+        while pages[-1]['aggregated']['next_token'] is not None:
+            pages.append(report.body({**params, 'next_token': pages[-1]['aggregated']['next_token']}))
+        return pages
+
+    def test_first_page_keeps_the_top_brands_and_the_totals(self, many_brands):
+        aggregated = many_brands.body({'group_id': 'coruna'})['aggregated']
+
+        assert (len(aggregated['brands']), aggregated['matching_brands'], aggregated['brands_truncated']) == (
+            BRAND_LIMIT, self.BRANDS + 1, True,
+        )
+        assert aggregated['next_token'] is not None
+
+    def test_next_token_continues_until_a_null_token_on_the_last_page(self, many_brands):
+        pages = self._all_pages(many_brands, {'group_id': 'coruna'})
+
+        assert [len(page['aggregated']['brands']) for page in pages] == [BRAND_LIMIT, BRAND_LIMIT, 11]
+        assert (pages[-1]['aggregated']['brands_truncated'], pages[-1]['aggregated']['next_token']) == (False, None)
+
+    def test_order_is_stable_across_pages(self, many_brands):
+        brands = [entry for page in self._all_pages(many_brands, {'group_id': 'coruna'}) for entry in page['aggregated']['brands']]
+
+        assert (len({entry['name'] for entry in brands}), [entry['overall_rank'] for entry in brands]) == (
+            self.BRANDS + 1, list(range(1, self.BRANDS + 2)),
+        )
+
+    def test_pages_a_single_keyword_and_a_classification(self, many_brands):
+        params = {'keyword': 'hotel coruna spa', 'classification': 'competitor'}
+
+        pages = self._all_pages(many_brands, params)
+
+        assert sum(len(page['aggregated']['brands']) for page in pages) == self.BRANDS
+
+    def test_a_scope_with_few_brands_has_a_single_page(self, coruna):
+        aggregated = coruna.body({'group_id': 'coruna'})['aggregated']
+
+        assert (aggregated['brands_truncated'], aggregated['next_token']) == (False, None)
+
+    @pytest.mark.parametrize('other', [
+        pytest.param({'group_id': 'marino'}, id='another-scope'),
+        pytest.param({'group_id': 'coruna', 'classification': 'competitor'}, id='another-classification'),
+        pytest.param({'group_id': 'coruna', 'provider': 'openai'}, id='another-provider'),
+        pytest.param({'group_id': 'coruna', 'timestamp': OLD_TS}, id='another-run'),
+        pytest.param({'group_id': 'coruna', 'view': 'appearances'}, id='the-appearances-view'),
+    ])
+    def test_rejects_a_token_of_another_query(self, many_brands, other):
+        token = many_brands.body({'group_id': 'coruna'})['aggregated']['next_token']
+
+        assert many_brands.call({**other, 'next_token': token})['statusCode'] == 400
+
+    def test_rejects_an_appearances_token(self, many_brands):
+        token = many_brands.body({'group_id': 'coruna', 'view': 'appearances', 'limit': '1'})['next_token']
+
+        assert many_brands.call({'group_id': 'coruna', 'next_token': token})['statusCode'] == 400
+
+    @pytest.mark.parametrize('token', ['not-a-token', 'eyJvZmZzZXQiOjF9'])
+    def test_rejects_a_malformed_token(self, many_brands, token):
+        assert many_brands.call({'group_id': 'coruna', 'next_token': token})['statusCode'] == 400
 
 
 class TestTimeBudget:

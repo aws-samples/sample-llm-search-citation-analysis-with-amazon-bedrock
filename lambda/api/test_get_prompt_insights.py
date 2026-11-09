@@ -16,7 +16,6 @@ answers each keyword's `query` with the rows a test stages for it.
 from __future__ import annotations
 
 import itertools
-import os
 from collections.abc import Collection
 from decimal import Decimal
 from types import ModuleType
@@ -31,11 +30,10 @@ from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR
 
 insights_module = handler_fixture(
-    _API_DIR,
+    API_DIR,
     'get-prompt-insights.py',
     'get_prompt_insights_under_test',
     env={

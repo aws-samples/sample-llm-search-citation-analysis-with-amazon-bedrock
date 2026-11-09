@@ -11,11 +11,6 @@ Routes:
 - GET/PUT/POST /api/markets -> manage-markets handler
 """
 
-import sys
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
-
 from shared.consolidated_router import route_map_handler
 
 ROUTE_MAP = {

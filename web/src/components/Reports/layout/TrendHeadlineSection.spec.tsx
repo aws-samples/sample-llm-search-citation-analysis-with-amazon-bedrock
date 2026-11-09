@@ -7,8 +7,7 @@ import {
 import type { HistoricalTrendsResponse } from '../../../types';
 import { TrendHeadlineSection } from './TrendHeadlineSection';
 import { KEYWORD_TRENDS_HEADING } from './KeywordTrendCounts';
-import { OWNED_DOMAINS_MISSING } from './KpiHeadline';
-import { NO_PREVIOUS_PERIOD } from './periodComparison';
+import { itShowsPeriodHeadlineGaps } from './kpiHeadline-fixtures';
 import { buildTrendView } from './reportPayload-fixtures';
 import {
   cardFigure, cardFootnote, plainStatCard, statFigure, statFootnote
@@ -44,17 +43,10 @@ describe('TrendHeadlineSection KPIs', () => {
     expect(statFootnote('Mention rate')).toBe('-10.0 pts vs previous week (3 keywords)');
   });
 
-  it('says there is no earlier period before a second one', () => {
-    renderHeadline({ change: null });
+});
 
-    expect(statFootnote('Share of voice')).toBe(NO_PREVIOUS_PERIOD);
-  });
-
-  it('asks for owned domains under the citation rate when none are set', () => {
-    renderHeadline({ citations_configured: false });
-
-    expect(statFootnote('Citation rate')).toBe(OWNED_DOMAINS_MISSING);
-  });
+describe('TrendHeadlineSection KPIs without a comparison or owned domains', () => {
+  itShowsPeriodHeadlineGaps(renderHeadline);
 });
 
 describe('TrendHeadlineSection keywords by trend', () => {

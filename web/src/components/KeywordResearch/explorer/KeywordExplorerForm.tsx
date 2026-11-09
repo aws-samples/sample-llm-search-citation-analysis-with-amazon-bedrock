@@ -1,7 +1,12 @@
 import {
   useId, useState, type FormEvent
 } from 'react';
+import { priceText } from '../../../exporters/paidExport';
+import {
+  GOOGLE_ADS_RESEARCH_USD, keywordResearchUsd, RESEARCH_CACHE_HOURS
+} from '../../Seo/seoPrices';
 import { Button } from '../../ui/Button';
+import { Disclosure } from '../../ui/Disclosure';
 import type {
   KeywordResearchMode, KeywordResearchRequest
 } from '../../../types/api/seo';
@@ -97,58 +102,69 @@ export function KeywordExplorerForm({
     });
   };
 
+  const price = `Price: ${priceText(keywordResearchUsd({
+    mode,
+    limit,
+    clickstream,
+  }))} per search (${priceText(GOOGLE_ADS_RESEARCH_USD)} in Google-Ads-only countries) · cached ${String(RESEARCH_CACHE_HOURS)} h`;
+
   return (
     <form onSubmit={submit} className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="md:col-span-2">
-          <label htmlFor={`${ids}-seed`} className={LABEL_CLASS}>Seed keyword</label>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <input
-              id={`${ids}-seed`}
-              type="text"
-              value={seed}
-              maxLength={MAX_SEED_LENGTH}
-              onChange={(event) => setSeed(event.target.value)}
-              placeholder="e.g. boutique hotel"
-              className={FIELD_CLASS}
-            />
-            <TrackedKeywordPicker onPick={(picked) => setSeed(picked.slice(0, MAX_SEED_LENGTH))} disabled={searching} />
-          </div>
-        </div>
-        <div>
-          <label htmlFor={`${ids}-mode`} className={LABEL_CLASS}>Mode</label>
-          <select
-            id={`${ids}-mode`}
-            value={mode}
-            onChange={(event) => { if (isMode(event.target.value)) setMode(event.target.value); }}
+      <div>
+        <label htmlFor={`${ids}-seed`} className={LABEL_CLASS}>Seed keyword</label>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <input
+            id={`${ids}-seed`}
+            type="text"
+            value={seed}
+            maxLength={MAX_SEED_LENGTH}
+            onChange={(event) => setSeed(event.target.value)}
+            placeholder="e.g. boutique hotel"
             className={FIELD_CLASS}
-          >
-            {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label htmlFor={`${ids}-limit`} className={LABEL_CLASS}>Results</label>
-          <select
-            id={`${ids}-limit`}
-            value={limit}
-            onChange={(event) => {
-              const next = Number(event.target.value);
-              if (isLimit(next)) setLimit(next);
-            }}
-            className={FIELD_CLASS}
-          >
-            {LIMIT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
-        <ToggleField label="Group keywords" checked={groupKeywords} onChange={setGroupKeywords} />
-        <ToggleField label="Include clickstream data" checked={clickstream} onChange={setClickstream} />
-        <div className="sm:ml-auto">
-          <Button type="submit" disabled={keyword === '' || searching}>
+          />
+          <TrackedKeywordPicker onPick={(picked) => setSeed(picked.slice(0, MAX_SEED_LENGTH))} disabled={searching} />
+          <Button type="submit" disabled={keyword === '' || searching} aria-describedby={`${ids}-price`} className="shrink-0">
             {searching ? 'Searching…' : 'Search'}
           </Button>
         </div>
+        <p id={`${ids}-price`} className="mt-1 text-xs text-gray-600">{price}</p>
+      </div>
+      <div>
+        <Disclosure title="Options" headingLevel={3} headingClassName="text-sm font-medium text-gray-700">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:max-w-xl">
+              <div>
+                <label htmlFor={`${ids}-mode`} className={LABEL_CLASS}>Mode</label>
+                <select
+                  id={`${ids}-mode`}
+                  value={mode}
+                  onChange={(event) => { if (isMode(event.target.value)) setMode(event.target.value); }}
+                  className={FIELD_CLASS}
+                >
+                  {MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor={`${ids}-limit`} className={LABEL_CLASS}>Results</label>
+                <select
+                  id={`${ids}-limit`}
+                  value={limit}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    if (isLimit(next)) setLimit(next);
+                  }}
+                  className={FIELD_CLASS}
+                >
+                  {LIMIT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
+              <ToggleField label="Group keywords" checked={groupKeywords} onChange={setGroupKeywords} />
+              <ToggleField label="Include clickstream data" checked={clickstream} onChange={setClickstream} />
+            </div>
+          </div>
+        </Disclosure>
       </div>
     </form>
   );

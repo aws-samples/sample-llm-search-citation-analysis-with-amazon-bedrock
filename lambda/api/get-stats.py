@@ -32,16 +32,12 @@ and the request's deadline; a scan cut short makes every total approximate.
 
 import concurrent.futures
 import logging
-import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from botocore.exceptions import BotoCoreError, ClientError
-
-# Add shared module to path
-sys.path.insert(0, '/opt/python')
 
 from shared import answer_queries, bounded_counts, dynamodb_batch, markets, scope_params
 from shared.api_response import success_response, validation_error

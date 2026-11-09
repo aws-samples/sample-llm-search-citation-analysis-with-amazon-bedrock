@@ -154,6 +154,28 @@ def _handle_with_bedrock_stub(job: dict, event: dict, bedrock: MagicMock | None 
     return result, table, bedrock
 
 
+def _handle_with_web_search_stub(job: dict, event: dict) -> tuple[dict, MagicMock, MagicMock]:
+    """Run ``event`` against a table holding ``job`` with the provider search stubbed; returns ``(result, table, run)``.
+
+    ``run`` answers an empty keyword list, for the replay and stale-attempt
+    cases where the assertion is that the worker never reached the provider.
+    """
+    run = MagicMock(return_value='[]')
+    result, table = _run(job, event, run_web_search=run)
+    return result, table, run
+
+
+def _assert_no_side_effects(table: MagicMock, *collaborators: MagicMock) -> None:
+    """The worker answered without writing the job row or calling any of ``collaborators``.
+
+    What a stale-attempt fence and a checkpoint replay both promise: the
+    persisted job, not the event, decides the answer.
+    """
+    table.update_item.assert_not_called()
+    for collaborator in collaborators:
+        collaborator.assert_not_called()
+
+
 class TestPlan:
     def test_creates_one_pending_step_per_configured_provider(self):
         result, _table = _plan(_expansion_job(), _PERPLEXITY, _OPENAI)
@@ -867,18 +889,15 @@ class TestAttemptAndRoundFences:
         result, table = _run(self._new_attempt_job(), self._stale_event('plan', retry=False), get_web_search_clients=providers)
 
         assert result['steps'] == []
-        table.update_item.assert_not_called()
-        providers.assert_not_called()
+        _assert_no_side_effects(table, providers)
 
     def test_stale_provider_action_does_not_call_or_checkpoint_the_provider(self):
-        run = MagicMock(return_value='[]')
         event = self._stale_event('execute_step', step_id='r1-openai', provider='openai')
 
-        result, table = _run(self._new_attempt_job(), event, run_web_search=run)
+        result, table, run = _handle_with_web_search_stub(self._new_attempt_job(), event)
 
         assert result['status'] == 'failed'
-        run.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, run)
 
     def _stale_bedrock_action(self, action: str) -> tuple[dict, MagicMock, MagicMock]:
         """Run a stale attempt-one ``action`` against a job that attempt two already owns."""
@@ -890,15 +909,13 @@ class TestAttemptAndRoundFences:
         result, table, bedrock = self._stale_bedrock_action('evaluate')
 
         assert result['decision'] == 'stop'
-        bedrock.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, bedrock)
 
     def test_stale_finalize_does_not_replace_the_new_attempt_result(self):
         result, table, bedrock = self._stale_bedrock_action('finalize')
 
         assert result['status'] == 'running'
-        bedrock.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, bedrock)
 
     def test_stale_fail_step_does_not_fail_the_new_attempt_checkpoint(self):
         event = self._stale_event(
@@ -911,25 +928,23 @@ class TestAttemptAndRoundFences:
         result, table = _run(self._new_attempt_job(), event)
 
         assert result['status'] == 'failed'
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table)
 
     def test_stale_fail_job_does_not_fail_the_new_attempt(self):
         result, table = _run(self._new_attempt_job(), self._stale_event('fail', error={'Error': 'States.Timeout'}))
 
         assert result['status'] == 'running'
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table)
 
     def test_previous_round_provider_action_cannot_mutate_the_active_round(self):
         job = self._new_attempt_job()
         job.update({'attempt': 1, 'retry_count': 0, 'execution_arn': 'arn:exec', 'active_round': 2})
         job['steps']['r1-openai']['attempt'] = 1
-        run = MagicMock(return_value='[]')
 
-        result, table = _run(job, _OPENAI_STEP_EVENT, run_web_search=run)
+        result, table, run = _handle_with_web_search_stub(job, _OPENAI_STEP_EVENT)
 
         assert result['status'] == 'failed'
-        run.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, run)
 
 
 class TestSequentialReplay:
@@ -943,13 +958,11 @@ class TestSequentialReplay:
                 },
             },
         )
-        run = MagicMock(return_value='[]')
 
-        result, table = _run(job, _OPENAI_STEP_EVENT, run_web_search=run)
+        result, table, run = _handle_with_web_search_stub(job, _OPENAI_STEP_EVENT)
 
         assert result['status'] == 'completed'
-        run.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, run)
 
     def test_persisted_evaluation_replays_without_calling_the_model(self):
         job = _round_one(
@@ -962,8 +975,7 @@ class TestSequentialReplay:
 
         assert result['decision'] == 'continue'
         assert result['expected_round'] == 2
-        bedrock.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, bedrock)
 
     def test_persisted_final_result_replays_without_calling_selection_model(self):
         job = _round_one()
@@ -978,8 +990,7 @@ class TestSequentialReplay:
         result, table, bedrock = _handle_with_bedrock_stub(job, {'action': 'finalize', 'job_id': 'job-a'})
 
         assert (result['status'], result['keyword_count']) == ('completed', 1)
-        bedrock.assert_not_called()
-        table.update_item.assert_not_called()
+        _assert_no_side_effects(table, bedrock)
 
     def test_persisted_plan_replays_without_calling_planning_model(self):
         bedrock = MagicMock()

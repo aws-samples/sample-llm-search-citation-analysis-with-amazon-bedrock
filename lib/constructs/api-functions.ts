@@ -45,6 +45,14 @@ export function monthLogGroup(
   });
 }
 
+/** A 7-day CloudWatch log group with a generated name, destroyed with the stack; for deploy-time custom resource Lambdas. */
+export function weekLogGroup(scope: Construct, id: string): logs.LogGroup {
+  return new logs.LogGroup(scope, id, {
+    retention: logs.RetentionDays.ONE_WEEK,
+    removalPolicy: cdk.RemovalPolicy.DESTROY,
+  });
+}
+
 /** Props of one stack Lambda; the Python runtime and the log group are fixed by `pythonFunction`. */
 export type PythonFunctionProps = Omit<lambda.FunctionProps, 'runtime' | 'logGroup' | 'functionName'> & {
   functionName: string;

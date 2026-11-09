@@ -6,8 +6,7 @@ import {
 } from '@testing-library/react';
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import { HeadlineSection } from './HeadlineSection';
-import { NO_PREVIOUS_PERIOD } from '../../layout/periodComparison';
-import { OWNED_DOMAINS_MISSING } from '../../layout/KpiHeadline';
+import { itShowsPeriodHeadlineGaps } from '../../layout/kpiHeadline-fixtures';
 import {
   buildOverview, buildPeriodChange
 } from '../../layout/reportPayload-fixtures';
@@ -16,7 +15,7 @@ import {
 } from '../../layout/reportQueries-fixtures';
 import { buildKpis } from '../../BrandVisibilityReport/groupKpiHistory-fixtures';
 import { loadedOverview } from './reportsOverview-fixtures';
-import { sectionPlaceholderCases } from '../../layout/sectionGate-fixtures';
+import { itRendersSectionPlaceholders } from '../../layout/sectionPlaceholders-fixtures';
 
 function renderHeadline(overrides: Partial<ReportsOverviewResponse> = {}): void {
   render(<HeadlineSection {...loadedOverview(overrides)} />);
@@ -35,19 +34,10 @@ describe('HeadlineSection — KPIs', () => {
     expect(statFootnote('Visibility score')).toBe('-8.2 pts vs previous day (7 keywords)');
   });
 
-  it('says there is no earlier period before a second one', () => {
-    renderHeadline({ change: null });
+  it('writes the citation rate change once owned domains are configured', () => {
+    renderHeadline({ citations_configured: true });
 
-    expect(statFootnote('Visibility score')).toBe(NO_PREVIOUS_PERIOD);
-  });
-
-  it.each([
-    [false, OWNED_DOMAINS_MISSING],
-    [true, '+1.2 pts vs previous day (3 keywords)'],
-  ])('writes under the citation rate, with owned domains configured %s, "%s"', (configured, footnote) => {
-    renderHeadline({ citations_configured: configured });
-
-    expect(statFootnote('Citation rate')).toBe(footnote);
+    expect(statFootnote('Citation rate')).toBe('+1.2 pts vs previous day (3 keywords)');
   });
 
   it('says how many answers and keywords the KPIs cover', () => {
@@ -58,6 +48,10 @@ describe('HeadlineSection — KPIs', () => {
 
     expect(screen.getByText('Each keyword\'s latest day in the last 30 days — 20 AI answers across 8 of 10 keywords.')).toBeInTheDocument();
   });
+});
+
+describe('HeadlineSection — KPIs without a comparison or owned domains', () => {
+  itShowsPeriodHeadlineGaps(renderHeadline);
 });
 
 describe('HeadlineSection — keyword breadth', () => {
@@ -81,12 +75,7 @@ describe('HeadlineSection — keyword breadth', () => {
 });
 
 describe('HeadlineSection — placeholder states', () => {
-  it.each(sectionPlaceholderCases('Loading executive summary…'))('renders the $name', ({
-    state, text
-  }) => {
-    render(<HeadlineSection data={null} {...state} />);
-    expect(screen.getByText(text)).toBeInTheDocument();
-  });
+  itRendersSectionPlaceholders(HeadlineSection, 'Loading executive summary…');
 
   it.each([
     ['there is no overview yet', null],

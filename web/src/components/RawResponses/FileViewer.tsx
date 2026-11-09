@@ -14,7 +14,9 @@ import {
   ViewerHeader, ViewerLoading
 } from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
-import { providerColor } from '../../constants/providers';
+import {
+  providerColor, providerName
+} from '../../constants/providers';
 import {
   TabBar, TabPanel, type TabDefinition
 } from '../ui/TabBar';
@@ -49,7 +51,7 @@ const VIEW_TABS: ReadonlyArray<TabDefinition<ViewTab>> = [
 ];
 
 const getProviderColor = (provider: string): string =>
-  providerColor(provider.toLowerCase())?.badge ?? 'bg-gray-100 text-gray-800';
+  providerColor(provider.toLowerCase())?.badge ?? 'bg-gray-100 text-gray-800 dark:text-gray-200';
 
 const hasDocumentContent = (
   content: RawResponseContent
@@ -133,7 +135,7 @@ const TooLargeNotice = ({
   size: number;
   limit: number | undefined 
 }) => (
-  <output className="block p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+  <output className="block p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-amber-800">
     This file is {formatSize(size)}, too large to preview here
     {limit === undefined ? '' : ` (the limit is ${formatSize(limit)})`}. Download it to open it.
   </output>
@@ -179,7 +181,7 @@ const QuickInfoCards = ({ doc }: QuickInfoCardsProps) => (
       <p
         className={`mt-1 inline-block px-2 py-1 rounded text-xs sm:text-sm font-medium ${getProviderColor(doc.provider)}`}
       >
-        {doc.provider}
+        {providerName(doc.provider.toLowerCase())}
       </p>
     </InfoCard>
     <InfoCard label="Keyword">
@@ -241,7 +243,7 @@ const OverviewTab = ({ doc }: OverviewTabProps) => (
               href={safeHref(url)}
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-sm text-blue-600 hover:underline truncate"
+              className="block text-sm text-blue-700 dark:text-blue-400 hover:underline truncate rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
             >
               {url}
             </a>

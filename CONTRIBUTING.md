@@ -44,7 +44,9 @@ GitHub provides additional document on [forking a repository](https://help.githu
 
 ## Local gates
 
-Set up the Python toolchain and build both Lambda layers once:
+Use Node.js 24, pinned in `.nvmrc` (`nvm use` or `fnm use`). It is the newest Lambda Node.js runtime, so don't go
+above it; `npm run validate` refuses any other major version. Set up the Python toolchain and build both Lambda
+layers once:
 
 ```bash
 npm install && (cd web && npm install)
@@ -89,7 +91,7 @@ GitHub releases). `quality-gates.yml` pins the versions CI uses.
 ### Test conventions
 
 - Tests live beside the code they test.
-  - CDK and dashboard: `*.spec.ts` / `*.spec.tsx` next to the module, run by Vitest (`vitest.config.ts` at the root
+  - CDK and dashboard: `*.spec.ts` / `*.spec.tsx` next to the module, run by Vitest (`vitest.config.mts` at the root
     covers `lib/**/*.spec.ts`; `web/vite.config.ts` runs the dashboard specs in jsdom).
   - Lambda: `test_*.py` next to the Python module, run by pytest from the repo root (`testpaths = ["lambda"]` in
     `pyproject.toml`).

@@ -31,6 +31,11 @@ A Tailwind class becomes dark-mode aware in one of two ways:
    error fallback) and wherever the override gives the wrong result, such as
    the sidebar logo mark and other fixed-contrast surfaces.
 
+> **Cascade:** Tailwind emits variant classes (`dark:`, `hover:`,
+> `focus:`, `disabled:`) after the overrides in `index.css`, at the same
+> specificity, so an explicit `dark:` variant wins over a global override.
+> Plain utilities come before the overrides, so the override wins over them.
+
 > **Rule of thumb:** if a class is covered by §1.2, do not add a `dark:`
 > variant. If a class you need is not covered, add the override to
 > `index.css` rather than sprinkling `dark:` variants across components.
@@ -56,36 +61,30 @@ A Tailwind class becomes dark-mode aware in one of two ways:
 | `hover:bg-gray-50`     | gray-700         |
 | `hover:bg-gray-100` / `-200` | gray-600   |
 | `input` (except checkbox/radio), `textarea`, `select` | background gray-700, border gray-600, text gray-100, placeholder gray-400, focus ring and border gray-500 |
+| disabled `input`, `textarea`, `select` | background gray-800, text gray-400 |
+| `text-gray-800`        | gray-200         |
+| `hover:text-gray-900` / `-800` | gray-50  |
+| `hover:text-gray-700` / `-600` | gray-200 |
+| `divide-gray-100` / `-200` | gray-700     |
+| `bg-gray-900 text-white` (primary buttons, selected toggles) | white background, gray-900 text; `hover:bg-gray-800` → gray-100. Skipped when the element sets its own `dark:bg-*`, and while disabled when it sets `disabled:bg-*` |
+| `text-white disabled:bg-gray-300` (disabled) | gray-600 background, gray-300 text |
 
 #### 1.2.2 Accent surfaces, text and borders
 
-Tinted surfaces become translucent dark tints (`bg-{tone}-50` ≈ 25 % and
-`bg-{tone}-100` ≈ 40 % alpha of the tone's `*-900`; slate 50 % / 70 %),
-accent text shifts to the `*-300` shade (`*-200` for `-900` text), and
-accent borders become muted translucent borders. Coverage differs per
-tone; check this table before relying on a class:
+Only the palette roles of §2.2 have dark overrides: tinted surfaces become
+translucent tints of the tone's `*-900`, and accent text lifts to `*-300`
+(`*-400` for `-600` text, `*-200` for `-900` text).
 
-| Tone | `bg-` | `text-` | `border-` | `hover:bg-` |
-| ---- | ----- | ------- | --------- | ----------- |
-| emerald | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
-| green   | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100 |
-| amber   | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
-| yellow  | 50, 100 | 700, 800, 900 | 100, 200 | – |
-| violet  | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
-| purple  | 50, 100 | 700, 800, 900 | 100, 200 | – |
-| fuchsia | 50, 100 | 700, 800 | – | – |
-| blue    | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
-| indigo  | 50, 100 | 700, 800 | 100, 200 | – |
-| sky     | 50, 100 | 700, 800 | 100, 200 | – |
-| cyan    | 50, 100 | – | – | – |
-| teal    | 50, 100 | 700, 800 | 100, 200 | – |
-| red     | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
-| rose    | 50, 100 | 700, 800 | 100, 200 | 100 |
-| orange  | 50, 100 | 700, 800 | 100, 200, 300 | – |
-| slate   | 50, 100 | 700, 800 | 100, 200 | – |
+| Tone | `bg-` | `text-` | `border-` | `hover:bg-` | `hover:text-` |
+| ---- | ----- | ------- | --------- | ----------- | ------------- |
+| blue    | 50, 100 | 600, 700, 800, 900 | 200 | 100 | 800 |
+| violet  | 50, 100 | 700, 800, 900 | 100, 200, 300 | – | 800 |
+| red     | 50, 100, 50/30 | 600, 700, 800 | 200, 300 | 50, 100 | 600, 700 |
+| amber   | – | 600, 700, 800, 900 | – | – | 900 |
+| emerald | – | 600, 700, 800, 900 | – | – | – |
 
-Four alpha-modifier row backgrounds have their own overrides:
-`bg-emerald-50/50`, `bg-green-50/30`, `bg-red-50/30`, `bg-orange-50/30`.
+Other tones have no overrides. Rules in `index.css` ship whether or not a
+component uses the class, so add one only for a class in use.
 
 > **Not overridden:** saturated solid surfaces (`bg-{tone}-500/600/700`)
 > and their `text-white` pairings. They work in both themes as-is.
@@ -116,11 +115,15 @@ timestamp, and opens the print dialog once the data is ready. Reports decide rea
 - Hide screen-only controls with `print-hidden` (or
   `data-print-hidden="true"`).
 - Reference content that would crowd the screen (the KPI definitions at the
-  end of every report and of the Visibility tab) goes in `ui/Disclosure`:
+  end of every report and of the Visibility page) goes in `ui/Disclosure`:
   collapsed on screen, always open in print and `?print=1` (`print-reveal`).
 - Keep a card or chart on one page with `avoid-break-inside`; start a
   section on a new page with `page-break-before`.
-- Print output is always light (white background, black text), keeps
+- Print output is always light. `useTheme` renders a `?print=1` tab in the
+  light theme (class and chart palette) whatever the saved theme, and drops
+  the `dark` class between `beforeprint` and `afterprint` when a dark page is
+  printed directly.
+- Print output has a white background and black text, keeps
   background colours (`print-color-adjust: exact`) and makes `sticky`
   elements static.
 
@@ -138,47 +141,54 @@ timestamp, and opens the print dialog once the data is ready. Reports decide rea
 | Border          | `gray-200` | `gray-700` |
 | Text primary    | `gray-900` | `gray-50`  |
 | Text secondary  | `gray-600` | `gray-300` |
-| Text muted      | `gray-400` | `gray-500` |
-| Action primary  | `gray-900` | (see Buttons) |
+| Text muted      | `gray-500` | `gray-400` |
 
-### 2.2 Accent palette
+`text-gray-400` is for decoration only (dividers, disabled controls): it is
+2.6:1 on white, below the 4.5:1 that text needs. Captions, helper text and
+icon buttons use `text-gray-500` (4.8:1 on white, about 5:1 on gray-800 in dark).
+| Action primary  | `gray-900` | `white` (inverted, see §1.2.1) |
 
-Accents are used sparingly: navigation icon tints, stat card badges,
-status pills and feedback states. Each sidebar item has its own `-500`
-icon tint; reuse the tone of the feature when you add accents to it.
+### 2.2 Palette: grey, blue, violet
 
-| Tone    | Meaning                          | Sidebar item |
-| ------- | -------------------------------- | ------------ |
-| Blue    | Info, neutral metrics            | Dashboard |
-| Indigo  | Visibility; domains that are not yours (charts) | Visibility |
-| Violet  | Brand mentions                   | Brand Mentions |
-| Purple  | Citations                        | Citations |
-| Fuchsia | Prompt insights                  | Prompt Insights |
-| Rose    | Citation gaps                    | Citation Gaps |
-| Emerald | Your brand, success, positive    | Action Center |
-| Amber   | Competitors, warnings            | Keyword Research |
-| Teal    | Content                          | Content Studio |
-| Cyan    | Reports                          | Reports |
-| Sky     | Recent searches                  | Recent Searches |
-| Slate   | Raw data, low emphasis           | Raw Responses |
-| Green   | Success, running                 | Run Analysis |
-| Orange  | Schedule                         | Schedule |
-| Yellow  | Medium priority                  | – |
-| Red     | Errors, destructive, negative    | – |
+The dashboard uses three colour roles in both themes, plus status colours
+kept to text, numbers and dots. Feature tints (one hue per page or section)
+are not used: a screen with many hues reads as noise, and colour stops
+meaning anything.
 
-Pattern for badges and pills: `bg-{tone}-50 text-{tone}-700`
-(`bg-{tone}-100` for stronger emphasis). Avoid mixing two accents in the
-same component. Solid action buttons keep
-`bg-{tone}-600 text-white hover:bg-{tone}-700` in both themes.
+| Role | Light | Dark | Used for |
+| ---- | ----- | ---- | -------- |
+| Neutral | white / gray-50 / gray-100 surfaces, gray-200 borders, gray-500 to gray-900 text | gray-900 to gray-700 surfaces, gray-700 borders, gray-100 to gray-400 text | Everything by default: icons, chips, category and engine badges, cards, competitors, "Other" |
+| Interaction | blue-600 / blue-700 | blue-400 / blue-300 | Links, focus, the open page in the sidebar, selected states |
+| Your brand | violet-50 surfaces, violet-700 text, violet-600 buttons | violet tints, violet-300 text, violet-600 buttons | First-party brands and domains, the "First Party" badge, first-party rows and buttons |
+| Status | amber-700 (warning), emerald-700 (positive), red-600/700 (error) | amber-300, emerald-300, red-300/400 | Text, numbers and dots only; never card fills, stripes or category labels. Red tinted panels are kept for real errors |
+
+Rules:
+
+- No coloured card stripes (`border-l-4 border-{tone}-500`): a card is
+  neutral and its status is a number, a word or a dot.
+- Brand-type badges come from `constants/brandTypeBadge.ts`, engine chips
+  from `constants/providers.ts` `badge` (neutral grey with the engine name).
+- Sidebar icons use `navIconClass` (`Layout/sidebarNav.tsx`): grey, the open
+  page in blue. `iconColor` on nav items no longer tints the sidebar.
+- Stat cards (`Dashboard/StatCard.tsx`) draw every tone as the same neutral
+  icon badge.
+- Charts keep one hue per series (engine colours in `constants/providers.ts`,
+  `Reports/charts/chartPalette.ts`): a chart needs distinct series to be read.
+- `index.css` ("Palette in dark mode") holds the dark versions of the blue,
+  violet, red, amber and emerald classes. Add a dark override there only for
+  a class a component uses: rules in `index.css` are not removed when unused.
 
 ### 2.3 Semantic state colours
 
-| State    | Background     | Text          | Border         |
-| -------- | -------------- | ------------- | -------------- |
-| Success  | `bg-green-50`  | `text-green-700` | `border-green-200` |
-| Warning  | `bg-yellow-50` | `text-yellow-800` | `border-yellow-200` |
-| Error    | `bg-red-50`    | `text-red-700` | `border-red-200` |
-| Info     | `bg-blue-50`   | `text-blue-700` | `border-blue-200` |
+| State    | Light | Dark (via override) | Where |
+| -------- | ----- | ------------------- | ----- |
+| Success  | `text-emerald-700` | emerald-300 | text, numbers, a dot (`bg-emerald-500`) |
+| Warning  | `text-amber-700`   | amber-300   | text, numbers, a dot (`bg-amber-500`) |
+| Error    | `bg-red-50 text-red-700 border-red-200` | red tint, red-300 | error panels and text |
+| Info     | `bg-blue-50 text-blue-700 border-blue-200` | blue tint, blue-300 | information panels and links |
+
+Success and warning do not fill panels: use a neutral panel with the status
+in its text.
 
 ---
 
@@ -193,9 +203,9 @@ The app uses the system font stack inherited from Tailwind defaults.
 | Section title (h3) | `text-lg font-semibold text-gray-900` |
 | Card label      | `text-sm font-medium text-gray-700`    |
 | Body            | `text-sm text-gray-600`                |
-| Helper / caption| `text-xs text-gray-400`                |
+| Helper / caption| `text-xs text-gray-500`                |
 | Numeric stat    | `text-3xl font-semibold text-gray-900` |
-| Section label   | `text-xs font-semibold uppercase tracking-wider text-gray-400` |
+| Section label   | `text-xs font-semibold uppercase tracking-wider text-gray-500` |
 
 > Markdown prose (AI responses, Content Studio output) uses the
 > `.prose-markdown` class, which has its own typographic scale in
@@ -235,7 +245,7 @@ hand-roll their buttons; move them to `<Button>` when you work on them.
 | `secondary`  | Alternate actions of equal weight. | `bg-white text-gray-900 border border-gray-200 hover:bg-gray-50` |
 | `ghost`      | Tertiary actions, cancel buttons, links inside dense rows. | `text-gray-600 hover:text-gray-900 hover:bg-gray-100` |
 | `danger`     | Destructive primary actions inside confirmation dialogs. | `bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300` |
-| `iconOnly`   | Square button hosting only an icon (toolbar / list-row actions). Always provide `aria-label`. | `text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md` |
+| `iconOnly`   | Square button hosting only an icon (toolbar / list-row actions). Always provide `aria-label`. | `text-gray-500 hover:text-gray-600 hover:bg-gray-100 rounded-md` |
 
 Every variant gets `rounded-lg`, `transition-colors`, a
 `focus-visible` ring and `disabled:opacity-50 disabled:cursor-not-allowed`.
@@ -367,21 +377,22 @@ global overrides of §1.2 for dark mode.
 | `/citation-gaps` | Citation Gaps | `Insights/CitationGaps` |
 | `/recommendations` | Action Center | `Insights/Recommendations` |
 | `/keyword-research` | Keyword Research | `KeywordResearch/KeywordResearchView` (research agent in `KeywordResearch/agent/`) |
+| `/seo/*` | SEO (children: Overview, Domain Overview, Backlinks, Rank Tracking, Site Audit, Performance, Local SEO) | `Seo/SeoRouter`, overview `Seo/SeoHome`, pages listed in `Seo/seoPages.ts` |
 | `/content-studio` | Content Studio | `ContentStudio/ContentStudioView` |
 | `/reports/*` | Reports | `Reports/ReportsRouter`, landing page `Reports/ReportsLandingView` |
 | `/searches` | Recent Searches | `Searches/SearchesView` |
 | `/raw-responses` | Raw Responses | `RawResponses/RawResponsesExplorer` |
 | `/execution` | Run Analysis | `Execution/ExecutionMonitor` |
 | `/schedule` | Schedule | `Schedule/ScheduleManager` |
-| `/settings` | Settings | `Settings/SettingsView`, tabs Keywords, Brand Tracking, Personas, AI Providers, Alerts, Users |
+| `/settings/*` | Settings (children: one per section) | `Settings/SettingsView`, sections Keywords, Markets, Brand tracking, Personas, AI providers, Bedrock models, Alerts, Users, AI assistants (`Settings/settingsSections.ts`; `/settings/<section>`, `/settings` opens Keywords; Users and Bedrock models are Admin only) |
 
 Reports (`ReportsRouter`): Executive Summary (`/reports/executive-summary`),
 Brand Visibility Report (`/reports/visibility[/:keyword]`), Competitor
 Benchmark (`/reports/benchmark`), AI Engines (`/reports/engines`), Sources
 (`/reports/sources`), Sentiment (`/reports/sentiment`), Competitor Gap
 Report (`/reports/competitor[/:competitor]`), Content Action Plan
-(`/reports/content-action-plan`) and Keyword Deep Dive
-(`/reports/keyword[/:keyword]`). Custom reports (`Reports/customReport/`):
+(`/reports/content-action-plan`), Keyword Deep Dive
+(`/reports/keyword[/:keyword]`) and SEO vs GEO (`/reports/seo-geo`). Custom reports (`Reports/customReport/`):
 the builder at `/reports/custom/new` and `/reports/custom/:id/edit`, a saved
 report at `/reports/custom/:id`.
 
@@ -408,7 +419,8 @@ its own file.
 | `Button.tsx` | Canonical button: variants and sizes (§5). |
 | `Icons.tsx`, `ClipboardIcon.tsx` | Shared SVG icons (§6). |
 | `StrokeIcon.tsx`, `iconPaths.ts` | The 24×24 outline SVG every icon is drawn with, and the path data it draws (§6.2). |
-| `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. |
+| `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. `Modal` sizes are `md`, `xl`, `4xl`, `5xl` and `6xl`; `layout="flush"` renders the children edge to edge (own header, scrolling body and footer) and `labelledBy` names the dialog from a heading inside them. Every dialog uses it, so all close on Escape. |
+| `LoadOnScrollFooter.tsx` | End of a list that grows as the reader scrolls: an invisible marker (`useLoadOnScroll`, IntersectionObserver, 400 px ahead) asks for the next batch, a polite live "Loading more…", a "Load more" button for keyboard users and browsers without the observer, "Try again" after a failure (no automatic retry), and an end-of-list line. Used by Recent Searches, Citations and Brand Mentions. A cursor-paged list keeps its pages with `hooks/useContinuedPages.ts`: it appends each page after the first, drops repeated rows, ignores a page that answers an older query, and starts again when the first page changes (a new sort, filter, scope or market). |
 | `ModalCloseFooter.tsx` | Bottom bar of a full-size detail dialog: a rule and a right-aligned Close button. |
 | `Spinner.tsx` | Loading indicator (`sm` / `md` / `lg`). |
 | `Skeleton.tsx` | First-load placeholders shaped like the content they stand in for, so nothing shifts when data arrives: `Skeleton` (one block), `SkeletonRegion` (the `<output aria-busy>` wrapper with the screen-reader label every skeleton layout goes in), `SkeletonLines`, `SkeletonTable`, `SkeletonCards`, `SkeletonPage` (the Suspense fallback of lazy tabs and reports). Show them only while there is no data yet; on refresh keep the old data. The `.skeleton` class in `index.css` carries the colour, dark tint and reduced-motion rule. |
@@ -453,8 +465,7 @@ Feature code lives in `components/<Feature>/`; import through the folder's
 `index.ts` where it has one. Specs (`*.spec.tsx`) and fixtures
 (`*-fixtures.ts(x)`) sit next to the file. ESLint caps files at 400 lines
 (specs at 730), cyclomatic complexity at 12 and nesting depth at 3; split a
-component into sub-components before it reaches them. See
-`.kiro/steering/structure.md` for the layout map.
+component into sub-components before it reaches them.
 
 Reports compose their pages from `components/Reports/layout/`:
 `ReportLayout`, `ReportSection` and `ReportSectionPlaceholder` (page and
@@ -510,7 +521,7 @@ Dataset colours: saturated colours stay fixed across themes; neutral
 
 #### Report charts
 
-The reports and the Visibility tab draw their charts from one library,
+The reports and the Visibility page draw their charts from one library,
 `components/Reports/charts/` (KPI trend line, share-of-voice donut,
 grouped engine bars, brand trend lines, sentiment split, top sources):
 
@@ -567,7 +578,7 @@ Do NOT apply the filter to:
 - Inputs / textareas / selects: `w-full p-2 border border-gray-200
   rounded-lg text-sm focus:ring-2 focus:ring-gray-900`. Dark-mode styling
   is applied globally.
-- Helper text under inputs: `text-xs text-gray-400 mt-1`.
+- Helper text under inputs: `text-xs text-gray-500 mt-1`.
 - Validation errors: `text-xs text-red-600 mt-1`.
 - Cancel buttons sit to the right of the submit button and use the `ghost`
   variant.

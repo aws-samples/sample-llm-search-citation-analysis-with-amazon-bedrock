@@ -74,6 +74,7 @@ export function BrandRankingsSection({
     title: 'Brand rankings',
     loading,
     loadingMessage: 'Loading brand rankings…',
+    loadingShape: 'chart',
     error,
     value: brands,
   });
@@ -109,7 +110,7 @@ export function BrandRankingsSection({
 }
 
 function firstPartyRowClass(brand: BrandLeaderboardRow): string {
-  return brand.classification === 'first_party' ? 'bg-emerald-50 dark:bg-emerald-950/20' : '';
+  return brand.classification === 'first_party' ? 'bg-violet-50 dark:bg-violet-950/20' : '';
 }
 
 /** The leaderboard of one keyword's latest run (`/visibility`). */
@@ -152,10 +153,10 @@ function ClassificationBadge({ classification }: { readonly classification: Bran
 
 function badgeStyles(c: BrandClassification): string {
   if (c === 'first_party') {
-    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
+    return 'bg-gray-100 text-emerald-800 dark:bg-gray-950 dark:text-emerald-300';
   }
   if (c === 'competitor') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
+    return 'bg-gray-100 text-amber-800 dark:bg-gray-950 dark:text-amber-300';
   }
   return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
 }

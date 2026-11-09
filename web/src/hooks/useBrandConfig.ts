@@ -139,30 +139,28 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   }, [fetchConfig, fetchPresets]);
 
   /**
-   * Replaces the local config with the one a mutation echoes back; a failed
-   * request leaves the optimistic local state as is.
+   * Saves `newConfig`, showing it at once. A failed save restores the config
+   * as it was and rethrows, so the form keeps its unsaved changes and can say
+   * the save failed (the change is not kept anywhere else).
    */
-  const adoptServerConfig = useCallback(async (request: () => Promise<BrandConfigResponse>, failureNote: string) => {
+  const saveConfig = useCallback(async (newConfig: Partial<BrandConfig>) => {
+    const previous = config;
+    setConfig({
+      ...DEFAULT_CONFIG,
+      ...config,
+      ...newConfig
+    });
     try {
-      const data = await request();
+      const data = await api.saveConfig(newConfig);
       setConfig({
         ...DEFAULT_CONFIG,
         ...data.config
       });
-    } catch {
-      console.warn(failureNote);
+    } catch (error) {
+      setConfig(previous);
+      throw error;
     }
-  }, []);
-
-  const saveConfig = useCallback(async (newConfig: Partial<BrandConfig>) => {
-    const mergedConfig = {
-      ...DEFAULT_CONFIG,
-      ...config,
-      ...newConfig
-    };
-    setConfig(mergedConfig);
-    await adoptServerConfig(() => api.saveConfig(newConfig), 'Could not save to API, config saved locally only');
-  }, [config, api, adoptServerConfig]);
+  }, [config, api]);
 
   const expandAllBrands = useCallback(
     async (existingBrands: string[], brandType: 'first_party' | 'competitor' = 'first_party'): Promise<BrandExpansionAllResult> => runExpansion<ExpandAllBrandsResponse, BrandExpansionAllResult>(

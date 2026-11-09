@@ -8,6 +8,7 @@ import { useSelfReflection } from './useSelfReflection';
 import { mockSelfReflection } from './useSelfReflection-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import { idleEndpointState } from '../test/idleEndpointState';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -21,12 +22,7 @@ describe('useSelfReflection', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useSelfReflection());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      triggerReflection: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('triggerReflection'));
   });
 
   describeEndpointHookContract({

@@ -22,7 +22,7 @@ import {
   EMPTY_POINT, hasSearchPoint, pointFields, targetFields, type IdentityInput
 } from './localSeoRequest';
 import {
-  TargetTabHints, marketHasPoint, targetLabel, type LocalTabProps
+  TARGET_LABEL, TargetTabHints, marketHasPoint, targetPlaceholder, type LocalTabProps
 } from './localSeoSettings';
 
 const SEARCH_TYPES: {
@@ -85,7 +85,7 @@ function ResultsTable({ response }: { readonly response: LocalSerpResponse }) {
         return (
           <tr
             key={item.cid ?? `${item.title}-${String(position)}`}
-            className={isMatch ? 'bg-emerald-50 font-semibold' : ''}
+            className={isMatch ? 'bg-gray-50 font-semibold' : ''}
             aria-current={isMatch ? 'true' : undefined}
           >
             {resultCells(item).map(([header, cell]) => <td key={header} className="px-3 py-2">{cell ?? '–'}</td>)}
@@ -135,9 +135,9 @@ export function LocalResultsTab({
       >
         <TextField label="Keyword" value={keyword} onChange={setKeyword} placeholder="e.g. coffee near me" suggestions={settings.keywords} />
         <SelectField label="Results from" value={searchType} options={SEARCH_TYPES} onChange={setSearchType} />
-        <SelectField label="Device" value={device} options={DEVICES} onChange={setDevice} />
+        <IdentityFields identity={target} onChange={setTarget} label={TARGET_LABEL} placeholder={targetPlaceholder(settings)} />
         <PointFields point={point} onChange={setPoint} market={market} />
-        <IdentityFields identity={target} onChange={setTarget} label={targetLabel(settings)} />
+        <SelectField label="Device" value={device} options={DEVICES} onChange={setDevice} />
       </LocalForm>
       <RequestOutcome state={request.state} loadingLabel="Loading local results" columns={6}>
         {(response) => (

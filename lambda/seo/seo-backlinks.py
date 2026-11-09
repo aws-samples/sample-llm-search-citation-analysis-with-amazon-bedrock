@@ -32,13 +32,9 @@ import functools
 import json
 import logging
 import os
-import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
-
-# Shared layer path (populated by the Lambda layer at /opt/python)
-sys.path.insert(0, '/opt/python')
 
 import boto3
 from seo_export import EXPORT_SCHEMA, ExportWindowError, export_pricing, row_window

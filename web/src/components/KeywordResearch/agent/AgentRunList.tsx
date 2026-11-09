@@ -83,7 +83,7 @@ export function AgentRunList({
           <li key={job.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 sm:p-4">
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                {active && <Spinner size="sm" className="text-gray-400" />}
+                {active && <Spinner size="sm" className="text-gray-500" />}
                 <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getResearchStatusClass(status)}`}>
                   {getResearchStatusLabel(status)}
                 </span>

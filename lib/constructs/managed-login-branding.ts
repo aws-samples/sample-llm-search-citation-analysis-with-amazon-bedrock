@@ -1,9 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { inlineCustomResourceProvider } from './custom-resource-provider';
 
 /**
  * Themes the Cognito managed-login pages an MCP client's browser lands on
@@ -22,7 +20,7 @@ import { Construct } from 'constructs';
  * rejects outright.
  *
  * This construct runs that round trip at deploy time, in one Lambda behind
- * a `cr.Provider` (same shape as `BedrockModelAccess`):
+ * a `cr.Provider` (`inlineCustomResourceProvider`, as `BedrockModelAccess` uses):
  *   1. `CreateManagedLoginBranding` with Cognito's own defaults
  *      (`useCognitoProvidedValues: true`) — this is the only call that is
  *      guaranteed to produce a settings document the service accepts.
@@ -254,34 +252,19 @@ export class ManagedLoginBranding extends Construct {
     const logoLightBase64 = Buffer.from(logoSvg(HEADER_HEX, SURFACE_HEX)).toString('base64');
     const logoDarkBase64 = Buffer.from(logoSvg(SURFACE_HEX, HEADER_HEX)).toString('base64');
 
-    const handlerFunction = new lambda.Function(this, 'Handler', {
+    const provider = inlineCustomResourceProvider(this, '', {
       functionName: 'CitationAnalysis-McpBrandingHandler',
       description: 'Themes the MCP managed-login pages to the Citation Analysis dashboard palette',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'index.handler',
-      code: lambda.Code.fromInline(brandingHandlerCode()),
+      code: brandingHandlerCode(),
       timeout: cdk.Duration.seconds(30),
-      memorySize: 256,
-      logGroup: new logs.LogGroup(this, 'HandlerLogs', {
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
-    });
-    handlerFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: [
-        'cognito-idp:CreateManagedLoginBranding',
-        'cognito-idp:DescribeManagedLoginBrandingByClient',
-        'cognito-idp:UpdateManagedLoginBranding',
-      ],
-      resources: ['*'], // These operations do not accept a resource ARN.
-    }));
-
-    const provider = new cr.Provider(this, 'Provider', {
-      onEventHandler: handlerFunction,
-      logGroup: new logs.LogGroup(this, 'ProviderLogs', {
-        retention: logs.RetentionDays.ONE_WEEK,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      }),
+      statements: [new iam.PolicyStatement({
+        actions: [
+          'cognito-idp:CreateManagedLoginBranding',
+          'cognito-idp:DescribeManagedLoginBrandingByClient',
+          'cognito-idp:UpdateManagedLoginBranding',
+        ],
+        resources: ['*'], // These operations do not accept a resource ARN.
+      })],
     });
 
     const resource = new cdk.CustomResource(this, 'Resource', {

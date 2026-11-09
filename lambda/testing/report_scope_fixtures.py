@@ -18,7 +18,8 @@ from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from testing.module_loader import load_handler_module, module_name_for
+from testing.handler_fixtures import handler_fixture
+from testing.module_loader import API_DIR, load_handler_module, module_name_for
 from testing.search_results_fixtures import (
     PartitionReadFailure,
     active_keywords_table,
@@ -62,6 +63,14 @@ def load_scoped_handler(directory: str, filename: str, suffix: str = '_scopes') 
     """``filename`` loaded with ``SCOPE_ENV`` in place and ``boto3.resource`` stubbed."""
     with patch('boto3.resource', MagicMock()), patch.dict(os.environ, SCOPE_ENV):
         return load_handler_module(directory, filename, module_name_for(filename, suffix))
+
+
+def report_handler_fixture(filename: str, module_name: str):
+    """A module-scoped fixture yielding the API handler ``filename`` loaded as ``module_name`` with ``REPORT_TABLES_ENV``.
+
+    Assign it to the fixture name (``handler_fixture`` with the report tables).
+    """
+    return handler_fixture(API_DIR, filename, module_name, env=REPORT_TABLES_ENV)
 
 
 def brand(name: str, classification: str, mentions: int = 1, rank: int = 1, sentiment: str = 'positive') -> dict[str, Any]:

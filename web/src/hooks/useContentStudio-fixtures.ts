@@ -1,8 +1,12 @@
 import {
   StrictMode, createElement, useEffect, type ReactNode
 } from 'react';
-import { renderHook } from '@testing-library/react';
-import { vi } from 'vitest';
+import {
+  renderHook, waitFor
+} from '@testing-library/react';
+import {
+  expect, vi
+} from 'vitest';
 import {
   apiBatchRequest, apiBatchStartResponse, apiBatchStatusResponse, buildApiBatchRequest
 } from '../api/contentStudio-fixtures';
@@ -289,6 +293,13 @@ export function storedActiveContentStudioBatchCandidates(): ContentStudioBatchCa
 
 export function storedActiveContentStudioBatchIds(): string[] {
   return storedActiveContentStudioBatchCandidates().map((candidate) => candidate.id);
+}
+
+/** Waits until no batch candidate is left in storage. */
+export async function waitForStoredBatchCandidatesCleared(): Promise<void> {
+  await waitFor(() => {
+    expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
+  });
 }
 
 export function buildTerminalBatchStartResponse(

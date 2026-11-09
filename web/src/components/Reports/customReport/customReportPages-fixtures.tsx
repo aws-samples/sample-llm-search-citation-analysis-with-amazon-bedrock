@@ -4,7 +4,9 @@ import {
 import {
   MemoryRouter, Route, Routes
 } from 'react-router-dom';
-import { vi } from 'vitest';
+import {
+  describe, expect, it, vi
+} from 'vitest';
 import { mockApiGet } from '../../../api/clientMock-fixtures';
 import type { CustomReport } from '../../../api/customReports';
 import { ALL_SCOPE } from '../../ui/reportScope';
@@ -86,6 +88,27 @@ export function renderWithoutSavedReports(path: string) {
   return renderCustomReportRoute(path);
 }
 
+/**
+ * What the custom report page at `path` (its id has no saved report) shows
+ * when the report is gone.
+ * The calling spec mocks `api/client` with `clientMock-fixtures`.
+ */
+export function describeMissingReportPage(path: string): void {
+  describe('when the report is missing', () => {
+    it('says the report is gone when no saved report has the id', async () => {
+      renderWithoutSavedReports(path);
+
+      expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
+    });
+
+    it('offers the way back to Reports when the report is gone', async () => {
+      renderWithoutSavedReports(path);
+
+      expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
+    });
+  });
+}
+
 /** The text of every level-2 heading, top to bottom. */
 export function sectionHeadingTexts(): (string | null)[] {
   return screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
@@ -165,4 +188,9 @@ class MissingFixtureElementError extends Error {
     super(`No ${what} found`);
     this.name = 'MissingFixtureElementError';
   }
+}
+
+/** Presses "Delete report" in the open "Delete this report?" dialog. */
+export function confirmReportDeletion(): void {
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete report' }));
 }

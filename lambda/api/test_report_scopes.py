@@ -24,7 +24,7 @@ import pytest
 from shared.scope_params import ReportScope
 from testing.assertions import present
 from testing.events import parse_response
-from testing.module_loader import load_handler_module, module_name_for
+from testing.module_loader import API_DIR, load_handler_module, module_name_for
 from testing.report_scope_fixtures import (
     OLD_TS,
     RUN_TS,
@@ -38,11 +38,9 @@ from testing.report_scope_fixtures import brand as _brand
 from testing.report_scope_fixtures import result as _result
 from testing.search_results_fixtures import key_parts, sort_condition
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
 
 def _load(filename: str):
-    return load_scoped_handler(_HERE, filename)
+    return load_scoped_handler(API_DIR, filename)
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +685,6 @@ class TestVisibilityGroupSurvivesAFailedKeyword:
 def test_reads_through_the_pooled_scope_resource(filename):
     sentinel = MagicMock(name='pooled-dynamodb')
     with patch('shared.scope_params.scoped_dynamodb_resource', return_value=sentinel), patch.dict(os.environ, SCOPE_ENV):
-        module = load_handler_module(_HERE, filename, module_name_for(filename, '_pooled'))
+        module = load_handler_module(API_DIR, filename, module_name_for(filename, '_pooled'))
 
     assert module.dynamodb is sentinel

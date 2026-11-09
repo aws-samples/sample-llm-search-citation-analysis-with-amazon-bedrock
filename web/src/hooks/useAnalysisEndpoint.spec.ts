@@ -27,7 +27,10 @@ import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 describe('useAnalysisEndpoint', () => {
   /** The exact state before any fetch and again after `reset`. */
-  const IDLE_STATE = idleEndpointState('fetchData', 'reset');
+  const IDLE_STATE = {
+    ...idleEndpointState('fetchData', 'reset'),
+    noData: false,
+  };
 
   describe('initial state', () => {
     it('returns null data, loading false, and null error before any fetch', () => {

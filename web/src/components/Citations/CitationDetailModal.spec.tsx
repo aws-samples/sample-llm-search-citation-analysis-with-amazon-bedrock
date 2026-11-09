@@ -8,6 +8,7 @@ import { CitationDetailModal } from './CitationDetailModal';
 import {
   buildCrawledContent, buildVideoCrawl
 } from './CitationDetailModal-fixtures';
+import { describeDialogContract } from '../../test/dialogContract';
 import type {
   CrawledContent, SEOAnalysis
 } from '../../types';
@@ -115,5 +116,20 @@ describe('CitationDetailModal YouTube video', () => {
     renderModalFor(buildVideoCrawl({ content_type: undefined }));
 
     expect(queryVideoHeadingElement()).toBeInTheDocument();
+  });
+});
+
+/** Renders the modal for a page titled "Hotel Sol rooms" and returns its `onClose` spy. */
+function renderClosableModal() {
+  const onClose = vi.fn();
+  render(<CitationDetailModal citation={buildCrawledContent({ title: 'Hotel Sol rooms' })} onClose={onClose} />);
+  return onClose;
+}
+
+describe('CitationDetailModal', () => {
+  describeDialogContract({
+    name: 'Hotel Sol rooms',
+    render: renderClosableModal,
+    closeButtons: ['Close'],
   });
 });

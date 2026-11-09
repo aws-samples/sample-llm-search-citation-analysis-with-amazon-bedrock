@@ -46,15 +46,26 @@ function isProviderId(provider: string): provider is ProviderId {
   return Object.keys(PROVIDER_NAMES).includes(provider);
 }
 
-/** A provider's display name ("OpenAI"), or its id for a provider the dashboard does not know. */
+/** Display names of the web-search providers, which add cited links but write no answer (not counted in the KPIs). */
+const SEARCH_PROVIDER_NAMES: ReadonlyMap<string, string> = new Map([
+  ['brave', 'Brave Search'],
+  ['tavily', 'Tavily'],
+  ['exa', 'Exa'],
+  ['serpapi', 'SerpAPI'],
+  ['firecrawl', 'Firecrawl'],
+  ['agentcore', 'Amazon Bedrock Web Search'],
+]);
+
+/** A provider's display name ("OpenAI", "Brave Search"), or its id for a provider the dashboard does not know. */
 export function providerName(provider: string): string {
-  return isProviderId(provider) ? PROVIDER_NAMES[provider] : provider;
+  if (isProviderId(provider)) return PROVIDER_NAMES[provider];
+  return SEARCH_PROVIDER_NAMES.get(provider) ?? provider;
 }
 
 interface ProviderColor {
   /** The provider's chart colour as `r, g, b`, for `rgb()` / `rgba()`. */
   rgb: string;
-  /** Tinted badge classes in the same hue. */
+  /** Badge classes: neutral grey with the engine name (the hue is for charts only). */
   badge: string;
 }
 
@@ -62,24 +73,24 @@ interface ProviderColor {
 const PROVIDER_COLORS: Record<ProviderId, ProviderColor> = {
   [PROVIDER.OPENAI]: {
     rgb: '16, 185, 129',
-    badge: 'bg-green-100 text-green-800',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   },
   [PROVIDER.PERPLEXITY]: {
     rgb: '249, 115, 22',
-    badge: 'bg-orange-100 text-orange-800',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   },
   [PROVIDER.GEMINI]: {
     rgb: '59, 130, 246',
-    badge: 'bg-blue-100 text-blue-800',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   },
   [PROVIDER.CLAUDE]: {
     rgb: '168, 85, 247',
-    badge: 'bg-purple-100 text-purple-800',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   },
   // cyan-500: a hue no other engine, brand or sentiment series uses.
   [PROVIDER.GOOGLE_AI_OVERVIEW]: {
     rgb: '6, 182, 212',
-    badge: 'bg-cyan-100 text-cyan-800',
+    badge: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   },
 };
 

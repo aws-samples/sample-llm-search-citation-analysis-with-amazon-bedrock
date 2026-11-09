@@ -100,7 +100,7 @@ export function BacklinksSearchCard({
         <Button type="submit" disabled={searching || resolved === '' || !allowed} className="w-full whitespace-nowrap sm:w-auto">{submitLabel(target, domains.ownDomain, 'Search')}</Button>
       </div>
       {!allowed && <p className="text-sm text-amber-700">Add a path to use Subfolder (e.g. example.com/blog).</p>}
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-500">
         {SCOPE_OPTIONS.find((option) => option.id === scope)?.description}. {LOOKUP_NOTES.overview}
       </p>
       {domains.missingOwnDomain && <NoOwnDomainHint />}

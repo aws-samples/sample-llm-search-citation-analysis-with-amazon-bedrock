@@ -2,6 +2,7 @@ export { ReportLayout } from './ReportLayout';
 export { ReportSection } from './ReportSection';
 export { ReportKeywordSelector } from './ReportKeywordSelector';
 export { SectionPlaceholder } from './SectionPlaceholder';
+export type { SectionShape } from './SectionSkeleton';
 export { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
 export { ReportSectionNote } from './ReportSectionNote';
 export {

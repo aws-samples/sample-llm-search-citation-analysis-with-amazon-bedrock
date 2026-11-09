@@ -5,6 +5,7 @@ import { screen } from '@testing-library/react';
 import { prepareGroupBriefClientIdMocks } from './GroupBriefForm-client-id-fixtures';
 import {
   buildContentBriefGroupScope,
+  chooseSpecificKeywords,
   confirmGroupBrief,
   renderGroupBriefForm,
   renderGroupBriefFormWithMarkets,
@@ -23,12 +24,13 @@ describe('GroupBriefForm markets', () => {
   it('offers no market filter while no market is configured', () => {
     renderGroupBriefForm();
 
-    expect(screen.queryByText('Every market (none ticked).')).toBeNull();
+    expect(screen.queryByText('None ticked: keywords of every market run.')).toBeNull();
   });
 
   it('lists only the keywords of the ticked market', async () => {
     renderGroupBriefFormWithMarkets();
     await tickBriefMarket('Chile (Spanish)');
+    await chooseSpecificKeywords();
 
     expect(screen.getByRole('checkbox', { name: 'Alpha keyword' })).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Beta keyword' })).not.toBeInTheDocument();
@@ -39,7 +41,7 @@ describe('GroupBriefForm markets', () => {
     await tickBriefMarket('Chile (Spanish)');
     await selectGroupForBrief();
 
-    expect(screen.getByText('Generic Group: 1 active keyword')).toBeInTheDocument();
+    expect(screen.getByText('1 active keyword in Generic Group')).toBeInTheDocument();
   });
 
   it.each([

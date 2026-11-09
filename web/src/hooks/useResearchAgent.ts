@@ -14,6 +14,7 @@ import {
 } from '../infrastructure';
 import { isActiveResearchStatus } from '../formatting/researchStatus';
 import type { KeywordResearchItem } from '../types';
+import { useMountedRef } from './useMountedRef';
 
 /** How often every running agent job is re-read while any is active. */
 export const AGENT_POLL_INTERVAL_MS = 5_000;
@@ -58,17 +59,10 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   const [starting, setStarting] = useState(false);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
+  const mountedRef = useMountedRef();
   const pollingRef = useRef(false);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   /** Shows a failed request's error and logs it, unless the tab has been left. */
   // Stryker disable ArrayDeclaration: React dependency list; the callback reads only a ref and state setters, so any list keeps it correct

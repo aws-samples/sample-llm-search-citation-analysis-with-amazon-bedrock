@@ -13,7 +13,7 @@ export function buildProps(overrides: Partial<CitationFiltersProps> = {}): Citat
     setMinCitations: vi.fn(),
     contentType: 'all',
     setContentType: vi.fn(),
-    setCurrentPage: vi.fn(),
+    onFilterChange: vi.fn(),
     onDownloadExcel: vi.fn(),
     ...overrides,
   };

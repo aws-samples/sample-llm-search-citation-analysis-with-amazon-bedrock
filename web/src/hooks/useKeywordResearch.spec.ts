@@ -25,14 +25,14 @@ import {
   startAndAdvance,
   startCompetitorAnalysis,
   startExpansion,
+  storeActiveResearchJob,
+  storedActiveResearchJob,
 } from './useKeywordResearch-harness-fixtures';
 import { advanceBy } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-
-const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
 
 describe('useKeywordResearch', () => {
   beforeEach(() => {
@@ -218,7 +218,7 @@ describe('useKeywordResearch', () => {
 
       await startCompetitorAnalysis(result, 'https://competitor.com');
 
-      expect(JSON.parse(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
+      expect(storedActiveResearchJob()).toStrictEqual({
         id: 'job-1',
         type: 'competitor',
       });
@@ -287,7 +287,7 @@ describe('useKeywordResearch', () => {
 
   describe('re-attaching after a refresh', () => {
     it('resumes polling the job stored in the browser', async () => {
-      localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
+      storeActiveResearchJob(JSON.stringify({
         id: 'job-9',
         type: 'expansion' 
       }));
@@ -298,7 +298,7 @@ describe('useKeywordResearch', () => {
       await advanceBy(POLL_FAST_INTERVAL_MS);
 
       expect(result.current.expansionResult?.seed_keyword).toBe('resumed');
-      expect(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY)).toBeNull();
+      expect(storedActiveResearchJob()).toBeNull();
     });
 
     it('remembers the job while it is still running', async () => {
@@ -306,14 +306,14 @@ describe('useKeywordResearch', () => {
 
       await startExpansion(result);
 
-      expect(JSON.parse(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
+      expect(storedActiveResearchJob()).toStrictEqual({
         id: 'job-1',
         type: 'expansion',
       });
     });
 
     it('ignores a malformed stored job', () => {
-      localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, '{"id": 7}');
+      storeActiveResearchJob('{"id": 7}');
 
       const { result } = renderResearch();
 

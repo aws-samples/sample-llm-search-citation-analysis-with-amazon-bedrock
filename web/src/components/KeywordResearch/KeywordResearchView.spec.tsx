@@ -29,7 +29,7 @@ vi.mock('./agent/ResearchAgent', () => ({ResearchAgent: () => <div data-testid="
 
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
 
-const mockUseKeywordResearch = useKeywordResearch as ReturnType<typeof vi.fn>;
+const mockUseKeywordResearch = vi.mocked(useKeywordResearch);
 
 function buildMockResearch(overrides = {}) {
   return {
@@ -37,12 +37,16 @@ function buildMockResearch(overrides = {}) {
     analyzeCompetitor: vi.fn(),
     deleteResearch: vi.fn(),
     fetchHistory: vi.fn(),
+    loadMoreHistory: vi.fn(),
     retryResearch: vi.fn(),
     loading: false,
     historyLoading: false,
+    historyLoadingMore: false,
+    historyHasMore: false,
     error: null,
     expansionResult: null,
     competitorResult: null,
+    activeJob: null,
     history: [],
     ...overrides,
   };

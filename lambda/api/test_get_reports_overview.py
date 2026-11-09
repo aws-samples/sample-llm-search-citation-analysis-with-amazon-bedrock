@@ -11,14 +11,11 @@ sibling-module loader is pre-filled so no DynamoDB or boto3 client is needed.
 """
 
 import json
-import os
 from unittest.mock import patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+from testing.module_loader import API_DIR, load_handler_module
 
 
 def _keyword_trend(keyword: str, score: float, change: float | None) -> dict:
@@ -63,7 +60,7 @@ DEFAULT_FAKE_RECS = [
 
 def _load_overview_module():
     """Load get-reports-overview.py with sibling helpers stubbed out."""
-    mod = load_handler_module(_API_DIR, 'get-reports-overview.py')
+    mod = load_handler_module(API_DIR, 'get-reports-overview.py')
 
     # Pre-fill the lazy cache with our fakes so the production
     # _load_sibling code path is never exercised in tests.

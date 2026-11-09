@@ -13,6 +13,7 @@ import {
 } from '../../../api/seoAudits-fixtures';
 import { AUDIT_POLL_MS } from '../../../hooks/useSiteAuditDetail';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
+import { countClearTimeoutsOnUnmount } from '../../../test/clearTimeoutOnUnmount';
 import { findBrandTrackingLinkElement } from '../settingsDomains-fixtures';
 import {
   ISSUE_TYPES, openAffectedPages, renderSiteAudit, setupSiteAudit
@@ -177,14 +178,14 @@ describe('SiteAuditView running audit', () => {
   });
 
   it('clears the poll timer when the view unmounts', async () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
     setupSiteAudit({ detail: RUNNING });
-    const { unmount } = renderSiteAudit();
-    await screen.findByText('Crawling pages');
-    const callsBefore = clearTimeoutSpy.mock.calls.length;
-    unmount();
+    const cleared = await countClearTimeoutsOnUnmount(async () => {
+      const rendered = renderSiteAudit();
+      await screen.findByText('Crawling pages');
+      return rendered;
+    });
 
-    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(cleared).toBeGreaterThan(0);
   });
 
   it('lets an admin cancel a running audit', async () => {

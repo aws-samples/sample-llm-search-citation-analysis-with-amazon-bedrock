@@ -64,7 +64,7 @@ describe('GapCard', () => {
       ...baseGap,
       priority: 'medium' 
     }} />);
-    expect(screen.getByText('medium')).toHaveClass('bg-yellow-100', 'text-yellow-800');
+    expect(screen.getByText('medium')).toHaveClass('bg-gray-100', 'text-amber-800');
   });
 
   it('displays competitor brands when present', () => {

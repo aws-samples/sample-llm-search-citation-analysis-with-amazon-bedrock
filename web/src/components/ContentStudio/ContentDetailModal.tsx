@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import {
+  useId, useState
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ContentStudioHistory } from '../../types';
@@ -6,7 +8,7 @@ import { Spinner } from '../ui/Spinner';
 import { exportToDocx } from '../../exporters/documentGenerator';
 import { CopyButton } from './CopyButtonLabel';
 import { useExportAction } from '../ui/useExportAction';
-import { OverlayDialog } from './OverlayDialog';
+import { Modal } from '../ui/Modal';
 import {
   formatContentWarning, getContentTitle
 } from './contentPresentation';
@@ -14,6 +16,8 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHECK_PATHS, CLOSE_PATHS, DOWNLOAD_PATHS, HASHTAG_PATHS 
 } from '../ui/iconPaths';
+
+const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-500 dark:focus-visible:ring-offset-gray-800';
 
 interface ContentDetailModalProps {
   item: ContentStudioHistory;
@@ -26,6 +30,7 @@ export const ContentDetailModal = ({
   item, onClose, onCopy, copied
 }: ContentDetailModalProps) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
+  const titleId = useId();
 
   const content = item.generated_content;
   const displayTitle = getContentTitle(item);
@@ -47,10 +52,11 @@ export const ContentDetailModal = ({
   );
 
   return (
-    <OverlayDialog onDismiss={onClose} panelClassName="max-w-4xl w-full max-h-[90vh] overflow-hidden">
+    <Modal isOpen onClose={onClose} size="4xl" layout="flush" labelledBy={titleId} showCloseButton={false}>
       <ContentDetailHeader
         item={item}
         title={displayTitle}
+        titleId={titleId}
         viewMode={viewMode}
         setViewMode={setViewMode}
         exporting={exporting}
@@ -64,13 +70,14 @@ export const ContentDetailModal = ({
         contentWarning={item.content_warning}
         viewMode={viewMode}
       />
-    </OverlayDialog>
+    </Modal>
   );
 };
 
 interface ContentDetailHeaderProps {
   item: ContentStudioHistory;
   title: string;
+  titleId: string;
   viewMode: 'preview' | 'raw';
   setViewMode: (mode: 'preview' | 'raw') => void;
   exporting: boolean;
@@ -81,20 +88,20 @@ interface ContentDetailHeaderProps {
 }
 
 const ContentDetailHeader = ({
-  item, title, viewMode, setViewMode, exporting, onExportDocx, onCopy, copied, onClose
+  item, title, titleId, viewMode, setViewMode, exporting, onExportDocx, onCopy, copied, onClose
 }: ContentDetailHeaderProps) => (
-  <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-    <div className="flex-1 min-w-0 pr-4">
-      <h2 className="text-lg font-semibold text-gray-900 truncate">
+  <div className="shrink-0 border-b border-gray-200 px-6 py-4 flex flex-col-reverse gap-3 md:flex-row md:items-start md:justify-between">
+    <div className="flex-1 min-w-0">
+      <h2 id={titleId} className="text-lg font-semibold text-gray-900 truncate" title={title}>
         {title}
       </h2>
-      <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
-        <span className="flex items-center gap-1">
-          <StrokeIcon className="w-3.5 h-3.5" paths={HASHTAG_PATHS} />
-          {item.keyword}
+      <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 min-w-0">
+        <span className="flex items-center gap-1 min-w-0">
+          <StrokeIcon className="w-3.5 h-3.5 shrink-0" paths={HASHTAG_PATHS} />
+          <span className="truncate">{item.keyword}</span>
         </span>
-        <span>•</span>
-        <span>{new Date(item.created_at).toLocaleDateString('en-US', {
+        <span aria-hidden="true">•</span>
+        <span className="whitespace-nowrap">{new Date(item.created_at).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
           year: 'numeric',
@@ -103,13 +110,13 @@ const ContentDetailHeader = ({
         })}</span>
       </div>
     </div>
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
       <ViewModeToggle viewMode={viewMode} setViewMode={setViewMode} />
       <ExportButton exporting={exporting} onExport={onExportDocx} />
       <CopyButton
         copied={copied}
         onCopy={onCopy}
-        className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+        className={`px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2 ${FOCUS_RING}`}
         iconClassName="w-4 h-4"
         label="Copy All"
       />
@@ -128,8 +135,10 @@ const ViewModeToggle = ({
 }: ViewModeToggleProps) => (
   <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
     <button
+      type="button"
+      aria-pressed={viewMode === 'preview'}
       onClick={() => setViewMode('preview')}
-      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${FOCUS_RING} ${
         viewMode === 'preview'
           ? 'bg-white text-gray-900 shadow-sm'
           : 'text-gray-500 hover:text-gray-700'
@@ -138,8 +147,10 @@ const ViewModeToggle = ({
       Preview
     </button>
     <button
+      type="button"
+      aria-pressed={viewMode === 'raw'}
       onClick={() => setViewMode('raw')}
-      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${FOCUS_RING} ${
         viewMode === 'raw'
           ? 'bg-white text-gray-900 shadow-sm'
           : 'text-gray-500 hover:text-gray-700'
@@ -161,7 +172,8 @@ const ExportButton = ({
   <button
     onClick={onExport}
     disabled={exporting}
-    className="px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+    type="button"
+    className={`px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 ${FOCUS_RING}`}
     title="Download as Word document"
   >
     {exporting ? (
@@ -177,8 +189,9 @@ interface CloseButtonProps {onClose: () => void;}
 
 const CloseButton = ({ onClose }: CloseButtonProps) => (
   <button
+    type="button"
     onClick={onClose}
-    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+    className={`p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors ${FOCUS_RING}`}
     aria-label="Close content details"
   >
     <StrokeIcon className="w-5 h-5" paths={CLOSE_PATHS} />
@@ -190,7 +203,7 @@ interface ContentWarningBannerProps {contentWarning: ContentStudioHistory['conte
 const ContentWarningBanner = ({ contentWarning }: ContentWarningBannerProps) => {
   if (!contentWarning) return null;
   return (
-    <output className="block rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+    <output className="block rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-amber-800">
       {formatContentWarning(contentWarning)}
     </output>
   );
@@ -205,7 +218,7 @@ interface ContentDetailBodyProps {
 const ContentDetailBody = ({
   content, contentWarning, viewMode
 }: ContentDetailBodyProps) => (
-  <div className="overflow-y-auto max-h-[calc(90vh-80px)] p-6 space-y-6">
+  <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
     <ContentWarningBanner contentWarning={contentWarning} />
 
     {content?.meta_description && (
@@ -251,7 +264,7 @@ const ContentDetailBody = ({
         <ul className="mt-2 space-y-2">
           {content.key_points.map((point) => (
             <li key={point} className="text-sm text-gray-700 flex items-start gap-2">
-              <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
+              <StrokeIcon className="w-4 h-4 text-emerald-700 dark:text-emerald-400 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
               {point}
             </li>
           ))}

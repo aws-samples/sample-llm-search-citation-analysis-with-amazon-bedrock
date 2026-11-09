@@ -18,7 +18,6 @@ Endpoints:
 import json
 import logging
 import os
-import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -29,14 +28,13 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
-sys.path.insert(0, '/opt/python')
-
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import api_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
 from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError, ModelRole, invoke_bedrock
 from shared.request_deadline import current_deadline
+from shared.scope_params import BRAND_FILTER_PARAMS, PERSONA_FILTER_PARAMS
 from shared.search_results import search_results_table_name
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 from shared.utils import brand_names_match, get_brand_config, get_timestamp, parse_timestamp, utc_now
@@ -523,8 +521,8 @@ def _run_job(keyword: str, brand: str, query_prompt_id: str) -> str | None:
 
 @validate({
     'keyword': require_keyword(),
-    'brand': {'type': str, 'max_length': 200},
-    'query_prompt_id': {'type': str, 'max_length': 100},
+    **BRAND_FILTER_PARAMS,
+    **PERSONA_FILTER_PARAMS,
 })
 def get_self_reflection(event, context, keyword, brand=None, query_prompt_id=None):
     """Retrieve stored self-reflection results with optional filters.

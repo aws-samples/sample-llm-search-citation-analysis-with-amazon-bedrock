@@ -1,12 +1,8 @@
-import {
-  expect, vi 
-} from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { vi } from 'vitest';
 import type { authenticatedFetch } from '../infrastructure/auth';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { renderLoadedHook } from '../test/loadedHook';
 import {
   useProviderConfig, type ProviderConfig 
 } from './useProviderConfig';
@@ -72,9 +68,7 @@ function createMockFetch(options: ProviderConfigMockFetchOptions = {}) {
  */
 export async function renderLoadedProviderConfig(options: ProviderConfigMockFetchOptions = {}) {
   mockAuthenticatedFetch.mockImplementation(createMockFetch(options));
-  const rendered = renderHook(() => useProviderConfig());
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
-  return rendered;
+  return renderLoadedHook(() => useProviderConfig());
 }
 
 

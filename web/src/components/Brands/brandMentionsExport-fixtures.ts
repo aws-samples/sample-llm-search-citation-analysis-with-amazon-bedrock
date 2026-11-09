@@ -129,3 +129,20 @@ export const brandMentionsExportRows: BrandAppearanceRow[] = brandMentionsExport
     overall_rank: brand.overall_rank,
   }))
 );
+
+/** The first page of a scope with 140 matching brands: two brands shown, the next page behind `brands-2`. */
+export const firstOfManyBrandsResponse: BrandMentionsResponse = {
+  ...brandMentionsExportResponse,
+  aggregated: {
+    ...brandMentionsExportResponse.aggregated,
+    matching_brands: 140,
+    next_token: 'brands-2',
+  },
+};
+
+/** A brand of the second page of `firstOfManyBrandsResponse`. */
+export const secondPageBrand = {
+  ...brandMentionsExportResponse.aggregated.brands[1],
+  name: 'Parador Lejano',
+  overall_rank: 101,
+};

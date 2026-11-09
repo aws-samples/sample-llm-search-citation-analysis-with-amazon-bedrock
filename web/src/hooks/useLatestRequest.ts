@@ -1,6 +1,7 @@
 import {
   useCallback, useEffect, useRef
 } from 'react';
+import { useMountedRef } from './useMountedRef';
 
 interface LatestRequest {
   signal: AbortSignal;
@@ -9,7 +10,7 @@ interface LatestRequest {
 }
 
 export function useLatestRequest() {
-  const mountedRef = useRef(true);
+  const mountedRef = useMountedRef();
   const generationRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -19,13 +20,7 @@ export function useLatestRequest() {
     controllerRef.current = null;
   }, []);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      cancelRequest();
-    };
-  }, [cancelRequest]);
+  useEffect(() => cancelRequest, [cancelRequest]);
 
   const beginRequest = useCallback((): LatestRequest => {
     cancelRequest();

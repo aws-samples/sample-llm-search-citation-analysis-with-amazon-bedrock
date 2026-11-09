@@ -9,10 +9,12 @@
     --color-text-primary: 17 24 39;     /* gray-900 */
   }
 
-  /* Dark mode */
+  /* Dark mode. `color-scheme` gives native scrollbars, checkboxes, date
+     pickers and select menus their dark rendering. */
   .dark {
     --color-bg-primary: 17 24 39;       /* gray-900 */
     --color-text-primary: 249 250 251;  /* gray-50 */
+    color-scheme: dark;
   }
 
   body {
@@ -89,115 +91,132 @@
   background-color: rgb(75 85 99); /* gray-600 */
 }
 
+/* Body text one step below gray-900 (labels, badge text). Without this it is
+   gray-800 on a gray-800 card. */
+.dark .text-gray-800 {
+  color: rgb(229 231 235); /* gray-200 */
+}
+
+/* Hover text on links and icon buttons. The light classes darken on hover,
+   which on a dark surface turns the text near-black. */
+.dark .hover\:text-gray-900:hover,
+.dark .hover\:text-gray-800:hover {
+  color: rgb(249 250 251); /* gray-50 */
+}
+
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-gray-600:hover {
+  color: rgb(229 231 235); /* gray-200 */
+}
+
+/* Row and list dividers (`divide-y`). */
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(55 65 81); /* gray-700 */
+}
+
+/* Primary buttons and selected toggles (`bg-gray-900 text-white`). On a
+   gray-800 card the gray-900 fill is 1.2:1 against its surface, so in dark
+   they invert to white with gray-900 text (as ConfirmModal and AlertModal do).
+   An element that sets its own `dark:bg-*` keeps it; a button with its own
+   `disabled:bg-*` keeps that while disabled. */
+.dark .bg-gray-900.text-white:not([class*="dark:bg-"]):not([class*="disabled:bg-"]:disabled) {
+  background-color: rgb(255 255 255);
+  color: rgb(17 24 39); /* gray-900 */
+}
+
+.dark .bg-gray-900.text-white.hover\:bg-gray-800:not([class*="dark:bg-"]):not(:disabled):hover {
+  background-color: rgb(243 244 246); /* gray-100 */
+}
+
+/* `disabled:bg-gray-300` with white text is 1.5:1 in light: use gray-600 text
+   (4.4:1) so a disabled button reads as disabled rather than broken. */
+.text-white.disabled\:bg-gray-300:disabled {
+  color: rgb(75 85 99); /* gray-600 */
+}
+
+/* Focus rings drawn in gray-900 vanish on dark surfaces (inputs get their own
+   ring colour below). */
+.dark .focus\:ring-gray-900:focus,
+.dark .focus-visible\:ring-gray-900:focus-visible {
+  --tw-ring-color: rgb(156 163 175); /* gray-400 */
+}
+
+/* `disabled:bg-gray-300` with white text: 1.5:1 in dark. */
+.dark .text-white.disabled\:bg-gray-300:disabled:not([class*="dark:disabled:bg-"]) {
+  background-color: rgb(75 85 99); /* gray-600 */
+  color: rgb(209 213 219); /* gray-300 */
+}
+
 /* ============================================================
- * Accent surfaces in dark mode
+ * Palette in dark mode: grey, blue and violet
  *
- * Tinted Tailwind classes (`bg-{tone}-50`, `bg-{tone}-100`, accent
- * text and borders) do not adapt to dark mode by default. Without
- * these overrides, components that use accent palettes (e.g. the
- * Brand settings emerald / amber / violet panels, status badges,
- * stat cards) render as bright pale-tinted surfaces sitting on a
- * dark page – uncomfortable to read and visually inconsistent.
+ * The dashboard uses three colour roles in both themes (see
+ * docs/design-system.md §2.2): grey for everything by default, blue for
+ * interaction (links, focus, the open page, selected states) and violet for
+ * your brand. Status colours carry meaning only, in text, numbers and dots:
+ * amber for warnings, emerald for positive, red for errors.
  *
- * Strategy:
- *   - `bg-{tone}-50/100` → translucent dark tint (~20-40% alpha
- *     over the dark surface). Reads as a low-saturation tinted
- *     callout, not a bright pastel.
- *   - `text-{tone}-700/800/900` → the corresponding `*-300/-200`
- *     variant. These are the legible accent colours on dark.
- *   - `border-{tone}-100/200/300` → muted accent borders so the
- *     panel still feels tinted but does not glow.
- *   - `hover:bg-{tone}-100/200` → hover lifts to a slightly denser
- *     translucent tint instead of flashing to bright pastel.
- *
- * Saturated solid surfaces (`bg-{tone}-500/600/700`) and their
- * matching `text-white` pairings are intentionally NOT overridden:
- * they are primary action buttons that work as-is in both themes.
- *
- * See `docs/design-system.md#1-theming-model` for the rationale.
+ * In dark mode the tinted classes of those roles become translucent tints
+ * of their `-900` shade, and accent text lifts to the `-300` shade, which
+ * is legible on gray-800. Saturated solid surfaces (`bg-{tone}-500/600/700`)
+ * with `text-white` keep their colour.
  * ============================================================ */
 
-/* --- Emerald / Green (success, first-party brands, "yours") --- */
-.dark .bg-emerald-50  { background-color: rgb(6 78 59 / 0.25); }
-.dark .bg-emerald-100 { background-color: rgb(6 78 59 / 0.4); }
-.dark .bg-green-50    { background-color: rgb(6 78 59 / 0.25); }
-.dark .bg-green-100   { background-color: rgb(6 78 59 / 0.4); }
-.dark .text-emerald-700 { color: rgb(110 231 183); /* emerald-300 */ }
-.dark .text-emerald-800 { color: rgb(110 231 183); }
-.dark .text-green-700   { color: rgb(134 239 172); /* green-300 */ }
-.dark .text-green-800   { color: rgb(134 239 172); }
-.dark .text-green-900   { color: rgb(187 247 208); /* green-200 */ }
-.dark .border-emerald-100 { border-color: rgb(6 95 70 / 0.4); }
-.dark .border-emerald-200 { border-color: rgb(4 120 87 / 0.55); }
-.dark .border-emerald-300 { border-color: rgb(5 150 105 / 0.7); }
-.dark .border-green-200   { border-color: rgb(22 101 52 / 0.55); }
-.dark .hover\:bg-emerald-100:hover { background-color: rgb(6 78 59 / 0.55); }
-.dark .hover\:bg-emerald-200:hover { background-color: rgb(6 78 59 / 0.7); }
-
-/* --- Amber / Yellow (warnings, competitor brands) --- */
-.dark .bg-amber-50  { background-color: rgb(120 53 15 / 0.25); }
-.dark .bg-amber-100 { background-color: rgb(120 53 15 / 0.4); }
-.dark .bg-yellow-100 { background-color: rgb(113 63 18 / 0.4); }
-.dark .text-amber-700  { color: rgb(252 211 77); /* amber-300 */ }
-.dark .text-amber-800  { color: rgb(252 211 77); }
-.dark .text-amber-900  { color: rgb(253 230 138); /* amber-200 */ }
-.dark .text-yellow-700 { color: rgb(253 224 71); /* yellow-300 */ }
-.dark .text-yellow-800 { color: rgb(253 224 71); }
-.dark .border-amber-100  { border-color: rgb(146 64 14 / 0.4); }
-.dark .border-amber-200  { border-color: rgb(180 83 9 / 0.55); }
-.dark .border-amber-300  { border-color: rgb(217 119 6 / 0.7); }
-.dark .hover\:bg-amber-100:hover { background-color: rgb(120 53 15 / 0.55); }
-.dark .hover\:bg-amber-200:hover { background-color: rgb(120 53 15 / 0.7); }
-
-/* --- Violet / Purple (brand mentions, custom entities) --- */
-.dark .bg-violet-50   { background-color: rgb(76 29 149 / 0.25); }
-.dark .bg-violet-100  { background-color: rgb(76 29 149 / 0.4); }
-.dark .bg-purple-50   { background-color: rgb(88 28 135 / 0.25); }
-.dark .bg-purple-100  { background-color: rgb(88 28 135 / 0.4); }
-.dark .text-violet-800  { color: rgb(196 181 253); }
-.dark .text-purple-700  { color: rgb(216 180 254); /* purple-300 */ }
-.dark .text-purple-800  { color: rgb(216 180 254); }
-.dark .text-purple-900  { color: rgb(233 213 255); /* purple-200 */ }
-.dark .border-violet-100  { border-color: rgb(91 33 182 / 0.4); }
-.dark .border-violet-200  { border-color: rgb(109 40 217 / 0.55); }
-.dark .border-violet-300  { border-color: rgb(124 58 237 / 0.7); }
-.dark .border-purple-100  { border-color: rgb(107 33 168 / 0.4); }
-.dark .border-purple-200  { border-color: rgb(126 34 206 / 0.55); }
-
-/* --- Blue / Indigo / Cyan (info, metrics, links) --- */
-.dark .bg-blue-50   { background-color: rgb(30 58 138 / 0.25); }
-.dark .bg-blue-100  { background-color: rgb(30 58 138 / 0.4); }
-.dark .bg-indigo-50  { background-color: rgb(49 46 129 / 0.25); }
-.dark .bg-cyan-50   { background-color: rgb(22 78 99 / 0.25); }
-.dark .text-blue-700   { color: rgb(147 197 253); /* blue-300 */ }
-.dark .text-blue-800   { color: rgb(147 197 253); }
-.dark .text-blue-900   { color: rgb(191 219 254); /* blue-200 */ }
-.dark .text-indigo-700 { color: rgb(165 180 252); /* indigo-300 */ }
-.dark .border-blue-100   { border-color: rgb(30 64 175 / 0.4); }
-.dark .border-blue-200   { border-color: rgb(29 78 216 / 0.55); }
-.dark .border-indigo-200 { border-color: rgb(67 56 202 / 0.55); }
+/* Blue: interaction and information. */
+.dark .bg-blue-50  { background-color: rgb(30 58 138 / 0.25); }
+.dark .bg-blue-100 { background-color: rgb(30 58 138 / 0.4); }
 .dark .hover\:bg-blue-100:hover { background-color: rgb(30 58 138 / 0.55); }
+.dark .border-blue-200 { border-color: rgb(29 78 216 / 0.55); }
+.dark .text-blue-600 { color: rgb(96 165 250); /* blue-400: -600 is about 3:1 on gray-800 */ }
+.dark .text-blue-700,
+.dark .text-blue-800 { color: rgb(147 197 253); /* blue-300 */ }
+.dark .text-blue-900 { color: rgb(191 219 254); /* blue-200 */ }
+.dark .hover\:text-blue-800:hover { color: rgb(147 197 253); }
 
-/* --- Red / Orange (errors, destructive, gaps) --- */
-.dark .bg-red-50    { background-color: rgb(127 29 29 / 0.25); }
-.dark .bg-red-100   { background-color: rgb(127 29 29 / 0.4); }
-.dark .bg-orange-50  { background-color: rgb(124 45 18 / 0.25); }
-.dark .bg-orange-100 { background-color: rgb(124 45 18 / 0.4); }
-.dark .text-red-700    { color: rgb(252 165 165); /* red-300 */ }
-.dark .text-red-800    { color: rgb(252 165 165); }
-.dark .text-orange-800 { color: rgb(253 186 116); }
-.dark .border-red-200   { border-color: rgb(185 28 28 / 0.55); }
-.dark .border-red-300   { border-color: rgb(220 38 38 / 0.7); }
-.dark .border-orange-200 { border-color: rgb(194 65 12 / 0.55); }
-.dark .border-orange-300 { border-color: rgb(234 88 12 / 0.7); }
-.dark .hover\:bg-red-100:hover    { background-color: rgb(127 29 29 / 0.55); }
-.dark .hover\:bg-red-200:hover    { background-color: rgb(127 29 29 / 0.7); }
+/* Violet: your brand. */
+.dark .bg-violet-50  { background-color: rgb(76 29 149 / 0.25); }
+.dark .bg-violet-100 { background-color: rgb(76 29 149 / 0.4); }
+.dark .border-violet-100 { border-color: rgb(91 33 182 / 0.4); }
+.dark .border-violet-200 { border-color: rgb(109 40 217 / 0.55); }
+.dark .border-violet-300 { border-color: rgb(124 58 237 / 0.7); }
+.dark .text-violet-700,
+.dark .text-violet-800 { color: rgb(196 181 253); /* violet-300 */ }
+.dark .text-violet-900 { color: rgb(221 214 254); /* violet-200 */ }
+.dark .hover\:text-violet-800:hover { color: rgb(221 214 254); }
 
-/* --- Alpha-modifier surfaces used in row backgrounds --- */
-.dark .bg-emerald-50\/50 { background-color: rgb(6 78 59 / 0.2); }
-.dark .bg-green-50\/30   { background-color: rgb(6 78 59 / 0.18); }
-.dark .bg-red-50\/30     { background-color: rgb(127 29 29 / 0.18); }
-.dark .bg-orange-50\/30  { background-color: rgb(124 45 18 / 0.2); }
+/* Red: errors, destructive actions, negative values. */
+.dark .bg-red-50  { background-color: rgb(127 29 29 / 0.25); }
+.dark .bg-red-100 { background-color: rgb(127 29 29 / 0.4); }
+.dark .bg-red-50\/30 { background-color: rgb(127 29 29 / 0.18); }
+.dark .hover\:bg-red-50:hover  { background-color: rgb(127 29 29 / 0.4); }
+.dark .hover\:bg-red-100:hover { background-color: rgb(127 29 29 / 0.55); }
+.dark .border-red-200 { border-color: rgb(185 28 28 / 0.55); }
+.dark .border-red-300 { border-color: rgb(220 38 38 / 0.7); }
+.dark .text-red-600 { color: rgb(248 113 113); /* red-400 */ }
+.dark .text-red-700,
+.dark .text-red-800 { color: rgb(252 165 165); /* red-300 */ }
+.dark .hover\:text-red-600:hover,
+.dark .hover\:text-red-700:hover { color: rgb(252 165 165); }
+
+/* Amber (warnings) and emerald (positive): text only. */
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 { color: rgb(252 211 77); /* amber-300 */ }
+.dark .text-amber-900 { color: rgb(253 230 138); /* amber-200 */ }
+.dark .hover\:text-amber-900:hover { color: rgb(253 230 138); }
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900 { color: rgb(110 231 183); /* emerald-300 */ }
+
+/* Remaining status stripes (`border-l-4 border-{tone}-500`): grey; the text carries the status. */
+.dark .border-l-4.border-red-400,
+.dark .border-l-4.border-red-500,
+.dark .border-l-4.border-amber-500,
+.dark .border-l-4.border-green-500,
+.dark .border-l-4.border-emerald-400,
+.dark .border-l-4.border-blue-500 { border-color: rgb(75 85 99); /* gray-600 */ }
 
 /* Input fields in dark mode */
 .dark input:not([type="checkbox"]):not([type="radio"]),
@@ -206,6 +225,15 @@
   background-color: rgb(55 65 81); /* gray-700 */
   border-color: rgb(75 85 99); /* gray-600 */
   color: rgb(243 244 246); /* gray-100 */
+}
+
+/* Disabled fields: `disabled:bg-gray-100` outranks the rule above and would
+   leave a pale box on the dark form. */
+.dark input:not([type="checkbox"]):not([type="radio"]):disabled,
+.dark textarea:disabled,
+.dark select:disabled {
+  background-color: rgb(31 41 55); /* gray-800 */
+  color: rgb(156 163 175); /* gray-400 */
 }
 
 .dark input::placeholder,
@@ -488,6 +516,15 @@
   -webkit-print-color-adjust: exact;
 }
 
+/* A report preview (`?print=1`) looks like paper on screen too: no card frames around the report header. */
+.print-mode .print\:border-0 {
+  border-width: 0;
+}
+
+.print-mode .print\:p-0 {
+  padding: 0;
+}
+
 .print-mode .print-header {
   margin-bottom: 0.5rem;
 }
@@ -496,7 +533,7 @@
   /* Hide every element marked .print-hidden anywhere in the tree, even
      outside of print-mode (modal portals, debug panels, etc.). */
   .print-hidden,
-  [data-print-hidden="true"] {
+[data-print-hidden="true"] {
     display: none !important;
   }
 
@@ -534,7 +571,7 @@
   /* Light background regardless of the saved theme so PDFs are readable
      when printed on white paper. */
   body,
-  .print-mode {
+.print-mode {
     background: white !important;
     color: black !important;
   }
@@ -560,7 +597,8 @@
 }
 
 @keyframes skeleton-pulse {
-  0%, 100% { opacity: 1; }
+  0%,
+100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
 

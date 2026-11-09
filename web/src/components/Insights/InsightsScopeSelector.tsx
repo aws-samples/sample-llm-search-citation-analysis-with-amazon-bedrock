@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react';
 import type { Keyword } from '../../types';
+import { PageHeaderCard } from '../ui/PageHeaderCard';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import type { ScopeSelection } from './useScopeSelection';
@@ -30,5 +32,23 @@ export function InsightsScopeSelector({
       onChange={selection.selectScope}
       label={label}
     />
+  );
+}
+
+interface InsightsPageHeaderProps {
+  readonly title: string;
+  readonly description: ReactNode;
+  readonly keywords: Keyword[];
+  readonly selection: Pick<ScopeSelection, 'scope' | 'selectScope'>;
+}
+
+/** The header card of an insights view: its title and description over the "Analyze" scope picker. */
+export function InsightsPageHeader({
+  title, description, keywords, selection
+}: InsightsPageHeaderProps) {
+  return (
+    <PageHeaderCard title={title} description={description}>
+      <InsightsScopeSelector keywords={keywords} selection={selection} label="Analyze" />
+    </PageHeaderCard>
   );
 }

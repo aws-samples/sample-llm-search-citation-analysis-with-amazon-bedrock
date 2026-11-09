@@ -5,9 +5,9 @@ import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { cognitoMethodOptions } from './api-auth';
+import { monthLogGroup } from './api-functions';
 import { ManagedLoginBranding } from './managed-login-branding';
 import type { McpState } from './mcp-state';
 import { lambdaSourceCode } from './python-layer';
@@ -323,11 +323,7 @@ export class McpServer extends Construct {
     urls: { resourceUrl: string; authorizationServerUrl: string }
   ): lambda.Function {
     const stack = cdk.Stack.of(this);
-    const logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/aws/lambda/${FUNCTION_NAME}`,
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+    const logGroup = monthLogGroup(this, 'LogGroup', `/aws/lambda/${FUNCTION_NAME}`, cdk.RemovalPolicy.DESTROY);
     const routerFunctionNames = Object.fromEntries(
       Object.entries(props.apiFunctions).map(([router, routerFunction]) => [router, routerFunction.functionName])
     );

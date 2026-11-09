@@ -20,8 +20,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.scope_params import (
+    BRAND_FILTER_PARAMS,
     MARKET_PARAM,
     MAX_KEYWORD_IDS,
+    PERSONA_FILTER_PARAMS,
     SCOPE_KEYWORDS_CAP,
     SCOPE_MAX_WORKERS,
     SCOPE_PARAMS,
@@ -201,6 +203,14 @@ class TestScopeQueryParams:
 
     def test_mutually_exclusive_names_are_every_rule_but_the_market_filter(self):
         assert (*SCOPE_PARAMS, MARKET_PARAM) == tuple(SCOPE_QUERY_PARAMS)
+
+
+class TestFilterParams:
+    def test_brand_filter_rule_is_the_shared_contract(self):
+        assert BRAND_FILTER_PARAMS == {'brand': {'type': str, 'max_length': 200}}
+
+    def test_persona_filter_rule_is_the_shared_contract(self):
+        assert PERSONA_FILTER_PARAMS == {'query_prompt_id': {'type': str, 'max_length': 100}}
 
 
 MARKET_ACTIVE = [

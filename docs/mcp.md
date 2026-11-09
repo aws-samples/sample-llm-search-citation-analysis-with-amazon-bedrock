@@ -1,14 +1,18 @@
 # Connecting AI assistants (MCP server)
 
+How to connect Kiro, Claude Code, Claude.ai, ChatGPT and Amazon Quick to Citation Analysis through its Model Context Protocol (MCP) server, which tools they get, and how spending is confirmed and limited.
+
+![AI assistants settings page with the MCP server URL and setup steps for Claude, ChatGPT, Kiro and Amazon Quick](aiassistants.png)
+
 The `CitationAnalysisMcpStack` stack serves the Citation Analysis API as an MCP server, so an assistant can read keywords, reports and citations, set up keyword groups and, with your approval, start runs, research jobs and content briefs. Every tool call is replayed against the dashboard's own API handlers as the signed-in user: you get the same permissions and the same figures as in the browser.
 
-The endpoint speaks MCP over Streamable HTTP (JSON responses, no SSE stream) and is protected with OAuth 2.1 + PKCE by the deployment's Cognito user pool. Dynamic client registration is not offered. Every client uses the pre-registered public client id (no secret).
+The endpoint speaks MCP over Streamable HTTP (JSON responses, no SSE stream) and is protected with OAuth 2.1 + PKCE by the deployment's Cognito user pool. Dynamic client registration is not offered. Every client uses the pre-registered public client id (no secret). Access and ID tokens last 1 hour and the refresh token 90 days, so an assistant is not asked to sign in again every week; token revocation is on (`oauthClient` in `lib/constructs/mcp-server.ts`).
 
 The server sits behind its own CloudFront distribution (`https://<dist>.cloudfront.net`), which maps the host root onto the API Gateway stage. Clients discover the authorization server from well-known URLs at the host root: RFC 9728's `/.well-known/oauth-protected-resource/mcp`, RFC 8414's `/.well-known/oauth-authorization-server` and OIDC's `/.well-known/openid-configuration`. On an execute-api URL the stage (`/prod`) is a path segment, so none of those locations exist and clients such as Claude Code fail to sign in. The distribution caches nothing and passes every request through to the API, `Authorization` header included.
 
 ## What you need
 
-The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys both stacks before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
+The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` runs `cdk deploy --all` and then rebuilds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
 
 From the `CitationAnalysisMcpStack` outputs (`aws cloudformation describe-stacks --stack-name CitationAnalysisMcpStack`):
 
@@ -94,13 +98,17 @@ Read tools carry `readOnlyHint: true`, so Quick's scheduled agents can run them 
 
 Not verified yet. If it offers the same OAuth form as Quick web, use the same values and the redirect URL it shows. If it accepts only a static header, it cannot connect: personal access keys are designed but not built.
 
+### Other clients
+
+Any client that supports remote MCP servers over Streamable HTTP with OAuth 2.1 and PKCE can connect: enter `<McpClientId>` with no secret, let it discover the authorization server from `<McpResourceMetadataUrl>`, and allow its callback URL in `mcpRedirectUris`. OpenAI Codex CLI is not supported yet: it adds a path segment to its callback URL, which Cognito's exact match refuses ([openai/codex#30460](https://github.com/openai/codex/issues/30460)).
+
 ## Tools
 
 `tools/list` shows eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools`, `describe_tool` and `call_tool`. Every other operation is in the catalogue: find it with `search_tools`, read its schema with `describe_tool`, and run it with `call_tool`. To list some catalogue operations directly, pin them with `-c mcpPinnedTools=get_report_insights,estimate_run`. Add `?tools=full` to the URL to list everything.
 
-Catalogue reads include providers, personas, engine answers, persona rankings, prompt insights, report insights (`get_report_insights`), recent searches, crawled pages, sentiment examples, custom reports (list and one by id), schedules, KPI alerts, run status (`get_run_status`), research jobs and templates, and Content Studio items.
+Catalogue reads include providers, personas, dashboard totals (`get_dashboard_stats`), engine answers (`get_brand_mentions`), persona rankings, prompt insights, report insights (`get_report_insights`), recent searches, crawled pages, sentiment examples, custom reports (list and one by id), schedules, KPI alerts, run status (`get_run_status`), research jobs and templates, and Content Studio items.
 
-Large lists come in pages: keywords, the citation list, recent searches, crawled pages, brand appearances (`get_brand_mentions` `view=appearances`), group KPI keywords and drivers (`get_report` `kind=group_kpis`), sentiment examples, schedules, research jobs and Content Studio items return `next_token`; pass it back with the same arguments for the next page (`null` on the last page). A result over 50,000 characters is cut to a first page and marked `truncated`; when it also has a `next_token`, ask again with a smaller `limit` first, because the cursor continues after the whole page. An API answer over 5 MB is read by the server from its temporary S3 copy, so tools see the same data as the dashboard.
+Large lists come in pages: keywords, the citation list, recent searches, crawled pages, brand appearances (`get_brand_mentions` `view=appearances`), group KPI keywords and drivers (`get_report` `kind=group_kpis`), sentiment examples, site audit issues (`get_site_audits` `view=issues`), schedules, research jobs and Content Studio items return `next_token`; pass it back with the same arguments for the next page (`null` on the last page). A result over 50,000 characters is cut to a first page and marked `truncated`; when it also has a `next_token`, ask again with a smaller `limit` first, because the cursor continues after the whole page. An API answer over 5 MB is read by the server from its temporary S3 copy, so tools see the same data as the dashboard.
 
 SEO reads (SEO stack, router `seo`; they need `CitationAnalysisSeoStack` deployed). They are free: none calls DataForSEO, and each description starts with "Free".
 
@@ -166,6 +174,8 @@ Defaults, changeable per deployment with `-c mcpLimits='{"runsPerDay":10}'` (`0`
 | `jobsPerDay` | 20 | Research jobs and content briefs together, per UTC day |
 | `maxRunKeywords` | 50 | Keywords one `start_run` can cover; counted at the estimate and again at the start |
 | `seoCallsPerDay` | 50 | DataForSEO lookups and SEO jobs together (`run_seo_*`, `start_seo_job`), per UTC day |
+
+Behind these, the MCP API stage is throttled at 20 requests per second (burst 40) and the server Lambda has 10 reserved concurrent executions (`lib/constructs/mcp-server.ts`).
 
 A refusal names the limit and, for the daily ones, when it resets (midnight UTC). The keyword cap is checked by counting the scope's active keywords page by page; the count stops as soon as it passes `maxRunKeywords`. If it cannot finish inside the request's time budget the start is refused ("The scope's keywords could not all be counted (too many, or the API was slow)"), because a spend is never started on a guess. A start that the API itself refuses gives the day's use back. A start that timed out keeps it, because the run may have started. Runs in flight that cannot be checked in time count as running.
 
