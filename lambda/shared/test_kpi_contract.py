@@ -25,6 +25,7 @@ from testing.kpi_tally_fixtures import keyword_run_tallies
 _ROOT = Path(__file__).resolve().parents[2]
 _DOC = _ROOT / 'docs' / 'kpi-definitions.md'
 _WEB = _ROOT / 'web' / 'src' / 'constants' / 'kpiDefinitions.ts'
+VERSION_FIELDS = ('citation_versions', 'citation_versions_mixed')
 
 
 def _documented_ids() -> list[str]:
@@ -75,3 +76,14 @@ def test_the_tallied_kpis_equal_the_engines_for_any_answers(rows, owned):
     engine = brand_kpis(answers, owned)
     tallied = tally_kpis(tallies, owned)
     assert {kpi: tallied[kpi] for kpi in KPI_IDS if kpi in engine} == {kpi: engine[kpi] for kpi in KPI_IDS if kpi in engine}
+
+
+@settings(max_examples=150, deadline=None)
+@given(rows=search_rows(), owned=OWNED_DOMAINS)
+def test_the_tallied_citation_versions_equal_the_engines_for_any_answers(rows, owned):
+    """Which citation rules a figure mixes is the same whether it is computed from answers or from summed tallies."""
+    answers = answers_from_rows(rows)
+    engine = brand_kpis(answers, owned)
+    tallied = tally_kpis(keyword_run_tallies(answers, KEYWORDS, owned), owned)
+
+    assert [tallied[field] for field in VERSION_FIELDS] == [engine[field] for field in VERSION_FIELDS]

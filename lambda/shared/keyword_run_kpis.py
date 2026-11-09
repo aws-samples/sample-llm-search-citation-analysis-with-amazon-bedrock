@@ -53,7 +53,9 @@ from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
 
-FORMAT_VERSION = 1
+#: 2 (2.48.0): the counts carry ``citations_current`` (``shared.kpi_tally.COUNT_FIELDS``); a version-1 row is read
+#: as absent and rebuilt from the answers (the backfill rewrites every row).
+FORMAT_VERSION = 2
 
 #: Brands one row keeps at most (``shared.kpi_tally`` ``brand_cap``): bounds the row and, above all, what a window reads.
 BRANDS_PER_RUN = 25

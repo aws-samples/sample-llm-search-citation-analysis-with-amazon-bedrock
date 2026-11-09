@@ -128,7 +128,7 @@ class TestReads:
 
         run_read = search_table.query.call_args.kwargs
         assert (run_read['ProjectionExpression'], run_read['ExpressionAttributeNames']) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id, timestamp_provider, query_prompt_name',
+            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id, citations_version, timestamp_provider, query_prompt_name',
             {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
 

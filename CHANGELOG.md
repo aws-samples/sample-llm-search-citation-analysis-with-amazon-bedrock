@@ -9,6 +9,42 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.52.0] - 2026-11-09
+
+Every KPI says which citation rule its answers were stored under, and a figure that mixes them says so (#210).
+
+### Upgrade notes
+
+- **Run the `latest` backfill once after deploying**, as for 2.45.0. The per-run KPI rows, the KeywordLatest
+  objects and the scope series gain a count (format 2), so rows and objects of the old format read as absent. Until
+  the backfill rewrites them, views read those runs from their answers (slower, same figures) and the snapshot build
+  serves keywords without an object as behind:
+
+  ```bash
+  aws lambda invoke --function-name CitationAnalysis-Deduplication --invocation-type Event \
+    --cli-binary-format raw-in-base64-out \
+    --payload '{"action":"backfill_keyword_run_kpis","latest":true,"chain":true}' out.json
+  ```
+
+- No stored answer is rewritten (D1).
+
+### Changed
+
+- **`citation_versions` and `citation_versions_mixed` on every KPI object** (`lambda/shared/kpi_engine.py`,
+  `kpi_tally.py`). Since 2.43.0 the search Lambda writes `citations_version` 2 on every answer row: only the sources
+  the answer cites count. Rows from before carry none and count as `unversioned (pre-2.43.0)`. A citation KPI over a
+  period that spans the upgrade adds up two definitions, so each KPI object lists each rule with its answers
+  (`[{"version": "2", "answers": 120}, {"version": "unversioned (pre-2.43.0)", "answers": 40}]`) and flags the mix.
+  The scope's KPIs, each engine's, each trend period's and the KPI history carry it. REST and MCP answer it
+  unchanged.
+- The tallies count `citations_current` (answers under the current rule), so a pooled figure knows its mix without
+  reading the answers. `KeywordRunKpis` rows, KeywordLatest objects and scope series move to format 2 (see Upgrade
+  notes).
+- **The dashboard shows a note** above a view whose citation figures mix the two rules, with the answers of each
+  (`ScopeCoverageNote`, `CitationVersionsNote`). A trend reads it from its periods.
+- `docs/kpi-definitions.md` (Conventions, "Citation versions") and the tenet 2 and D2 rows of TENETS.md describe it.
+  `CITATIONS_VERSION` now lives in `shared/kpi_engine.py`, and the search Lambda imports it.
+
 ## [2.50.0] - 2026-11-09
 
 Google AI Overviews sits behind the provider contract: the search handler reads a provider field instead of

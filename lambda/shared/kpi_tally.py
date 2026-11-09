@@ -32,9 +32,11 @@ from typing import Any, NamedTuple
 
 from shared.brand_names import FIRST_PARTY, normalize_brand_key
 from shared.kpi_engine import (
+    CITATIONS_VERSION,
     SPLIT_LABELS,
     Answer,
     Sighting,
+    citation_versions,
     is_owned_domain,
     leaderboard,
     normalize_domain,
@@ -59,6 +61,8 @@ COUNT_FIELDS: tuple[str, ...] = (
     'citing',
     'owned_pairs',
     'all_pairs',
+    # Answers stored under the current citation rule (``kpi_engine.CITATIONS_VERSION``); the rest are unversioned.
+    'citations_current',
 )
 _INDEX = {name: index for index, name in enumerate(COUNT_FIELDS)}
 _SPLIT = tuple(_INDEX[label] for label in SPLIT_LABELS)
@@ -125,6 +129,7 @@ def _answer_counts(answer: Answer, domains: Sequence[str]) -> list[int]:
     counts = [0] * len(COUNT_FIELDS)
     first_party = answer.first_party()
     counts[_INDEX['answers']] = 1
+    counts[_INDEX['citations_current']] = int(answer.citations_version == CITATIONS_VERSION)
     counts[_INDEX['first_party_mentions']] = len(first_party)
     counts[_INDEX['total_mentions']] = len(answer.sightings)
     if first_party:
@@ -366,6 +371,7 @@ def pooled_kpis(pooled: PooledCounts, citations_configured: bool) -> dict[str, A
         'top_3_share': percent(pool.count('top_3'), answers),
         'visibility_score': visibility_percent(pool.count('points'), answers),
         **_citation_fields(pool, citations_configured),
+        **citation_versions(answers, pool.count('citations_current')),
         **sentiment_fields({label: pool.counts[index] for label, index in zip(SPLIT_LABELS, _SPLIT, strict=True)}),
         'engine_coverage': percent(pooled.engines_naming, pooled.engines),
         'keyword_coverage': percent(pooled.keywords_naming, pooled.keywords),

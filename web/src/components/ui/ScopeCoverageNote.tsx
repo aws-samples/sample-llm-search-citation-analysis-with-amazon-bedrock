@@ -1,5 +1,8 @@
 import type { ScopedResponseFields } from '../../types/domain/scopeCoverage';
 import { formatDate } from '../../formatting/dateFormatter';
+import {
+  CitationVersionsNote, citationVersionsOf 
+} from './CitationVersionsNote';
 
 /*
  * How complete and how current a scoped view's figures are (2.45.0 `coverage` and source
@@ -61,7 +64,8 @@ export function ScopeCoverageNote({
 }: ScopeCoverageNoteProps) {
   const coverage = response?.coverage;
   const stale = response?.stale === true;
-  if (coverage === undefined && !stale) return null;
+  const mixed = citationVersionsOf(response).length > 1;
+  if (coverage === undefined && !stale && !mixed) return null;
   return (
     <div className={`space-y-2 ${className}`}>
       {coverage !== undefined && (coverage.complete
@@ -76,6 +80,7 @@ export function ScopeCoverageNote({
           </p>
         ))}
       {stale && <StaleNote refreshing={response?.refreshing === true} />}
+      {mixed && <CitationVersionsNote response={response} />}
     </div>
   );
 }

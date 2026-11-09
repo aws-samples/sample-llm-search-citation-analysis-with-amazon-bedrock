@@ -8,6 +8,7 @@
 import type { ReportScopeInfo } from './baseTypes';
 import type { ScopedResponseFields } from './scopeCoverage';
 import type { KpiId } from '../../constants/kpiDefinitions';
+import type { CitationVersionFields } from './citationVersions';
 import {
   isNullableString, isRecord
 } from './keywordDecoders';
@@ -29,7 +30,7 @@ export interface SentimentSplit {
  * are `null` when there is nothing to divide by; the citation KPIs are
  * `null` until owned domains are configured.
  */
-export type BrandKpis = Record<KpiId, number | null> & {
+export type BrandKpis = Record<KpiId, number | null> & CitationVersionFields & {
   /** AI engines with at least one answer. */
   engines: number;
   /** Keywords with at least one answer. */
