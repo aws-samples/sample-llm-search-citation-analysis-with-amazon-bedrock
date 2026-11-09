@@ -4,7 +4,7 @@
 # HTTP requests and HTML parsing. Every AI provider (OpenAI, Perplexity,
 # Gemini, Claude) is called over plain REST with `requests`, so no vendor
 # SDK is bundled.
-requests>=2.31.0
+requests>=2.34.2
 beautifulsoup4>=4.15.0
 
 # IANA time zone database for `zoneinfo`: the schedule API validates the
