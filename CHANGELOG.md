@@ -42,9 +42,11 @@ checking provider names, and the engine's client moved next to the other search 
   for Google AI Overviews and for the web-search providers, which take no persona template. Whether the row is
   `branded` is decided from that stored value. Rows written before 2.50.0 have no `query`.
 - **Persona-filtered visibility names the engines it cannot cover.** `/api/visibility` with a `query_prompt_id`
-  other than `default` returns `engines_not_covered: ["google_ai_overview"]`. The engine was already absent from
-  that figure's engine count, engine coverage and per-engine rows, because its answers are filed under the default
-  prompt. The field says why, so the absence does not read as zero coverage. It is empty for every other request
+  other than `default` returns `engines_not_covered: ["google_ai_overview"]` when Google AI Overviews has answers
+  in the same scope and `branded` filter. The engine was already absent from that figure's engine count, engine
+  coverage and per-engine rows, because its answers are filed under the default prompt. The field says why, so the
+  absence does not read as zero coverage. The list is empty for every other request, and also when the engine is
+  off, was never run or found no overview, since it is then missing from every figure alike
   (`engines_not_covered` in `lambda/shared/kpi_engine.py`).
 
 ### Documentation

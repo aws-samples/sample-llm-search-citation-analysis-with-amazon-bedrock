@@ -34,7 +34,7 @@ from typing import Any
 
 from shared import partial_kpi
 from shared.brand_names import FIRST_PARTY
-from shared.kpi_engine import engines_not_covered
+from shared.kpi_engine import DEFAULT_PERSONA, engines_not_covered
 from shared.partial_contract import KeywordLatest, KeywordLatestRun, Partial
 from shared.snapshot_artifacts import ArtifactBuilder, SnapshotArtifacts, encode_snapshot_cursor
 from shared.view_builder import ViewBuilder, params_of
@@ -243,11 +243,21 @@ def _list_view(artifacts: SnapshotArtifacts, request: LatestParams, variant: str
     return None if sources is None else list_page(sources, 'sources', request.offset, artifacts.build_id)
 
 
+def _engines_not_covered(artifacts: SnapshotArtifacts, request: LatestParams) -> list[str]:
+    """``engines_not_covered`` of a persona's body: the plain-keyword engines with answers in the same scope and
+    ``branded`` filter over every persona (none without a persona, so nothing more is read)."""
+    if request.persona is None or request.persona == DEFAULT_PERSONA:
+        return []
+    everyone = artifacts.load(view_key(variant_of(None, request.branded))) or {}
+    answered = (row['engine'] for row in everyone.get('engines', []) if row['kpis'].get('answers'))
+    return engines_not_covered(request.persona, answered)
+
+
 def serve_latest(artifacts: SnapshotArtifacts, request: LatestParams) -> dict[str, Any] | None:
     """The visibility body (or one keyword, brand or source page) of ``request``; ``None`` when the build does not hold its variant.
 
     The body names the AI engines a persona's figures cannot cover (``engines_not_covered``): the plain-keyword
-    engines, asked only under the default prompt.
+    engines, asked only under the default prompt, that answered in the scope.
     """
     variant = variant_of(request.persona, request.branded)
     if request.view in LIST_VIEWS:
@@ -272,7 +282,7 @@ def serve_latest(artifacts: SnapshotArtifacts, request: LatestParams) -> dict[st
         'brands_total': brands_total,
         'brands_next_token': encode_snapshot_cursor(BRANDS_LIMIT, brands_total, artifacts.build_id),
         **{name: view[name] for name in ('engines', 'sources', 'sources_total')},
-        'engines_not_covered': engines_not_covered(request.persona),
+        'engines_not_covered': _engines_not_covered(artifacts, request),
         'sources_next_token': encode_snapshot_cursor(SOURCES_LIMIT, view['sources_total'], artifacts.build_id),
         'keywords': listing['keywords'],
         'keywords_total': len(rows),

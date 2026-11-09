@@ -210,17 +210,20 @@ def _cited_urls(citations: object) -> tuple[str, ...]:
 DEFAULT_PERSONA = 'default'
 
 
-def engines_not_covered(persona: str | None) -> list[str]:
-    """The AI engines a figure narrowed to ``persona`` holds no answer of, whatever was run.
+def engines_not_covered(persona: str | None, answered_engines: Iterable[str]) -> list[str]:
+    """The AI engines that answered in the scope (``answered_engines``) but that a figure narrowed to ``persona``
+    cannot include.
 
     An engine that ``asks_plain_keyword`` (Google AI Overviews) is asked once per keyword and run under the
-    default prompt, never a persona's wording, so a persona's figures cannot include it: it is named here and
-    left out of their engine count (``engines``, ``engine_coverage``) rather than read as zero coverage. Every
-    answer (``None``) and the default persona cover every engine.
+    default prompt, never a persona's wording, so a persona's figures hold none of its answers: it is named here
+    and left out of their engine count (``engines``, ``engine_coverage``) rather than read as zero coverage. An
+    engine with no answer in the scope (switched off, never run) is missing from every figure alike and is not
+    named. Every answer (``None``) and the default persona cover every engine.
     """
     if persona is None or persona == DEFAULT_PERSONA:
         return []
-    return [provider for provider in LLM_PROVIDERS if asks_plain_keyword(provider)]
+    answered = set(answered_engines)
+    return [provider for provider in LLM_PROVIDERS if asks_plain_keyword(provider) and provider in answered]
 
 
 def _is_answer_row(row: Mapping[str, Any]) -> bool:

@@ -20,24 +20,29 @@ def _answer(provider: str, persona: str) -> dict:
     return {**row, 'query_prompt_id': persona}
 
 
+_PERSONA_ANSWERS = [_answer('openai', 'family'), _answer('gemini', 'family')]
 #: One run with a persona: OpenAI and Gemini answer the persona, Google AI Overviews the plain keyword.
-_ROWS = [_answer('openai', 'family'), _answer('gemini', 'family'), _answer('google_ai_overview', 'default')]
+_ROWS = [*_PERSONA_ANSWERS, _answer('google_ai_overview', 'default')]
 
 
-def _served(persona: str | None) -> dict:
-    artifacts = snapshot_artifacts(scope_latests([_KEYWORD], _ROWS, []), keywords_total=1)
-    body = served_visibility(artifacts, persona=persona, page_size=None)
+def _served(persona: str | None, rows: list[dict] = _ROWS, branded: str = 'all') -> dict:
+    artifacts = snapshot_artifacts(scope_latests([_KEYWORD], rows, []), keywords_total=1)
+    body = served_visibility(artifacts, persona=persona, branded=branded, page_size=None)
     assert body is not None
     return body
 
 
 @pytest.mark.parametrize('persona', [None, 'default'])
 def test_names_no_engine_when_figures_are_not_narrowed_to_a_persona(persona):
-    assert engines_not_covered(persona) == []
+    assert engines_not_covered(persona, ['openai', 'google_ai_overview']) == []
 
 
-def test_names_google_ai_overviews_when_figures_are_narrowed_to_a_persona():
-    assert engines_not_covered('family') == ['google_ai_overview']
+def test_names_google_ai_overviews_when_it_answered_and_figures_are_narrowed_to_a_persona():
+    assert engines_not_covered('family', ['openai', 'google_ai_overview']) == ['google_ai_overview']
+
+
+def test_names_no_engine_when_google_ai_overviews_has_no_answer_in_the_scope():
+    assert engines_not_covered('family', ['openai', 'gemini']) == []
 
 
 def test_leaves_google_ai_overviews_out_of_a_personas_engine_count():
@@ -56,3 +61,19 @@ def test_counts_google_ai_overviews_when_every_answer_is_shown():
     body = _served(None)
 
     assert (body['kpis']['engines'], body['engines_not_covered']) == (3, [])
+
+
+def test_names_no_engine_in_a_personas_body_when_google_ai_overviews_never_ran():
+    assert _served('family', _PERSONA_ANSWERS)['engines_not_covered'] == []
+
+
+def test_names_no_engine_in_a_personas_body_when_google_ai_overviews_found_no_overview():
+    rows = [*_PERSONA_ANSWERS, {**_answer('google_ai_overview', 'default'), 'status': 'no_answer'}]
+
+    assert _served('family', rows)['engines_not_covered'] == []
+
+
+def test_names_no_engine_when_the_branded_filter_leaves_no_google_ai_overviews_answer():
+    rows = [*({**row, 'branded': False} for row in _PERSONA_ANSWERS), {**_answer('google_ai_overview', 'default'), 'branded': True}]
+
+    assert _served('family', rows, branded='neutral')['engines_not_covered'] == []
