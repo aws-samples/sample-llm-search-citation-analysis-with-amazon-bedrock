@@ -62,6 +62,10 @@ class ProviderDefinition:
     Read-only: no API route, MCP tool or ProviderConfig row changes it. ``GET /providers`` shows it.
     """
 
+    display_name: str
+    """The name users see ("Google Gemini"), the same as ``web/src/constants/providers.ts``
+    (``shared/test_provider_contract.py`` checks it)."""
+
     asks_plain_keyword: bool = False
     """Asked the plain keyword once per keyword and run, whatever the personas, and its answer filed under the
     default (unpersonalised) prompt. Changing it would change what past and future answers measure, so it is set
@@ -71,17 +75,17 @@ class ProviderDefinition:
 #: Every provider's definition. Google AI Overviews takes no persona wording: a long persona prompt rarely
 #: triggers an overview.
 PROVIDER_DEFINITIONS: Mapping[str, ProviderDefinition] = MappingProxyType({
-    Provider.OPENAI: ProviderDefinition(),
-    Provider.PERPLEXITY: ProviderDefinition(),
-    Provider.GEMINI: ProviderDefinition(),
-    Provider.CLAUDE: ProviderDefinition(),
-    Provider.GOOGLE_AI_OVERVIEW: ProviderDefinition(asks_plain_keyword=True),
-    Provider.BRAVE: ProviderDefinition(),
-    Provider.TAVILY: ProviderDefinition(),
-    Provider.EXA: ProviderDefinition(),
-    Provider.SERPAPI: ProviderDefinition(),
-    Provider.FIRECRAWL: ProviderDefinition(),
-    Provider.AGENTCORE: ProviderDefinition(),
+    Provider.OPENAI: ProviderDefinition('OpenAI'),
+    Provider.PERPLEXITY: ProviderDefinition('Perplexity'),
+    Provider.GEMINI: ProviderDefinition('Google Gemini'),
+    Provider.CLAUDE: ProviderDefinition('Anthropic Claude'),
+    Provider.GOOGLE_AI_OVERVIEW: ProviderDefinition('Google AI Overviews', asks_plain_keyword=True),
+    Provider.BRAVE: ProviderDefinition('Brave Search'),
+    Provider.TAVILY: ProviderDefinition('Tavily'),
+    Provider.EXA: ProviderDefinition('Exa'),
+    Provider.SERPAPI: ProviderDefinition('SerpAPI'),
+    Provider.FIRECRAWL: ProviderDefinition('Firecrawl'),
+    Provider.AGENTCORE: ProviderDefinition('Amazon Bedrock Web Search'),
 })
 
 
@@ -131,25 +135,10 @@ SEARCH_PROVIDERS: list[str] = [
 # All providers combined (for backward compatibility)
 PROVIDERS: list[str] = LLM_PROVIDERS + SEARCH_PROVIDERS
 
-# Names shown to users; the dashboard's `web/src/constants/providers.ts` uses the same ones.
-PROVIDER_DISPLAY_NAMES: dict[str, str] = {
-    Provider.OPENAI: 'OpenAI',
-    Provider.PERPLEXITY: 'Perplexity',
-    Provider.GEMINI: 'Google Gemini',
-    Provider.CLAUDE: 'Anthropic Claude',
-    Provider.GOOGLE_AI_OVERVIEW: 'Google AI Overviews',
-    Provider.BRAVE: 'Brave Search',
-    Provider.TAVILY: 'Tavily',
-    Provider.EXA: 'Exa',
-    Provider.SERPAPI: 'SerpAPI',
-    Provider.FIRECRAWL: 'Firecrawl',
-    Provider.AGENTCORE: 'Amazon Bedrock Web Search',
-}
-
-
 def provider_display_name(provider: str) -> str:
-    """A provider's display name ("Google Gemini"), or its id for an unknown provider."""
-    return PROVIDER_DISPLAY_NAMES.get(provider, provider)
+    """A provider's display name ("Google Gemini", from its definition), or its id for an unknown provider."""
+    definition = PROVIDER_DEFINITIONS.get(provider)
+    return provider if definition is None else definition.display_name
 
 
 @dataclass

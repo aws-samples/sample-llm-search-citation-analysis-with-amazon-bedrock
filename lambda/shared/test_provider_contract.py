@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from types import ModuleType
 
-from shared.config import LLM_PROVIDERS, PROVIDER_DISPLAY_NAMES, Provider
+from shared.config import LLM_PROVIDERS, PROVIDER_DEFINITIONS, Provider
 from shared.provider_models import DEFAULT_PROVIDER_MODELS
 from testing.handler_fixtures import handler_fixture
 
@@ -115,6 +115,6 @@ def _web_search_provider_names() -> dict[str, str]:
 
 
 def test_the_lambdas_name_every_provider_as_the_dashboard_does():
-    """Recommendation titles (``provider_display_name``) use the names the dashboard shows."""
+    """Every provider definition names its provider as the dashboard shows it (recommendation titles use it)."""
     dashboard = {**_web_record('PROVIDER_NAMES'), **_web_search_provider_names()}
-    assert PROVIDER_DISPLAY_NAMES == dashboard
+    assert {provider: definition.display_name for provider, definition in PROVIDER_DEFINITIONS.items()} == dashboard

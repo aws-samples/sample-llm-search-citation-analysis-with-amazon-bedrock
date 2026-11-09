@@ -131,7 +131,8 @@ process.
   (`shared/recommendation_rules.py`, `shared/content_idea_rules.py`, `shared/config.py` `provider_display_name`).
   A provider-gap card carries its engine id (`provider`), and `recommendation_id` hashes the title it had before
   (`Not Appearing on Gemini`), so Action Center statuses saved against it keep matching.
-  `shared/test_provider_contract.py` checks that the Lambdas use the dashboard's display names, and
+  Each provider's name is a read-only field of its definition (`display_name` in `PROVIDER_DEFINITIONS`), and
+  `shared/test_provider_contract.py` checks it against the dashboard's names; and
   `seo/test_seo_prices_contract.py` that the Keyword Explorer's price table (`Seo/seoPrices.ts`) matches the prices the
   Lambdas bill with.
 
