@@ -4,8 +4,9 @@ import {
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiRequestError } from '../../infrastructure';
+import { buildGroup } from '../../api/keywordGroups-fixtures';
 import type {
-  Keyword, KeywordExtended
+  Keyword, KeywordExtended, KeywordGroup
 } from '../../types';
 
 export const existingKeywordFixture = {
@@ -158,4 +159,13 @@ export async function submitBulk() {
   );
   await user.click(screen.getByRole('button', { name: 'Add all' }));
   return input;
+}
+
+/** The group the group-count specs add keywords to and delete them from. */
+export function buildSevilleGroup(keywordCount: number): KeywordGroup {
+  return buildGroup({
+    id: 'seville',
+    name: 'Seville',
+    keyword_count: keywordCount,
+  });
 }

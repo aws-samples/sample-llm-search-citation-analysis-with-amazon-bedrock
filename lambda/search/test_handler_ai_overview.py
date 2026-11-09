@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 
 import google_ai_overview
 import pytest
-from google_ai_overview import AiOverviewResult
 
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_locations import GLOBAL_MARKET_CODES
@@ -36,12 +35,12 @@ _ORGANIC = (
 )
 _METADATA = {'model': 'google-serp', 'latency_ms': 900, 'cost_usd': 0.004, 'attempts': 1}
 _RAW_RESULT = {'keyword': _KEYWORD, 'items': [{'type': 'ai_overview', 'items': [], 'references': []}]}
-_ANSWERED = AiOverviewResult(
+_ANSWERED = google_ai_overview.AiOverviewResult(
     status='success', answer_markdown='Stay at Example Air Hotel.[[1]](https://example.com/riazor)',
     answer_text='Stay at Example Air Hotel.', citations=('https://example.com/riazor',),
     organic=_ORGANIC, metadata=dict(_METADATA), raw_result=_RAW_RESULT,
 )
-_NO_OVERVIEW = AiOverviewResult(
+_NO_OVERVIEW = google_ai_overview.AiOverviewResult(
     status='no_answer', answer_markdown=None, answer_text='', citations=(), organic=_ORGANIC,
     metadata=dict(_METADATA),
 )

@@ -6,6 +6,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from boto3.dynamodb.conditions import Key
 from hypothesis import given, settings
 
 from shared.keyword_run_kpis import (
@@ -111,6 +112,13 @@ class TestQueryStoredRuns:
         query_stored_runs(table, _KEYWORD, '', limit=2, deadline=Deadline(60))
 
         assert table.query.call_count == 2
+
+    def test_sends_no_sort_key_condition_when_every_run_is_asked_for(self):
+        # DynamoDB refuses `run_timestamp >= ''` (an empty key value) with a ValidationException.
+        rollups = rollup_table(rollup_items(_ROWS))
+        query_stored_runs(rollups, _KEYWORD, since='', deadline=Deadline(60))
+
+        assert rollups.query.call_args.kwargs['KeyConditionExpression'] == Key('keyword').eq(_KEYWORD)
 
     def test_leaves_the_brand_counts_unread_when_asked(self):
         stored = query_stored_runs(rollup_table(rollup_items(_ROWS)), _KEYWORD, _START, brands=False, deadline=Deadline(60))

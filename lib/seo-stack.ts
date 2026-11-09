@@ -151,6 +151,8 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
       dataForSeoSecret.grantRead(fn);
       // The SEO bucket only: paid-answer cache, Lighthouse reports, domain snapshot keywords, robots.txt copies.
       allow(fn, ['s3:GetObject', 's3:PutObject'], [seoBucket.arnForObjects('*')]);
+      // Without ListBucket a missing object (a cache payload not written yet) answers AccessDenied, not NoSuchKey.
+      allow(fn, ['s3:ListBucket'], [seoBucket.bucketArn]);
     }
     ssm.StringParameter.fromStringParameterName(this, 'CorsOriginParam', CORS_ORIGIN_PARAMETER).grantRead(router);
     this.grantDailyCallLimit(router, mainTables.providerConfig);

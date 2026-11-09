@@ -167,6 +167,14 @@ describe('citation-analysis-seo bucket', () => {
       DestinationBucketName: 'citation-analysis-access-logs-123456789012', LogFilePrefix: 'seo/',
     });
   });
+
+  it('may be listed by the router and the jobs, so a missing object reads as NoSuchKey instead of AccessDenied', () => {
+    const listers = Object.values(snapshot.template.findResources('AWS::IAM::Policy'))
+      .filter((policy) => JSON.stringify(resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement'])).includes('"s3:ListBucket"'))
+      .filter((policy) => JSON.stringify(resolvePath(policy, ['Properties', 'PolicyDocument'])).includes(`"${seoBucketId}"`));
+
+    expect(listers).toHaveLength(2);
+  });
 });
 
 describe('CitationAnalysis-Search-google_ai_overview', () => {

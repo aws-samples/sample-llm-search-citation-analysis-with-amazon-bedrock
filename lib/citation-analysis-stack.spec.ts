@@ -2788,9 +2788,9 @@ describe('Report insights narrative', () => {
     expect(snapshot.deduplicationKeywordRunKpisActions).toStrictEqual(['dynamodb:PutItem', 'dynamodb:Query']);
   });
 
-  it('lets the worker invoke Bedrock models and, outside DynamoDB, only read the scope snapshots, request a rebuild, start view jobs and announce its narratives', () => {
+  it('lets the worker invoke Bedrock models and, outside DynamoDB, only read and list the scope snapshots, request a rebuild, start view jobs and announce its narratives', () => {
     expect(snapshot.workerActions.filter((action) => !action.startsWith('dynamodb:'))).toStrictEqual([
-      'bedrock:InvokeModel', 'events:PutEvents', 'lambda:InvokeFunction', 's3:DeleteObject', 's3:GetObject', 's3:PutObject',
+      'bedrock:InvokeModel', 'events:PutEvents', 'lambda:InvokeFunction', 's3:DeleteObject', 's3:GetObject', 's3:ListBucket', 's3:PutObject',
     ]);
   });
 

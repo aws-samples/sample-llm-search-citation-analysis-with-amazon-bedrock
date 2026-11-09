@@ -10,9 +10,11 @@ import { STATUS_ERROR_MESSAGE } from './keywordEntry';
 import {
   apiDelete, apiPost, apiPut
 } from '../../api/client';
+import { fetchKeywordGroups } from '../../api/keywordGroups';
 import { KeywordsManager } from './KeywordsManager';
 import {
   BULK_CONFLICT_MESSAGE,
+  buildSevilleGroup,
   bulkCreatedKeywordFixture,
   chooseKeywordAction,
   CREATE_CONFLICT_MESSAGE,
@@ -58,6 +60,7 @@ vi.mock('../../api/keywordGroups', () => ({
 const mockApiDelete = vi.mocked(apiDelete);
 const mockApiPost = vi.mocked(apiPost);
 const mockApiPut = vi.mocked(apiPut);
+const mockFetchGroups = vi.mocked(fetchKeywordGroups);
 
 function renderManager(keywords?: Keyword[]) {
   const props = createKeywordsManagerProps(keywords);
@@ -513,6 +516,39 @@ describe('KeywordsManager', () => {
         await screen.findByText(`${STATUS_ERROR_MESSAGE} for 1 of 1: ${pausedKeyword.keyword}`)
       ).toBeInTheDocument();
       expect(props.setKeywords).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('group counts', () => {
+    beforeEach(() => {
+      mockApiPost.mockResolvedValue({
+        ...createdKeywordFixture,
+        group_ids: ['seville'],
+      });
+      mockApiDelete.mockResolvedValue({});
+    });
+
+    it('shows the new count of the selected group after a keyword is added to it', async () => {
+      mockFetchGroups.mockResolvedValueOnce([buildSevilleGroup(0)]).mockResolvedValueOnce([buildSevilleGroup(1)]);
+      renderManager([]);
+      await userEvent.setup().click(await screen.findByRole('button', { name: 'Seville, 0 keywords' }));
+
+      await submitCreate();
+
+      expect(await screen.findByRole('button', { name: 'Seville, 1 keyword' })).toBeInTheDocument();
+    });
+
+    it('shows the new count of a group after one of its keywords is deleted', async () => {
+      mockFetchGroups.mockResolvedValueOnce([buildSevilleGroup(1)]).mockResolvedValueOnce([buildSevilleGroup(0)]);
+      renderManager([{
+        ...existingKeywordFixture,
+        group_ids: ['seville'],
+      }]);
+      await screen.findByRole('button', { name: 'Seville, 1 keyword' });
+
+      await submitDelete();
+
+      expect(await screen.findByRole('button', { name: 'Seville, 0 keywords' })).toBeInTheDocument();
     });
   });
 });

@@ -77,7 +77,7 @@ export function useKeywordsManager(keywords: Keyword[], setKeywords: (keywords: 
   }, [setKeywords]);
 
   const {
-    groups, loading: groupsLoading, createGroup, renameGroup, removeGroup, changeMemberships
+    groups, loading: groupsLoading, refresh: refreshGroups, createGroup, renameGroup, removeGroup, changeMemberships
   } = useKeywordGroups({ onKeywordsUpdated: applyUpdatedKeywords });
 
   const knownGroupIds = useMemo(() => new Set(groups.map((group) => group.id)), [groups]);
@@ -117,6 +117,8 @@ export function useKeywordsManager(keywords: Keyword[], setKeywords: (keywords: 
       const data = parseKeywordResponse(response);
       setKeywords([data, ...keywords]);
       setNewKeyword('');
+      // The new keyword joined the selected group: its count changed.
+      if (targetGroupIds.length > 0) await refreshGroups();
     } catch (error) {
       console.error('Error adding keyword:', error);
       showAlert('Error', getSafeErrorMessage(error, CREATE_ERROR_MESSAGE), 'error');
@@ -152,6 +154,7 @@ export function useKeywordsManager(keywords: Keyword[], setKeywords: (keywords: 
 
       if (addedKeywords.length > 0) {
         setKeywords([...addedKeywords, ...keywords]);
+        if (targetGroupIds.length > 0) await refreshGroups();
       }
       setBulkKeywords(failures.map(({ keyword }) => keyword).join('\n'));
 
@@ -194,7 +197,10 @@ export function useKeywordsManager(keywords: Keyword[], setKeywords: (keywords: 
 
   const deleteKeyword = async (id: string) => {
     await apiDelete<unknown>(`/keywords/${id}`, { allowStructured4xx: true });
+    const removed = keywords.find((item) => item.id === id);
     setKeywords(keywords.filter((item) => item.id !== id));
+    // The keyword left its groups: their counts changed.
+    if ((removed?.group_ids?.length ?? 0) > 0) await refreshGroups();
   };
 
   /**

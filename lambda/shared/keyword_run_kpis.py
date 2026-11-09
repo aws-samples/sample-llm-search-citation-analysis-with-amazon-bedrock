@@ -221,8 +221,16 @@ class StoredRuns:
 
 
 def _window_condition(keyword: str, since: str, until: str | None) -> Any:
+    """The key condition of ``keyword``'s runs from ``since`` (``''``: every run) through ``until``.
+
+    DynamoDB refuses an empty string as a key value, so ``''`` without
+    ``until`` leaves the sort key out instead of asking ``>= ''``.
+    """
     sort_key = Key('run_timestamp')
-    return Key('keyword').eq(keyword) & (sort_key.gte(since) if until is None else sort_key.between(since, until))
+    partition = Key('keyword').eq(keyword)
+    if until is not None:
+        return partition & sort_key.between(since, until)
+    return partition & sort_key.gte(since) if since else partition
 
 
 def query_stored_runs(
