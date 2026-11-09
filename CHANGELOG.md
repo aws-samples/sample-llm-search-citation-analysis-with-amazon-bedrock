@@ -40,7 +40,11 @@ job view subscribes while its job runs and reads its REST route once on connect 
   - `citation-analysis.content-studio`: `content.changed` when an item is generated or fails, the reconcile included.
   - `citation-analysis.insights`: `self-reflection.finished` (keyword, brand, persona, status) and
     `narrative.finished` (group, market, `generated` / `skipped` / `failed`) for a run's and an Admin's regenerate.
-  - `citation-analysis.views`: `view-job.finished` (`job_id`, `status`), the shape #214 resumes exports on.
+  - `citation-analysis.view-jobs`: `view-job.finished` is not a new event. Its one producer stays 2.49.0's
+    `lambda/shared/view_job_events.py` (detail `job_id`, `started_at`, `status`, published once the outcome is
+    stored), and the relay routes it to `/deployment/view-jobs` next to the export state machine's rule.
+    GenerateSummary has one `events:PutEvents` statement, whose `events:source` condition lists `runs`, `view-jobs`
+    and `snapshots`.
   - `citation-analysis.snapshots`: `scope-snapshots.built` for an in-process build; the distributed build's state
     machine announces itself.
   - `citation-analysis.alerts`: `kpi-alerts.raised` (`execution_id`, `count`).

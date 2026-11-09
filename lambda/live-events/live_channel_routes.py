@@ -43,7 +43,8 @@ class ChannelRoute:
     owner_only: bool = False
 
 
-#: Events this platform publishes (``shared.change_events``, and the workflow's keyword step), by source and detail-type.
+#: Events this platform publishes, by source and detail-type: ``shared.change_events``, the workflow's keyword step,
+#: and ``shared.view_job_events`` (``view-job.finished``, the one event the exports also resume on).
 ROUTES: Final[Mapping[tuple[str, str], ChannelRoute]] = {
     ('citation-analysis.runs', 'run.step.finished'): ChannelRoute('runs', ('execution_id', 'step')),
     ('citation-analysis.runs', 'run.keyword.finished'): ChannelRoute('runs', ('status',)),
@@ -53,7 +54,7 @@ ROUTES: Final[Mapping[tuple[str, str], ChannelRoute]] = {
         'insights', ('keyword', 'brand', 'query_prompt_id', 'status')
     ),
     ('citation-analysis.insights', 'narrative.finished'): ChannelRoute('insights', ('group_id', 'market_id', 'status')),
-    ('citation-analysis.views', 'view-job.finished'): ChannelRoute('view-jobs', ('job_id', 'status')),
+    ('citation-analysis.view-jobs', 'view-job.finished'): ChannelRoute('view-jobs', ('job_id', 'started_at', 'status')),
     ('citation-analysis.snapshots', 'scope-snapshots.built'): ChannelRoute('snapshots', ('status',)),
     ('citation-analysis.alerts', 'kpi-alerts.raised'): ChannelRoute('alerts', ('execution_id', 'count')),
     ('citation-analysis.exports', 'export.changed'): ChannelRoute('exports', ('export_id', 'status'), owner_only=True),

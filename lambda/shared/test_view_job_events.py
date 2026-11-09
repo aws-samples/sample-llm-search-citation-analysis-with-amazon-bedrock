@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -17,8 +16,8 @@ from shared.view_job_events import DETAIL_TYPE, SOURCE, finished_entry, publish_
 from shared.view_jobs import JobRequest, read_status, run_view_job, start_job
 from testing.scope_snapshot_fixtures import SNAPSHOT_BUCKET, RecordingLambda
 from testing.snapshot_fakes import ConditionalS3
+from testing.view_job_event_fixtures import VIEW_JOB_EVENT_NAMES
 
-_EVENT_NAMES = json.loads((Path(__file__).resolve().parents[2] / 'test-fixtures' / 'view-job-events.json').read_text())
 _NOW = datetime(2026, 11, 6, 8, 0, tzinfo=UTC)
 _SCOPE = ReportScope(kind='all', keywords=('hotel coruña',), scope={'mode': 'all'}, label='All keywords')
 _JOB = 'job-1'
@@ -46,7 +45,7 @@ def _run(s3: ConditionalS3, computers: dict[str, Any]) -> tuple[dict[str, Any], 
 
 class TestEntry:
     def test_names_the_source_and_detail_type_the_rule_matches(self) -> None:
-        assert (SOURCE, DETAIL_TYPE) == (_EVENT_NAMES['source'], _EVENT_NAMES['detail_type'])
+        assert (SOURCE, DETAIL_TYPE) == (VIEW_JOB_EVENT_NAMES['source'], VIEW_JOB_EVENT_NAMES['detail_type'])
 
     def test_carries_the_job_its_run_and_the_outcome_on_the_default_bus(self) -> None:
         entry = finished_entry(_JOB, '2026-11-06T08:00:00Z', 'done')

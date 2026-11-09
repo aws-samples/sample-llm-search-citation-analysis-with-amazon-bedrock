@@ -12,8 +12,8 @@ import pytest
 from botocore.credentials import Credentials
 from live_channel_routes import ChannelMessage
 
-from shared.change_events import VIEW_JOB_FINISHED
-from testing.live_events_fixtures import STATE_MACHINE_TOPICS, WORKFLOW, change_event, execution_status_event
+from shared.view_job_events import finished_entry
+from testing.live_events_fixtures import STATE_MACHINE_TOPICS, WORKFLOW, delivered_event, execution_status_event
 from testing.module_loader import load_handler_module
 
 _relay = load_handler_module(os.path.dirname(__file__), 'handler.py', 'live_events_relay_under_test')
@@ -55,13 +55,15 @@ def _relay_with(http: FakeHttp, event: dict[str, Any]) -> dict[str, Any]:
 def test_a_routed_event_is_published_once_as_one_json_event_on_its_channel():
     http = FakeHttp()
 
-    result = _relay_with(http, change_event(VIEW_JOB_FINISHED, {'job_id': 'j1', 'status': 'done'}))
+    result = _relay_with(http, delivered_event(finished_entry('j1', '2026-11-09T10:00:00Z', 'done')))
 
     assert result == {'status': 'published', 'channel': '/deployment/view-jobs'}
     assert [(sent['method'], sent['url']) for sent in http.sent] == [('POST', f'https://{_DOMAIN}/event')]
     body = http.sent[0]['body']
     assert body['channel'] == '/deployment/view-jobs'
-    assert [json.loads(event) for event in body['events']] == [{'type': 'view-job.finished', 'job_id': 'j1', 'status': 'done'}]
+    assert [json.loads(event) for event in body['events']] == [
+        {'type': 'view-job.finished', 'job_id': 'j1', 'started_at': '2026-11-09T10:00:00Z', 'status': 'done'},
+    ]
 
 
 @pytest.mark.usefixtures('relay_env')

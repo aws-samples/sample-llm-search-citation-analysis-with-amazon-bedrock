@@ -138,7 +138,7 @@ describe('the producers in the main stack', () => {
   const main = synthesizeMainTemplate();
 
   it.each([
-    ['CitationAnalysis-GenerateSummary', ['citation-analysis.runs', 'citation-analysis.views', 'citation-analysis.snapshots']],
+    ['CitationAnalysis-GenerateSummary', ['citation-analysis.runs', 'citation-analysis.view-jobs', 'citation-analysis.snapshots']],
     ['CitationAnalysis-KpiAlerts', ['citation-analysis.runs', 'citation-analysis.alerts']],
     ['CitationAnalysis-ReportInsights', ['citation-analysis.insights']],
     ['CitationAnalysis-API-SelfReflection', ['citation-analysis.insights']],

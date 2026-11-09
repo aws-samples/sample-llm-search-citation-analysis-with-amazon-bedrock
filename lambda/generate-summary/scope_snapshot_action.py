@@ -16,10 +16,11 @@ The ``build_scope_snapshots`` and ``view_job`` actions of the GenerateSummary La
   publishes ``view-job.finished`` to the default EventBridge bus
   (``shared.view_job_events``), which resumes the exports waiting on it.
 
-Both announce what they finished (``shared.change_events``): a finished view job
-``view-job.finished`` (``job_id``, ``status``), an in-process build
-``scope-snapshots.built`` and, inside a run, ``run.step.finished``. A distributed
-build announces itself through its state machine's status changes.
+A build announces what it finished (``shared.change_events``): an in-process
+build ``scope-snapshots.built`` and, inside a run, ``run.step.finished``. A
+distributed build announces itself through its state machine's status changes.
+The live-events relay forwards these and the view job's ``view-job.finished``
+to the dashboard's channels.
 
 Environment: ``SCOPE_SNAPSHOT_BUCKET`` (else ``SUMMARY_BUCKET``, the same
 keywords bucket), ``DYNAMODB_TABLE_KEYWORDS``, ``DYNAMODB_TABLE_BRAND_CONFIG``,
@@ -45,7 +46,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from shared.change_events import RUN_STEP_FINISHED, SNAPSHOTS_BUILT, VIEW_JOB_FINISHED, publish_change
+from shared.change_events import RUN_STEP_FINISHED, SNAPSHOTS_BUILT, publish_change
 from shared.keyword_run_brands import keyword_run_brands_table
 from shared.keyword_run_kpis import keyword_run_kpis_table
 from shared.kpi_engine import owned_domains_from
@@ -73,8 +74,6 @@ MAX_SERIES_RESUMES = 8
 BACKFILL_BUILD_REASON = 'keyword_latest_backfill'
 #: Build summaries that hand the build to the distributed state machine, which announces its own end.
 _HANDED_OVER = frozenset({'started', 'running'})
-#: View job summaries that end the job (``skipped``: another invocation owns it, or nothing was asked).
-_JOB_ENDINGS = frozenset({'done', 'failed'})
 
 
 class SnapshotConfigurationError(RuntimeError):
@@ -243,6 +242,4 @@ def view_job(event: dict[str, Any], context: Any) -> dict[str, Any]:
     finally:
         clear_request_deadline()
     logger.info('View job: %s', summary)
-    if summary.get('status') in _JOB_ENDINGS:
-        publish_change(VIEW_JOB_FINISHED, {'job_id': job, 'status': summary['status']})
     return summary

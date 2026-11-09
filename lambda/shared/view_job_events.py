@@ -7,7 +7,10 @@ once the job's outcome is stored (the result object for ``done``, the
 event always sees that outcome. The export state machine's rule
 (``lib/citation-analysis-stack.ts``, ``ViewJobFinishedRule``) routes it to the
 export worker, which resumes every export waiting on the job
-(``shared.export_view_job_wait``).
+(``shared.export_view_job_wait``). The live-events relay
+(``CitationAnalysisEventsStack``) forwards the same event to the
+``/deployment/view-jobs`` channel, so an open view waiting on the job reads
+it again. It is the only producer of ``view-job.finished``.
 
 Detail: ``{job_id, started_at, status}``. ``started_at`` names the run of the
 job (a failed or dead job is started again under the same id), and

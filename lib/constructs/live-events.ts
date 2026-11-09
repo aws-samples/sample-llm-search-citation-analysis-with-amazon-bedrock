@@ -37,13 +37,16 @@ export const LIVE_EVENTS_PARAMETERS = {
   realtimeDomain: '/citation-analysis/live-events-realtime-domain',
 } as const;
 
-/** The source of each kind of change event (`lambda/shared/change_events.py`), by area. */
+/**
+ * The source of each kind of change event, by area: `lambda/shared/change_events.py`, and `viewJobs` for the
+ * `view-job.finished` event of `lambda/shared/view_job_events.py`, which the export state machine also resumes on.
+ */
 export const CHANGE_EVENT_SOURCES = {
   runs: 'citation-analysis.runs',
   research: 'citation-analysis.research',
   contentStudio: 'citation-analysis.content-studio',
   insights: 'citation-analysis.insights',
-  views: 'citation-analysis.views',
+  viewJobs: 'citation-analysis.view-jobs',
   snapshots: 'citation-analysis.snapshots',
   alerts: 'citation-analysis.alerts',
   exports: 'citation-analysis.exports',

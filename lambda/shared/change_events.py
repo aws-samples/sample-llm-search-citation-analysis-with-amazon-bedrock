@@ -8,8 +8,9 @@ dashboard can never learn more from an event than its own read would show it.
 
 The live-events relay (``lambda/live-events/``, ``CitationAnalysisEventsStack``) forwards each one to the AWS AppSync
 Events channel the dashboard subscribes to; other consumers add an EventBridge rule. Step Functions status changes
-(the analysis workflow, keyword research and the scope snapshot build) reach the bus from the service itself and are
-not published here.
+(the analysis workflow, keyword research and the scope snapshot build) reach the bus from the service itself, and a
+view job's ``view-job.finished`` from ``shared.view_job_events`` (its one producer, which the exports resume on); none
+of them is published here.
 
 Publishing is best effort. The change is already stored when it is announced, so a failed ``PutEvents`` is logged
 and never fails or retries the work: the state stays readable, and a dashboard reads it when it next connects.
@@ -60,8 +61,6 @@ SELF_REFLECTION_FINISHED: Final = ChangeKind('citation-analysis.insights', 'self
 #: A keyword group's narrative request ended (``group_id``, ``market_id`` outside the global market, ``status``:
 #: ``generated``, ``skipped`` or ``failed``), from a run's GenerateInsights step or an Admin's regenerate request.
 NARRATIVE_FINISHED: Final = ChangeKind('citation-analysis.insights', 'narrative.finished')
-#: A view job finished (``job_id``, ``status``: ``done`` or ``failed``); the shape #214 resumes exports on.
-VIEW_JOB_FINISHED: Final = ChangeKind('citation-analysis.views', 'view-job.finished')
 #: The scope snapshots were built in-process (``status``); a distributed build announces itself through Step Functions.
 SNAPSHOTS_BUILT: Final = ChangeKind('citation-analysis.snapshots', 'scope-snapshots.built')
 #: A run raised KPI alerts (``execution_id``, ``count``).

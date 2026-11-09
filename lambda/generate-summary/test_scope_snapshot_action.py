@@ -306,11 +306,9 @@ class TestChangeEvents:
         _build_with(actions, heavy=True, running=running)
         assert change_events_bus.entries == []
 
-    @pytest.mark.parametrize(('status', 'announced'), [
-        ('done', [{'job_id': 'job-7', 'status': 'done'}]),
-        ('failed', [{'job_id': 'job-7', 'status': 'failed'}]),
-        ('skipped', []),
-    ])
-    def test_a_view_job_that_ends_announces_its_id_and_status(self, actions, change_events_bus, status, announced):
+    @pytest.mark.parametrize('status', ['done', 'failed', 'skipped'])
+    def test_a_view_job_announces_its_end_only_through_its_notify_hook(self, actions, change_events_bus, status):
+        # `run_view_job` calls `publish_view_job_finished` once the outcome is stored (shared.view_job_events), the one
+        # producer of `view-job.finished`: the action adds no second event.
         _run_view_job(actions, {'job_id': 'job-7', 'status': status})
-        assert change_events_bus.details('view-job.finished') == announced
+        assert change_events_bus.entries == []

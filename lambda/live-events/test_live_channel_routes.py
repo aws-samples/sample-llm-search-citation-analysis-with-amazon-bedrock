@@ -10,23 +10,41 @@ from shared.change_events import (
     NARRATIVE_FINISHED,
     RESEARCH_JOB_CHANGED,
     SELF_REFLECTION_FINISHED,
-    VIEW_JOB_FINISHED,
 )
+from shared.view_job_events import finished_entry
 from testing.live_events_fixtures import (
     OWNER_SUB,
     PUBLISHED_KINDS,
     RESEARCH,
     STATE_MACHINE_TOPICS,
+    VIEW_JOB_FINISHED,
     WORKFLOW,
     WORKFLOW_KEYWORD_FINISHED,
     change_event,
+    delivered_event,
     execution_status_event,
 )
+from testing.view_job_event_fixtures import VIEW_JOB_EVENT_NAMES
 
 
-@pytest.mark.parametrize('kind', [*PUBLISHED_KINDS, WORKFLOW_KEYWORD_FINISHED], ids=lambda kind: kind.detail_type)
+@pytest.mark.parametrize(
+    'kind', [*PUBLISHED_KINDS, WORKFLOW_KEYWORD_FINISHED, VIEW_JOB_FINISHED], ids=lambda kind: kind.detail_type,
+)
 def test_every_published_kind_has_a_route(kind):
     assert (kind.source, kind.detail_type) in ROUTES
+
+
+def test_the_view_job_route_is_the_event_the_exports_resume_on():
+    assert ROUTES[(VIEW_JOB_EVENT_NAMES['source'], VIEW_JOB_EVENT_NAMES['detail_type'])].topic == 'view-jobs'
+
+
+@pytest.mark.parametrize('status', ['done', 'failed'])
+def test_a_finished_view_job_goes_to_the_view_jobs_topic_with_its_run_and_status(status):
+    routed = channel_message(delivered_event(finished_entry('j1', '2026-11-09T10:00:00Z', status)), STATE_MACHINE_TOPICS)
+
+    assert routed is not None
+    assert routed.channel == '/deployment/view-jobs'
+    assert routed.message == {'type': 'view-job.finished', 'job_id': 'j1', 'started_at': '2026-11-09T10:00:00Z', 'status': status}
 
 
 def test_a_deployment_event_goes_to_its_topic_with_only_the_route_fields():
@@ -35,7 +53,6 @@ def test_a_deployment_event_goes_to_its_topic_with_only_the_route_fields():
     routed = channel_message(event, STATE_MACHINE_TOPICS)
 
     assert routed is not None
-    assert routed.channel == '/deployment/view-jobs'
     assert routed.message == {'type': 'view-job.finished', 'job_id': 'j1', 'status': 'done'}
 
 

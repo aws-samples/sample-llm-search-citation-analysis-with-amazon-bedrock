@@ -72,7 +72,7 @@ function viewJobTimeout(): ApiRequestError {
   return new ApiRequestError('The complete figures are still being computed; try again in a few minutes.', { statusCode: 504 });
 }
 
-/** Whether `event` says view job `jobId` finished (`view-job.finished`, `lambda/shared/change_events.py`). */
+/** Whether `event` says view job `jobId` finished (`view-job.finished`, `lambda/shared/view_job_events.py`). */
 export function isViewJobFinished(event: LiveEvent, jobId: string): boolean {
   return event.type === 'view-job.finished' && eventField(event, 'job_id') === jobId;
 }

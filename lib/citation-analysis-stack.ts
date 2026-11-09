@@ -36,7 +36,8 @@ import { SEO_ROUTER_FUNCTION_NAME } from './constructs/seo-api';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import { DASHBOARD_API_PARAMETERS, RUNTIME_CONFIG_OBJECT_KEY } from './api-stack';
 import {
-  RESEARCH_STATE_MACHINE_NAME, RUN_KEYWORD_FINISHED, SCOPE_SNAPSHOT_BUILD_NAME, WORKFLOW_STATE_MACHINE_NAME, allowChangeEvents
+  CHANGE_EVENT_SOURCES, RESEARCH_STATE_MACHINE_NAME, RUN_KEYWORD_FINISHED, SCOPE_SNAPSHOT_BUILD_NAME, WORKFLOW_STATE_MACHINE_NAME,
+  allowChangeEvents
 } from './constructs/live-events';
 import { DASHBOARD_API_FUNCTION_NAMES, type DashboardApiFunctions } from './constructs/rest-api';
 import {
@@ -45,7 +46,7 @@ import {
 import { citationAnalysisTable, stringKey, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
 import {
-  allow, allowWhere, apiKeySecret, lambdaServiceRole
+  allow, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
 import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
@@ -153,7 +154,7 @@ const EXPORT_WORKER_TIMEOUT_SECONDS = 900;
  * job publishes it to the default bus once its outcome is stored, and the
  * export state machine resumes on it.
  */
-export const VIEW_JOB_EVENT_SOURCE = 'citation-analysis.view-jobs';
+export const VIEW_JOB_EVENT_SOURCE = CHANGE_EVENT_SOURCES.viewJobs;
 export const VIEW_JOB_FINISHED_DETAIL_TYPE = 'view-job.finished';
 /**
  * How long WaitForViewJob waits for that event before it runs ExportChunk
@@ -1699,10 +1700,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunBrandsTable.grant(generateSummaryFunction, 'dynamodb:Query');
     allow(generateSummaryFunction, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(generateSummaryFunction, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [searchResultsTable.tableArn]);
-    // A view job publishes view-job.finished (shared/view_job_events.py) to the default bus, under its own source only.
-    allowWhere(generateSummaryFunction, ['events:PutEvents'], [this.formatArn({
-      service: 'events', resource: 'event-bus', resourceName: 'default',
-    })], { StringEquals: { 'events:source': VIEW_JOB_EVENT_SOURCE } });
     // A finished chained `latest` backfill starts a build; brand-config and
     // persona writes start that backfill.
     deduplicationFunction.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', generateSummaryFunction.functionName);
@@ -2975,7 +2972,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     // and no other source; CitationAnalysisEventsStack relays them to the
     // dashboard's AppSync Events channels. The workflow's keyword step gets its
     // PutEvents grant from `PublishKeywordProgress` itself.
-    allowChangeEvents(generateSummaryFunction, this, ['runs', 'views', 'snapshots']);
+    // A view job's view-job.finished (shared/view_job_events.py) is the `viewJobs` source: the export state machine
+    // resumes on it (ViewJobFinishedRule) and the events stack relays it to /deployment/view-jobs.
+    allowChangeEvents(generateSummaryFunction, this, ['runs', 'viewJobs', 'snapshots']);
     allowChangeEvents(kpiAlertsFunction, this, ['runs', 'alerts']);
     allowChangeEvents(reportInsightsFunction, this, ['insights']);
     allowChangeEvents(selfReflectionFunction, this, ['insights']);
