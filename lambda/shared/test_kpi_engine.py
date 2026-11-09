@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -82,7 +83,7 @@ class TestAnswerFromRow:
 
         assert resolved == {
             'keyword', 'timestamp', 'provider', 'status', 'query_prompt_id', 'brands', 'citations', 'metadata.model',
-            'branded', 'market_id',
+            'branded', 'market_id', 'citations_version',
         }
 
     def test_keeps_only_successful_llm_answers(self):
@@ -509,3 +510,26 @@ class TestChanges:
             'top_1_share': 'stable', 'top_3_share': 'stable', 'visibility_score': 'stable', 'citation_rate': 'stable',
             'citation_share': 'stable', 'net_sentiment': 'declining', 'engine_coverage': 'stable', 'keyword_coverage': 'stable',
         }
+
+
+class TestCitationVersions:
+    """Which citation rule each answer was stored under, and whether a figure mixes them (tenet 2, #210)."""
+
+    def test_reads_the_stored_version_and_none_for_a_row_from_before_2_43(self):
+        rows = [{'provider': 'openai', 'keyword': 'k', 'citations_version': Decimal(2)}, {'provider': 'openai', 'keyword': 'k'}]
+
+        assert [answer.citations_version for answer in answers_from_rows(rows)] == [2, None]
+
+    @pytest.mark.parametrize(('older', 'versions', 'mixed'), [
+        (1, [{'version': '2', 'answers': 3}, {'version': 'unversioned (pre-2.43.0)', 'answers': 1}], True),
+        (0, [{'version': '2', 'answers': 3}], False),
+    ])
+    def test_lists_each_rule_with_its_answers_and_flags_only_a_mix(self, older, versions, mixed):
+        rows = [{'provider': 'openai', 'keyword': 'k', 'citations_version': 2}] * 3 + [{'provider': 'gemini', 'keyword': 'k'}] * older
+
+        kpis = brand_kpis(answers_from_rows(rows))
+
+        assert (kpis['citation_versions'], kpis['citation_versions_mixed']) == (versions, mixed)
+
+    def test_lists_no_rule_for_no_answer(self):
+        assert (brand_kpis([])['citation_versions'], brand_kpis([])['citation_versions_mixed']) == ([], False)

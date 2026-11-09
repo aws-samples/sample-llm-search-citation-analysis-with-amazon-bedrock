@@ -26,6 +26,7 @@ from shared.kpi_engine import (
     Answer,
     brand_kpis,
     brand_table,
+    combined_citation_versions,
     engine_breakdown,
     kpi_changes,
     kpi_trends,
@@ -267,6 +268,8 @@ def trend_view(
     - ``overall``: how many keywords improve, decline or hold on the visibility score.
     - ``brand_trends``: the tracked brand and its leading competitors per period.
     - ``brand_series`` (only ``with_brand_series``): every brand of the window and its KPIs per period (``brand_series``).
+    - ``citation_versions`` / ``citation_versions_mixed``: the citation rules of every answer of the window
+      (``shared.kpi_engine.combined_citation_versions``); periods of one rule each can still mix two over the window.
     - ``brands_truncated``: some run kept only its top brands (``shared.keyword_run_kpis.BRANDS_PER_RUN``, first-party
       and tracked brands always), so a competitor outside them reads as not named in that run.
     """
@@ -304,6 +307,8 @@ def trend_view(
         },
         'brand_trends': _brand_trends(series, series_kpis, tables),
         'brands_truncated': brands_truncated(run for periods in per_keyword.values() for bucket in periods.values() for run in bucket),
+        # The window's citation rules (every period together), so a client sees a mix across periods too.
+        **combined_citation_versions(series_kpis.values()),
     }
     if with_brand_series:
         body['brand_series'] = brand_series(tables)

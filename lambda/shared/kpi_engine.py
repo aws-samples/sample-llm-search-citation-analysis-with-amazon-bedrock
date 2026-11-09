@@ -18,9 +18,10 @@ same. Percentages are never averaged.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from fractions import Fraction
 from typing import Any
 from urllib.parse import urlparse
@@ -73,7 +74,20 @@ OTHER = 'other'
 SENTIMENT_LABELS: tuple[str, ...] = ('positive', 'neutral', 'mixed', 'negative')
 
 #: The SearchResults attributes an answer is read from (`#ts` = timestamp, `#st` = status, `#md` = metadata).
-ANSWER_PROJECTION = 'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id'
+ANSWER_PROJECTION = (
+    'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model, branded, market_id, citations_version'
+)
+
+#: The citation rule an answer row was stored under (``citations_version``, written since 2.43.0; D2, D3). 2: only
+#: the sources the answer cites count (``citations``), the pages an engine only read are ``retrieved_urls``, and
+#: Perplexity and Claude are asked to cite. A row without the field predates it and counted every source the engine
+#: returned: it is "unversioned", a definition of its own. The search Lambda writes this value on every answer.
+#: Changing it is a new rule: add its ``citations_v<n>`` count to ``shared.kpi_tally.COUNT_FIELDS`` (and to
+#: ``TALLIED_CITATION_RULES`` there) and bump the three stored count formats, so every older answer keeps its own
+#: label. ``test_kpi_tally.py`` fails until the tallies count this version.
+CITATIONS_VERSION = 2
+#: How a citation version is named in ``citation_versions`` (``docs/kpi-definitions.md``, Conventions).
+UNVERSIONED_CITATIONS = 'unversioned (pre-2.43.0)'
 
 #: The ``branded`` filters of a pool of answers: answers to queries that do not name the brand
 #: (``neutral``), that do (``branded``), or every answer (``all``).
@@ -118,6 +132,8 @@ class Answer:
     branded_classified: bool = True
     """Whether the row carried a ``branded`` flag at all; rows from before 2.43 did not, so their ``branded`` is a default."""
     market_id: str = GLOBAL_MARKET_ID
+    citations_version: int | None = None
+    """The citation rule the row was stored under (``CITATIONS_VERSION``); ``None`` for a row from before 2.43.0."""
 
     def first_party(self) -> tuple[Sighting, ...]:
         return tuple(sighting for sighting in self.sightings if sighting.classification == FIRST_PARTY)
@@ -259,7 +275,45 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
         branded=row.get('branded') is True,
         branded_classified='branded' in row,
         market_id=str(row.get('market_id') or GLOBAL_MARKET_ID),
+        citations_version=_citations_version(row.get('citations_version')),
     )
+
+
+def _citations_version(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int | Decimal) or value != int(value):
+        return None
+    return int(value)
+
+
+def citation_rule(version: int | None) -> str:
+    """How one stored ``citations_version`` is named in ``citation_versions``: its number, or the pre-2.43.0 label."""
+    return UNVERSIONED_CITATIONS if version is None else str(version)
+
+
+def citation_versions(answers_by_rule: Mapping[str, int]) -> dict[str, Any]:
+    """Which citation rules the answers of a figure were stored under, and whether it mixes them (tenet 2).
+
+    ``answers_by_rule``: answers per rule name (``citation_rule``). Each rule keeps its own name, so a figure over
+    rule 2 and a later rule says so too. A citation KPI over a mix adds up two definitions, so the figure says so
+    (``citation_versions_mixed``) with the answers of each, numbered rules first, in order.
+    """
+    def order(rule: str) -> tuple[int, int]:
+        return (0, int(rule)) if rule.isdigit() else (1, 0)
+
+    versions = [{'version': rule, 'answers': count} for rule, count in sorted(answers_by_rule.items(), key=lambda item: order(item[0])) if count > 0]
+    return {'citation_versions': versions, 'citation_versions_mixed': len(versions) > 1}
+
+
+def combined_citation_versions(kpi_objects: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """``citation_versions`` over the answers of disjoint KPI objects together (a trend's periods: its whole window).
+
+    Periods that each hold one rule, but not the same one, mix two definitions over the window.
+    """
+    by_rule: dict[str, int] = defaultdict(int)
+    for kpis in kpi_objects:
+        for entry in kpis.get('citation_versions') or ():
+            by_rule[str(entry['version'])] += int(entry['answers'])
+    return citation_versions(by_rule)
 
 
 def answers_from_rows(rows: Iterable[Mapping[str, Any]]) -> list[Answer]:
@@ -379,6 +433,7 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
         'top_3_share': percent(sum(rank <= 3 for rank in ranks), len(pool)),
         'visibility_score': visibility_percent(visibility, len(pool)),
         **_citation_kpis(pool, domains),
+        **citation_versions(Counter(citation_rule(answer.citations_version) for answer in pool)),
         **_net_sentiment(sighting for answer in mentioning for sighting in answer.first_party()),
         'engine_coverage': percent(len({answer.provider for answer in mentioning}), len(engines)),
         'keyword_coverage': percent(len({answer.keyword for answer in mentioning}), len(keywords)),
@@ -566,6 +621,7 @@ __all__ = [
     'ANSWER_ATTRIBUTE_NAMES',
     'ANSWER_PROJECTION',
     'BRANDED_FILTERS',
+    'CITATIONS_VERSION',
     'COMPETITOR',
     'DEFAULT_PERSONA',
     'KPI_IDS',
@@ -575,6 +631,7 @@ __all__ = [
     'SENTIMENT_LABELS',
     'SPLIT_LABELS',
     'TRENDED_KPIS',
+    'UNVERSIONED_CITATIONS',
     'Answer',
     'DomainCount',
     'Sighting',
@@ -582,6 +639,8 @@ __all__ = [
     'answers_from_rows',
     'brand_kpis',
     'brand_table',
+    'citation_rule',
+    'citation_versions',
     'engine_breakdown',
     'engines_not_covered',
     'filter_branded',

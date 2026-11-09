@@ -32,7 +32,9 @@ from typing import Any
 from shared.kpi_engine import SPLIT_LABELS
 from shared.kpi_tally import COUNT_FIELDS, BrandTally, RunTally
 
-SERIES_VERSION = 1
+#: 2 (2.52.0): the counts carry ``citations_v2`` and ``citations_unversioned`` (``shared.kpi_tally.COUNT_FIELDS``); a version-1 series is read
+#: as absent and rebuilt from the answers (the next snapshot build rebuilds it in full).
+SERIES_VERSION = 2
 SERIES_BRANDS = 500
 SERIES_RUNS = 365
 #: A row holding more brands than this while a build adds to it is cut to ``COMPACT_KEEP`` (the threshold keeps it sound).

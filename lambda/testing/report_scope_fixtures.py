@@ -173,3 +173,12 @@ def scoped_report(
             return
         with patch.object(module, 'get_brand_config', return_value=brand_config):
             yield ScopedReport(module, tables)
+
+
+@contextmanager
+def visibility_report(search_rows: Mapping[str, list[dict[str, Any]]], suffix: str) -> Generator[ScopedReport, None, None]:
+    """``GET /api/visibility`` (``api/get-visibility-metrics.py``) over ``search_rows``, the brand config empty."""
+    api_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'api')
+    module = load_scoped_handler(api_dir, 'get-visibility-metrics.py', suffix)
+    with scoped_report(module, {}, search_rows=search_rows) as report:
+        yield report

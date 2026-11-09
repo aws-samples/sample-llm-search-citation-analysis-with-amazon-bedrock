@@ -8,6 +8,7 @@ sentiment, failed answers and web-search rows (which are not answers).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from hypothesis import strategies as st
@@ -41,6 +42,9 @@ def search_rows(draw: st.DrawFn, min_size: int = 0, max_size: int = 40) -> list[
             'brands': st.lists(_BRAND, max_size=6),
             'citations': st.lists(st.sampled_from(_DOMAINS), max_size=5),
             'metadata': st.fixed_dictionaries({'model': st.sampled_from(('gpt-5-mini', 'sonar', ''))}),
+        }, optional={
+            # Rows from before 2.43.0 carry no citation version; DynamoDB answers numbers as Decimal.
+            'citations_version': st.sampled_from((2, Decimal(2))),
         }),
         min_size=min_size,
         max_size=max_size,

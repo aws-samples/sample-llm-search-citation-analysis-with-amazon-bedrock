@@ -54,7 +54,7 @@ from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dataforseo_client import DataForSeoError
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
-from shared.kpi_engine import NO_ANSWER
+from shared.kpi_engine import CITATIONS_VERSION, NO_ANSWER
 from shared.markets import GLOBAL_MARKET_ID, Market, brand_config_for_market, market_from_payload
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
@@ -99,10 +99,6 @@ def get_extraction_config() -> dict[str, Any]:
 # Environment variables
 DYNAMODB_TABLE_SEARCH_RESULTS = search_results_table_name()
 RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
-#: The citation rule an answer row was stored under (D2, D3). 2: only the sources the answer cites count
-#: (``citations``), the pages an engine only read are ``retrieved_urls``, and Perplexity and Claude are asked to
-#: cite (2.43.0). Rows without the field predate it and counted every source the engine returned.
-CITATIONS_VERSION = 2
 # Provider config table. Default mirrors the CDK resource name so a bootstrap
 # deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (

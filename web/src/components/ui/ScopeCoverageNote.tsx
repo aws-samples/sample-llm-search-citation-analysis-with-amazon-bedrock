@@ -1,5 +1,10 @@
-import type { ScopedResponseFields } from '../../types/domain/scopeCoverage';
+import type {
+  ScopeCoverage, ScopedResponseFields 
+} from '../../types/domain/scopeCoverage';
 import { formatDate } from '../../formatting/dateFormatter';
+import {
+  CitationVersionsNote, citationVersionFieldsOf
+} from './CitationVersionsNote';
 
 /*
  * How complete and how current a scoped view's figures are (2.45.0 `coverage` and source
@@ -45,6 +50,18 @@ function CompleteLine({ response }: { readonly response: ScopedResponseFields & 
   );
 }
 
+/** All keywords: the grey line; fewer: the yellow note that the time budget cut the read short. */
+function CoverageLine({ response }: { readonly response: ScopedResponseFields & { coverage: ScopeCoverage } }) {
+  const { coverage } = response;
+  if (coverage.complete) return <CompleteLine response={response} />;
+  return (
+    <p role="note" className="text-sm px-3 py-2 rounded-lg border bg-yellow-50 text-yellow-800 border-yellow-200">
+      {`${coverageSentence(coverage.keywords_analyzed, coverage.keywords_total)}. `}
+      The request ran out of time before it read the rest, so their figures are left out. Reload to try again.
+    </p>
+  );
+}
+
 function StaleNote({ refreshing }: { readonly refreshing: boolean }) {
   return (
     <output className="block text-xs px-3 py-2 rounded-lg border bg-blue-50 text-blue-700 border-blue-200">
@@ -61,21 +78,16 @@ export function ScopeCoverageNote({
 }: ScopeCoverageNoteProps) {
   const coverage = response?.coverage;
   const stale = response?.stale === true;
-  if (coverage === undefined && !stale) return null;
+  const mixed = citationVersionFieldsOf(response)?.citation_versions_mixed === true;
+  if (coverage === undefined && !stale && !mixed) return null;
   return (
     <div className={`space-y-2 ${className}`}>
-      {coverage !== undefined && (coverage.complete
-        ? <CompleteLine response={{
-          ...response,
-          coverage 
-        }} />
-        : (
-          <p role="note" className="text-sm px-3 py-2 rounded-lg border bg-yellow-50 text-yellow-800 border-yellow-200">
-            {`${coverageSentence(coverage.keywords_analyzed, coverage.keywords_total)}. `}
-            The request ran out of time before it read the rest, so their figures are left out. Reload to try again.
-          </p>
-        ))}
+      {coverage !== undefined && <CoverageLine response={{
+        ...response,
+        coverage,
+      }} />}
       {stale && <StaleNote refreshing={response?.refreshing === true} />}
+      {mixed && <CitationVersionsNote response={response} />}
     </div>
   );
 }
