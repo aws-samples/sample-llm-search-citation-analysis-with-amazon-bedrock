@@ -29,7 +29,8 @@ async function setupSubscribed(overrides: Parameters<typeof fakeLiveEventsDeps>[
   return fake;
 }
 
-async function setupConnected(channel = deploymentChannel('runs')) {
+/** A client with one subscription to `channel` whose socket AppSync accepted; the subscription is not confirmed yet. */
+async function setupAccepted(channel = deploymentChannel('runs')) {
   const fake = fakeLiveEventsDeps();
   const client = new LiveEventsClient(fake.deps);
   const listener = spyListener();
@@ -38,6 +39,19 @@ async function setupConnected(channel = deploymentChannel('runs')) {
   const [socket] = fake.sockets;
   socket.accept();
   await vi.advanceTimersByTimeAsync(0);
+  return {
+    fake,
+    client,
+    listener,
+    release,
+    socket
+  };
+}
+
+async function setupConnected(channel = deploymentChannel('runs')) {
+  const {
+    fake, client, listener, release, socket
+  } = await setupAccepted(channel);
   socket.confirmSubscriptions();
   return {
     ...fake,
@@ -210,6 +224,48 @@ describe('LiveEventsClient reconnecting', () => {
     fake.wake();
     await vi.advanceTimersByTimeAsync(0);
     expect(fake.sockets).toHaveLength(MAX_RECONNECT_ATTEMPTS + 2);
+  });
+});
+
+describe('LiveEventsClient when live events cannot tell a view', () => {
+  it('has every view read once when it gives up reconnecting, and a view that subscribes meanwhile at once', async () => {
+    const fake = fakeLiveEventsDeps();
+    const client = new LiveEventsClient(fake.deps);
+    const first = spyListener();
+    client.subscribe(deploymentChannel('runs'), first);
+    await vi.advanceTimersByTimeAsync(0);
+    await waitForEveryConnectionToDrop(fake, MAX_RECONNECT_ATTEMPTS + 1);
+    const late = spyListener();
+    client.subscribe(deploymentChannel('alerts'), late);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect([first.onConnected.mock.calls.length, late.onConnected.mock.calls.length, fake.sockets.length])
+      .toStrictEqual([1, 1, MAX_RECONNECT_ATTEMPTS + 1]);
+  });
+
+  it('has the views of a subscription AppSync refused read once', async () => {
+    vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const {
+      socket, listener
+    } = await setupAccepted();
+
+    socket.frame({
+      type: 'subscribe_error',
+      id: socket.sentOfType('subscribe')[0].id
+    });
+
+    expect(listener.onConnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a connection AppSync refused and connects again', async () => {
+    vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const fake = await setupSubscribed();
+    const [socket] = fake.sockets;
+
+    socket.frame({ type: 'connection_error' });
+    await vi.advanceTimersByTimeAsync(RECONNECT_BASE_MS);
+
+    expect([socket.closed, fake.sockets.length]).toStrictEqual([true, 2]);
   });
 });
 

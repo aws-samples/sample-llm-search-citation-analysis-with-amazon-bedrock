@@ -98,7 +98,13 @@ describe('apiGet on a 202 computing answer', () => {
     expect(onComputing.mock.calls).toStrictEqual([[computingBody], [computingBody]]);
   });
 
-  it('rejects with a 504 ApiRequestError when the job has not finished after 3 minutes, and stops listening', async () => {
+  it('answers the complete body from the read at 3 minutes when no event told it the job finished', async () => {
+    const { request } = await setupComputingVisibility(VIEW_JOB_WAIT_LIMIT_MS);
+
+    await expect(request).resolves.toStrictEqual(completeBody);
+  });
+
+  it('rejects with a 504 ApiRequestError when the read at 3 minutes still finds the job computing, and stops listening', async () => {
     mockAlwaysComputing();
 
     const outcome = expect(apiGet<unknown>('/visibility')).rejects.toMatchObject({
@@ -108,7 +114,7 @@ describe('apiGet on a 202 computing answer', () => {
     await vi.advanceTimersByTimeAsync(VIEW_JOB_WAIT_LIMIT_MS);
 
     await outcome;
-    expect(readsAndListeners('view-jobs')).toStrictEqual([2, 0]);
+    expect(readsAndListeners('view-jobs')).toStrictEqual([3, 0]);
   });
 
   it('rejects with AbortError, stops listening and sends no further request when the caller aborts during the wait', async () => {

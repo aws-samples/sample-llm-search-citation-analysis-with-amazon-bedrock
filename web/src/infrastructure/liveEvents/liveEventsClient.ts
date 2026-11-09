@@ -15,6 +15,10 @@
  * - A lost connection is opened again with jittered exponential backoff (`RECONNECT_BASE_MS` doubling to
  *   `RECONNECT_MAX_MS`), at most `MAX_RECONNECT_ATTEMPTS` times in a row; after that the next `online` or
  *   `visibilitychange` event of the page tries again.
+ * - When live events cannot tell a view about changes, the view is told to read once instead, so it never keeps
+ *   a state it cannot see change: every listener gets `onConnected` when the client gives up reconnecting, a
+ *   subscription added while it waits for the page to wake gets it at once, and AppSync refusing a subscription
+ *   (`subscribe_error`) gives its listeners one read. A `connection_error` closes the socket and reconnects.
  */
 import type { LiveEventsEndpoints } from '../config/runtimeConfig';
 import {
@@ -147,7 +151,9 @@ export class LiveEventsClient {
     entry.listeners.add(listener);
     if (entry.active) queueMicrotask(() => listener.onConnected());
     else if (existing === undefined && this.acknowledged) void this.sendSubscribe(entry);
-    else this.ensureConnected();
+    else if (this.stopWaking === null) this.ensureConnected();
+    // Gave up until the page wakes: nothing will report this subscription active, so the view reads once now.
+    else queueMicrotask(() => listener.onConnected());
     return () => this.remove(entry, listener);
   }
 
@@ -210,7 +216,23 @@ export class LiveEventsClient {
     else if (message.type === 'ka') this.armKeepAlive();
     else if (message.type === 'subscribe_success') this.activate(message.id);
     else if (message.type === 'data') this.deliver(message.id, message.event);
+    else if (message.type === 'subscribe_error') this.refused(message.id);
+    else if (message.type === 'connection_error') this.failed(socket);
     else if (message.type.endsWith('_error')) console.error('[live events] AppSync Events answered', message.type);
+  }
+
+  /** AppSync refused the subscription `id`: its views will hear nothing on it, so each reads once now. */
+  private refused(id: string | undefined): void {
+    console.error('[live events] AppSync Events refused a subscription');
+    const entry = this.entryById(id);
+    if (entry === undefined) return;
+    for (const listener of [...entry.listeners]) listener.onConnected();
+  }
+
+  private failed(socket: LiveSocket): void {
+    console.error('[live events] AppSync Events refused the connection');
+    socket.close();
+    this.closed(socket);
   }
 
   private acknowledge(connectionTimeoutMs: number | undefined): void {
@@ -290,6 +312,7 @@ export class LiveEventsClient {
     }, backoff / 2 + this.deps.random() * (backoff / 2));
   }
 
+  /** Stops reconnecting until the page wakes, and has every view read once, since none will be told of changes. */
   private waitForWake(): void {
     if (this.stopWaking !== null) return;
     this.stopWaking = this.deps.onWake(() => {
@@ -298,6 +321,9 @@ export class LiveEventsClient {
       this.attempts = 0;
       void this.connect();
     });
+    for (const entry of [...this.entries.values()]) {
+      for (const listener of [...entry.listeners]) listener.onConnected();
+    }
   }
 
   private shutDown(): void {

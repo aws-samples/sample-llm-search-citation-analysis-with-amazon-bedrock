@@ -128,6 +128,10 @@ export class CitationAnalysisEventsStack extends cdk.Stack {
       role,
       timeout: cdk.Duration.seconds(15),
       memorySize: 256,
+      // A publish AppSync refused raises: Lambda runs the event again twice within the hour, then drops it. The
+      // state stays readable, and a view reads it when it next connects.
+      retryAttempts: 2,
+      maxEventAge: cdk.Duration.hours(1),
       environment: {
         EVENTS_HTTP_DOMAIN: this.api.httpDns,
         STATE_MACHINE_TOPICS: JSON.stringify(STATE_MACHINE_TOPICS),
@@ -137,8 +141,9 @@ export class CitationAnalysisEventsStack extends cdk.Stack {
 
   /**
    * Two rules on the default bus, both to the relay: the platform's own change events (`citation-analysis.*`), and
-   * the Step Functions status changes of the state machines whose progress a dashboard watches. A failed delivery
-   * is retried for up to an hour; an event older than that is stale for a screen anyway.
+   * the Step Functions status changes of the state machines whose progress a dashboard watches. EventBridge retries
+   * a failed delivery to Lambda for up to an hour; a publish that fails inside the relay is retried by Lambda
+   * (`retryAttempts` on the function). An event older than an hour is stale for a screen anyway.
    */
   private routeEvents(relay: lambda.IFunction): void {
     const target = new targets.LambdaFunction(relay, { retryAttempts: 4, maxEventAge: cdk.Duration.hours(1) });

@@ -53,16 +53,24 @@ job view subscribes while its job runs and reads its REST route once on connect 
   - `/deployment/<topic>`: changes to state every signed-in user may already read through the API (runs,
     research, content-studio, insights, view-jobs, snapshots, alerts, seo).
   - `/user/<sub>/exports`: a user's own exports. The namespace's subscribe handler refuses a channel whose second
-    segment is not the caller's own `sub`, wildcards included.
+    segment is not the caller's own `sub`, wildcards included. `lib/events-stack.spec.ts` runs the handler as
+    deployed, against a stub of AppSync's `util`.
 - **The relay** (`lambda/live-events/`): one event in, one signed publish out. The channel comes from a fixed table
   keyed by source and detail-type, so a producer cannot pick one; an export event without a valid owner goes
-  nowhere. A refused publish raises, and EventBridge retries for up to an hour. Its role may only
+  nowhere. A refused publish raises, and Lambda runs the event again twice within the hour (the function's
+  asynchronous retries), then drops it; the views read the state when they next connect. Its role may only
   `appsync:EventPublish` to the two namespaces.
 - **The dashboard's live events client** (`web/src/infrastructure/liveEvents/`): one WebSocket per tab with no new
   dependency (the AppSync Events protocol directly), opened with the first subscription and closed 10 s after the
   last. Keep-alive timeout, jittered reconnect from 1 s to 30 s at most 8 times in a row, then on the page's next
   `online` or `visibilitychange`. Every (re)activated subscription triggers its view's catch-up read.
   `useLiveRefresh` reads once at a time, so a burst of events costs at most two reads.
+  - When live events cannot tell a view about changes, the view reads once instead: every watching view when the
+    client gives up reconnecting, a view that subscribes while the client waits for the page to wake, and the
+    views of a subscription AppSync refused (`subscribe_error`). A `connection_error` closes the socket and
+    reconnects.
+  - A wait with a limit (`waitForLive`: view jobs, research jobs, ranking analyses, narratives) reads once more at
+    the limit, so a job that finished while no event could arrive ends with its result, not a timeout.
 
 ### Changed
 

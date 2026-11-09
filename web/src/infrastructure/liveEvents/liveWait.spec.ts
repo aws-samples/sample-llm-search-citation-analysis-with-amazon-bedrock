@@ -23,6 +23,11 @@ const SETTLED: LiveReadOutcome<string> = {
 };
 const PENDING: LiveReadOutcome<string> = { settled: false };
 
+/** A read that finds the state pending once and settled from then on. */
+function mockPendingThenSettled() {
+  return vi.fn<() => Promise<LiveReadOutcome<string>>>().mockResolvedValueOnce(PENDING).mockResolvedValue(SETTLED);
+}
+
 function waitWith(read: () => Promise<LiveReadOutcome<string>>, signal?: AbortSignal, abortedValue?: () => string) {
   return waitForLive<string>({
     channel: deploymentChannel('view-jobs'),
@@ -42,7 +47,7 @@ describe('waitForLive', () => {
   });
 
   it('reads again only on a wanted event', async () => {
-    const read = vi.fn<() => Promise<LiveReadOutcome<string>>>().mockResolvedValueOnce(PENDING).mockResolvedValue(SETTLED);
+    const read = mockPendingThenSettled();
     const waiting = waitWith(read);
     await vi.advanceTimersByTimeAsync(0);
     await emitLive('view-jobs', { type: 'other' });
@@ -57,10 +62,19 @@ describe('waitForLive', () => {
     await expect(waitWith(() => Promise.reject(new TypeError('gone')))).rejects.toThrow('gone');
   });
 
-  it('rejects with the timeout error after the limit', async () => {
-    const waiting = expect(waitWith(() => Promise.resolve(PENDING))).rejects.toBeInstanceOf(TimedOut);
+  it('rejects with the timeout error when the read at the limit still finds it pending', async () => {
+    const read = vi.fn(() => Promise.resolve(PENDING));
+    const waiting = expect(waitWith(read)).rejects.toBeInstanceOf(TimedOut);
     await vi.advanceTimersByTimeAsync(60_000);
     await waiting;
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves with the read at the limit when the state settled without an event', async () => {
+    const waiting = waitWith(mockPendingThenSettled());
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect(waiting).resolves.toBe('done');
   });
 
   it('rejects with the signal’s reason on an abort, and stops listening', async () => {

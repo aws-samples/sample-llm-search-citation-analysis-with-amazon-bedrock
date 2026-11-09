@@ -5,10 +5,10 @@ import {
   allowStatementsOfRole, extractLambdaEnvVars, extractStateMachineStates, findFunctionRoleLogicalId, resolvePath, statementActions,
 } from './citation-analysis-stack-fixtures';
 import {
-  DEPLOYMENT_NAMESPACE, LIVE_EVENTS_RELAY_FUNCTION_NAME, OWN_CHANNEL_ONLY_HANDLER, USER_NAMESPACE
+  DEPLOYMENT_NAMESPACE, LIVE_EVENTS_RELAY_FUNCTION_NAME, USER_NAMESPACE
 } from './events-stack';
 import {
-  putEventsSources, resourceTypes, synthesizeEventsTemplate
+  importOwnChannelHandler, putEventsSources, resourceTypes, subscribeContext, synthesizeEventsTemplate
 } from './events-stack-fixtures';
 import { synthesizeMainTemplate } from './web-search-stack-fixtures';
 import { LIVE_EVENTS_PARAMETERS, STATE_MACHINE_TOPICS, WORKFLOW_STATE_MACHINE_NAME } from './constructs/live-events';
@@ -56,20 +56,32 @@ describe('the Event API', () => {
 });
 
 describe('the user namespace subscribe handler', () => {
-  // APPSYNC_JS runs only in AppSync (`aws appsync evaluate-code` checks it against a context there); the spec
-  // pins the code's three rules: the second channel segment, the caller's own sub, and a refusal otherwise.
+  // The handler runs as written, imported from a temporary module; AppSync's `util` is a stub that throws.
+  const SUB = '3f1c2a4e-9b7d-4e21-8a55-0c6d2f1e9a10';
+
+  it('lets a caller subscribe to their own exports channel', async () => {
+    const { onSubscribe } = await importOwnChannelHandler();
+    expect(() => onSubscribe(subscribeContext(`/user/${SUB}/exports`, SUB))).not.toThrow();
+  });
+
   it.each([
-    "import { util } from '@aws-appsync/utils';",
-    'export function onSubscribe(ctx) {',
-    'const owner = ctx.info.channel.segments[1];',
-    'if (!ctx.identity || !ctx.identity.sub || owner !== ctx.identity.sub) {',
-    'util.unauthorized();',
-  ])('refuses any channel whose second segment is not the caller’s own Cognito sub: %s', (line) => {
-    expect(OWN_CHANNEL_ONLY_HANDLER).toContain(line);
+    ['another user’s channel', `/user/0d6f2a4e-1111-4e21-8a55-0c6d2f1e9a10/exports`, SUB],
+    ['every user’s channel by wildcard', '/user/*', SUB],
+    ['a channel without an owner segment', '/user', SUB],
+    ['a caller without an identity', `/user/${SUB}/exports`, null],
+  ])('refuses %s', async (_case, channel, sub) => {
+    const { onSubscribe } = await importOwnChannelHandler();
+    expect(() => onSubscribe(subscribeContext(channel, sub))).toThrow('Unauthorized');
   });
 });
 
 describe('the relay', () => {
+  it('is run again twice within the hour when a publish fails, then the event is dropped', () => {
+    const configs = Object.values(template.findResources('AWS::Lambda::EventInvokeConfig'))
+      .map((resource) => [resolvePath(resource, ['Properties', 'MaximumRetryAttempts']), resolvePath(resource, ['Properties', 'MaximumEventAgeInSeconds'])]);
+    expect(configs).toStrictEqual([[2, 3600]]);
+  });
+
   it('may only publish to the two namespaces', () => {
     const statements = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, LIVE_EVENTS_RELAY_FUNCTION_NAME));
     expect([...new Set(statements.flatMap(statementActions))]).toStrictEqual(['appsync:EventPublish']);
@@ -111,7 +123,7 @@ describe('the stack', () => {
   it('holds only resources paid per use, so an idle deployment pays nothing for it (tenet 7)', () => {
     expect(resourceTypes(template)).toStrictEqual([
       'AWS::AppSync::Api', 'AWS::AppSync::ChannelNamespace', 'AWS::Events::Rule', 'AWS::IAM::Policy', 'AWS::IAM::Role',
-      'AWS::Lambda::Function', 'AWS::Lambda::Permission', 'AWS::Logs::LogGroup', 'AWS::SSM::Parameter',
+      'AWS::Lambda::EventInvokeConfig', 'AWS::Lambda::Function', 'AWS::Lambda::Permission', 'AWS::Logs::LogGroup', 'AWS::SSM::Parameter',
     ]);
   });
 

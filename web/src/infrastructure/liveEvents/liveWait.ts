@@ -3,7 +3,8 @@
  * rendering a hook: a view job's answer, a research job's end. The state is read once when the subscription
  * becomes active (it may have settled before) and after every reconnect, and again after every event that
  * concerns it; one read runs at a time, and events during a read cause one more read after it. Nothing is read
- * on a timer: the only timer is the limit after which the wait gives up.
+ * on a timer: the only timer is the limit, which reads once more before the wait gives up, so a wait whose events
+ * never arrived (no connection) still ends with the state as it is.
  */
 import { abortReason } from '../errors';
 import type {
@@ -87,7 +88,17 @@ export function createLiveWait(subscribe: Subscribe) {
         flight.running = true;
         void attempt();
       };
-      const timer = setTimeout(() => finish(() => reject(wait.timedOut())), wait.limitMs);
+      const lastRead = async (): Promise<void> => {
+        try {
+          const outcome = await wait.read();
+          finish(() => (outcome.settled ? resolve(outcome.value) : reject(wait.timedOut())));
+        } catch (failure) {
+          finish(() => reject(failure));
+        }
+      };
+      const timer = setTimeout(() => {
+        if (!flight.done) void lastRead();
+      }, wait.limitMs);
       const release = subscribe(wait.channel, {
         onConnected: trigger,
         onEvent: (event) => {

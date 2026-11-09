@@ -5,7 +5,8 @@ channel (``live_channel_routes``), so an open dashboard is told a job changed in
 Invoked by the ``CitationAnalysisEventsStack`` rules: the platform's own change events (``citation-analysis.*``) and
 the Step Functions status changes of the state machines in ``STATE_MACHINE_TOPICS``. It publishes over the Event
 API's HTTP endpoint, signed with its role (``appsync:EventPublish`` on the two namespaces, nothing else). A refused
-publish raises, so the asynchronous invocation is retried; an event no channel hears is dropped.
+publish raises, so Lambda retries the asynchronous invocation (twice within the hour, ``CitationAnalysisEventsStack``)
+before it drops the event; an event no channel hears is dropped at once.
 """
 
 from __future__ import annotations
