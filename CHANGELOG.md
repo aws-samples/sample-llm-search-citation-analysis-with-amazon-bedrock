@@ -9,6 +9,20 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.48.1] - 2026-11-09
+
+A test fix: the citation gap rollup property test failed on `main` for a keyword with six gaps. No shipped code
+changes.
+
+### Fixed
+
+- **`test_scope_rollup_top_gaps_hold_the_pre_move_ranking` used a stale oracle.** It ranked only each keyword's five
+  best gaps, as the 2.44.0 rollup did. Since 2.45.0 a scope's `top_gaps` are the first 30 of every gap of every
+  keyword (`scope_gap_rollup`), which is what the API and the paging test expect. When Hypothesis drew a keyword
+  whose six cited URLs were all gaps, the rollup correctly listed six and the oracle five. The oracle now ranks
+  every gap, and `test_scope_rollup_top_gaps_keep_a_keywords_sixth_gap` pins that case without the Hypothesis
+  example database.
+
 ## [2.47.0] - 2026-11-08
 
 One daily limit of paid DataForSEO calls per user, set in Settings, for every client (#212).
