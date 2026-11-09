@@ -14,10 +14,12 @@ import {
   WILDCARD_PERMISSION_FUNCTION_KEYS,
   type DashboardApiFunctions,
 } from './constructs/rest-api';
+import { LIVE_EVENTS_PARAMETERS } from './constructs/live-events';
 
 /**
  * The object the dashboard reads at startup (`web/src/infrastructure/config`)
- * to find the API: `{ "apiUrl": "<stage url>/api" }`. The main stack's web
+ * to find the API and the live events: `{ "apiUrl": "<stage url>/api",
+ * "liveEvents": { "httpDomain", "realtimeDomain" } }`. The main stack's web
  * deployment excludes it, so a dashboard deploy never overwrites or prunes it.
  */
 export const RUNTIME_CONFIG_OBJECT_KEY = 'config.json';
@@ -67,6 +69,11 @@ export class CitationAnalysisApiStack extends cdk.Stack {
     const dashboardOrigin = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.corsOrigin);
     const userPoolId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.userPoolId);
     const distributionId = ssm.StringParameter.valueForStringParameter(this, DASHBOARD_API_PARAMETERS.webDistributionId);
+    // Written by CitationAnalysisEventsStack, which `bin/` deploys before this stack.
+    const liveEvents = {
+      httpDomain: ssm.StringParameter.valueForStringParameter(this, LIVE_EVENTS_PARAMETERS.httpDomain),
+      realtimeDomain: ssm.StringParameter.valueForStringParameter(this, LIVE_EVENTS_PARAMETERS.realtimeDomain),
+    };
 
     this.restApi = new DashboardRestApi(this, 'DashboardApi', {
       functions: importFunctions(this),
@@ -82,7 +89,7 @@ export class CitationAnalysisApiStack extends cdk.Stack {
     // dashboard's own files with it.
     const webBucket = s3.Bucket.fromBucketName(this, 'WebBucket', `citation-analysis-web-${this.account}`);
     new s3deploy.BucketDeployment(this, 'DeployRuntimeConfig', {
-      sources: [s3deploy.Source.jsonData(RUNTIME_CONFIG_OBJECT_KEY, { apiUrl })],
+      sources: [s3deploy.Source.jsonData(RUNTIME_CONFIG_OBJECT_KEY, { apiUrl, liveEvents })],
       destinationBucket: webBucket,
       role: this.runtimeConfigRole(webBucket, distributionId),
       prune: false,

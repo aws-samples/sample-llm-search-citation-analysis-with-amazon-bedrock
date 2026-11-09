@@ -10,6 +10,7 @@ import {
   type DeferredResponse,
 } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { reconnectLive } from '../test/liveEventsMock';
 import {
   buildContentHistoryPayload,
   createMockFetch,
@@ -164,6 +165,14 @@ export async function settleDeferredStatusBatch(
   });
 }
 
+/** Reports the content-studio subscriptions active again `times` times (as after a reconnect); each one reads. */
+export async function reconnectContentStudio(times = 1): Promise<void> {
+  if (times <= 0) return;
+  await reconnectLive('content-studio');
+  await advanceContentStudioTimersAsync(0);
+  await reconnectContentStudio(times - 1);
+}
+
 export async function advanceContentStudioTimersAsync(milliseconds: number): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(milliseconds);
@@ -222,7 +231,7 @@ export async function renderContentStudioAfterStatusFailureLimit(
     statusFailure,
     historyResponse: buildContentHistoryPayload(mockContentHistory.slice(1)),
   });
-  await advanceContentStudioTimersAsync(20_000);
+  await reconnectContentStudio(2);
   return renderedHook;
 }
 

@@ -6,9 +6,7 @@ import {
 } from '../api/seoRankTracking';
 import { seoErrorMessage } from '../api/seo';
 import type { RankRun } from '../types/api/seoRankTracking';
-
-/** How often the latest run is read while it is pending or running (free read). */
-export const RUN_POLL_MS = 3000;
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
 export function isRunActive(run: RankRun | null): boolean {
   return run !== null && (run.status === 'pending' || run.status === 'running');
@@ -23,9 +21,9 @@ export interface RankRunControl {
 }
 
 /**
- * The tracker's latest run: polled every `RUN_POLL_MS` while it is active, and
- * `onFinished` called once when it ends, so the caller re-reads the results.
- * `start` is the only paid action and runs only when called.
+ * The tracker's latest run: while it is active, read again (free) whenever a step of one of the tracker's runs
+ * ran and once on every (re)connect of the SEO channel (TENETS.md tenet 8), and `onFinished` called once when it
+ * ends, so the caller re-reads the results. `start` is the only paid action and runs only when called.
  */
 export function useRankTrackingRun(trackerId: string, initial: RankRun | null, onFinished: () => void): RankRunControl {
   const [run, setRun] = useState<RankRun | null>(initial);
@@ -51,16 +49,10 @@ export function useRankTrackingRun(trackerId: string, initial: RankRun | null, o
   }, [initial]);
 
   const active = isRunActive(run);
-  useEffect(() => {
-    if (!active) return undefined;
-    const timer = setInterval(() => {
-      fetchLatestRankRun(trackerId).then((latest) => {
-        setRun(latest);
-        if (!isRunActive(latest)) finishedRef.current();
-      }, (failure: unknown) => setError(seoErrorMessage(failure)));
-    }, RUN_POLL_MS);
-    return () => clearInterval(timer);
-  }, [active, trackerId, setError]);
+  useSeoJobRefresh('rank', active ? trackerId : null, (tracker) => fetchLatestRankRun(tracker).then((latest) => {
+    setRun(latest);
+    if (!isRunActive(latest)) finishedRef.current();
+  }, (failure: unknown) => setError(seoErrorMessage(failure))));
 
   const begin = useCallback(() => {
     setStart({

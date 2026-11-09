@@ -1,7 +1,7 @@
 /**
  * Reviews, profile updates (posts) and questions & answers of one business.
  *
- * Reviews and updates are queued DataForSEO tasks: one paid start per click, then free polling until the
+ * Reviews and updates are queued DataForSEO tasks: one paid start per click, then free reads as its steps run until the
  * results arrive (usually under a minute). Asking again within the hour collects the same tasks for free.
  * Q&A is one live call; Google keeps Q&A for few businesses, so an empty answer is stated as such.
  */

@@ -6,6 +6,7 @@ import {
 } from 'vitest';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { deferAuthenticatedFetch } from '../test/infrastructureMock';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import type {
   ContentBriefBatchStartResponse,
   ContentBriefBatchStatusResponse,
@@ -121,12 +122,6 @@ export function batchStatusRequestCounts(
   ]));
 }
 
-/** Spies on `setInterval`; the returned reader lists the ten-second aggregate poll intervals. */
-export function spyOnAggregatePollIntervals(): () => unknown[] {
-  const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
-  return () => setIntervalSpy.mock.calls.filter(([, milliseconds]) => milliseconds === 10_000);
-}
-
 /** Renders a bare hook and starts `mockBatchRequest` without awaiting it. */
 export function renderPendingBatchStart() {
   const rendered = renderHook(() => useContentStudio());
@@ -187,4 +182,9 @@ export function renderInFlightContentStudioAction(
     ...rendered,
     deferred,
   };
+}
+
+/** How many Content Studio views listen to the `content-studio` channel now. */
+export function contentStudioListenerCount(): number {
+  return liveSubscriberCount('content-studio');
 }

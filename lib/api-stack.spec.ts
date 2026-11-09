@@ -9,6 +9,7 @@ import {
   COGNITO_AUTH, allowStatementsOfRole, methodRouteLabels, resolvePath, statementActions
 } from './citation-analysis-stack-fixtures';
 import { DASHBOARD_API_FUNCTION_NAMES, WILDCARD_PERMISSION_FUNCTION_KEYS } from './constructs/rest-api';
+import { LIVE_EVENTS_PARAMETERS } from './constructs/live-events';
 
 /**
  * CitationAnalysisApiStack (2.44.0): the dashboard REST API, moved out of the
@@ -177,11 +178,12 @@ describe('API stack cross-stack references', () => {
     expect(snapshot.apiImports).toStrictEqual([]);
   });
 
-  it('reads the dashboard origin, the user pool id and the distribution id from SSM at deploy time', () => {
+  it('reads the dashboard origin, the user pool id, the distribution id and the live events domains from SSM at deploy time', () => {
+    const expected = [...Object.values(DASHBOARD_API_PARAMETERS), ...Object.values(LIVE_EVENTS_PARAMETERS)];
     expect(Object.keys(snapshot.apiSsmParameters).sort((left, right) => left.localeCompare(right)))
-      .toStrictEqual(Object.values(DASHBOARD_API_PARAMETERS).sort((left, right) => left.localeCompare(right)));
+      .toStrictEqual([...expected].sort((left, right) => left.localeCompare(right)));
     expect(Object.values(snapshot.apiSsmParameters).map((parameter) => parameter.type))
-      .toStrictEqual(Array(3).fill('AWS::SSM::Parameter::Value<String>'));
+      .toStrictEqual(Array(expected.length).fill('AWS::SSM::Parameter::Value<String>'));
   });
 
   it('reaches the thirteen API functions by the fixed names the main stack gives them', () => {
@@ -242,10 +244,12 @@ describe('Main stack exports kept for one release', () => {
 });
 
 describe('Runtime config (config.json)', () => {
-  it('writes the stage URL plus /api into the web bucket root', () => {
+  it('writes the stage URL plus /api and the live events domains into the web bucket root', () => {
     expect(resolvePath(runtimeConfig, ['DestinationBucketName'])).toStrictEqual(snapshot.mainWebBucketName);
     expect(resolvePath(runtimeConfig, ['DestinationBucketKeyPrefix'])).toBeUndefined();
-    expect(JSON.stringify(resolvePath(runtimeConfig, ['SourceMarkers']))).toMatch(/"\/api\\""\]\]\}\}\]$/);
+    const markers = JSON.stringify(resolvePath(runtimeConfig, ['SourceMarkers']));
+    expect(markers).toMatch(/"\/api\\""\]\]\},"<<marker:0xbaba:1>>"/u);
+    expect(markers).toMatch(/liveeventshttpdomain.*liveeventsrealtimedomain/u);
   });
 
   it('never prunes the bucket and keeps every file when the API stack is deleted', () => {

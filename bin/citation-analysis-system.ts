@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { CitationAnalysisStack } from '../lib/citation-analysis-stack';
 import { CitationAnalysisApiStack } from '../lib/api-stack';
+import { CitationAnalysisEventsStack } from '../lib/events-stack';
 import { CitationAnalysisMcpStack } from '../lib/mcp-stack';
 import { CitationAnalysisSeoStack } from '../lib/seo-stack';
 import { readWebSearchRegion } from '../lib/constructs/web-search';
@@ -38,6 +39,17 @@ const seoStack = new CitationAnalysisSeoStack(app, 'CitationAnalysisSeoStack', {
 });
 seoStack.node.addDependency(stack);
 
+// Live events (AppSync Events and the relay from EventBridge) have their own
+// stack: the main stack is near the 500-resource limit, and the push holds no
+// data. It reads the user pool id from the SSM parameter the main stack
+// writes, so it deploys after it; the API stack reads its endpoints into
+// config.json, so it deploys after this one.
+const eventsStack = new CitationAnalysisEventsStack(app, 'CitationAnalysisEventsStack', {
+  env,
+  description: 'Citation Analysis System - live events (AppSync Events) for the dashboard',
+});
+eventsStack.node.addDependency(stack);
+
 // The dashboard REST API has its own stack: its ~300 API Gateway resources
 // took the main stack to CloudFormation's 500-resource limit. It takes no
 // cross-stack reference from the main stack (function ARNs from fixed names,
@@ -49,6 +61,7 @@ const apiStack = new CitationAnalysisApiStack(app, 'CitationAnalysisApiStack', {
   description: 'Citation Analysis System - dashboard REST API',
 });
 apiStack.node.addDependency(stack);
+apiStack.node.addDependency(eventsStack);
 
 // Amazon Bedrock Web Search only exists in three regions, so its gateway has its
 // own stack in a fixed region. The main stack reaches it through the SSM
@@ -58,7 +71,7 @@ const webSearchStack = new CitationAnalysisWebSearchStack(app, 'CitationAnalysis
   description: 'Citation Analysis System - Amazon Bedrock Web Search gateway',
 });
 
-for (const taggedStack of [stack, apiStack, mcpStack, seoStack, webSearchStack]) {
+for (const taggedStack of [stack, apiStack, eventsStack, mcpStack, seoStack, webSearchStack]) {
   cdk.Tags.of(taggedStack).add('Application', 'CitationAnalysis');
 }
 

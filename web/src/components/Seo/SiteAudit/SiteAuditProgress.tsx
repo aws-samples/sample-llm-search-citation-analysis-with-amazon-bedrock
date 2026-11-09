@@ -1,4 +1,4 @@
-/** Progress of a queued or running audit, polled by the report; Admins may cancel it. */
+/** Progress of a queued or running audit, read again by the report as its steps run; Admins may cancel it. */
 import type { SiteAudit } from '../../../types/api/seoAudits';
 import { Button } from '../../ui';
 import { STATUS_LABELS } from './siteAuditFormat';

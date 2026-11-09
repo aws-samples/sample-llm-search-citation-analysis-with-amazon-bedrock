@@ -18,7 +18,7 @@ import { saveRecommendationStatus } from '../api/recommendations';
 const complete = scopedFixture('recommendations', 'complete');
 const computing = scopedFixture('recommendations', 'computing');
 
-/** Renders the hook, answers its fetches with `answers` and polls the first fetch for `ms`. */
+/** Renders the hook, answers its fetches with `answers` and lets `ms` pass after the first fetch. */
 async function renderPolledRecommendations(ms: number, ...answers: ReadonlyArray<readonly [unknown, number]>) {
   answerFetchesInOrder(...answers);
   const { result } = renderHook(() => useRecommendations());
@@ -29,8 +29,8 @@ async function renderPolledRecommendations(ms: number, ...answers: ReadonlyArray
 describe('useRecommendations on a 2.45.0 scope', () => {
   setupFakeTimersAndFetch();
 
-  it('holds the view job while a 202 answer is polled', async () => {
-    const result = await renderPolledRecommendations(0, [computing, 202]);
+  it('holds the view job while it waits for a 202 answer’s job', async () => {
+    const result = await renderPolledRecommendations(0, [computing, 202], [computing, 202]);
 
     expect(result.current.computing).toStrictEqual(computing);
   });

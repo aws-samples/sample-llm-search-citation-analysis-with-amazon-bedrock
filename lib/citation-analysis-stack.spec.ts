@@ -809,8 +809,20 @@ describe('Keyword-scale analysis workflow', () => {
         'total_citations_found.$': '$.total_citations_found',
         'pages_crawled.$': "States.ArrayLength($.crawled_results[?(@.status == 'success')])",
       },
-      End: true,
+      Next: 'PublishKeywordProgress',
     });
+  });
+
+  it('then announces the keyword on the default bus and ends with the compact result, whether or not the event was put', () => {
+    const states = resolvePath(synthesized.workflowScale.definition, CHILD_STATES);
+    expect(resolvePath(states, ['PublishKeywordProgress', 'Parameters', 'Entries'])).toStrictEqual([{
+      Detail: { 'status.$': '$.status', 'run_timestamp.$': '$.timestamp' },
+      DetailType: 'run.keyword.finished',
+      Source: 'citation-analysis.runs',
+    }]);
+    expect(resolvePath(states, ['PublishKeywordProgress', 'ResultPath'])).toBeNull();
+    expect(resolvePath(states, ['PublishKeywordProgress', 'End'])).toBe(true);
+    expect(resolvePath(states, ['KeywordProgressNotPublished'])).toStrictEqual({ Type: 'Pass', End: true });
   });
 
   it('hands ParseKeywords the execution input and the execution name', () => {
@@ -1551,6 +1563,14 @@ describe('Dashboard content security policy', () => {
     expect(synthesized.contentSecurityPolicy['frame-src']).toStrictEqual([
       'https://www.youtube-nocookie.com',
       'https://player.vimeo.com',
+    ]);
+  });
+
+  it('lets the dashboard reach the API over HTTPS and the live events over a WebSocket (wss://<realtime domain>/event/realtime)', () => {
+    expect(synthesized.contentSecurityPolicy['connect-src']).toStrictEqual([
+      "'self'",
+      'https://*.amazonaws.com',
+      'wss://*.amazonaws.com',
     ]);
   });
 
@@ -2768,9 +2788,9 @@ describe('Report insights narrative', () => {
     expect(snapshot.deduplicationKeywordRunKpisActions).toStrictEqual(['dynamodb:PutItem', 'dynamodb:Query']);
   });
 
-  it('lets the worker invoke Bedrock models and, outside DynamoDB, only read the scope snapshots, request a rebuild and start view jobs', () => {
+  it('lets the worker invoke Bedrock models and, outside DynamoDB, only read the scope snapshots, request a rebuild, start view jobs and announce its narratives', () => {
     expect(snapshot.workerActions.filter((action) => !action.startsWith('dynamodb:'))).toStrictEqual([
-      'bedrock:InvokeModel', 'lambda:InvokeFunction', 's3:DeleteObject', 's3:GetObject', 's3:PutObject',
+      'bedrock:InvokeModel', 'events:PutEvents', 'lambda:InvokeFunction', 's3:DeleteObject', 's3:GetObject', 's3:PutObject',
     ]);
   });
 

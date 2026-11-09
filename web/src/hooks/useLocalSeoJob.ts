@@ -8,10 +8,9 @@ import {
 import type {
   LocalJob, LocalJobRequest
 } from '../types/api/seoLocal';
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
-export const JOB_POLL_INTERVAL_MS = 5000;
 const TERMINAL: readonly LocalJob['status'][] = ['completed', 'failed', 'timed_out'];
-
 export type LocalJobState =
   | { readonly status: 'idle' }
   | { readonly status: 'starting' }
@@ -37,18 +36,16 @@ function isTerminal(job: LocalJob): boolean {
 }
 
 /**
- * A queued local SEO job: one paid `POST /seo/local/jobs` on the user's click, then the free status route
- * every 5 s until the job completes, fails or times out. An unmount or reset stops the polling.
+ * A queued local SEO job: one paid `POST /seo/local/jobs` on the user's click; then, while it runs, the free
+ * status route is read once when the SEO channel connects (and reconnects) and again whenever a step of this job
+ * ran (TENETS.md tenet 8), until the job completes, fails or times out. An unmount or reset stops listening.
  */
 export function useLocalSeoJob(): LocalJobController {
   const [state, setState] = useState<LocalJobState>({ status: 'idle' });
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
 
   const stop = useCallback(() => {
     generationRef.current += 1;
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = null;
   }, []);
 
   useEffect(() => stop, [stop]);
@@ -70,13 +67,16 @@ export function useLocalSeoJob(): LocalJobController {
       job,
       reused 
     });
-    if (isTerminal(job)) return;
-    timerRef.current = setTimeout(() => {
-      fetchLocalJob(job.job_id)
-        .then((next) => { show(next, reused, generation); })
-        .catch((failure: unknown) => { fail(generation, failure); });
-    }, JOB_POLL_INTERVAL_MS);
-  }, [fail]);
+  }, []);
+
+  useSeoJobRefresh('local', state.status === 'running' ? state.job.job_id : null, async (jobId) => {
+    const generation = generationRef.current;
+    try {
+      show(await fetchLocalJob(jobId), state.status === 'running' && state.reused, generation);
+    } catch (failure) {
+      fail(generation, failure);
+    }
+  });
 
   const start = useCallback(async (request: LocalJobRequest) => {
     stop();

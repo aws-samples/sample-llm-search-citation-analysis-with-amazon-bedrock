@@ -5,7 +5,7 @@ import {
 import { ExportToasts } from './ExportToasts';
 
 /**
- * Mounts the one Exports center of the signed-in dashboard (polling, badge count, toasts) and
+ * Mounts the one Exports center of the signed-in dashboard (live list, badge count, toasts) and
  * renders its toasts; every "Export all" button, the header badge and the Exports page read it.
  */
 export function ExportsProvider({ children }: { readonly children: ReactNode }) {

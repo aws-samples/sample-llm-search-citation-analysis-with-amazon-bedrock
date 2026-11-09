@@ -4,9 +4,13 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
+import { STALE_REFETCH_LIMIT } from './useStaleRefetch';
 import {
-  STALE_REFETCH_INTERVAL_MS, STALE_REFETCH_LIMIT
-} from './useStaleRefetch';
+  emitLive, liveSubscriberCount
+} from '../test/liveEventsMock';
+import {
+  SNAPSHOTS_BUILT_EVENT, emitLiveRepeatedly, readsAndListeners
+} from '../test/liveReadCounts';
 import { answerEveryFetch } from '../test/fetchStubs';
 import { act } from '@testing-library/react';
 import { fixtureBody } from '../types/domain/scopeCoverage-fixtures';
@@ -56,10 +60,16 @@ async function renderProbeFetched(ms: number, polled = false) {
   return rendered;
 }
 
+/** Renders the probe over a stale answer whose background refetch never answers. */
+function renderProbeRefetchingStale() {
+  answerFetchesInOrder([staleProbe, 200]);
+  mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
+  return renderProbeFetched(0);
+}
+
 describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
   setupFakeTimersAndFetch();
-
-  it('holds the view job in computing while a 202 answer is polled', async () => {
+  it('holds the view job in computing while it waits for a 202 answer’s job', async () => {
     answerEveryFetch(computingBody, 202);
 
     const { result } = await renderProbeFetched(0, true);
@@ -70,47 +80,69 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
   it('stores the 200 body and clears computing when the job finishes', async () => {
     answerFetchesInOrder([computingBody, 202], [probeResponse, 200]);
 
-    const { result } = await renderProbeFetched(2_000, true);
+    const { result } = await renderProbeFetched(0, true);
 
     expect([result.current.data, result.current.computing, result.current.loading]).toStrictEqual([probeResponse, null, false]);
   });
 
-  it('refetches a stale answer after 10 s and stores the current one', async () => {
+  it('reads a stale answer again once it listens for the rebuild, and stores the current one', async () => {
     answerFetchesInOrder([staleProbe, 200], [currentProbe, 200]);
 
-    const { result } = await renderProbeFetched(STALE_REFETCH_INTERVAL_MS);
+    const { result } = await renderProbeFetched(0);
 
-    expect(result.current.data).toStrictEqual(currentProbe);
+    expect([result.current.data, liveSubscriberCount('snapshots')]).toStrictEqual([currentProbe, 0]);
+  });
+
+  it('reads it again when a snapshot build ends', async () => {
+    answerFetchesInOrder([staleProbe, 200], [staleProbe, 200], [currentProbe, 200]);
+    const { result } = await renderProbeFetched(0);
+
+    await emitLive('snapshots', SNAPSHOTS_BUILT_EVENT);
+
+    expect([result.current.data, mockAuthenticatedFetch.mock.calls.length]).toStrictEqual([currentProbe, 3]);
+  });
+
+  it('ignores a build that only started', async () => {
+    answerFetchesInOrder([staleProbe, 200], [staleProbe, 200]);
+    await renderProbeFetched(0);
+
+    await emitLive('snapshots', {
+      type: 'execution.status',
+      status: 'RUNNING' 
+    });
+
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
   });
 
   it('keeps loading false while a stale answer is refetched in the background', async () => {
-    answerFetchesInOrder([staleProbe, 200]);
-    mockAuthenticatedFetch.mockReturnValueOnce(new Promise(vi.fn()));
-
-    const { result } = await renderProbeFetched(STALE_REFETCH_INTERVAL_MS);
+    const { result } = await renderProbeRefetchingStale();
 
     expect([result.current.loading, result.current.data]).toStrictEqual([false, staleProbe]);
   });
 
-  it.each([
-    ['stops refetching a stale answer after the refetch limit', staleProbe, STALE_REFETCH_LIMIT + 5, STALE_REFETCH_LIMIT + 1],
-    ['sends no refetch after a current answer', currentProbe, 3, 1],
-  ])('%s', async (_name, body, intervals, calls) => {
-    answerEveryFetch(body);
+  it('stops refetching a stale answer after the refetch limit', async () => {
+    answerEveryFetch(staleProbe);
+    await renderProbeFetched(0);
 
-    await renderProbeFetched(STALE_REFETCH_INTERVAL_MS * intervals);
+    await emitLiveRepeatedly('snapshots', SNAPSHOTS_BUILT_EVENT, STALE_REFETCH_LIMIT + 5);
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(calls);
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(STALE_REFETCH_LIMIT + 1);
+  });
+
+  it('listens for nothing after a current answer', async () => {
+    answerEveryFetch(currentProbe);
+
+    await renderProbeFetched(0);
+
+    expect(readsAndListeners('snapshots')).toStrictEqual([1, 0]);
   });
 
   it('cancels the pending stale refetch on reset', async () => {
-    answerEveryFetch(staleProbe);
-    const { result } = await renderProbeFetched(0);
+    const { result } = await renderProbeRefetchingStale();
 
     act(() => { result.current.reset(); });
-    await act(() => vi.advanceTimersByTimeAsync(STALE_REFETCH_INTERVAL_MS * 2));
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(liveSubscriberCount('snapshots')).toBe(0);
   });
 
   it.each([
@@ -124,14 +156,11 @@ describe('useAnalysisEndpoint with 2.45.0 scoped answers', () => {
     expect([result.current.data, result.current.error]).toStrictEqual([data, error]);
   });
 
-  it('clears the pending stale refetch timer on unmount', async () => {
-    answerEveryFetch(staleProbe);
-    const { unmount } = await renderProbeFetched(0);
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    const callsBefore = clearTimeoutSpy.mock.calls.length;
+  it('stops listening for the rebuild on unmount', async () => {
+    const { unmount } = await renderProbeRefetchingStale();
 
     unmount();
 
-    expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(liveSubscriberCount('snapshots')).toBe(0);
   });
 });

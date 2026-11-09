@@ -13,10 +13,12 @@ import {
   getErrorMessage, isAbortError
 } from '../infrastructure';
 import { isActiveResearchStatus } from '../formatting/researchStatus';
+import { deploymentChannel } from '../infrastructure/liveEvents';
 import type { KeywordResearchItem } from '../types';
+import { concernsResearchJob } from './researchJobWatch';
+import { useLiveRefresh } from './useLiveRefresh';
 
-/** How often every running agent job is re-read while any is active. */
-export const AGENT_POLL_INTERVAL_MS = 5_000;
+const RESEARCH_CHANNEL = deploymentChannel('research');
 
 interface UseResearchAgentReturn {
   /** Every agent run, newest first — running ones keep updating. */
@@ -50,9 +52,11 @@ function replaceJob(jobs: KeywordResearchItem[], job: KeywordResearchItem): Keyw
 
 /**
  * Research-agent runs. Unlike expansion/competitor jobs (one job followed at
- * a time), the agent tab lists every run and re-reads the active ones on a
- * timer, so several runs can be shipped and left in the background while the
- * user works on something else (steering 2026-09-18; R22).
+ * a time), the agent tab lists every run and re-reads the active ones when
+ * the research channel says one of them changed (and once on every
+ * (re)connect; TENETS.md tenet 8), so several runs can be shipped and left in
+ * the background while the user works on something else (steering
+ * 2026-09-18; R22).
  */
 export const useResearchAgent = (): UseResearchAgentReturn => {
   const [jobs, setJobs] = useState<KeywordResearchItem[]>([]);
@@ -65,7 +69,6 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
-  const pollingRef = useRef(false);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
 
@@ -147,26 +150,13 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
 
   const activeKey = useMemo(() => jobs.filter(isActiveJob).map((job) => job.id).join(','), [jobs]);
 
-  // One timer for every active run: re-read them until none is active.
-  useEffect(() => {
-    if (activeKey === '') return;
-    const ids = activeKey.split(',');
-    const tick = async () => {
-      if (pollingRef.current) return;
-      pollingRef.current = true;
-      try {
-        await Promise.all(ids.map((id) => reload(id)));
-      } finally {
-        pollingRef.current = false;
-      }
-    };
-    const timer = setInterval(() => {
-      void tick();
-    }, AGENT_POLL_INTERVAL_MS);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [activeKey, reload]);
+  // One subscription for every active run: re-read them until none is active.
+  const activeIds = activeKey === '' ? [] : activeKey.split(',');
+  useLiveRefresh(
+    activeIds.length === 0 ? null : RESEARCH_CHANNEL,
+    () => Promise.all(activeIds.map((id) => reload(id))),
+    (event) => activeIds.some((id) => concernsResearchJob(event, id))
+  );
 
   /** Start a run; it appears at the top of the list (the user opens it from there). */
   // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback

@@ -1,5 +1,18 @@
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+import {
+  afterEach, vi
+} from 'vitest';
+import { resetLiveEvents } from './liveEventsMock';
+
+/**
+ * Every spec gets the fake live events of `liveEventsMock.ts` in place of the AppSync Events client, so no spec
+ * opens a WebSocket, and the fake forgets its listeners after each test. The client's own specs import
+ * `liveEventsClient.ts` and `liveWait.ts` directly, which this does not replace.
+ */
+vi.mock('../infrastructure/liveEvents', () => import('./liveEventsMock'));
+afterEach(() => {
+  resetLiveEvents();
+});
 
 /**
  * Polyfill `window.matchMedia` for jsdom. Components that consume the

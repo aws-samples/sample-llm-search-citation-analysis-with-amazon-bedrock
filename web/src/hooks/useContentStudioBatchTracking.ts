@@ -14,13 +14,16 @@ import {
   type ContentStudioBatchCandidate,
 } from '../api/contentStudioBatchStorage';
 import { ApiRequestError } from '../infrastructure';
+import { deploymentChannel } from '../infrastructure/liveEvents';
+import { useLiveRefresh } from './useLiveRefresh';
 import type {
   ContentBriefBatchStartResponse,
   ContentBriefBatchStatusResponse,
   ContentStudioHistory,
 } from '../types';
 
-const BATCH_POLL_INTERVAL = 10000;
+/** Content Studio status changes (`content.changed`, `lambda/api/content-studio.py`); a batch's children are items. */
+const CONTENT_STUDIO_BATCH_CHANNEL = deploymentChannel('content-studio');
 export const CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS = 5 * 60 * 1000;
 
 interface MountedRef { current: boolean; }
@@ -146,7 +149,6 @@ export function useContentStudioBatchTracking(
 ) {
   const [activeBatches, setActiveBatches] = useState<ContentBriefBatchStatusResponse[]>([]);
   const [trackedCandidates, setTrackedCandidates] = useState<ContentStudioBatchCandidate[]>([]);
-  const batchPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const batchPollOperationsRef = useRef(new Map<string, symbol>());
   const batchPollCommitTokensRef = useRef(new Map<string, symbol>());
   const batchFinalizationsRef = useRef(new Map<string, number>());
@@ -370,18 +372,13 @@ export function useContentStudioBatchTracking(
   }, [synchronizeFromStorage]);
   // Stryker restore ArrayDeclaration
 
-  useEffect(() => {
-    if (trackedCandidates.length === 0) return undefined;
-    const interval = setInterval(
-      () => void pollTrackedBatches(),
-      BATCH_POLL_INTERVAL
-    );
-    batchPollingRef.current = interval;
-    return () => {
-      clearInterval(interval);
-      batchPollingRef.current = null;
-    };
-  }, [pollTrackedBatches, trackedCandidates]);
+  // While a batch runs, its status is read once when the channel connects (and reconnects) and again whenever a
+  // Content Studio item changes (a batch's children are items; TENETS.md tenet 8); nothing is read on a timer.
+  useLiveRefresh(
+    trackedCandidates.length > 0 ? CONTENT_STUDIO_BATCH_CHANNEL : null,
+    () => pollTrackedBatches(),
+    (event) => event.type === 'content.changed'
+  );
 
   // Stryker disable ArrayDeclaration: Array.of preserves candidate data; the literal array is only the stable React dependency list.
   const trackBatchStart = useCallback((

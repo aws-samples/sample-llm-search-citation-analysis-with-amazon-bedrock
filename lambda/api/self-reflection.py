@@ -33,6 +33,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import api_response, success_response, validation_error
+from shared.change_events import SELF_REFLECTION_FINISHED, publish_change
 from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
 from shared.models import MODEL_TIMED_OUT_MESSAGE, BedrockDeadlineError, ModelRole, invoke_bedrock
@@ -486,11 +487,14 @@ def run_reflection_job(job: object) -> dict[str, Any]:
     except Exception:
         logger.exception('Self-reflection job failed')
         outcome = 'The analysis failed; try again'
+    status = 'done' if outcome is None else JOB_FAILED
     if outcome is None:
         _clear_job(keyword, brand, query_prompt_id)
-        return {'status': 'done'}
-    _fail_job(keyword, brand, query_prompt_id, outcome)
-    return {'status': JOB_FAILED}
+    else:
+        _fail_job(keyword, brand, query_prompt_id, outcome)
+    # The waiting view reads GET /self-reflection once on this instead of polling it.
+    publish_change(SELF_REFLECTION_FINISHED, {'keyword': keyword, 'brand': brand, 'query_prompt_id': query_prompt_id, 'status': status})
+    return {'status': status}
 
 
 # The job fields and their length limits (the POST validation's).

@@ -1,3 +1,4 @@
+import { waitFor } from '@testing-library/react';
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
@@ -8,11 +9,10 @@ import {
   RUN_ID, buildRun, buildStartRunResponse
 } from '../api/seoPerformance-fixtures';
 import { renderStartedRun } from './usePerformanceRun-fixtures';
-import { RUN_POLL_INTERVAL_MS } from './usePerformanceRun';
+import { liveSubscriberCount } from '../test/liveEventsMock';
 import {
-  advanceFakeTime, runEachTestWithFakeTimers
-} from '../test/fakeTime';
-import { countClearTimeoutsOnUnmount } from '../test/clearTimeoutOnUnmount';
+  emitSeoJobChanged, waitForDoneAfterSeoJobChanged, waitForJobReads
+} from '../test/seoJobEvents';
 
 vi.mock('../api/seoPerformance');
 vi.mock('../api/seo', () => import('../test/seoApiMock'));
@@ -24,52 +24,56 @@ class RefusedError extends Error {
   }
 }
 
-runEachTestWithFakeTimers();
+const RUNNING = buildRun({
+  status: 'running',
+  results: [null]
+});
 
 beforeEach(() => {
-  vi.mocked(startLighthouse).mockResolvedValue(buildStartRunResponse(buildRun({
-    status: 'running',
-    results: [null]
-  })));
-  vi.mocked(fetchLighthouseRun).mockResolvedValue(buildRun());
+  vi.mocked(startLighthouse).mockResolvedValue(buildStartRunResponse(RUNNING));
+  vi.mocked(fetchLighthouseRun).mockResolvedValue(RUNNING);
 });
 
 describe('usePerformanceRun', () => {
-  it('reads the run again after five seconds and settles once it completes', async () => {
+  it('reads the run it started once when it starts listening, to catch up', async () => {
+    await renderStartedRun();
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchLighthouseRun).mock.calls).toStrictEqual([[RUN_ID]]);
+    });
+  });
+
+  it('reads the run again when a step of it ran and settles once it completes', async () => {
     const { result } = await renderStartedRun();
+    await waitForJobReads(fetchLighthouseRun, 1);
+    vi.mocked(fetchLighthouseRun).mockResolvedValue(buildRun());
 
-    await advanceFakeTime(RUN_POLL_INTERVAL_MS);
-
-    expect(result.current.state.status).toBe('done');
+    expect(await waitForDoneAfterSeoJobChanged('lighthouse', RUN_ID, () => result.current.state.status)).toBe(0);
   });
 
-  it('reads nothing before the poll interval has passed', async () => {
+  it('ignores the steps of other runs', async () => {
     await renderStartedRun();
+    await waitForJobReads(fetchLighthouseRun, 1);
 
-    expect(vi.mocked(fetchLighthouseRun).mock.calls).toStrictEqual([]);
-  });
+    await emitSeoJobChanged('lighthouse', 'another-run');
 
-  it('reads the run it started', async () => {
-    await renderStartedRun();
-
-    await advanceFakeTime(RUN_POLL_INTERVAL_MS);
-
-    expect(vi.mocked(fetchLighthouseRun).mock.calls[0]?.[0]).toBe(RUN_ID);
+    expect(fetchLighthouseRun).toHaveBeenCalledTimes(1);
   });
 
   it('starts once and never retries a refused start', async () => {
     vi.mocked(startLighthouse).mockRejectedValue(new RefusedError('refused'));
     const { result } = await renderStartedRun();
 
-    await advanceFakeTime(3 * RUN_POLL_INTERVAL_MS);
-
-    expect([result.current.state, vi.mocked(startLighthouse).mock.calls.length]).toStrictEqual([{
+    expect([result.current.state, vi.mocked(startLighthouse).mock.calls.length, liveSubscriberCount('seo')]).toStrictEqual([{
       status: 'error',
       message: 'refused'
-    }, 1]);
+    }, 1, 0]);
   });
 
-  it('calls clearTimeout once when the hook unmounts with a read pending', async () => {
-    await expect(countClearTimeoutsOnUnmount(renderStartedRun)).resolves.toBe(1);
+  it('stops listening when the hook unmounts', async () => {
+    const { unmount } = await renderStartedRun();
+    unmount();
+
+    expect(liveSubscriberCount('seo')).toBe(0);
   });
 });

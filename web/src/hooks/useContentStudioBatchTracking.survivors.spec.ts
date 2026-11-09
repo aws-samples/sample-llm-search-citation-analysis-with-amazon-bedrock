@@ -8,7 +8,7 @@ import {
   storeActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
 import {
-  advanceContentStudioPoll, flushContentStudioPromises
+  announceContentChange, flushContentStudioPromises
 } from './useContentStudioBatchTracking-fixtures';
 import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
@@ -39,7 +39,7 @@ describe('useContentStudioBatchTracking no-op poll outcome', () => {
     requestBehavior.shouldFailBatchStatus = true;
     const rendersBeforeError = renderCount.value;
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(renderCount.value).toBe(rendersBeforeError);
   });

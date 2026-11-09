@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { act } from '@testing-library/react';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   dispatchBatchStorageEvent,
   flushContentStudioPromises,
   newestTrackedBatchIdsAfterElevenStarts,
@@ -30,8 +30,8 @@ import { deferNextTwoAuthenticatedFetches } from '../test/infrastructureMock';
 import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import {
   activeBatchIds,
+  contentStudioListenerCount,
   renderTwoVisibleRunningBatches,
-  spyOnAggregatePollIntervals,
   startRunningBatch,
 } from './useContentStudio-scenario-fixtures';
 
@@ -41,14 +41,25 @@ beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
 
 describe('useContentStudioBatchTracking mutation boundaries', () => {
-  it('creates no polling interval when no batch IDs are stored', () => {
-    const aggregatePollIntervals = spyOnAggregatePollIntervals();
+  it('listens to nothing when no batch IDs are stored', () => {
     const fetch = createMockFetch();
 
     renderContentStudio(fetch);
 
-    expect(requestUrlsContaining(fetch, '/batches/')).toStrictEqual([]);
-    expect(aggregatePollIntervals()).toStrictEqual([]);
+    expect([requestUrlsContaining(fetch, '/batches/'), contentStudioListenerCount()]).toStrictEqual([[], 0]);
+  });
+
+  it('reads an accepted running batch again when a Content Studio item changes', async () => {
+    vi.useFakeTimers();
+    const {
+      fetch, unmount
+    } = await startRunningBatch();
+    await flushContentStudioPromises();
+
+    await announceContentChange();
+
+    expect(batchStatusRequestUrls(fetch)).toHaveLength(2);
+    unmount();
   });
 
   it('replaces one batch card instead of duplicating a repeated batch start', async () => {
@@ -58,21 +69,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
 
     await act(() => result.current.generateContentBatch(mockBatchRequest));
 
-    expect(activeBatchIds(result.current)).toStrictEqual(['batch-1']);
-    expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
-    unmount();
-  });
-
-  it('continues polling an accepted running batch after ten seconds', async () => {
-    vi.useFakeTimers();
-    const {
-      fetch, unmount
-    } = await startRunningBatch();
-    await flushContentStudioPromises();
-
-    await advanceContentStudioPoll();
-
-    expect(batchStatusRequestUrls(fetch)).toHaveLength(2);
+    expect([activeBatchIds(result.current), storedActiveContentStudioBatchIds()]).toStrictEqual([['batch-1'], ['batch-1']]);
     unmount();
   });
 
@@ -98,7 +95,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     await flushContentStudioPromises();
 
     const [batchTwoStatus, batchOneStatus] = deferNextTwoAuthenticatedFetches();
-    await advanceContentStudioPoll();
+    await announceContentChange();
     await resolveRunningBatchStatus(batchOneStatus, 'batch-1');
 
     const laterBatchIds = Array.from({ length: 9 }, (_, index) => `batch-${index + 3}`);

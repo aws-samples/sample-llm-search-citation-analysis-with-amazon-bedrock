@@ -27,9 +27,10 @@ import {
   settleDeferredJson,
   waitForContentStudioRequests,
 } from './useContentStudio-test-fixtures';
-import { advanceContentStudioPoll } from './useContentStudioBatchTracking-fixtures';
+import { announceContentChange } from './useContentStudioBatchTracking-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+import { liveSubscriberCount } from '../test/liveEventsMock';
 
 const terminalStatuses = [
   'generated', 'failed'
@@ -38,7 +39,7 @@ const terminalStatuses = [
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
 
-describe('useContentStudio single-item polling', () => {
+describe('useContentStudio single-item status reads', () => {
   it.each(terminalStatuses)(
     'refreshes history when one non-batch item becomes %s',
     async (status) => {
@@ -150,16 +151,15 @@ describe('useContentStudio single-item polling', () => {
     ]);
   });
 
-  it('clears the item polling interval when the hook unmounts', async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+  it('stops listening for item changes when the hook unmounts', async () => {
     const {
       rendered, statusRequest
     } = await renderPendingItemStatus();
-    const callsBeforeUnmount = clearIntervalSpy.mock.calls.length;
+    const listeningBeforeUnmount = liveSubscriberCount('content-studio');
 
     rendered.unmount();
 
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
+    expect([listeningBeforeUnmount, liveSubscriberCount('content-studio')]).toStrictEqual([1, 0]);
     await settleDeferredJson(
       statusRequest,
       contentStatusPayload('content-2', 'generating')
@@ -180,7 +180,7 @@ describe('useContentStudio single-item polling', () => {
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
   });
 
-  it('ignores a stale item status that settles after polling was restarted', async () => {
+  it('ignores a stale item status that settles after a new history was loaded', async () => {
     const staleStatus = createDeferredResponse();
     const currentStatus = createDeferredResponse();
     const rendered = await renderQueuedContentStudio(
@@ -206,7 +206,7 @@ describe('useContentStudio single-item polling', () => {
     );
   });
 
-  it('requests another item status when the ten-second interval elapses', async () => {
+  it('requests another item status when that item’s change is announced, and not for another item', async () => {
     vi.useFakeTimers();
     const fetch = createMockFetch({
       historyResponse: generatingHistoryPayload,
@@ -220,9 +220,11 @@ describe('useContentStudio single-item polling', () => {
       await Promise.resolve();
     });
 
-    await advanceContentStudioPoll();
+    await announceContentChange('content-other');
+    const afterOtherItem = contentStudioRequestUrls('/status/').length;
+    await announceContentChange('content-2');
 
-    expect(contentStudioRequestUrls('/status/')).toHaveLength(2);
+    expect([afterOtherItem, contentStudioRequestUrls('/status/').length]).toStrictEqual([1, 2]);
     unmount();
   });
 });

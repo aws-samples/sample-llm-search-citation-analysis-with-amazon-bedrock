@@ -9,6 +9,94 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.53.0] - 2026-11-09
+
+The dashboard is told when a job changes instead of polling for it (#208, TENETS.md tenet 8). Job and alert state
+changes go to EventBridge, a new `CitationAnalysisEventsStack` relays them to AWS AppSync Events channels, and every
+job view subscribes while its job runs and reads its REST route once on connect and on reconnect.
+
+### Upgrade notes
+
+- **A new stack, `CitationAnalysisEventsStack`**, deploys with `npm run deploy` (`cdk deploy --all`), after the main
+  stack and before the API stack. It holds the Event API `CitationAnalysis-LiveEvents`, two EventBridge rules, the
+  relay Lambda `CitationAnalysis-LiveEventsRelay` and two SSM parameters (`/citation-analysis/live-events-http-domain`,
+  `/citation-analysis/live-events-realtime-domain`). Deploying stacks one at a time: the main stack, then this one,
+  then `CitationAnalysisApiStack`, which now reads those parameters into `config.json`.
+- No fixed monthly cost: AppSync Events bills $1.00 per million operations and $0.08 per million connection
+  minutes, EventBridge $1.00 per million custom events. A dashboard holds a connection only while a view watches a
+  running job.
+- `npm run dev`: set `VITE_LIVE_EVENTS_HTTP_DOMAIN` and `VITE_LIVE_EVENTS_REALTIME_DOMAIN` in `web/.env.local` from
+  the stack's outputs. Without them a view reads its job once and is not told when it changes.
+- The dashboard's content security policy (`CitationAnalysis-SecurityHeaders-v3`) adds `wss://*.amazonaws.com` to
+  `connect-src`, so browsers allow the WebSocket to the Event API's real-time domain. The main stack's deploy
+  updates the response headers policy.
+
+### Added
+
+- **State-change events** on the default bus (`lambda/shared/change_events.py`): ids and a status only, never the
+  state. Best effort: a failed `PutEvents` is logged and never fails the work. Each function may put only its own
+  source (`events:source` condition on its role).
+  - `citation-analysis.runs`: `run.step.finished` (GenerateSummary, KpiAlerts; `execution_id`, `step`) and
+    `run.keyword.finished` from a new `PublishKeywordProgress` state at the end of every keyword's child execution.
+    Its failure goes to a Pass state that keeps the keyword's result.
+  - `citation-analysis.research`: `research-job.changed` after every research worker action (`job_id`).
+  - `citation-analysis.content-studio`: `content.changed` when an item is generated or fails, the reconcile included.
+  - `citation-analysis.insights`: `self-reflection.finished` (keyword, brand, persona, status) and
+    `narrative.finished` (group, market, `generated` / `skipped` / `failed`) for a run's and an Admin's regenerate.
+  - `citation-analysis.view-jobs`: `view-job.finished` is not a new event. Its one producer stays 2.49.0's
+    `lambda/shared/view_job_events.py` (detail `job_id`, `started_at`, `status`, published once the outcome is
+    stored), and the relay routes it to `/deployment/view-jobs` next to the export state machine's rule.
+    GenerateSummary has one `events:PutEvents` statement, whose `events:source` condition lists `runs`, `view-jobs`
+    and `snapshots`.
+  - `citation-analysis.snapshots`: `scope-snapshots.built` for an in-process build; the distributed build's state
+    machine announces itself.
+  - `citation-analysis.alerts`: `kpi-alerts.raised` (`execution_id`, `count`).
+  - `citation-analysis.exports`: `export.changed` on every status change of an export (`ExportJobs.save`), with
+    its owner's Cognito sub.
+  - `citation-analysis.seo`: `seo-job.changed` after every SEO jobs step of a rank-tracking run, local SEO job,
+    Lighthouse run or site audit (`feature`, `id`).
+- **`CitationAnalysisEventsStack`** (`lib/events-stack.ts`). Clients connect and subscribe with the Cognito ID
+  token; only IAM publishes. Two namespaces:
+  - `/deployment/<topic>`: changes to state every signed-in user may already read through the API (runs,
+    research, content-studio, insights, view-jobs, snapshots, alerts, seo).
+  - `/user/<sub>/exports`: a user's own exports. The namespace's subscribe handler refuses a channel whose second
+    segment is not the caller's own `sub`, wildcards included. `lib/events-stack.spec.ts` runs the handler as
+    deployed, against a stub of AppSync's `util`.
+- **The relay** (`lambda/live-events/`): one event in, one signed publish out. The channel comes from a fixed table
+  keyed by source and detail-type, so a producer cannot pick one; an export event without a valid owner goes
+  nowhere. A refused publish raises, and Lambda runs the event again twice within the hour (the function's
+  asynchronous retries), then drops it; the views read the state when they next connect. Its role may only
+  `appsync:EventPublish` to the two namespaces.
+- **The dashboard's live events client** (`web/src/infrastructure/liveEvents/`): one WebSocket per tab with no new
+  dependency (the AppSync Events protocol directly), opened with the first subscription and closed 10 s after the
+  last. Keep-alive timeout, jittered reconnect from 1 s to 30 s at most 8 times in a row, then on the page's next
+  `online` or `visibilitychange`. Every (re)activated subscription triggers its view's catch-up read.
+  `useLiveRefresh` reads once at a time, so a burst of events costs at most two reads.
+  - When live events cannot tell a view about changes, the view reads once instead: every watching view when the
+    client gives up reconnecting, a view that subscribes while the client waits for the page to wake, and the
+    views of a subscription AppSync refused (`subscribe_error`). A `connection_error` closes the socket and
+    reconnects.
+  - A wait with a limit (`waitForLive`: view jobs, research jobs, ranking analyses, narratives) reads once more at
+    the limit, so a job that finished while no event could arrive ends with its result, not a timeout.
+
+### Changed
+
+- **No dashboard view polls a job any more.** Each subscribes while its job runs, reads once on connect and on
+  reconnect, and again on an event about that job: run status (`useExecutionPolling`), research jobs
+  (`researchPolling.ts` became `researchJobWatch.ts`) and agent runs (`useResearchAgent`), Content Studio items and
+  batches, ranking analyses (`useSelfReflection`), narrative regeneration, rank-tracking runs, local SEO jobs,
+  Lighthouse runs, site audits, the Exports list, view jobs (`api/viewJobs.ts`) and stale scope snapshots
+  (`useStaleRefetch`, `useMarketCitations`). The waits keep their limits as one timer each: 3 minutes for a view
+  job, 2 minutes for a ranking analysis or a narrative, 36 minutes for a research job.
+- The run view applies the terminal status a run's `execution.status` event names when the read that event
+  triggers fails (`useExecutionPolling`): that event is the last one about the run, so the view no longer stays on
+  RUNNING with nothing left to read, and `onComplete` still fires once.
+- A narrative regenerate that the worker skipped or failed now ends as failed at once, instead of after the
+  two-minute wait.
+- TENETS.md: the "Until AppSync Events is in place" clause and the polling items of the tenet 8 gap row are gone,
+  and the "nothing publishes" item names only crawl events now. `WaitForViewJob` (#214) stays in the row.
+- README (Live updates, Stacks and deploy order, Cost) describes the events, channels and costs.
+
 ## [2.52.0] - 2026-11-09
 
 Every KPI says which citation rule its answers were stored under, and a figure that mixes them says so (#210).

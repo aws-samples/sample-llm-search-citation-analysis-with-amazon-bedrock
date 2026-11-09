@@ -21,6 +21,7 @@ from map_run_results import load_keyword_results
 from scope_snapshot_action import build_scope_snapshots, view_job
 from snapshot_build_steps import STEP_ACTIONS, build_step
 
+from shared.change_events import RUN_STEP_FINISHED, publish_change
 from shared.citation_rollup import BUILD_ACTION
 from shared.dynamo_decimal import positive_int
 from shared.provider_counts import add_error_categories, empty_provider_counts
@@ -481,6 +482,9 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
         # `log_error` sanitises a dict event; a raw Map list carries nothing to redact.
         log_error(e, "generate summary handler", event if isinstance(event, dict) else None)
         raise
+    if from_map_run:
+        # A workflow run's step (not a direct invocation): an open run view re-reads the run on it.
+        publish_change(RUN_STEP_FINISHED, {'execution_id': execution_id, 'step': 'generate_summary'})
 
     if s3_location is None:
         return report

@@ -14,7 +14,7 @@ interface ComputingStateProps {
 /**
  * Shown while a `202` view job computes a scoped answer no snapshot holds (2.45.0): the
  * skeleton of the content plus a line saying the complete figures are being computed. The data
- * hook keeps polling (`api/viewJobs.ts`) and the view swaps this for the figures when they arrive.
+ * hook waits for the job's live event (`api/viewJobs.ts`) and the view swaps this for the figures when they arrive.
  */
 export function ComputingState({
   subject = 'figures', children, className = ''

@@ -343,6 +343,11 @@ export function isAbortError(error: unknown): boolean {
   return (error instanceof Error || error instanceof DOMException) && error.name === 'AbortError';
 }
 
+/** What an aborted `signal` rejects with: its own reason, or a standard `AbortError`. */
+export function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
 /**
  * The single "when may a server-provided message be shown?" policy
  * (bugs.md 4.2 — previously three disagreeing copies).

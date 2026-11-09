@@ -5,7 +5,7 @@ import {
   act, renderHook
 } from '@testing-library/react';
 import {
-  SELF_REFLECTION_GAVE_UP, SELF_REFLECTION_MAX_POLLS, SELF_REFLECTION_POLL_INTERVAL_MS, useSelfReflection
+  SELF_REFLECTION_GAVE_UP, SELF_REFLECTION_WAIT_LIMIT_MS, useSelfReflection
 } from './useSelfReflection';
 import {
   SELF_REFLECTION_STATUS_URL,
@@ -20,6 +20,10 @@ import {
 } from '../test/fakeTime';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import {
+  emitLive, liveSubscriberCount
+} from '../test/liveEventsMock';
+import { readsAndListeners } from '../test/liveReadCounts';
 
 // Hoisted above the imports: the hook reaches the API through the mocked infrastructure.
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -34,13 +38,13 @@ async function renderTriggered(...responses: unknown[]) {
   return hook;
 }
 
-/** Lets `count` poll intervals pass one by one, so each check's answer arrives before the next interval starts. */
-async function waitPollIntervals(count: number) {
-  await Array.from({ length: count }).reduce<Promise<void>>(
-    (previous) => previous.then(() => advanceFakeTime(SELF_REFLECTION_POLL_INTERVAL_MS)),
-    Promise.resolve(),
-  );
-}
+const FINISHED = {
+  type: 'self-reflection.finished',
+  keyword: 'hotels in madrid',
+  brand: 'Hotel Sol',
+  query_prompt_id: 'prompt-family',
+  status: 'done',
+};
 
 describe('useSelfReflection while the analysis runs in the background', () => {
   runEachTestWithFakeTimers();
@@ -49,10 +53,10 @@ describe('useSelfReflection while the analysis runs in the background', () => {
     mockAuthenticatedFetch.mockReset();
   });
 
-  it('checks the analysis once the poll interval has passed', async () => {
+  it('checks the analysis once when it starts listening, to catch up', async () => {
     await renderTriggered(pendingSelfReflection, runningSelfReflection);
 
-    await advanceFakeTime(SELF_REFLECTION_POLL_INTERVAL_MS);
+    await advanceFakeTime(0);
 
     expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(SELF_REFLECTION_STATUS_URL, { signal: expect.any(AbortSignal) });
   });
@@ -60,7 +64,7 @@ describe('useSelfReflection while the analysis runs in the background', () => {
   it('keeps loading while the analysis is pending', async () => {
     const { result } = await renderTriggered(pendingSelfReflection, runningSelfReflection);
 
-    await advanceFakeTime(SELF_REFLECTION_POLL_INTERVAL_MS);
+    await advanceFakeTime(0);
 
     expect(result.current).toStrictEqual({
       data: null,
@@ -70,10 +74,11 @@ describe('useSelfReflection while the analysis runs in the background', () => {
     });
   });
 
-  it('shows the reflection once the analysis finished', async () => {
+  it('shows the reflection once its finished event arrives', async () => {
     const { result } = await renderTriggered(pendingSelfReflection, runningSelfReflection, finishedSelfReflection);
+    await advanceFakeTime(0);
 
-    await waitPollIntervals(2);
+    await emitLive('insights', FINISHED);
 
     expect(result.current).toStrictEqual({
       data: mockSelfReflection,
@@ -83,45 +88,63 @@ describe('useSelfReflection while the analysis runs in the background', () => {
     });
   });
 
-  it('stops checking once the analysis finished', async () => {
-    await renderTriggered(pendingSelfReflection, finishedSelfReflection);
+  it.each([
+    ['another keyword', { keyword: 'hotels in seville' }],
+    ['another brand', { brand: 'Hotel Luna' }],
+    ['another persona', { query_prompt_id: 'prompt-business' }],
+    ['a narrative', { type: 'narrative.finished' }],
+  ])('ignores the event of %s', async (_case, fields) => {
+    await renderTriggered(pendingSelfReflection, runningSelfReflection, finishedSelfReflection);
+    await advanceFakeTime(0);
 
-    await waitPollIntervals(3);
+    await emitLive('insights', {
+      ...FINISHED,
+      ...fields 
+    });
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops listening once the analysis finished', async () => {
+    await renderTriggered(pendingSelfReflection, finishedSelfReflection);
+
+    await advanceFakeTime(0);
+
+    expect(readsAndListeners('insights')).toStrictEqual([2, 0]);
   });
 
   it('reports why the analysis failed', async () => {
     const { result } = await renderTriggered(pendingSelfReflection, failedSelfReflection);
 
-    await advanceFakeTime(SELF_REFLECTION_POLL_INTERVAL_MS);
+    await advanceFakeTime(0);
 
     expect([result.current.error, result.current.loading]).toStrictEqual(['The AI model did not answer in time; try again', false]);
   });
 
-  it('gives up after the last allowed check', async () => {
+  it('gives up after the wait limit without reading on a timer', async () => {
     mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(runningSelfReflection)));
     const { result } = await renderTriggered(pendingSelfReflection);
 
-    await waitPollIntervals(SELF_REFLECTION_MAX_POLLS + 2);
+    await advanceFakeTime(SELF_REFLECTION_WAIT_LIMIT_MS);
 
-    expect([result.current.error, mockAuthenticatedFetch.mock.calls.length]).toStrictEqual([SELF_REFLECTION_GAVE_UP, SELF_REFLECTION_MAX_POLLS + 1]);
+    expect([result.current.error, mockAuthenticatedFetch.mock.calls.length, liveSubscriberCount('insights')]).toStrictEqual([
+      SELF_REFLECTION_GAVE_UP, 2, 0,
+    ]);
   });
 
-  it('stops checking when the panel unmounts', async () => {
+  it('stops listening when the panel unmounts', async () => {
     const { unmount } = await renderTriggered(pendingSelfReflection, runningSelfReflection);
 
     unmount();
-    await waitPollIntervals(2);
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(liveSubscriberCount('insights')).toBe(0);
   });
 
-  it('never checks when the reflection came back at once', async () => {
+  it('never listens when the reflection came back at once', async () => {
     await renderTriggered(mockSelfReflection);
 
-    await waitPollIntervals(2);
+    await advanceFakeTime(0);
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(readsAndListeners('insights')).toStrictEqual([1, 0]);
   });
 });

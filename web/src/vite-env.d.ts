@@ -12,6 +12,10 @@ interface ImportMetaEnv {
   readonly VITE_MCP_CLIENT_ID?: string
   /** `CitationAnalysisSeoStack` API URL with `/api` appended; unset when the SEO stack is not deployed. */
   readonly VITE_SEO_API_URL?: string
+  /** Live events HTTP domain for `npm run dev` (deployed dashboards read it from `/config.json`). */
+  readonly VITE_LIVE_EVENTS_HTTP_DOMAIN?: string
+  /** Live events real-time domain for `npm run dev` (deployed dashboards read it from `/config.json`). */
+  readonly VITE_LIVE_EVENTS_REALTIME_DOMAIN?: string
 }
 
 interface ImportMeta {

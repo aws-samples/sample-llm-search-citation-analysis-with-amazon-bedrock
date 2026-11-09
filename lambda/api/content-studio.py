@@ -32,6 +32,7 @@ from shared.api_response import (
 )
 from shared.auth import get_caller_identity
 from shared.brand_visibility import tracked_brand_names
+from shared.change_events import CONTENT_CHANGED, publish_change
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
@@ -1166,6 +1167,7 @@ def _finish_generation(
         ExpressionAttributeNames={"#status": "status"},
         ExpressionAttributeValues=values,
     )
+    publish_change(CONTENT_CHANGED, {"content_id": content_id, "status": status})
 
 
 def _return_generation_to_pending(content_id: str, owner: str) -> None:
@@ -2366,7 +2368,7 @@ def _terminalize_exhausted_row(row: dict[str, Any], now_epoch: int) -> bool:
         )
         values[":owner"] = owner
         values[":lease_expires_at"] = lease
-    return _conditional_recovery_update(
+    terminalized = _conditional_recovery_update(
         content_id,
         (
             "SET #status = :failed, error_message = :error, "
@@ -2376,6 +2378,9 @@ def _terminalize_exhausted_row(row: dict[str, Any], now_epoch: int) -> bool:
         condition,
         values,
     )
+    if terminalized:
+        publish_change(CONTENT_CHANGED, {"content_id": content_id, "status": "failed"})
+    return terminalized
 
 
 def _release_expired_generation(row: dict[str, Any], now_epoch: int) -> bool:

@@ -2,8 +2,12 @@ import {
   describe, it, expect, vi
 } from 'vitest';
 import {
-  renderHook, act 
+  renderHook, act, waitFor
 } from '@testing-library/react';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  emitLive, liveSubscriberCount
+} from '../test/liveEventsMock';
 import { useExecutionPolling } from './useExecutionPolling';
 import type { AnalysisScope } from '../types';
 import {
@@ -12,17 +16,11 @@ import {
   createMockFetch,
   renderTriggeredExecutionPolling,
   mockKeywordProgress,
+  statusReads,
   triggerWithProgress,
 } from './useExecutionPolling-fixtures';
 
-import {
-  advanceFakeTime, runEachTestWithFakeTimers
-} from '../test/fakeTime';
-
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-
 
 describe('useExecutionPolling', () => {
   it('returns null execution initially', () => {
@@ -149,35 +147,107 @@ describe('useExecutionPolling keyword progress', () => {
   });
 });
 
-describe('useExecutionPolling polling lifecycle', () => {
-  runEachTestWithFakeTimers();
+async function waitForStatusReads(count: number): Promise<void> {
+  await waitFor(() => {
+    expect(statusReads()).toBe(count);
+  });
+}
 
-  it('stops polling and fires onComplete exactly once after a terminal status', async () => {
-    // Regression for AUDIT-2026-08-19 2.16: the interval handle lived in
-    // useState, the interval callback froze a stale stopPolling closure over
-    // null, clearInterval never ran, and onComplete fired on every 3s tick.
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('SUCCEEDED'),}));
-    const onComplete = vi.fn();
+/** Triggers an analysis whose execution keeps running, and waits for the catch-up read after the trigger's own. */
+async function renderRunningExecution() {
+  const view = await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING') }));
+  await waitForStatusReads(2);
+  return view;
+}
 
-    const { result } = renderHook(() => useExecutionPolling(onComplete));
+/** Renders the hook with an `onComplete` spy over `fetch`, triggers an analysis, then emits the run's `status` change. */
+async function renderAnnouncedExecution(fetch: ReturnType<typeof createMockFetch>, status: string, readsBefore = 0) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  const onComplete = vi.fn();
+  const view = renderHook(() => useExecutionPolling(onComplete));
+  await act(async () => {
+    await view.result.current.triggerAnalysis();
+  });
+  if (readsBefore > 0) await waitForStatusReads(readsBefore);
+  await emitLive('runs', {
+    type: 'execution.status',
+    executionArn: mockExecutionArn,
+    status,
+  });
+  return {
+    ...view,
+    onComplete,
+  };
+}
 
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
-    const fetchCallsAfterCompletion = mockAuthenticatedFetch.mock.calls.length;
+describe('useExecutionPolling live lifecycle', () => {
+  it('fires onComplete exactly once after a terminal status and listens to nothing more', async () => {
+    // Regression for AUDIT-2026-08-19 2.16: onComplete fired on every 3s tick of the old poll.
+    const { onComplete } = await renderAnnouncedExecution(createMockFetch({ statusResponse: createMockStatusResponse('SUCCEEDED') }), 'SUCCEEDED');
 
-    await advanceFakeTime(9000);
-
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterCompletion);
+    expect([onComplete.mock.calls.length, liveSubscriberCount('runs')]).toStrictEqual([1, 0]);
   });
 
-  it('keeps polling on the interval while the execution is running', async () => {
-    await renderTriggeredExecutionPolling(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
-    const fetchCallsAfterTrigger = mockAuthenticatedFetch.mock.calls.length;
+  it('reads the status once to catch up when it starts listening to a running execution', async () => {
+    await renderRunningExecution();
 
-    await advanceFakeTime(6000);
+    expect(statusReads()).toBe(2);
+  });
 
-    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterTrigger + 2);
+  it.each([
+    ['its own status change', {
+      type: 'execution.status',
+      executionArn: mockExecutionArn,
+      status: 'RUNNING' 
+    }],
+    ['one of its steps', {
+      type: 'run.step.finished',
+      execution_id: 'test',
+      step: 'generate_summary' 
+    }],
+    ['a keyword finishing', {
+      type: 'run.keyword.finished',
+      status: 'success' 
+    }],
+  ])('reads the status again on %s', async (_case, event) => {
+    await renderRunningExecution();
+
+    await emitLive('runs', event);
+
+    await waitForStatusReads(3);
+  });
+
+  it('ignores another execution’s status change', async () => {
+    await renderRunningExecution();
+
+    await emitLive('runs', {
+      type: 'execution.status',
+      executionArn: `${mockExecutionArn}-other`,
+      status: 'SUCCEEDED' 
+    });
+
+    expect(statusReads()).toBe(2);
+  });
+
+  it.each([
+    ['applies the announced end of its run, fires onComplete and stops listening', 'FAILED', ['FAILED', 1, 0]],
+    ['keeps the run running and listening when the event announced no end', 'RUNNING', ['RUNNING', 0, 1]],
+  ])('when the read after a status change fails, %s', async (_case, announced, expected) => {
+    // The run's terminal status change is the last event about it: a failed read must not leave the view on RUNNING.
+    const {
+      result, onComplete 
+    } = await renderAnnouncedExecution(createMockFetch({ failStatusFrom: 2 }), announced, 2);
+    await waitForStatusReads(3);
+
+    await waitFor(() => {
+      expect([result.current.execution?.status, onComplete.mock.calls.length, liveSubscriberCount('runs')]).toStrictEqual(expected);
+    });
+  });
+
+  it('stops listening when the hook unmounts', async () => {
+    const { unmount } = await renderRunningExecution();
+    unmount();
+
+    expect(liveSubscriberCount('runs')).toBe(0);
   });
 });

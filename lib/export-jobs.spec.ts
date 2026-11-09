@@ -2,7 +2,7 @@ import {
   describe, expect, it
 } from 'vitest';
 import { synthesizeDashboardStacks } from './api-stack-fixtures';
-import { COGNITO_AUTH, methodRouteLabels } from './citation-analysis-stack-fixtures';
+import { COGNITO_AUTH, methodRouteLabels, resolvePath } from './citation-analysis-stack-fixtures';
 import {
   extractExportServiceSnapshot, readViewJobEventNames, referencedLogicalIds, resourcesGranting
 } from './export-jobs-fixtures';
@@ -183,12 +183,12 @@ describe('Resuming exports on view-job.finished', () => {
       .toStrictEqual(['states:SendTaskSuccess', 'states:SendTaskFailure']);
   });
 
-  it('lets GenerateSummary publish to the default bus under the view jobs source only', () => {
+  it('lets GenerateSummary publish to the default bus under the view jobs source, in its one PutEvents statement', () => {
     const publishing = snapshot.generateSummaryStatements.filter((statement) => statement.actions.includes('events:PutEvents'));
 
-    expect(publishing.map((statement) => [statement.actions, statement.conditions])).toStrictEqual([
-      [['events:PutEvents'], JSON.stringify({ StringEquals: { 'events:source': readViewJobEventNames().source } })],
-    ]);
+    expect(publishing.map((statement) => statement.actions)).toStrictEqual([['events:PutEvents']]);
+    expect(resolvePath(JSON.parse(publishing[0].conditions ?? 'null'), ['StringEquals', 'events:source']))
+      .toContain(readViewJobEventNames().source);
     expect(publishing[0].resources).toMatch(/:event-bus\/default"\]\]\}$/);
   });
 });

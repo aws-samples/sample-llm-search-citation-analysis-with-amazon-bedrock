@@ -1,13 +1,12 @@
 import {
-  useCallback, useEffect, useRef, useState
+  useCallback, useRef, useState
 } from 'react';
 import { seoErrorMessage } from '../api/seo';
 import { fetchLighthouseRun } from '../api/seoPerformance';
 import type {
   LighthouseRun, StartRunResponse
 } from '../types/api/seoPerformance';
-
-export const RUN_POLL_INTERVAL_MS = 5000;
+import { useSeoJobRefresh } from './useSeoJobRefresh';
 
 /** Nothing shown yet, a start or open under way, a run on screen, or why it could not be shown. */
 export type RunState =
@@ -50,17 +49,16 @@ function failed(failure: unknown): RunState {
 }
 
 /**
- * One Lighthouse run on screen: started on a click (or opened from the list), then read every 5 s while it
- * runs. The polling reads are free; an unmount, a newer start or a newer open stops them.
+ * One Lighthouse run on screen: started on a click (or opened from the list); while it runs, it is read again
+ * (free) once when the SEO channel connects or reconnects and whenever a step of it ran (TENETS.md tenet 8). An
+ * unmount, a newer start or a newer open stops listening to it.
  */
 export function usePerformanceRun(): RunController {
   const [state, setState] = useState<RunState>({ status: 'idle' });
   const latest = useRef(0);
 
-  const show = useCallback(async (load: () => Promise<StartRunResponse>) => {
-    latest.current += 1;
-    const ticket = latest.current;
-    setState({ status: 'starting' });
+  /** Shows what `load` answers unless a newer start or open took over since `ticket` was drawn. */
+  const settle = useCallback(async (ticket: number, load: () => Promise<StartRunResponse>) => {
     try {
       const answer = await load();
       if (latest.current === ticket) setState(shown(answer.run, answer.reused));
@@ -69,19 +67,19 @@ export function usePerformanceRun(): RunController {
     }
   }, []);
 
-  useEffect(() => {
-    if (state.status !== 'running') return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetchLighthouseRun(state.run.run_id, { signal: controller.signal })
-        .then((run) => { if (!controller.signal.aborted) setState(shown(run, state.reused)); })
-        .catch((failure: unknown) => { if (!controller.signal.aborted) setState(failed(failure)); });
-    }, RUN_POLL_INTERVAL_MS);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [state]);
+  const show = useCallback(async (load: () => Promise<StartRunResponse>) => {
+    latest.current += 1;
+    setState({ status: 'starting' });
+    await settle(latest.current, load);
+  }, [settle]);
+
+  useSeoJobRefresh('lighthouse', state.status === 'running' ? state.run.run_id : null, (runId) => settle(
+    latest.current,
+    async () => ({
+      run: await fetchLighthouseRun(runId),
+      reused: state.status === 'running' && state.reused
+    })
+  ));
 
   const open = useCallback((runId: string) => show(async () => ({
     run: await fetchLighthouseRun(runId),

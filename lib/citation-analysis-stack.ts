@@ -35,6 +35,10 @@ import { RANK_TRACKER_SCHEDULE_GROUP } from './constructs/seo-rank-tracking';
 import { SEO_ROUTER_FUNCTION_NAME } from './constructs/seo-api';
 import { lambdaSourceCode, pythonLayer } from './constructs/python-layer';
 import { DASHBOARD_API_PARAMETERS, RUNTIME_CONFIG_OBJECT_KEY } from './api-stack';
+import {
+  CHANGE_EVENT_SOURCES, RESEARCH_STATE_MACHINE_NAME, RUN_KEYWORD_FINISHED, SCOPE_SNAPSHOT_BUILD_NAME, WORKFLOW_STATE_MACHINE_NAME,
+  allowChangeEvents
+} from './constructs/live-events';
 import { DASHBOARD_API_FUNCTION_NAMES, type DashboardApiFunctions } from './constructs/rest-api';
 import {
   apiFunction, apiLambdaCode, monthLogGroup, pythonFunction, type PythonFunctionProps
@@ -42,7 +46,7 @@ import {
 import { citationAnalysisTable, stringKey, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
 import {
-  allow, allowWhere, apiKeySecret, lambdaServiceRole
+  allow, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
 import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
@@ -89,8 +93,6 @@ const RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES = 60;
  */
 const RESEARCH_STEP_CONCURRENCY = 10;
 
-/** Name of the analysis state machine; its role policies format ARNs from it to avoid a self-reference. */
-const WORKFLOW_STATE_MACHINE_NAME = 'CitationAnalysis-Workflow';
 
 /**
  * Keywords-bucket prefix for per-run scratch objects: ParseKeywords' keyword
@@ -152,7 +154,7 @@ const EXPORT_WORKER_TIMEOUT_SECONDS = 900;
  * job publishes it to the default bus once its outcome is stored, and the
  * export state machine resumes on it.
  */
-export const VIEW_JOB_EVENT_SOURCE = 'citation-analysis.view-jobs';
+export const VIEW_JOB_EVENT_SOURCE = CHANGE_EVENT_SOURCES.viewJobs;
 export const VIEW_JOB_FINISHED_DETAIL_TYPE = 'view-job.finished';
 /**
  * How long WaitForViewJob waits for that event before it runs ExportChunk
@@ -641,6 +643,8 @@ function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Fu
   // checkpoint objects (put, get, delete) and Finalize's HeadObject.
   allow(worker, ['s3:PutObject', 's3:GetObject', 's3:DeleteObject', 's3:AbortMultipartUpload'], [exportObjects]);
   allow(worker, ['lambda:InvokeFunction'], Object.values(inputs.routers).map((fn) => fn.functionArn));
+  // Every status change of an export is announced on its owner's channel (`ExportJobs.save`).
+  allowChangeEvents(worker, scope, ['exports']);
 
   const stateMachine = exportStateMachine(scope, worker);
   resumeExportsOnViewJobEvents(scope, worker);
@@ -663,6 +667,8 @@ function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Fu
   // its checkpoints, abort a cancelled upload.
   allow(api, ['s3:GetObject', 's3:DeleteObject', 's3:AbortMultipartUpload'], [exportObjects]);
   allow(api, ['states:StartExecution'], [stateMachine.stateMachineArn]);
+  // A cancel, or a start the state machine refused, changes the status too.
+  allowChangeEvents(api, scope, ['exports']);
   // Cancel: only executions of the export state machine (name-formatted to
   // avoid a reference to the execution ARN, which is not a resource).
   allow(api, ['states:StopExecution'], [cdk.Stack.of(scope).formatArn({
@@ -676,7 +682,6 @@ function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Fu
 
 /** Measured at 10x (report-w6-b.md): every fold unit, series turn, rollup shard and merge peaks <= ~606 MB of heap and < 600 s CPU. */
 const SCOPE_SNAPSHOT_WORKER_MEMORY_MB = 1769;
-const SCOPE_SNAPSHOT_BUILD_NAME = 'CitationAnalysis-ScopeSnapshotBuild';
 
 /** What the distributed build reads and writes in the main stack. */
 interface ScopeSnapshotBuildInputs {
@@ -1695,10 +1700,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunBrandsTable.grant(generateSummaryFunction, 'dynamodb:Query');
     allow(generateSummaryFunction, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(generateSummaryFunction, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [searchResultsTable.tableArn]);
-    // A view job publishes view-job.finished (shared/view_job_events.py) to the default bus, under its own source only.
-    allowWhere(generateSummaryFunction, ['events:PutEvents'], [this.formatArn({
-      service: 'events', resource: 'event-bus', resourceName: 'default',
-    })], { StringEquals: { 'events:source': VIEW_JOB_EVENT_SOURCE } });
     // A finished chained `latest` backfill starts a build; brand-config and
     // persona writes start that backfill.
     deduplicationFunction.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', generateSummaryFunction.functionName);
@@ -1859,11 +1860,30 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // 7. Chain Search -> Deduplication -> Crawl -> compact result
+    // 6b. PublishKeywordProgress: tell the default bus this keyword finished
+    // (TENETS.md tenet 8), so an open run view re-reads the run's progress
+    // instead of polling for it (`lambda/live-events/`). Best effort: a
+    // failed PutEvents ends in KeywordProgressNotPublished, a Pass that keeps
+    // the compact result, so it never costs the keyword (tenet 5).
+    const publishKeywordProgress = new tasks.EventBridgePutEvents(this, 'PublishKeywordProgress', {
+      entries: [{
+        source: RUN_KEYWORD_FINISHED.source,
+        detailType: RUN_KEYWORD_FINISHED.detailType,
+        detail: stepfunctions.TaskInput.fromObject({ 'status.$': '$.status', 'run_timestamp.$': '$.timestamp' }),
+      }],
+      resultPath: stepfunctions.JsonPath.DISCARD,
+    });
+    publishKeywordProgress.addCatch(new stepfunctions.Pass(this, 'KeywordProgressNotPublished'), {
+      errors: ['States.ALL'],
+      resultPath: stepfunctions.JsonPath.DISCARD,
+    });
+
+    // 7. Chain Search -> Deduplication -> Crawl -> compact result -> progress event
     const processKeywordChain = searchAllProviders
       .next(deduplicationTask)
       .next(crawlCitationsMap)
-      .next(summarizeKeywordResult);
+      .next(summarizeKeywordResult)
+      .next(publishKeywordProgress);
 
     // 8. ProcessKeywords Distributed Map (parallel keyword processing).
     //
@@ -2248,7 +2268,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // evidence worth having after a failed run.
     const researchStateMachine = loggedStateMachine(this, 'KeywordResearchStateMachine', {
       logGroupId: 'ResearchStateMachineLogGroup',
-      stateMachineName: 'CitationAnalysis-KeywordResearch',
+      stateMachineName: RESEARCH_STATE_MACHINE_NAME,
       definition: researchDefinition,
       role: stepFunctionsRole,
       timeout: cdk.Duration.minutes(RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES),
@@ -2945,6 +2965,24 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // ========================================
+    // State-change events (TENETS.md tenet 8, lambda/shared/change_events.py)
+    // ========================================
+
+    // Each function may put its own area's change events on the default bus,
+    // and no other source; CitationAnalysisEventsStack relays them to the
+    // dashboard's AppSync Events channels. The workflow's keyword step gets its
+    // PutEvents grant from `PublishKeywordProgress` itself.
+    // A view job's view-job.finished (shared/view_job_events.py) is the `viewJobs` source: the export state machine
+    // resumes on it (ViewJobFinishedRule) and the events stack relays it to /deployment/view-jobs.
+    allowChangeEvents(generateSummaryFunction, this, ['runs', 'viewJobs', 'snapshots']);
+    allowChangeEvents(kpiAlertsFunction, this, ['runs', 'alerts']);
+    allowChangeEvents(reportInsightsFunction, this, ['insights']);
+    allowChangeEvents(selfReflectionFunction, this, ['insights']);
+    allowChangeEvents(researchWorkerFunction, this, ['research']);
+    allowChangeEvents(contentStudioFunction, this, ['contentStudio']);
+    allowChangeEvents(contentStudioWorkerFunction, this, ['contentStudio']);
+
+    // ========================================
     // Visualization Dashboard - S3 + CloudFront
     // ========================================
 
@@ -2997,7 +3035,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       comment: 'Security headers for Citation Analysis Dashboard',
       securityHeadersBehavior: {
         contentSecurityPolicy: {
-          contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';",
+          contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com wss://*.amazonaws.com; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';",
           override: true,
         },
         contentTypeOptions: {override: true,},

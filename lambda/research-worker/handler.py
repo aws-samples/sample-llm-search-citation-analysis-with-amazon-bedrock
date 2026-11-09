@@ -23,6 +23,7 @@ import boto3
 from bs4 import BeautifulSoup, Tag
 
 from shared.ai_clients import WebSearchProvider, get_web_search_clients, get_web_search_provider, run_web_search
+from shared.change_events import RESEARCH_JOB_CHANGED, publish_change
 from shared.dynamo_decimal import convert_floats_to_decimal, positive_int
 from shared.dynamodb_conditions import applied_conditionally
 from shared.keyword_signals import fetch_google_signals
@@ -1297,4 +1298,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         event.get('expected_round'),
         event.get('step_id'),
     )
-    return ACTIONS[action](event)
+    try:
+        return ACTIONS[action](event)
+    finally:
+        # Every action may have changed the job row; an open research view re-reads it on this
+        # (a raised action included: the state machine's FailResearchJob step follows it).
+        job_id = event.get('job_id')
+        if isinstance(job_id, str) and job_id:
+            publish_change(RESEARCH_JOB_CHANGED, {'job_id': job_id})

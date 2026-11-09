@@ -149,9 +149,20 @@ S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files, ru
 
 ### API and hosting
 
-A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. It has its own stack, `CitationAnalysisApiStack` (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`), which takes nothing from `CitationAnalysisStack` by cross-stack reference (it builds the API Lambdas' ARNs from their fixed names and the web bucket name from the account, and reads the user pool id, the distribution id and the dashboard origin from SSM parameters the main stack writes: `/citation-analysis/user-pool-id`, `/citation-analysis/web-distribution-id`, `/citation-analysis/cors-origin`) and is deployed after it; it also writes `config.json` (`{"apiUrl": "<stage URL>/api"}`) into the web bucket, which the dashboard reads at startup, so the API URL is not built into the bundle. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. Exports are `POST /api/exports {view, params, format}`, `GET /api/exports`, `GET`/`DELETE /api/exports/{id}` and `POST /api/exports/{id}/seen` on API-Exports: any signed-in user can export, sees only their own exports (Admin included), and has at most 5 queued or running; a download is a 15-minute presigned URL minted on each request, and the file key is never returned. The SEO exports need the SEO stack: the export worker invokes `CitationAnalysis-SeoRouter` by name. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
+A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. It has its own stack, `CitationAnalysisApiStack` (`lib/api-stack.ts`, routes in `lib/constructs/rest-api.ts`), which takes nothing from `CitationAnalysisStack` by cross-stack reference (it builds the API Lambdas' ARNs from their fixed names and the web bucket name from the account, and reads the user pool id, the distribution id and the dashboard origin from SSM parameters the main stack writes: `/citation-analysis/user-pool-id`, `/citation-analysis/web-distribution-id`, `/citation-analysis/cors-origin`, plus the live events domains `CitationAnalysisEventsStack` writes to `/citation-analysis/live-events-http-domain` and `/citation-analysis/live-events-realtime-domain`) and is deployed after both; it also writes `config.json` (`{"apiUrl": "<stage URL>/api", "liveEvents": {"httpDomain", "realtimeDomain"}}`) into the web bucket, which the dashboard reads at startup, so neither the API URL nor the live events endpoints are built into the bundle. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. Exports are `POST /api/exports {view, params, format}`, `GET /api/exports`, `GET`/`DELETE /api/exports/{id}` and `POST /api/exports/{id}/seen` on API-Exports: any signed-in user can export, sees only their own exports (Admin included), and has at most 5 queued or running; a download is a 15-minute presigned URL minted on each request, and the file key is never returned. The SEO exports need the SEO stack: the export worker invokes `CitationAnalysis-SeoRouter` by name. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
 
 The SEO features have their own REST API in `CitationAnalysisSeoStack` (`lib/seo-stack.ts`): `CitationAnalysis-SeoApi`, routes under `/api/seo/`, one router Lambda (`CitationAnalysis-SeoRouter`), a Cognito authorizer on the same user pool and a stage throttle of 20 requests per second (burst 40). The stack imports only the user pool and the `CitationAnalysis-CorsOrigin` export from the main stack. Its URL is the stack output `SeoApiUrl`, which `scripts/build-web.sh` builds into the dashboard as `VITE_SEO_API_URL`; without the stack, the SEO pages say the SEO stack is not deployed. Setup, pages, permissions and DataForSEO prices: [docs/seo.md](docs/seo.md).
+
+### Live updates (AppSync Events)
+
+The dashboard is told when a job changes instead of polling for it ([TENETS.md](TENETS.md), tenet 8). The pieces:
+
+- **Events.** The workers put thin change events on the default EventBridge bus (`lambda/shared/change_events.py`): ids and a status, never the state itself. Each function may only put its own area's source (`events:source` condition). Step Functions adds the status changes of the analysis workflow, keyword research and the scope snapshot build, and every keyword of a run ends with a `run.keyword.finished` event (`PublishKeywordProgress`). A view job's `view-job.finished` (`lambda/shared/view_job_events.py`, source `citation-analysis.view-jobs`, detail `{job_id, started_at, status}`) is one event with two consumers: the export state machine resumes on it, and the relay forwards it to `/deployment/view-jobs`.
+- **Relay.** `CitationAnalysisEventsStack` (`lib/events-stack.ts`) has two EventBridge rules (sources `citation-analysis.*`, and those state machines' status changes) that invoke `CitationAnalysis-LiveEventsRelay` (`lambda/live-events/`). The relay picks the channel from a fixed table (`live_channel_routes.py`), copies only the ids and status the route names, and publishes over the Event API's HTTP endpoint signed with IAM. A refused publish raises, Lambda retries it twice within the hour and then drops the event; a view reads the state when it next connects. Its role may only `appsync:EventPublish` to the two namespaces.
+- **Channels.** The Event API `CitationAnalysis-LiveEvents` accepts connections and subscriptions with the Cognito ID token, and publishes from IAM only. `/deployment/<topic>` (runs, research, content-studio, insights, view-jobs, snapshots, alerts, seo) carries changes to state every signed-in user may already read through the API. `/user/<sub>/exports` carries a user's own exports: the namespace's subscribe handler refuses any channel whose second segment is not the caller's Cognito `sub`, so nobody hears another user's exports.
+- **Dashboard.** One WebSocket per tab (`web/src/infrastructure/liveEvents/`), opened only while a view watches a running job and closed 10 s after the last one stops. A view subscribes while its job runs, reads its REST route once when the subscription becomes active (and after every reconnect, to catch up), and again after each event about that job. Reconnects back off from 1 s to 30 s, at most 8 times in a row; then the next `online` or `visibilitychange` event of the page tries again. When live events cannot tell a view about changes, the view reads once instead: every watching view when the client gives up reconnecting, a view that starts watching before the page wakes, and the views of a subscription AppSync refused. A wait with a limit (a view job's 3 minutes) reads once more at the limit before it gives up, so a missing connection delays a view but never leaves it on a finished job's old state. A run view whose read after the run's final `execution.status` event fails applies the status that event names. The dashboard's CSP allows `wss://*.amazonaws.com` in `connect-src` for the socket.
+
+Every state an event announces stays readable through its REST route and MCP; clients that cannot subscribe (a CLI, an MCP tool call) read it when they need it. Without the events stack (or on `npm run dev` without `VITE_LIVE_EVENTS_*`) a view reads its job once and is not told when it changes.
 
 ### MCP server (preview)
 
@@ -176,10 +187,11 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 ## Project structure
 
 ```
-├── bin/                     # CDK app entry point (five stacks: CitationAnalysisStack, CitationAnalysisApiStack, CitationAnalysisMcpStack, CitationAnalysisSeoStack, CitationAnalysisWebSearchStack)
+├── bin/                     # CDK app entry point (six stacks: CitationAnalysisStack, CitationAnalysisApiStack, CitationAnalysisEventsStack, CitationAnalysisMcpStack, CitationAnalysisSeoStack, CitationAnalysisWebSearchStack)
 ├── lib/
 │   ├── citation-analysis-stack.ts  # Tables, buckets, workflows, Lambdas, Cognito, CloudFront
 │   ├── api-stack.ts         # Dashboard REST API stack (+ config.json)
+│   ├── events-stack.ts      # Live events: AppSync Events API and the relay from EventBridge
 │   ├── mcp-stack.ts         # MCP server stack
 │   ├── seo-stack.ts         # SEO API, SEO jobs and the Google AI Overviews engine (features in seo-features.ts)
 │   ├── web-search-stack.ts  # Amazon Bedrock Web Search gateway
@@ -192,6 +204,7 @@ Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or
 │   ├── export-worker/       # Export service steps (CitationAnalysis-Export)
 │   ├── seo/  seo-jobs/      # SEO API router handlers; SEO state machine steps
 │   ├── research-worker/     # Keyword research state machine steps
+│   ├── live-events/         # Relay: EventBridge change events to AppSync Events channels
 │   ├── shared/              # Shared modules (KPI engine, scope snapshots, export sources, DataForSEO client, clients, decorators, config)
 │   ├── layer/  crawler-layer/   # Layer build scripts and requirements
 │   ├── testing/             # Test support: module loader, DynamoDB stubs, events, env
@@ -237,12 +250,13 @@ npm run deploy      # same as ./scripts/deploy.sh
 | Stack | Holds | Depends on |
 |---|---|---|
 | `CitationAnalysisStack` | Tables, buckets, workflows, workflow and API Lambdas, Cognito, CloudFront, the SSM parameters the other stacks read | Nothing |
-| `CitationAnalysisApiStack` | The dashboard REST API and `config.json` | Main stack (SSM parameters and fixed function names, no CloudFormation imports) |
+| `CitationAnalysisEventsStack` | The live events: the AppSync Events API the dashboard subscribes to, the EventBridge rules and the relay Lambda | Main stack (the user pool id SSM parameter) |
+| `CitationAnalysisApiStack` | The dashboard REST API and `config.json` | Main stack (SSM parameters and fixed function names, no CloudFormation imports) and the events stack (its endpoints' SSM parameters) |
 | `CitationAnalysisMcpStack` | The MCP server, its API, distribution and `CitationAnalysis-McpState` | Main stack (imports function ARNs and the user pool) |
 | `CitationAnalysisSeoStack` | The SEO API, SEO tables, state machines and jobs, the Google AI Overviews engine | Main stack (imports the user pool and `CitationAnalysis-CorsOrigin`) |
 | `CitationAnalysisWebSearchStack` | The Amazon Bedrock Web Search gateway, in `webSearchRegion` | Nothing (the main stack reaches it by SSM parameter name) |
 
-`cdk deploy --all` (and so `npm run deploy`) deploys every stack together: the main stack first and the others after it. When you deploy stacks one at a time, deploy `CitationAnalysisStack` first. Two cross-stack calls by name:
+`cdk deploy --all` (and so `npm run deploy`) deploys every stack together: the main stack first and the others after it, the events stack before the API stack. When you deploy stacks one at a time, deploy `CitationAnalysisStack` first, then `CitationAnalysisEventsStack`, then `CitationAnalysisApiStack`. Two cross-stack calls by name:
 
 - **Google AI Overviews:** the main workflow always calls the engine's Lambda, `CitationAnalysis-Search-google_ai_overview`, in the SEO stack. If that stack is not deployed, each keyword gets a failed Google row that names the missing function, and the other engines run as usual.
 - **SEO exports** invoke `CitationAnalysis-SeoRouter` by name, so they work once the SEO stack exists; every other export works without it.
@@ -261,7 +275,7 @@ bash lambda/crawler-layer/build-layer.sh
 (cd web && npm install && npm run build)   # synth requires web/dist
 npm run build
 cdk bootstrap                              # first time per account/region
-cdk deploy --all                           # CitationAnalysisStack first, then the API, MCP, SEO and web search stacks
+cdk deploy --all                           # CitationAnalysisStack first, then the events, API, MCP, SEO and web search stacks
 ./scripts/deploy-web.sh                    # rebuild with the stack outputs, upload, invalidate CloudFront
 ```
 
@@ -484,6 +498,8 @@ For 100 keywords analysed weekly across four providers and three personas (about
 | [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) | $2–4 | $0.40 per stored provider key |
 | [CloudFront](https://aws.amazon.com/cloudfront/pricing/) | $0–2 | Small dashboard traffic |
 | [Step Functions](https://aws.amazon.com/step-functions/pricing/) | <$1 | $0.000025 per state transition |
+| [AppSync Events](https://aws.amazon.com/appsync/pricing/) | <$1 | $1.00 per million Event API operations (a publish, each delivery, each subscribe) and $0.08 per million connection minutes; nothing while no dashboard is open |
+| [EventBridge](https://aws.amazon.com/eventbridge/pricing/) | <$1 | $1.00 per million custom events (the change events); Step Functions status changes are free |
 | [Cognito](https://aws.amazon.com/cognito/pricing/) | $0 | First 10,000 MAUs free on Essentials |
 
 ### AI provider rates
@@ -538,6 +554,8 @@ npm run watch          # tsc -w
 npm run lint:fix       # ESLint --fix
 cd web && npm run dev  # Vite dev server on :5173 (deploy with -c dev=true)
 ```
+
+For live updates on the dev server, put the `LiveEventsHttpDomain` and `LiveEventsRealtimeDomain` outputs of `CitationAnalysisEventsStack` in `web/.env.local` as `VITE_LIVE_EVENTS_HTTP_DOMAIN` and `VITE_LIVE_EVENTS_REALTIME_DOMAIN`.
 
 The tenets every change is measured against are in [TENETS.md](TENETS.md). UI conventions are in [docs/design-system.md](docs/design-system.md); versioning and the changelog in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog).
 

@@ -157,8 +157,9 @@ async function fetchAnalysisResponse<TResult>(
  * - `computing` holds the view job of a `202` answer while the request
  *   waits for it (`awaitViewJob`), and clears when the request settles;
  * - a `stale: true` snapshot answer is kept and the same request is sent
- *   again every 10 s (at most 18 times) without touching `loading` or
- *   `error`, until an answer is current (`useStaleRefetch`).
+ *   again when a snapshot build ends (the `snapshots` live channel, at most
+ *   18 times) without touching `loading` or `error`, until an answer is
+ *   current (`useStaleRefetch`).
  *
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
@@ -230,7 +231,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
         setData(result);
         setRequest(built);
         if (round < STALE_REFETCH_LIMIT && isStaleScopedBody(result)) {
-          scheduleStaleRefetch(() => { void run(round + 1); });
+          scheduleStaleRefetch(() => run(round + 1));
         }
       }, round > 0);
       return run(0);

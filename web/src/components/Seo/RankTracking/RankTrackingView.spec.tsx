@@ -2,7 +2,7 @@ import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  act, screen, waitFor, within
+  screen, waitFor, within
 } from '@testing-library/react';
 import { isSeoApiConfigured } from '../../../api/seo';
 import { getSeoNotSetUpElement } from '../../../test/seoNotSetUp';
@@ -23,6 +23,7 @@ import {
   buildRankCell, buildRankEstimate, buildRankResults, buildRankRun, buildRankTracker, buildResultRow, buildTrackerList
 } from '../../../api/seoRankTracking-fixtures';
 import { TestError } from '../../../test/testError';
+import { emitLive } from '../../../test/liveEventsMock';
 import {
   answerKeywordRemoval, chooseGroupScope, clickAfterResults, clickOnEmptyMarket, getRowElement, mockChileTracker, mockRankTrackingApi,
   openRunConfirmation, renderEmptyMarket, renderRankTracking, renderWithResults, reviewAndConfirm, reviewNewTracker
@@ -192,25 +193,28 @@ describe('RankTrackingView editing', () => {
 });
 
 describe('RankTrackingView run progress', () => {
-  it('polls the active run and reloads the results when it ends', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('reads the active run when a step of it ran and reloads the results when it ends', async () => {
     const running = buildRankRun({
       status: 'running',
       keywords_checked: 1,
     });
     vi.mocked(fetchRankTrackers).mockResolvedValue(buildTrackerList({ trackers: [buildRankTracker({ latest_run: running })] }));
-    vi.mocked(fetchLatestRankRun).mockResolvedValue(buildRankRun());
+    vi.mocked(fetchLatestRankRun).mockResolvedValueOnce(running).mockResolvedValue(buildRankRun());
     await renderWithResults();
+    await waitFor(() => {
+      expect(fetchLatestRankRun).toHaveBeenCalledTimes(1);
+    });
     const loads = vi.mocked(fetchRankResults).mock.calls.length;
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
+    await emitLive('seo', {
+      type: 'seo-job.changed',
+      feature: 'rank',
+      id: buildRankTracker().tracker_id,
     });
 
     await waitFor(() => {
       expect(vi.mocked(fetchRankResults).mock.calls.length).toBeGreaterThan(loads);
     });
-    vi.useRealTimers();
   });
 });
 

@@ -18,6 +18,7 @@ import { SeoCallbacks } from './constructs/seo-callbacks';
 import { SEO_JOBS_FUNCTION_NAME, type SeoFeatureProps, sharedTableActions } from './constructs/seo-feature';
 import { seoFeatures } from './seo-features';
 import { pythonFunction } from './constructs/api-functions';
+import { allowChangeEvents } from './constructs/live-events';
 
 export { SEO_JOBS_FUNCTION_NAME };
 import { citationAnalysisTable } from './constructs/tables';
@@ -136,6 +137,8 @@ export class CitationAnalysisSeoStack extends cdk.Stack {
     });
     const router = this.seoApi.routerFunction;
     const jobs = this.jobsFunction(sharedLayer, environment);
+    // Each step announces the job it ran for (`seo-job.changed`, lambda/seo-jobs/seo-jobs.py).
+    allowChangeEvents(jobs, this, ['seo']);
     for (const fn of [router, jobs]) {
       // Per action, no delete (TENETS.md, tenet 6 and D5): stored keyword metrics are batch-written; the cache is
       // read and put (a conditional put never replaces a fresh non-empty answer), never deleted from.

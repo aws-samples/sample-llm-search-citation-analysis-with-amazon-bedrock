@@ -287,7 +287,11 @@ describe('useContentStudio generation request lifecycle', () => {
 
   it('recovers a batch after its network-ambiguous start failure', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-    mockAuthenticatedFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    // The start never reached the server, so the catch-up read of the remembered batch finds none yet.
+    const startNeverArrived = createMockFetch({ missingBatchIds: ['batch-1'] });
+    mockAuthenticatedFetch.mockImplementation((url, init) => (
+      init?.method === 'POST' ? Promise.reject(new TypeError('Failed to fetch')) : startNeverArrived(url, init)
+    ));
     const firstRender = renderHook(() => useContentStudio());
 
     await act(() => firstRender.result.current.generateContentBatch(mockBatchRequest));
@@ -353,7 +357,10 @@ describe('useContentStudio generation request lifecycle', () => {
   it('logs exact batch context and retains its candidate when a 5xx start fails', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
     const { result } = renderContentStudio(
-      createMockFetch({ shouldFailBatchStart: true })
+      createMockFetch({
+        shouldFailBatchStart: true,
+        missingBatchIds: ['batch-1'],
+      })
     );
 
     await act(() => result.current.generateContentBatch(mockBatchRequest));

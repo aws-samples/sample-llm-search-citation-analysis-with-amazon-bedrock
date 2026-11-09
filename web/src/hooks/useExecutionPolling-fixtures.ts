@@ -78,6 +78,8 @@ export function createMockFetch(options: {
   triggerResponse?: unknown;
   statusResponse?: unknown;
   statusSequence?: unknown[];
+  /** Status reads from this one on (0 is the trigger's own read) answer `500`. */
+  failStatusFrom?: number;
 } = {}) {
   const statusCallCount = { current: 0 };
 
@@ -90,6 +92,9 @@ export function createMockFetch(options: {
     }
 
     if (url.includes('/executions/')) {
+      if (options.failStatusFrom !== undefined && statusCallCount.current++ >= options.failStatusFrom) {
+        return Promise.resolve(createMockJsonResponse({ error: 'unavailable' }, 500));
+      }
       const response = options.statusSequence
         ? options.statusSequence[statusCallCount.current++] ?? options.statusSequence[options.statusSequence.length - 1]
         : options.statusResponse ?? createMockStatusResponse('RUNNING');
@@ -102,4 +107,9 @@ export function createMockFetch(options: {
       json: () => Promise.resolve({}) 
     });
   });
+}
+
+/** How many times the execution status route was read. */
+export function statusReads(): number {
+  return mockAuthenticatedFetch.mock.calls.filter(([url]) => String(url).includes('/executions/')).length;
 }

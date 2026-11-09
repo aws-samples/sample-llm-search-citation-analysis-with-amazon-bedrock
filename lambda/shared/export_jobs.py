@@ -38,6 +38,7 @@ from typing import Any, Final
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
+from shared.change_events import EXPORT_CHANGED, publish_change
 from shared.cursors import encode_cursor
 from shared.dynamodb_conditions import applied_conditionally
 from shared.export_contract import (
@@ -233,7 +234,8 @@ class ExportJobs:
         Write ``item`` with ``changes`` if nobody wrote it since it was read.
 
         A save that moves the export out of queued/running frees its running
-        slot in the same transaction.
+        slot in the same transaction. A save that changes the status announces
+        it on the owner's channel (``export.changed``, ``shared.change_events``).
 
         Raises:
             StaleExportError: The item's ``revision`` moved on, or it was deleted.
@@ -241,8 +243,13 @@ class ExportJobs:
         revision = int(item['revision'])
         updated = {**item, **changes, 'revision': revision + 1, 'updated_at': format_timestamp(now)}
         if item['status'] in RUNNING_STATUSES and updated['status'] not in RUNNING_STATUSES:
-            return self._save_releasing(updated, revision)
-        return self._save_alone(updated, revision)
+            saved = self._save_releasing(updated, revision)
+        else:
+            saved = self._save_alone(updated, revision)
+        if saved['status'] != item['status']:
+            # Only the owner's channel hears it (``owner`` is the Cognito sub); their Exports list re-reads on it.
+            publish_change(EXPORT_CHANGED, {'export_id': saved['export_id'], 'status': saved['status'], 'owner_sub': saved.get('owner')})
+        return saved
 
     def delete(self, export_id: str) -> None:
         self._table.delete_item(Key={'export_id': export_id})

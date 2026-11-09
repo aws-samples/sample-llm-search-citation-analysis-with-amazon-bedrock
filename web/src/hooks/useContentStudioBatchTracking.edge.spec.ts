@@ -14,7 +14,7 @@ import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
   buildRunningBatchStatusesFor,
   dispatchBatchCandidateStorageEvent,
   flushContentStudioPromises,
@@ -211,7 +211,7 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
     ]);
     staleStatus.resolve(createMockJsonResponse(buildRunningBatchStatusResponse()));
     await flushContentStudioPromises();
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
     rendered.unmount();

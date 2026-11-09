@@ -11,7 +11,8 @@ import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import {
-  advanceContentStudioPoll,
+  announceContentChange,
+  announceContentChanges,
   buildRunningBatchStatusesFor,
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
@@ -32,8 +33,8 @@ import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import {
   activeBatchIds,
   batchStatusRequestCounts,
+  contentStudioListenerCount,
   renderTwoRunningBatchesWithFakeTimers,
-  spyOnAggregatePollIntervals,
   renderTwoVisibleRunningBatches,
   startTerminalBatch,
 } from './useContentStudio-scenario-fixtures';
@@ -61,6 +62,12 @@ import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 
+/** One status request for each of the two recovered batches. */
+const ONE_STATUS_READ_EACH = {
+  'batch-1': 1,
+  'batch-2': 1,
+};
+
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
 
@@ -74,23 +81,7 @@ describe('useContentStudio recovered batch persistence', () => {
       expect(activeBatchIds(result.current)).toStrictEqual(['batch-1', 'batch-2']);
     });
 
-    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
-      'batch-1': 1,
-      'batch-2': 1,
-    });
-  });
-
-  it('uses one ten-second interval for every recovered batch', async () => {
-    const aggregatePollIntervals = spyOnAggregatePollIntervals();
-    const {
-      fetch, unmount
-    } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(1);
-    });
-
-    expect(aggregatePollIntervals()).toHaveLength(1);
-    unmount();
+    expect(batchStatusRequestCounts(fetch, activeBatchIds(result.current))).toStrictEqual(ONE_STATUS_READ_EACH);
   });
 
   it('ignores malformed persisted candidate state without making requests', () => {
@@ -158,7 +149,7 @@ describe('useContentStudio recovered batch persistence', () => {
     });
     await flushContentStudioPromises();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
       'batch-terminal': 1,
@@ -168,13 +159,13 @@ describe('useContentStudio recovered batch persistence', () => {
   });
 });
 
-describe('useContentStudio aggregate batch timer', () => {
-  it('requests another status for every tracked batch after ten seconds', async () => {
+describe('useContentStudio aggregate batch reads', () => {
+  it('requests another status for every tracked batch when a Content Studio item changes', async () => {
     const {
       fetch, unmount
     } = await renderTwoRunningBatchesWithFakeTimers();
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
       'batch-1': 2,
@@ -189,7 +180,7 @@ describe('useContentStudio aggregate batch timer', () => {
     const [firstStatus, secondStatus] = deferNextTwoAuthenticatedFetches();
     const rendered = renderHook(() => useContentStudio());
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
     rendered.unmount();
@@ -231,19 +222,18 @@ describe('useContentStudio aggregate batch timer', () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(expect.anything());
   });
 
-  it('clears the aggregate interval when the hook unmounts', async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+  it('listens once for every recovered batch and stops listening when the hook unmounts', async () => {
     const {
       fetch, unmount
     } = renderTwoRunningBatches();
     await waitFor(() => {
-      expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
+      expect(batchStatusRequestUrls(fetch, 'batch-2').length).toBeGreaterThan(0);
     });
-    const callsBeforeUnmount = clearIntervalSpy.mock.calls.length;
+    const whileMounted = contentStudioListenerCount();
 
     unmount();
 
-    expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
+    expect([whileMounted, contentStudioListenerCount()]).toStrictEqual([1, 0]);
   });
 });
 
@@ -254,7 +244,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent(['batch-2']);
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(activeBatchIds(result.current)).toStrictEqual(['batch-2']);
     expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
@@ -290,10 +280,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
 
     dispatchBatchStorageEvent(['batch-1', 'batch-2']);
 
-    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
-      'batch-1': 1,
-      'batch-2': 1,
-    });
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual(ONE_STATUS_READ_EACH);
   });
 
   it('invalidates a stale poll when another tab replaces the candidate timestamp', async () => {
@@ -329,7 +316,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent([], 'other.key');
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(result.current.activeBatches).toHaveLength(2);
     expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(2);
@@ -391,8 +378,7 @@ describe('useContentStudio batch request races', () => {
       throw new TypeError('Storage unavailable');
     });
 
-    await advanceContentStudioPoll();
-    await advanceContentStudioPoll();
+    await announceContentChanges(2);
 
     expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
       'batch-terminal': 2,
@@ -420,7 +406,7 @@ describe('useContentStudio batch request races', () => {
     missingBatchIds.push('batch-1');
     vi.setSystemTime(Date.now() + CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS);
 
-    await advanceContentStudioPoll();
+    await announceContentChange();
 
     expect(activeBatchIds(result.current)).toStrictEqual(['batch-terminal']);
   });

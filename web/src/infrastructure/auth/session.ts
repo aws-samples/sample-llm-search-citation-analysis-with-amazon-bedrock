@@ -17,14 +17,30 @@ export const ADMIN_GROUP = 'Admin';
 const GROUPS_CLAIM = 'cognito:groups';
 
 /**
- * Get the current user's JWT token for API authentication
+ * Get the current user's JWT token for API authentication (and the live events connection)
  */
-async function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(): Promise<string | null> {
   try {
     const session = await fetchAuthSession();
     return session.tokens?.idToken?.toString() ?? null;
   } catch (error) {
     console.error('Error fetching auth session:', error);
+    return null;
+  }
+}
+
+/**
+ * The signed-in user's Cognito `sub` (the ID token's subject), or `null` without a session. It names the user's
+ * own live events channel (`/user/<sub>/...`); the server checks it against the token, so this is not a trust
+ * decision.
+ */
+export async function getUserSub(): Promise<string | null> {
+  try {
+    const session = await fetchAuthSession();
+    const sub = session.tokens?.idToken?.payload.sub;
+    return typeof sub === 'string' && sub !== '' ? sub : null;
+  } catch (error) {
+    console.error('Error reading the user id:', error);
     return null;
   }
 }

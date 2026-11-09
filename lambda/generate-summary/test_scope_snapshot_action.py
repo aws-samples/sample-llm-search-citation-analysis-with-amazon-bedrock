@@ -111,16 +111,21 @@ class TestKeywordsBehind:
         assert sources.request_backfill is None
 
 
-@pytest.fixture
-def ran_view_job(actions):
-    """The ``run_view_job`` call a ``view_job`` event for job ``job-7`` made."""
+def _run_view_job(actions: Any, summary: dict[str, Any]) -> Any:
+    """Run a ``view_job`` event for job ``job-7`` whose ``run_view_job`` answers ``summary``; that call's arguments."""
     with (
         patch.dict(os.environ, _BUCKET), patch.object(actions, '_s3', return_value='s3'),
         patch.object(actions, 'job_resources', return_value=JobResources(None, [])),
-        patch.object(actions, 'run_view_job', return_value={}) as run,
+        patch.object(actions, 'run_view_job', return_value=summary) as run,
     ):
         actions.view_job({'action': 'view_job', 'job_id': 'job-7'}, lambda_context(900_000))
     return run.call_args
+
+
+@pytest.fixture
+def ran_view_job(actions):
+    """The ``run_view_job`` call a ``view_job`` event for job ``job-7`` made."""
+    return _run_view_job(actions, {})
 
 
 def test_a_view_job_runs_the_job_it_names(ran_view_job):
@@ -282,3 +287,28 @@ class TestSteps:
     def test_an_unknown_step_fails(self, steps):
         with pytest.raises(SnapshotBuildIncomplete, match='Not a scope snapshot build step'):
             steps.build_step({'action': 'snapshot_build_other', 'build_id': 'b'}, lambda_context(900_000))
+
+
+class TestChangeEvents:
+    """What a build and a view job announce on the bus (``shared.change_events``)."""
+
+    def test_an_in_process_build_announces_the_snapshots_and_the_run_step(self, actions, change_events_bus):
+        _build_with(actions, heavy=False, event=_RUN_EVENT)
+        assert change_events_bus.details('scope-snapshots.built') == [{'status': 'built'}]
+        assert change_events_bus.details('run.step.finished') == [{'execution_id': _RUN_EVENT['execution_id'], 'step': 'build_scope_snapshots'}]
+
+    def test_a_build_outside_a_run_announces_no_run_step(self, actions, change_events_bus):
+        _build_with(actions, heavy=False)
+        assert (len(change_events_bus.details('scope-snapshots.built')), change_events_bus.details('run.step.finished')) == (1, [])
+
+    @pytest.mark.parametrize('running', [None, [{'executionArn': 'running-1'}]], ids=['started', 'already running'])
+    def test_a_build_handed_to_the_state_machine_announces_nothing_itself(self, actions, change_events_bus, running):
+        _build_with(actions, heavy=True, running=running)
+        assert change_events_bus.entries == []
+
+    @pytest.mark.parametrize('status', ['done', 'failed', 'skipped'])
+    def test_a_view_job_announces_its_end_only_through_its_notify_hook(self, actions, change_events_bus, status):
+        # `run_view_job` calls `publish_view_job_finished` once the outcome is stored (shared.view_job_events), the one
+        # producer of `view-job.finished`: the action adds no second event.
+        _run_view_job(actions, {'job_id': 'job-7', 'status': status})
+        assert change_events_bus.entries == []

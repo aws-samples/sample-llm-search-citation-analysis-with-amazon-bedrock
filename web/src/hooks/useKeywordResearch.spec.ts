@@ -7,7 +7,10 @@ import {
 import {
   createDeferredResponse, createMockJsonResponse 
 } from '../test/fetchResponses';
-import { POLL_FAST_INTERVAL_MS } from './researchPolling';
+import { RESEARCH_WAIT_LIMIT_MS } from './researchJobWatch';
+import {
+  emitLive, liveSubscriberCount
+} from '../test/liveEventsMock';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
   mockHistoryItems,
@@ -15,11 +18,13 @@ import {
   buildStep,
   buildCompletedExpansionJob,
   buildCompletedCompetitorJob,
+  buildTwoExpansionsOptions,
   runningJobResearchOptions,
 } from './useKeywordResearch-fixtures';
 import {
   countJobPolls,
   findCall,
+  reconnectResearch,
   renderResearch,
   retryPartialExpansion,
   startAndAdvance,
@@ -33,6 +38,14 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+
+/** Starts an expansion whose job stays running and lets `ms` of fake time pass; the hook's result. */
+async function renderRunningExpansionFor(ms: number) {
+  const { result } = renderResearch(runningJobResearchOptions);
+  await startExpansion(result);
+  await advanceBy(ms);
+  return result;
+}
 
 describe('useKeywordResearch', () => {
   beforeEach(() => {
@@ -164,18 +177,12 @@ describe('useKeywordResearch', () => {
     });
 
     it('clears the previous result and active job when a new expansion starts', async () => {
-      const { result } = renderResearch({
-        pendingIds: ['job-1', 'job-2'],
-        snapshots: {
-          'job-1': [buildCompletedExpansionJob('job-1', 'first')],
-          'job-2': [buildJob({
-            id: 'job-2',
-            status: 'running' 
-          })],
-        },
-      });
+      const { result } = renderResearch(buildTwoExpansionsOptions('first', buildJob({
+        id: 'job-2',
+        status: 'running'
+      })));
 
-      await startExpansion(result, POLL_FAST_INTERVAL_MS, 'first');
+      await startExpansion(result, 1, 'first');
       expect(result.current.expansionResult?.id).toBe('job-1');
 
       await startExpansion(result, 0, 'second');
@@ -286,7 +293,7 @@ describe('useKeywordResearch', () => {
   });
 
   describe('re-attaching after a refresh', () => {
-    it('resumes polling the job stored in the browser', async () => {
+    it('resumes waiting for the job stored in the browser', async () => {
       localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
         id: 'job-9',
         type: 'expansion' 
@@ -295,7 +302,7 @@ describe('useKeywordResearch', () => {
       const { result } = renderResearch({ snapshots: { 'job-9': [buildCompletedExpansionJob('job-9', 'resumed')] } });
       expect(result.current.loading).toBe(true);
 
-      await advanceBy(POLL_FAST_INTERVAL_MS);
+      await advanceBy(0);
 
       expect(result.current.expansionResult?.seed_keyword).toBe('resumed');
       expect(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY)).toBeNull();
@@ -382,7 +389,7 @@ describe('useKeywordResearch', () => {
   // cancellation path (kept fetching after unmount or a newer call) and
   // treated auth failures as "not ready yet" (the user waited the full window
   // to get a bogus timeout).
-  describe('polling lifecycle (AUDIT 2.20)', () => {
+  describe('waiting lifecycle (AUDIT 2.20)', () => {
     const sessionExpiredResearchOptions = { pollResponse: () => createMockJsonResponse({}, 401) };
 
     it('surfaces an auth error after the first poll when the session expires', async () => {
@@ -394,37 +401,37 @@ describe('useKeywordResearch', () => {
       expect(result.current.loading).toBe(false);
     });
 
-    it('stops polling after an auth failure instead of retrying until timeout', async () => {
+    it('stops reading after an auth failure instead of retrying until timeout', async () => {
       const { result } = renderResearch(sessionExpiredResearchOptions);
 
-      await startExpansion(result, POLL_FAST_INTERVAL_MS * 5);
+      await startExpansion(result, 5);
 
       expect(countJobPolls()).toBe(1);
     });
 
-    it('stops polling when the job was deleted underneath it', async () => {
+    it('stops reading when the job was deleted underneath it', async () => {
       const { result } = renderResearch({ snapshots: {} });
 
-      await startExpansion(result, POLL_FAST_INTERVAL_MS * 3);
+      await startExpansion(result, 3);
 
       expect(countJobPolls()).toBe(1);
       expect(result.current.error).toBe('Research data not found');
     });
 
-    it('keeps polling through a transient server error', async () => {
+    it('keeps waiting through a transient server error', async () => {
       const pollResponses = [
         createMockJsonResponse({}, 503),
         createMockJsonResponse(buildCompletedExpansionJob('job-1', 'best hotels')),
       ];
       const { result } = renderResearch({pollResponse: () => pollResponses.shift() ?? createMockJsonResponse({}, 503),});
 
-      await startExpansion(result, POLL_FAST_INTERVAL_MS * 2);
+      await startExpansion(result, 2);
 
       expect(countJobPolls()).toBe(2);
       expect(result.current.expansionResult?.id).toBe('job-1');
     });
 
-    it('stops polling when the component unmounts mid-poll', async () => {
+    it('stops listening when the component unmounts mid-wait', async () => {
       const {
         result, unmount 
       } = renderResearch(runningJobResearchOptions);
@@ -433,41 +440,47 @@ describe('useKeywordResearch', () => {
       expect(countJobPolls()).toBe(1);
 
       unmount();
-      await advanceBy(POLL_FAST_INTERVAL_MS * 5);
+      await reconnectResearch(5);
 
-      expect(countJobPolls()).toBe(1);
+      expect([countJobPolls(), liveSubscriberCount('research')]).toStrictEqual([1, 0]);
     });
 
-    it('drops the superseded poll when a newer expansion starts', async () => {
-      const { result } = renderResearch({
-        pendingIds: ['job-1', 'job-2'],
-        snapshots: {
-          'job-1': [buildCompletedExpansionJob('job-1', 'first seed')],
-          'job-2': [buildCompletedExpansionJob('job-2', 'second seed')],
-        },
-      });
+    it('drops the superseded wait when a newer expansion starts', async () => {
+      const { result } = renderResearch(buildTwoExpansionsOptions('first seed', buildCompletedExpansionJob('job-2', 'second seed')));
 
       await act(async () => {
         void result.current.expandKeywords('first seed', 'hospitality', 10);
         void result.current.expandKeywords('second seed', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
+        await vi.advanceTimersByTimeAsync(0);
       });
 
-      // Only the second generation polled; the first exited without fetching.
+      // Only the second generation read the job; the first exited without fetching.
       expect(countJobPolls()).toBe(1);
       expect(result.current.expansionResult?.id).toBe('job-2');
       expect(result.current.loading).toBe(false);
     });
 
-    it('slows down to ten-second polls after the first minute', async () => {
-      const { result } = renderResearch(runningJobResearchOptions);
+    it('reads the job only when it connects and when the job changes, never on a timer', async () => {
+      await renderRunningExpansionFor(10 * 60_000);
+      const afterTenMinutes = countJobPolls();
+      await emitLive('research', {
+        type: 'research-job.changed',
+        job_id: 'job-2' 
+      });
+      await emitLive('research', {
+        type: 'research-job.changed',
+        job_id: 'job-1' 
+      });
 
-      await startExpansion(result, 60_000);
-      expect(countJobPolls()).toBe(20);
+      expect([afterTenMinutes, countJobPolls()]).toStrictEqual([1, 2]);
+    });
 
-      await advanceBy(30_000);
+    it('gives up with the timeout message after the wait limit', async () => {
+      const result = await renderRunningExpansionFor(RESEARCH_WAIT_LIMIT_MS);
 
-      expect(countJobPolls()).toBe(23);
+      expect([result.current.error, result.current.loading, liveSubscriberCount('research')]).toStrictEqual([
+        'Failed to process research request', false, 0,
+      ]);
     });
   });
 });
