@@ -3,6 +3,7 @@ import {
 } from 'vitest';
 import { synthesizeDashboardStacks } from './api-stack-fixtures';
 import {
+  allowStatementsOfRole,
   extractDistributedMapNames,
   extractFunctionMemorySize,
   extractFunctionRoleActions,
@@ -12,6 +13,7 @@ import {
   extractLambdaEnvVars,
   extractStateMachineStates,
   extractTableProperty,
+  findFunctionRoleLogicalId,
   findLambdaLogicalId,
   resolvePath,
 } from './citation-analysis-stack-fixtures';
@@ -70,6 +72,15 @@ describe('Deduplication writes the KeywordLatest objects', () => {
 
   it('may only put KeywordRunBrands rows', () => {
     expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-Deduplication', keywordRunBrandsId)).toStrictEqual(['dynamodb:PutItem']);
+  });
+
+  it('may list the KeywordLatest prefix, so a keyword with no object yet reads as missing instead of AccessDenied', () => {
+    const listing = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, 'CitationAnalysis-Deduplication'))
+      .filter((statement) => JSON.stringify(resolvePath(statement, ['Action'])).includes('s3:ListBucket'));
+
+    expect(listing.map((statement) => resolvePath(statement, ['Condition']))).toStrictEqual([
+      { StringLike: { 's3:prefix': ['scope-snapshots/keywords/*'] } },
+    ]);
   });
 
   it('may invoke the builder', () => {
