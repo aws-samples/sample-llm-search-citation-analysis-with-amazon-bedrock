@@ -560,7 +560,7 @@ function exportStateMachine(scope: Construct, worker: lambda.IFunction): stepfun
  * answers tokens of its own state machine only (named, not referenced: the
  * state machine already references the worker).
  */
-function resumeExportsOnViewJobEvents(scope: Construct, worker: lambda.IFunction): void {
+function resumeExportsOnViewJobEvents(scope: Construct, worker: lambda.Function): void {
   new events.Rule(scope, 'ViewJobFinishedRule', {
     ruleName: 'CitationAnalysis-ViewJobFinished',
     description: 'A view job finished or failed: resume the exports waiting on it',
@@ -572,11 +572,14 @@ function resumeExportsOnViewJobEvents(scope: Construct, worker: lambda.IFunction
         started_at: events.EventField.fromPath('$.detail.started_at'),
         status: events.EventField.fromPath('$.detail.status'),
       }),
-      // A lost event only delays the export until the WaitForViewJob timeout.
+      // Delivery to Lambda: a lost event only delays the export until the WaitForViewJob timeout.
       maxEventAge: cdk.Duration.seconds(EXPORT_VIEW_JOB_WAIT_SECONDS),
       retryAttempts: 4,
     })],
   });
+  // EventBridge invokes the worker asynchronously (Step Functions invokes it synchronously), so a resume that raises
+  // (Step Functions refused a token) is retried by Lambda: twice, and not after the waits it would resume timed out.
+  worker.configureAsyncInvoke({ retryAttempts: 2, maxEventAge: cdk.Duration.seconds(EXPORT_VIEW_JOB_WAIT_SECONDS) });
   allow(worker, ['states:SendTaskSuccess', 'states:SendTaskFailure'], [cdk.Stack.of(scope).formatArn({
     service: 'states',
     resource: 'stateMachine',

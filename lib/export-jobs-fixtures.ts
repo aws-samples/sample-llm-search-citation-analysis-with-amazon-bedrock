@@ -66,6 +66,8 @@ export interface ExportServiceSnapshot {
   /** Principals and source ARNs allowed to invoke the worker (`AWS::Lambda::Permission`). */
   workerInvokePermissions: { principal: string; sourceArn: string }[];
   generateSummaryStatements: RoleStatementSnapshot[];
+  /** The worker's asynchronous invoke settings (`AWS::Lambda::EventInvokeConfig`), one entry per config. */
+  workerAsyncInvoke: { retryAttempts: unknown; maxEventAgeSeconds: unknown }[];
   apiEnvironment: Record<string, unknown>;
   apiStatements: RoleStatementSnapshot[];
   apiHandler: unknown;
@@ -151,6 +153,15 @@ function viewJobRuleProperties(template: Template): Record<string, unknown> {
   return isRecord(properties) ? properties : {};
 }
 
+function asyncInvokeConfigs(template: Template, functionLogicalId: string): { retryAttempts: unknown; maxEventAgeSeconds: unknown }[] {
+  return Object.values(template.findResources('AWS::Lambda::EventInvokeConfig'))
+    .filter((config) => collectRefTargets(resolvePath(config, ['Properties', 'FunctionName'])).includes(functionLogicalId))
+    .map((config) => ({
+      retryAttempts: resolvePath(config, ['Properties', 'MaximumRetryAttempts']),
+      maxEventAgeSeconds: resolvePath(config, ['Properties', 'MaximumEventAgeInSeconds']),
+    }));
+}
+
 function functionProperties(template: Template, functionName: string): unknown {
   return resolvePath(template.toJSON(), ['Resources', findLambdaLogicalId(template, functionName), 'Properties']);
 }
@@ -229,6 +240,7 @@ export function extractExportServiceSnapshot({ mainTemplate, apiTemplate }: Dash
     workerInvokePermissions: permissionsOf(mainTemplate)
       .filter((permission) => permission.functionLogicalIds.includes(workerLogicalId))
       .map(({ principal, sourceArn }) => ({ principal, sourceArn })),
+    workerAsyncInvoke: asyncInvokeConfigs(mainTemplate, workerLogicalId),
     generateSummaryStatements: roleStatements(mainTemplate, findFunctionRoleLogicalId(mainTemplate, GENERATE_SUMMARY_FUNCTION_NAME)),
     apiEnvironment: environmentOf(mainTemplate, EXPORTS_API_FUNCTION_NAME),
     apiStatements: roleStatements(mainTemplate, findFunctionRoleLogicalId(mainTemplate, EXPORTS_API_FUNCTION_NAME)),

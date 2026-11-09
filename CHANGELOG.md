@@ -16,8 +16,9 @@ and checking again (#214, tenet 8).
 
 ### Upgrade notes
 
-- The deploy adds the EventBridge rule `CitationAnalysis-ViewJobFinished` on the default bus and its permission to
-  invoke `CitationAnalysis-ExportWorker`. Nothing to configure, and no fixed cost: EventBridge bills each event.
+- The deploy adds the EventBridge rule `CitationAnalysis-ViewJobFinished` on the default bus, its permission to
+  invoke `CitationAnalysis-ExportWorker`, and the worker's asynchronous invoke settings. Nothing to configure, and no
+  fixed cost: EventBridge bills each event.
 - Exports already running when you deploy finish on the definition they started with: their chunks still answer
   `wait_seconds` for the old `WaitForViewJob` Wait state. That field goes in the next minor release.
 
@@ -39,7 +40,9 @@ and checking again (#214, tenet 8).
   - The run is keyed by `started_at`, so the end of a failed run never resumes an export waiting on the job's next
     run.
   - An event delivered twice sends again harmlessly, and tokens whose task already ended (timed out, cancelled)
-    are skipped. Another Step Functions error raises, so EventBridge retries the event.
+    are skipped. Another Step Functions error raises. EventBridge invokes the worker asynchronously, so Lambda then
+    retries the invocation: the worker's asynchronous invoke config allows 2 retries within 960 s, the wait's
+    timeout. The rule's own retry policy (4 attempts within 960 s) covers delivering the event to Lambda.
   - The worker may answer task tokens (`states:SendTaskSuccess`, `states:SendTaskFailure`) of the export state
     machine only. It still reads and writes the Exports table with `GetItem` and `PutItem` only.
 - **A lost event fails the export within a bounded time.** `WaitForViewJob` times out after 960 s (a view job runs

@@ -162,8 +162,12 @@ describe('Resuming exports on view-job.finished', () => {
     });
   });
 
-  it('stops retrying an event once the waiting exports have timed out anyway', () => {
+  it('stops retrying the delivery of an event to the worker once the waiting exports have timed out anyway', () => {
     expect(target.RetryPolicy).toStrictEqual({ MaximumEventAgeInSeconds: VIEW_JOB_WAIT_SECONDS, MaximumRetryAttempts: 4 });
+  });
+
+  it('retries a resume that raised twice, within the same bound (EventBridge invokes the worker asynchronously)', () => {
+    expect(snapshot.workerAsyncInvoke).toStrictEqual([{ retryAttempts: 2, maxEventAgeSeconds: VIEW_JOB_WAIT_SECONDS }]);
   });
 
   it('lets EventBridge invoke the worker for this rule only', () => {

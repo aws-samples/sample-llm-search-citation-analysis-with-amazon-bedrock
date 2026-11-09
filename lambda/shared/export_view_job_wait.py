@@ -147,7 +147,8 @@ def finish_view_job(table: Any, sfn: Any, run: ViewJobRun, status: str, now: dat
     Mark ``run`` finished with ``status`` and send back every token waiting on it; how many tasks resumed.
 
     A token Step Functions refuses for another reason (throttling, access)
-    raises after every token was tried, so the event's retry sends again.
+    raises after every token was tried, so Lambda's asynchronous retry of the
+    rule's invocation (twice, within the wait's timeout) sends again.
     """
     if status not in _FINISHED:
         raise ValueError(f'a view job finishes done or failed, not {status!r}')
