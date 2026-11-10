@@ -36,6 +36,10 @@ process.
   keyword, left the group's count unchanged until a reload; the groups are now read again after either.
 - `GET /providers` logged "Connection pool is full" on every call: it reads the 11 providers in parallel through
   clients with botocore's default pool of 10. The clients now hold one connection per provider.
+- The crawler logged an expected third-party page failure (the page closed before its screenshot, or navigated away
+  while its text was read) as an `ERROR` with a traceback, then again as a warning. Playwright errors in those steps
+  are now one warning line, as navigation failures already were; a long page's truncation is `INFO`
+  (`shared/browser_tools.py`, `crawler/handler.py`).
 
 ### Upgrade notes
 

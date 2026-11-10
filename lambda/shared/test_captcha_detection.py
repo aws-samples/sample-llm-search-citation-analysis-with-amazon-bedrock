@@ -165,6 +165,18 @@ def test_reports_a_page_that_cannot_be_loaded_in_one_line_without_a_traceback(to
     assert result["error"] == "Page.goto: net::ERR_INVALID_AUTH_CREDENTIALS at http://feed.example/item"
 
 
+def test_reports_a_screenshot_of_a_closed_page_in_one_line_without_a_traceback(tools_with_page, caplog):
+    tools_with_page.page.screenshot.side_effect = browser_tools.PlaywrightError(
+        "Page.screenshot: Target page, context or browser has been closed\nBrowser logs:\n  Target disconnected"
+    )
+
+    with caplog.at_level(logging.INFO, logger=browser_tools.__name__):
+        tools_with_page.take_screenshot()
+
+    failures = [(record.levelname, record.getMessage(), record.exc_info) for record in caplog.records if "Screenshot" in record.getMessage()]
+    assert failures == [("WARNING", "Screenshot failed: Page.screenshot: Target page, context or browser has been closed", None)]
+
+
 def test_returns_not_blocked_when_document_body_is_missing(tools_with_page):
     tools_with_page.page.evaluate.return_value = ""
 

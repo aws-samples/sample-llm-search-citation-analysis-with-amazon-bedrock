@@ -52,6 +52,20 @@ class BrowserConfigurationError(RuntimeError):
     """Raised when required AgentCore browser configuration is absent."""
 
 
+def _error_result(exc: Exception) -> dict[str, str]:
+    """The result of a page step that raised ``exc``."""
+    return {"status": "error", "error": str(exc)}
+
+
+def _expected_step_failure(step: str, exc: PlaywrightError) -> dict[str, str]:
+    """A page step Playwright could not finish (the page navigated away, closed, or timed out).
+
+    An expected outcome on third-party pages: one warning line, no traceback.
+    """
+    logger.warning("%s failed: %s", step, str(exc).splitlines()[0][:300])
+    return _error_result(exc)
+
+
 class SimpleBrowserTools:
     """Simplified browser automation tools for Lambda environment."""
 
@@ -260,7 +274,7 @@ class SimpleBrowserTools:
             max_chars = 50000
             if len(text_content) > max_chars:
                 text_content = text_content[:max_chars]
-                logger.warning("Content truncated to %s chars", max_chars)
+                logger.info("Content truncated to %s chars", max_chars)
 
             metadata = page.evaluate("""
                 () => {
@@ -281,12 +295,11 @@ class SimpleBrowserTools:
                 "url": page.url,
             }
 
+        except PlaywrightError as exc:
+            return _expected_step_failure("Content extraction", exc)
         except Exception as exc:
             logger.exception("Content extraction error")
-            return {
-                "status": "error",
-                "error": str(exc),
-            }
+            return _error_result(exc)
 
     def take_screenshot(self) -> dict:
         """Take a full-page PNG screenshot of the current page."""
@@ -301,12 +314,11 @@ class SimpleBrowserTools:
                 "timestamp": get_timestamp(),
             }
 
+        except PlaywrightError as exc:
+            return _expected_step_failure("Screenshot", exc)
         except Exception as exc:
             logger.exception("Screenshot error")
-            return {
-                "status": "error",
-                "error": str(exc),
-            }
+            return _error_result(exc)
 
     def cleanup(self) -> None:
         """Detach and independently release every browser resource exactly once."""
