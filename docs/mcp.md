@@ -83,6 +83,8 @@ Settings › Security and login › Developer mode on, then create a connector w
 
 ### Amazon Quick (web)
 
+Not verified yet: the steps follow Quick's current connector wizard, but no connection has been proven end to end.
+
 Connectors › Create for your team › Model Context Protocol. The wizard has five steps: Connect (server URL `<McpUrl>`), Authenticate, Manage Write Permissions, Manage Read Permissions, Publish. On Authenticate choose User authentication, then the auth configuration Custom user based OAuth:
 
 | Field | Value |
@@ -95,7 +97,7 @@ Connectors › Create for your team › Model Context Protocol. The wizard has f
 
 The dashboard's Amazon Quick steps take the two URLs from the authorization server metadata (`<McpUrl host>/.well-known/openid-configuration`, `authorization_endpoint` and `token_endpoint`); they are the same values as `McpAuthorizeUrl` and `McpTokenUrl`.
 
-The form has no scope field. The server publishes `scopes_supported` (`openid <McpUrl>/read <McpUrl>/write <McpUrl>/run`) in its protected resource metadata, which is where a spec-compliant client reads them; whether Quick does is the first thing the live test must confirm, because an authorize request without `scope` fails at the token exchange. On Manage Write Permissions and Manage Read Permissions, Quick asks which tools it may call; read tools carry `readOnlyHint: true`, so they are listed as reads and Quick's scheduled agents can run them unattended. Authentication methods are documented at [Authentication methods](https://docs.aws.amazon.com/quick/latest/userguide/quick-action-auth.html).
+The form has no scope field. The server publishes `<McpUrl>/read <McpUrl>/write <McpUrl>/run` as `scopes_supported` in its protected resource metadata (`openid` is left out on purpose, see Scopes above), which is where a spec-compliant client reads them. Two things the live test must confirm: whether Quick reads them, and that a sign-in without them fails (Cognito is expected to refuse a code issued without any `scope` at the token exchange, with `invalid_grant`). On Manage Write Permissions and Manage Read Permissions, Quick asks which tools it may call; read tools carry `readOnlyHint: true`, so they are listed as reads and Quick's scheduled agents can run them unattended. Authentication methods are documented at [Authentication methods](https://docs.aws.amazon.com/quick/latest/userguide/quick-action-auth.html).
 
 ### Amazon Quick Desktop
 

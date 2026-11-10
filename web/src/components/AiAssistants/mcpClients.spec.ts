@@ -60,9 +60,16 @@ describe('MCP_CLIENTS', () => {
     expect(labels).toContainEqual(['Authorization server metadata', 'https://d111example.cloudfront.net/.well-known/openid-configuration']);
   });
 
-  it('names one scope per server permission for Amazon Quick', () => {
+  it('offers Amazon Quick no Scopes snippet, since its OAuth form has no scope field', () => {
     const quick = MCP_CLIENTS.find((client) => client.id === 'quick');
-    const scopes = quick?.guide(FAKE_MCP_CONFIG).snippets.find((snippet) => snippet.label === 'Scopes');
+    const labels = quick?.guide(FAKE_MCP_CONFIG).snippets.map((snippet) => snippet.label);
+
+    expect(labels).toStrictEqual(['Server URL', 'OAuth client ID', 'Authorization server metadata']);
+  });
+
+  it('names one scope per server permission for other clients', () => {
+    const other = MCP_CLIENTS.find((client) => client.id === 'other');
+    const scopes = other?.guide(FAKE_MCP_CONFIG).snippets.find((snippet) => snippet.label === 'Scopes');
 
     expect(scopes?.value).toBe(
       'openid https://d111example.cloudfront.net/mcp/read https://d111example.cloudfront.net/mcp/write https://d111example.cloudfront.net/mcp/run',

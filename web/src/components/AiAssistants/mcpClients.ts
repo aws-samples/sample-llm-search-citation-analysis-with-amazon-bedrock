@@ -60,16 +60,23 @@ function callback(urls: readonly string[], allowedByDefault: boolean): ClientCal
   };
 }
 
-/** The server URL and client id, plus (for manual OAuth forms) a discovery document under the host root and the scopes. */
+/**
+ * The server URL and client id, plus (for manual OAuth forms) a discovery
+ * document under the host root and, unless the form has no scope field
+ * (`withScopes: false`), the scopes.
+ */
 function connectionSnippets(config: McpConfig, discovery?: {
   readonly label: string;
-  readonly path: string 
+  readonly path: string;
+  readonly withScopes?: boolean;
 }): ConfigSnippet[] {
   const basics = [snippet('Server URL', config.url), snippet('OAuth client ID', config.clientId)];
   if (discovery === undefined) return basics;
   const origin = config.url.replace(/\/mcp\/?$/, '');
+  const metadata = snippet(discovery.label, `${origin}${discovery.path}`);
+  if (discovery.withScopes === false) return [...basics, metadata];
   const scopes = ['read', 'write', 'run'].map((scope) => `${config.url}/${scope}`);
-  return [...basics, snippet(discovery.label, `${origin}${discovery.path}`), snippet('Scopes', ['openid', ...scopes].join(' '))];
+  return [...basics, metadata, snippet('Scopes', ['openid', ...scopes].join(' '))];
 }
 
 export function buildClaudeCodeCommand(config: McpConfig): string {
@@ -152,18 +159,22 @@ const kiroGuide = (config: McpConfig): ClientGuide => ({
 
 const quickGuide = (config: McpConfig): ClientGuide => ({
   steps: [
-    'In Amazon Quick, open Integrations › MCP and add a server with the server URL below.',
-    'Choose to configure OAuth manually: paste the client ID below and set the client type to Public (no client secret).',
-    'Open the authorization server metadata below and copy authorization_endpoint into Authorization URL and token_endpoint into Token URL.',
-    'Paste the scopes below, note the redirect URL the form shows, and ask an administrator to allow it.',
+    'In Amazon Quick, open Connectors › Create for your team › Model Context Protocol, and on Connect enter the server URL below.',
+    'On Authenticate, choose User authentication and then Custom user based OAuth. Paste the client ID below and tick Public OAuth client, so the client secret stays empty.',
+    'Open the authorization server metadata below and copy token_endpoint into Token URL and authorization_endpoint into Authorization URL.',
+    'Note the Redirect URL the form shows and ask an administrator to allow that exact URL.',
+    'On Manage Write Permissions and Manage Read Permissions, choose the tools Quick may call, then Publish.',
     SIGN_IN_STEP,
   ],
   snippets: connectionSnippets(config, {
     label: 'Authorization server metadata',
     path: '/.well-known/openid-configuration',
+    withScopes: false,
   }),
   callback: callback(['https://<region>.quicksight.aws.amazon.com/sn/oauthcallback'], false),
   notes: [
+    'Not verified yet: no Amazon Quick connection has been proven end to end.',
+    'The form has no scope field: Quick is expected to read the scopes from the server\'s protected resource metadata.',
     'Read tools are marked read-only, so Quick\'s scheduled agents can run them unattended.',
     'Amazon Quick Desktop is not verified yet. If it offers the same OAuth form, use the same values; if it accepts only a static header, it cannot connect.',
   ],

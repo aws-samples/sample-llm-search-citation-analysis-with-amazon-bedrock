@@ -9,6 +9,18 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.3] - 2026-11-10
+
+### Fixed
+
+- **Settings › AI assistants gave old Amazon Quick steps.** The Amazon Quick guide now follows Quick's Connectors ›
+  Create wizard (Connect, Authenticate with Custom user based OAuth and the Public OAuth client box ticked, Manage
+  Write and Read Permissions, Publish). It no longer offers a Scopes value, since the form has no scope field, and it
+  says Quick is not verified yet (`web/src/components/AiAssistants/mcpClients.ts`). The Other / Codex guide keeps its
+  Scopes value.
+- `docs/mcp.md`, Amazon Quick (web): the same wizard steps, marked not verified yet. The scopes the server publishes in
+  `scopes_supported` are `<McpUrl>/read`, `/write` and `/run` (without `openid`, as the Scopes table already said).
+
 ## [2.54.2] - 2026-11-09
 
 ### Fixed
