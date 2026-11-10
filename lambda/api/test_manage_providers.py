@@ -102,6 +102,11 @@ def _reset_mocks():
     _serve_config_rows({})
 
 
+def test_the_clients_hold_a_connection_for_every_provider_read_at_once():
+    # GET /providers reads every provider in parallel; a smaller pool logs "Connection pool is full".
+    assert _module._CLIENT_CONFIG.max_pool_connections == len(_module.PROVIDERS)
+
+
 class TestGetProvidersSurfacesHealth:
     """The response half of the health pipeline: row fields must reach the wire."""
 

@@ -126,6 +126,23 @@ describe('GenerateSummary builds the snapshots and runs the view jobs', () => {
       resources: [environment.SCOPE_SNAPSHOT_BUILD_STATE_MACHINE_ARN],
     }]);
   });
+
+  it('may invoke itself, so a series build that ran out of time resumes', () => {
+    const selfInvoke = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, 'CitationAnalysis-GenerateSummary'))
+      .filter((statement) => JSON.stringify(resolvePath(statement, ['Resource'])).includes(':function:CitationAnalysis-GenerateSummary'));
+
+    expect(selfInvoke.map((statement) => resolvePath(statement, ['Action']))).toStrictEqual(['lambda:InvokeFunction']);
+  });
+});
+
+describe('Every provider search Lambda reads back the answers of its run', () => {
+  const searchResultsId = Object.keys(template.findResources('AWS::DynamoDB::Table', {
+    Properties: { TableName: 'CitationAnalysis-SearchResults' },
+  }))[0] ?? '';
+
+  it('may query SearchResults, so a retried keyword asks no provider twice (stored_slim_results)', () => {
+    expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-Search-openai', searchResultsId)).toContain('dynamodb:Query');
+  });
 });
 
 describe('The distributed scope snapshot and citation rollup build', () => {
@@ -182,6 +199,14 @@ describe.each(READERS)('%s serves scoped views from the snapshots', (functionNam
 
   it('may read snapshot objects and put and delete its rebuild marker and view jobs', () => {
     expect(extractFunctionRoleActions(template, functionName)).toStrictEqual(expect.arrayContaining(['s3:GetObject', 's3:PutObject', 's3:DeleteObject']));
+  });
+
+  it('may list the snapshot prefix, so a view job not computed yet reads as missing instead of AccessDenied', () => {
+    const listing = allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName))
+      .filter((statement) => JSON.stringify(resolvePath(statement, ['Action'])).includes('s3:ListBucket'))
+      .map((statement) => resolvePath(statement, ['Condition']));
+
+    expect(listing).toContainEqual({ StringLike: { 's3:prefix': ['scope-snapshots/*'] } });
   });
 });
 

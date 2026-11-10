@@ -27,6 +27,7 @@ from decimal import Decimal
 from typing import Any
 
 from boto3.dynamodb.conditions import ConditionBase
+from botocore.exceptions import ClientError
 
 from testing.partition_tables import project, rows_after
 
@@ -108,6 +109,27 @@ def _partition_of(condition: ConditionBase, partition_key: str) -> Any:
     return _ANY
 
 
+class EmptyKeyValueError(ClientError):
+    """DynamoDB's ``ValidationException`` for an empty string in a key condition."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            {'Error': {'Code': 'ValidationException', 'Message': 'The AttributeValue for a key attribute cannot contain an empty string value.'}},
+            'Query',
+        )
+
+
+def _has_empty_value(condition: ConditionBase) -> bool:
+    """Whether a key condition compares a key with ``''`` anywhere (DynamoDB refuses it)."""
+    for value in condition.get_expression()['values']:
+        if isinstance(value, ConditionBase):
+            if _has_empty_value(value):
+                return True
+        elif value == '':
+            return True
+    return False
+
+
 @dataclass
 class MemoryTable:
     """One table: its key (``(partition, sort)`` or ``(partition,)``), its GSIs by name, its rows and the reads made."""
@@ -170,6 +192,8 @@ class MemoryTable:
 
     def query(self, **params: Any) -> dict[str, Any]:
         self.reads.append(('query', dict(params)))
+        if _has_empty_value(params['KeyConditionExpression']):
+            raise EmptyKeyValueError
         index_name = params.get('IndexName')
         schema = self._schema(index_name)
         candidates = self.rows.values() if index_name is not None else self._partition_rows(params['KeyConditionExpression'])

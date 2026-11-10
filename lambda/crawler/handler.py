@@ -429,7 +429,7 @@ def _capture_page(browser_tools: SimpleBrowserTools, url: str) -> _PageCapture:
     content_result = browser_tools.extract_page_content()
     if content_result['status'] != 'success':
         error_message = content_result.get('error', 'Content extraction failed')
-        logger.error("Content extraction failed: %s", error_message)
+        logger.info("Recording failed content extraction: %s", error_message[:200])
         return _PageCapture(
             status='error',
             page_load_time_ms=page_load_time_ms,
@@ -442,7 +442,7 @@ def _capture_page(browser_tools: SimpleBrowserTools, url: str) -> _PageCapture:
 
     screenshot_result = browser_tools.take_screenshot()
     if screenshot_result['status'] != 'success':
-        logger.warning("Screenshot capture failed: %s", screenshot_result.get('error'))
+        logger.info("Saving the page without a screenshot: %s", str(screenshot_result.get('error'))[:200])
 
     return _PageCapture(
         status='captured',

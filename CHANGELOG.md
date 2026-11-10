@@ -9,6 +9,38 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.2] - 2026-11-09
+
+### Fixed
+
+- **Analysis runs stored no answers.** The provider search Lambdas read back what an earlier attempt of the same run
+  stored (`stored_slim_results`, since 2.42.0) with a DynamoDB `Query` on SearchResults, but their role
+  (`CitationAnalysis-SearchLambdaRole`) could only write the table. Every provider failed with `AccessDeniedException`
+  before asking anything, so each keyword ended with zero answers and the run still showed as finished. The role may
+  now query the SearchResults base table (`lib/citation-analysis-stack.ts`, checked in `lib/scope-snapshots.spec.ts`).
+- **The scope snapshot build failed after every run.** The scope series asked KeywordRunKpis for `run_timestamp >= ''`
+  when it wanted every run, and DynamoDB refuses an empty key value (`ValidationException`), so `BuildScopeSnapshots`
+  failed on every run. An empty `since` now sends no sort-key condition (`shared/keyword_run_kpis.py`). The in-memory
+  DynamoDB test double refuses an empty key value too, as DynamoDB does (`lambda/testing/memory_dynamodb.py`), which
+  makes the end-to-end snapshot tests catch this.
+- **Scoped views could not start a view job.** The dashboard API Lambdas that serve scope snapshots (StatsInsights,
+  GetBrandMentions, ContentStudio, KeywordMgmt, ConfigMgmt, CitationsContent, ReportInsights) could read
+  `scope-snapshots/*` but not list the bucket, so S3 answered a view job not computed yet, or the first rebuild marker,
+  with `AccessDenied` instead of `NoSuchKey`. Large scopes answered "failed" instead of `202 computing`. They now have
+  `s3:ListBucket` limited to the `scope-snapshots/*` prefix, as Deduplication got in 2.54.1.
+- **A series build that ran out of time could not resume.** GenerateSummary invokes itself to continue
+  (`scope_snapshot_action._resume`) but had no `lambda:InvokeFunction` on its own ARN.
+- **SEO objects that are missing read as `AccessDenied`.** The SEO router and jobs may now list the SEO bucket, so a
+  cache payload or domain-snapshot object not written yet reads as missing (`lib/seo-stack.ts`).
+- **Settings › Keywords showed stale group counts.** Adding keywords to the selected group, or deleting a grouped
+  keyword, left the group's count unchanged until a reload; the groups are now read again after either.
+- `GET /providers` logged "Connection pool is full" on every call: it reads the 11 providers in parallel through
+  clients with botocore's default pool of 10. The clients now hold one connection per provider.
+- The crawler logged an expected third-party page failure (the page closed before its screenshot, or navigated away
+  while its text was read) as an `ERROR` with a traceback, then again as a warning. Playwright errors in those steps
+  are now one warning line, as navigation failures already were; a long page's truncation is `INFO`
+  (`shared/browser_tools.py`, `crawler/handler.py`).
+
 ## [2.54.1] - 2026-11-09
 
 ### Fixed

@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+__all__ = ['VIEW_JOB_EVENT_NAMES']
+
 _PATH = Path(__file__).resolve().parents[2] / 'test-fixtures' / 'view-job-events.json'
 
 #: ``source`` and ``detail_type`` of the event.

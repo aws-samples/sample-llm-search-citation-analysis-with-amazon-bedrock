@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import google_ai_overview
 import pytest
 from ai_overview_answer import citations_from, markdown_to_text, parse_ai_overview
-from google_ai_overview import ai_overview_search
 
 from shared.dataforseo_client import DataForSeoError
 from shared.dataforseo_serp import ORGANIC_LIVE_PATH
@@ -46,7 +45,7 @@ def aio_error(fake: FakePostLive) -> Callable[[Outcome], DataForSeoError]:
     def run(outcome: Outcome) -> DataForSeoError:
         fake.by_path = {ORGANIC_LIVE_PATH: outcome}
         with pytest.raises(DataForSeoError) as raised:
-            ai_overview_search('best tracker', LABS_US)
+            google_ai_overview.ai_overview_search('best tracker', LABS_US)
         return raised.value
     return run
 
@@ -142,7 +141,7 @@ class TestAiOverviewSearch:
     def test_sends_the_exact_billed_request_without_http_retries(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([TRACKER_OVERVIEW])])}
 
-        ai_overview_search('best tracker', LABS_US)
+        google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         call = fake.calls[0]
         assert {key: value for key, value in call.task.items() if key != 'tag'} == {
@@ -155,7 +154,7 @@ class TestAiOverviewSearch:
     def test_escapes_percent_and_plus_in_keyword(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([])])}
 
-        ai_overview_search('100% c++', LABS_US)
+        google_ai_overview.ai_overview_search('100% c++', LABS_US)
 
         assert fake.calls[0].task['keyword'] == '100%25 c%2B%2B'
 
@@ -163,7 +162,7 @@ class TestAiOverviewSearch:
         items = [organic_item(1, 'example.com'), TRACKER_OVERVIEW]
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result(items)])}
 
-        result = ai_overview_search('best tracker', LABS_US)
+        result = google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (result.status, result.answer_text) == ('success', 'Use Example Tracker.')
         assert result.citations == ('https://tracker.example.com/blog', 'https://analytics.example.org/docs')
@@ -173,12 +172,12 @@ class TestAiOverviewSearch:
         returned = serp_result([organic_item(1, 'example.com'), TRACKER_OVERVIEW])
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([returned])}
 
-        assert ai_overview_search('best tracker', LABS_US).raw_result == returned
+        assert google_ai_overview.ai_overview_search('best tracker', LABS_US).raw_result == returned
 
     def test_records_the_row_metadata(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([TRACKER_OVERVIEW])], cost=0.004, task_id='t-9')}
 
-        metadata = ai_overview_search('best tracker', LABS_US).metadata
+        metadata = google_ai_overview.ai_overview_search('best tracker', LABS_US).metadata
 
         assert {key: value for key, value in metadata.items() if key != 'latency_ms'} == {
             'model': 'google-serp', 'cost_usd': 0.004, 'location_code': 2840, 'language_code': 'en',
@@ -190,7 +189,7 @@ class TestAiOverviewSearch:
     def test_returns_no_answer_with_organic_results_when_the_page_has_no_overview(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([organic_item(1, 'example.com')])])}
 
-        result = ai_overview_search('best tracker', LABS_US)
+        result = google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (result.status, result.answer_markdown, result.answer_text, result.citations) == ('no_answer', None, '', ())
         assert len(result.organic) == 1
@@ -199,14 +198,14 @@ class TestAiOverviewSearch:
         empty = ai_overview_item('  ', references=[{'url': 'https://example.com/a'}])
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([serp_result([empty])])}
 
-        result = ai_overview_search('best tracker', LABS_US)
+        result = google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (result.status, result.citations) == ('no_answer', ())
 
     def test_classifies_no_search_results_message_as_no_answer(self, fake):
         fake.by_path = {ORGANIC_LIVE_PATH: task_result([], cost=0.002, no_results=True)}
 
-        result = ai_overview_search('best tracker', LABS_US)
+        result = google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (result.status, result.organic, result.metadata['cost_usd']) == ('no_answer', (), 0.002)
 
@@ -225,7 +224,7 @@ class TestAiOverviewSearch:
                          task_result([{'items': 'not-a-list'}], cost=0.004)]
 
         with pytest.raises(DataForSeoError) as raised:
-            ai_overview_search('best tracker', LABS_US)
+            google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (raised.value.code, raised.value.cost_usd) == ('INTERNAL_ERROR', pytest.approx(0.007))
 
@@ -239,7 +238,7 @@ class TestAiOverviewSearch:
         fake.sequence = [dataforseo_error('UPSTREAM_UNAVAILABLE', 50301),
                          task_result([serp_result([TRACKER_OVERVIEW])], cost=0.004)]
 
-        result = ai_overview_search('best tracker', LABS_US)
+        result = google_ai_overview.ai_overview_search('best tracker', LABS_US)
 
         assert (result.status, result.metadata['attempts'], sleep.call_count) == ('success', 2, 1)
 

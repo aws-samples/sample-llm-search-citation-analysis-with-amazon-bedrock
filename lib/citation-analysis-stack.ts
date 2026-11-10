@@ -46,7 +46,7 @@ import {
 import { citationAnalysisTable, stringKey, type CitationAnalysisIndexSpec } from './constructs/tables';
 import { citationAnalysisBucket } from './constructs/buckets';
 import {
-  allow, apiKeySecret, lambdaServiceRole
+  allow, allowWhere, apiKeySecret, lambdaServiceRole
 } from './constructs/permissions';
 import { MCP_STATE_TABLE_NAME, grantAuditPut } from './constructs/mcp-state';
 import { allowSavedBedrockModels, bedrockTierEnv, claudeInvokeModelStatement } from './constructs/bedrock-invoke';
@@ -221,6 +221,9 @@ function grantScopeSnapshotReader(fn: lambda.Function, inputs: ScopeSnapshotRead
   fn.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', inputs.builder.functionName);
   fn.addEnvironment('DYNAMODB_TABLE_QUERY_PROMPTS', inputs.queryPrompts.tableName);
   allow(fn, ['s3:GetObject'], [inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}*`)]);
+  // A view job's result and the rebuild marker are missing until first written:
+  // without ListBucket S3 answers AccessDenied instead of NoSuchKey.
+  allowWhere(fn, ['s3:ListBucket'], [inputs.bucket.bucketArn], { StringLike: { 's3:prefix': [`${SCOPE_SNAPSHOT_PREFIX}*`] } });
   allow(fn, ['s3:PutObject'], [
     inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_PREFIX}rebuild-requested.json`),
     inputs.bucket.arnForObjects(`${SCOPE_SNAPSHOT_JOBS_PREFIX}*`),
@@ -863,6 +866,17 @@ function seoStateMachineArn(stack: cdk.Stack, name: string): string {
   return stack.formatArn({ service: 'states', resource: 'stateMachine', resourceName: name, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME });
 }
 
+/**
+ * The ARN of a Lambda function by its fixed name. A function that invokes
+ * itself is granted this, not `grantInvoke(fn)`, which would make the
+ * function's role policy depend on the function.
+ */
+function namedFunctionArn(scope: Construct, name: string): string {
+  return cdk.Stack.of(scope).formatArn({
+    service: 'lambda', resource: 'function', resourceName: name, arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+  });
+}
+
 export class CitationAnalysisStack extends cdk.Stack {
   /** What the MCP stack builds on: the user pool and the API router Lambdas. */
   public readonly mcpInputs: McpServerInputs;
@@ -1359,8 +1373,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     serpapiSecret.grantRead(searchLambdaRole);
     firecrawlSecret.grantRead(searchLambdaRole);
 
-    // Grant Search Lambda write access to SearchResults table
+    // Grant Search Lambda write access to SearchResults table, and Query on
+    // the base table: a retried keyword reads the answers an earlier attempt
+    // of the same run stored (`stored_slim_results`), so none is paid twice.
     searchResultsTable.grantWriteData(searchLambdaRole);
+    allow(searchLambdaRole, ['dynamodb:Query'], [searchResultsTable.tableArn]);
 
     // Grant Search Lambda write access to Raw Responses bucket
     rawResponsesBucket.grantWrite(searchLambdaRole);
@@ -1563,11 +1580,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunBrandsTable.grant(deduplicationLambdaRole, 'dynamodb:PutItem');
     allow(deduplicationLambdaRole, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(deduplicationLambdaRole, ['dynamodb:Query'], [`${crawledContentTable.tableArn}/index/KeywordIndex`]);
-    // The chained `latest` backfill invokes itself with its cursor (by name:
-    // the function's own ARN would make its role policy depend on it).
-    allow(deduplicationLambdaRole, ['lambda:InvokeFunction'], [cdk.Arn.format({
-      service: 'lambda', resource: 'function', resourceName: 'CitationAnalysis-Deduplication', arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
-    }, this)]);
+    // The chained `latest` backfill invokes itself with its cursor.
+    allow(deduplicationLambdaRole, ['lambda:InvokeFunction'], [namedFunctionArn(this, 'CitationAnalysis-Deduplication')]);
 
     // Crawler Lambda Layer - Browser tools (Playwright + AgentCore)
     // Separate from shared layer to keep each under 250MB limit
@@ -1707,6 +1721,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordRunBrandsTable.grant(generateSummaryFunction, 'dynamodb:Query');
     allow(generateSummaryFunction, ['dynamodb:Query'], [queryPromptsTable.tableArn, `${queryPromptsTable.tableArn}/index/EnabledIndex`]);
     allow(generateSummaryFunction, ['dynamodb:Query', 'dynamodb:BatchGetItem'], [searchResultsTable.tableArn]);
+    // A series build that runs out of time invokes itself to resume
+    // (`scope_snapshot_action._resume`).
+    allow(generateSummaryFunction, ['lambda:InvokeFunction'], [namedFunctionArn(this, 'CitationAnalysis-GenerateSummary')]);
     // A finished chained `latest` backfill starts a build; brand-config and
     // persona writes start that backfill.
     deduplicationFunction.addEnvironment('SCOPE_SNAPSHOT_FUNCTION_NAME', generateSummaryFunction.functionName);
@@ -2745,15 +2762,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     selfReflectionTable.grantReadWriteData(selfReflectionFunction);
     selfReflectionFunction.addToRolePolicy(claudeInvokeModelStatement(this));
     allowSavedBedrockModels(selfReflectionFunction, providerConfigTable);
-    // POST /self-reflection runs its Bedrock job by invoking itself
-    // asynchronously. Named by ARN, not `grantInvoke(selfReflectionFunction)`,
-    // which would make the function's role policy depend on the function.
-    allow(selfReflectionFunction, ['lambda:InvokeFunction'], [cdk.Stack.of(this).formatArn({
-      service: 'lambda',
-      resource: 'function',
-      resourceName: 'CitationAnalysis-API-SelfReflection',
-      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
-    })]);
+    // POST /self-reflection runs its Bedrock job by invoking itself asynchronously.
+    allow(selfReflectionFunction, ['lambda:InvokeFunction'], [namedFunctionArn(this, 'CitationAnalysis-API-SelfReflection')]);
 
     brandConfigTable.grantReadWriteData(manageBrandConfigFunction);
     
@@ -2870,12 +2880,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Reconciliation re-dispatches recovered rows to the worker itself. The
     // API never invokes a Lambda: generation starts from the table stream.
-    const contentStudioWorkerFunctionArn = cdk.Stack.of(this).formatArn({
-      service: 'lambda',
-      resource: 'function',
-      resourceName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
-      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
-    });
+    const contentStudioWorkerFunctionArn = namedFunctionArn(this, CONTENT_STUDIO_WORKER_FUNCTION_NAME);
     allow(contentStudioWorkerFunction, ['lambda:InvokeFunction'], [contentStudioWorkerFunctionArn]);
 
     const contentStudioStreamDlq = new sqs.Queue(this, 'ContentStudioStreamDlq', {

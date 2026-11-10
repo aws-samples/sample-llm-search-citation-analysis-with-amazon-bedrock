@@ -15,6 +15,7 @@ from functools import partial, wraps
 from typing import Any, NamedTuple
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # Add shared module to path
@@ -71,9 +72,6 @@ from shared.web_search_gateway import (
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-secrets_client = boto3.client('secretsmanager')
-dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 PROVIDER_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_PROVIDER_CONFIG')
@@ -202,6 +200,12 @@ PROVIDERS = {
         'type': PROVIDER_TYPE_SEO
     },
 }
+
+# GET /providers reads every provider's secret and row at once, one worker per
+# provider: botocore's default pool of 10 connections would discard the rest.
+_CLIENT_CONFIG = Config(max_pool_connections=len(PROVIDERS))
+secrets_client = boto3.client('secretsmanager', config=_CLIENT_CONFIG)
+dynamodb = boto3.resource('dynamodb', config=_CLIENT_CONFIG)
 
 #: The optional fields of a ``PROVIDERS`` entry ``GET /providers`` passes through as they are.
 _PASSTHROUGH_FIELDS = ('credential_from', 'credential_fields')
