@@ -41,12 +41,6 @@ process.
   are now one warning line, as navigation failures already were; a long page's truncation is `INFO`
   (`shared/browser_tools.py`, `crawler/handler.py`).
 
-### Upgrade notes
-
-- Deployments upgraded from before 2.43.0 keep their domain-snapshot keywords and Lighthouse reports
-  in the raw-responses bucket, where the SEO stack no longer reads. Copy them once:
-  `aws s3 cp s3://citation-analysis-raw-responses-<account>/seo/ s3://citation-analysis-seo-<account>/seo/ --recursive`.
-
 ## [2.54.1] - 2026-11-09
 
 ### Fixed
