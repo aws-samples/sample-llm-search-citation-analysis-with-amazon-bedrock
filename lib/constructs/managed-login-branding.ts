@@ -30,9 +30,17 @@ import { Construct } from 'constructs';
  *      true` to read that document back in full.
  *   3. Patch the handful of colour / radius / logo keys this app cares
  *      about and `UpdateManagedLoginBranding` with the merged result.
- * `Update`/`Delete` on the custom resource re-run steps 2–3 (or do nothing,
- * for Delete — the style is deleted with the app client it belongs to).
+ * `Update` re-runs all three steps, so a client whose style went missing
+ * gets one again (step 1 is a no-op when the style exists); `Delete` does
+ * nothing, since the style is deleted with the app client it belongs to.
  */
+
+/**
+ * Bump to make CloudFormation send the custom resource an Update, so every
+ * existing deployment re-runs the handler once. 2: recreate the style that
+ * 2.37.x upgrades deleted.
+ */
+const HANDLER_REVISION = '2';
 
 const HEADER_HEX = '#111827'; // gray-900: sidebar, header, primary buttons, dashboard login screen
 const SURFACE_HEX = '#ffffff'; // white: light-mode form background
@@ -178,19 +186,24 @@ def handler(event, context):
         # up here that would outlive the client.
         return {'PhysicalResourceId': physical_id}
 
-    if request_type == 'Create':
-        try:
-            cognito.create_managed_login_branding(
-                UserPoolId=user_pool_id,
-                ClientId=client_id,
-                UseCognitoProvidedValues=True,
-            )
-            logger.info('Created default managed-login branding for client %s', client_id)
-        except cognito.exceptions.ManagedLoginBrandingExistsException as error:
-            # A style already exists for this client (set up in the console,
-            # or a re-run after a partial failure); fall through to the
-            # describe/patch below, which themes whatever is there.
-            logger.info('Default branding already exists for %s: %s', client_id, error)
+    # Create the default style on Update too, not only on Create: a client
+    # can lose its style while this resource stays in place. Deployments
+    # upgraded through 2.37.x did: this resource adopted the style of the
+    # native AWS::Cognito::ManagedLoginBranding it replaced, then
+    # CloudFormation's cleanup deleted that resource and the style with it,
+    # leaving every MCP sign-in on "Login pages unavailable".
+    try:
+        cognito.create_managed_login_branding(
+            UserPoolId=user_pool_id,
+            ClientId=client_id,
+            UseCognitoProvidedValues=True,
+        )
+        logger.info('Created default managed-login branding for client %s', client_id)
+    except cognito.exceptions.ManagedLoginBrandingExistsException as error:
+        # A style already exists for this client (the usual Update, one set
+        # up in the console, or a re-run after a partial failure); fall
+        # through to the describe/patch below, which themes whatever is there.
+        logger.info('Default branding already exists for %s: %s', client_id, error)
 
     described = cognito.describe_managed_login_branding_by_client(
         UserPoolId=user_pool_id,
@@ -292,6 +305,7 @@ export class ManagedLoginBranding extends Construct {
         theme: JSON.stringify(theme),
         logoLightBase64,
         logoDarkBase64,
+        handlerRevision: HANDLER_REVISION,
       },
     });
     resource.node.addDependency(props.domainDependency);

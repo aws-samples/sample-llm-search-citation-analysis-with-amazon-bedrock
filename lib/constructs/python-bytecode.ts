@@ -123,7 +123,7 @@ function uvPython312(): string | undefined {
 const python312: { found?: string | null } = {};
 
 /** A CPython 3.12 on this machine: `$PYTHON312`, `python3.12` on PATH, or uv's. Null when there is none. */
-function findPython312(): string | null {
+export function findPython312(): string | null {
   if (python312.found !== undefined) return python312.found;
   const candidates = [process.env.PYTHON312, onPath('python3.12'), uvPython312()];
   python312.found = candidates.find((candidate): candidate is string => (
