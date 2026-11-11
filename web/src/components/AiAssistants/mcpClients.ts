@@ -174,7 +174,7 @@ const quickGuide = (config: McpConfig): ClientGuide => ({
   callback: callback(['https://<region>.quicksight.aws.amazon.com/sn/oauthcallback'], false),
   notes: [
     'Not verified yet: no Amazon Quick connection has been proven end to end.',
-    'The form has no scope field: Quick is expected to read the scopes from the server\'s protected resource metadata.',
+    'The form has no scope field: when no scope is sent, Cognito grants every scope the MCP client allows.',
     'Read tools are marked read-only, so Quick\'s scheduled agents can run them unattended.',
     'Amazon Quick Desktop is not verified yet. If it offers the same OAuth form, use the same values; if it accepts only a static header, it cannot connect.',
   ],

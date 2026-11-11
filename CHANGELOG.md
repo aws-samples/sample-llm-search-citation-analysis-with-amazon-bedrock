@@ -19,7 +19,16 @@ process.
   says Quick is not verified yet (`web/src/components/AiAssistants/mcpClients.ts`). The Other / Codex guide keeps its
   Scopes value.
 - `docs/mcp.md`, Amazon Quick (web): the same wizard steps, marked not verified yet. The scopes the server publishes in
-  `scopes_supported` are `<McpUrl>/read`, `/write` and `/run` (without `openid`, as the Scopes table already said).
+  `scopes_supported` are `<McpUrl>/read`, `/write` and `/run` (without `openid`, as the Scopes table already said). A
+  sign-in that sends no `scope` gets every scope the `mcp` client allows (tested live), so Quick's missing scope field
+  does not block it; the docs had said Cognito refuses such a code with `invalid_grant`.
+- **MCP sign-in showed "Login pages unavailable" on deployments upgraded through 2.37.x.** The managed-login branding
+  custom resource had adopted the style of the native `AWS::Cognito::ManagedLoginBranding` it replaced, and
+  CloudFormation's cleanup then deleted that resource and the style with it. Its Update step only described the
+  style, so no later deploy brought it back. The handler now creates the style on Update as well when it is missing,
+  and a new `handlerRevision` property makes every existing deployment run that Update once
+  (`lib/constructs/managed-login-branding.ts`). Fresh installs were not affected. Clients holding a refresh token kept
+  working; any new MCP sign-in (Kiro, Claude Code, Quick) failed.
 
 ## [2.54.2] - 2026-11-09
 
