@@ -1,11 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { allowStatementsOfRole, findFunctionRoleLogicalId, resolvePath, statementActions } from './citation-analysis-stack-fixtures';
 import { CitationAnalysisEventsStack, OWN_CHANNEL_ONLY_HANDLER } from './events-stack';
+import { removeScratchTree, writeScratchTree } from './scratch-tree-fixtures';
 
 /** The events stack on its own, environment-agnostic like the other stack specs. */
 export function synthesizeEventsTemplate(): Template {
@@ -40,18 +39,17 @@ export function subscribeContext(channel: string, sub: string | null): unknown {
  * The directory is removed once the module is loaded.
  */
 export async function importOwnChannelHandler(): Promise<{ onSubscribe: (ctx: unknown) => void }> {
-  const dir = mkdtempSync(join(tmpdir(), 'appsync-js-'));
-  const utils = join(dir, 'node_modules', '@aws-appsync', 'utils');
-  mkdirSync(utils, { recursive: true });
-  writeFileSync(join(utils, 'package.json'), JSON.stringify({ name: '@aws-appsync/utils', type: 'module', main: 'index.js' }));
-  writeFileSync(join(utils, 'index.js'), "export const util = { unauthorized() { throw new Error('Unauthorized'); } };\n");
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
+  const dir = writeScratchTree('appsync-js-', {
+    'node_modules/@aws-appsync/utils/package.json': JSON.stringify({ name: '@aws-appsync/utils', type: 'module', main: 'index.js' }),
+    'node_modules/@aws-appsync/utils/index.js': "export const util = { unauthorized() { throw new Error('Unauthorized'); } };\n",
+    'package.json': JSON.stringify({ type: 'module' }),
+    'own-channel-only.js': OWN_CHANNEL_ONLY_HANDLER,
+  });
   const file = join(dir, 'own-channel-only.js');
-  writeFileSync(file, OWN_CHANNEL_ONLY_HANDLER);
   try {
     return await (import(pathToFileURL(file).href) as Promise<{ onSubscribe: (ctx: unknown) => void }>);
   } finally {
     // The imported modules stay loaded; the files are only needed for the import.
-    rmSync(dir, { recursive: true, force: true });
+    removeScratchTree(dir);
   }
 }

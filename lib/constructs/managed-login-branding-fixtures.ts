@@ -1,12 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { App, Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { Construct } from 'constructs';
 
 import { resolvePath } from '../citation-analysis-stack-fixtures';
+import { removeScratchTree, writeScratchTree } from '../scratch-tree-fixtures';
 import { ManagedLoginBranding } from './managed-login-branding';
 import { extractBrandingHandlerCode } from './mcp-server-fixtures';
 import { findPython312 } from './python-bytecode';
@@ -97,16 +95,13 @@ export interface HandlerRun {
 export function runBrandingHandler(template: Template, requestType: string, styleExists: boolean): HandlerRun {
   const python = findPython312();
   if (python === null) return { calls: [], outcome: 'CPython 3.12 not found (PYTHON312, python3.12, uv)' };
-  const dir = mkdtempSync(join(tmpdir(), 'branding-handler-'));
-  const files: Record<string, string> = {
+  const dir = writeScratchTree('branding-handler-', {
     'botocore/__init__.py': '',
     'botocore/exceptions.py': FAKE_BOTOCORE_EXCEPTIONS,
     'boto3.py': FAKE_BOTO3,
     'index.py': extractBrandingHandlerCode(template),
     'driver.py': DRIVER,
-  };
-  mkdirSync(join(dir, 'botocore'));
-  Object.entries(files).forEach(([name, text]) => writeFileSync(join(dir, name), text));
+  });
   const event = { RequestType: requestType, ResourceProperties: extractResourceProperties(template) };
   const result = spawnSync(python, ['driver.py'], {
     cwd: dir,
@@ -114,6 +109,6 @@ export function runBrandingHandler(template: Template, requestType: string, styl
     encoding: 'utf8',
     env: { ...process.env, STYLE_EXISTS: styleExists ? '1' : '0', PYTHONDONTWRITEBYTECODE: '1' },
   });
-  rmSync(dir, { recursive: true, force: true });
+  removeScratchTree(dir);
   return JSON.parse(result.stdout || `{"calls":[],"outcome":${JSON.stringify(result.stderr)}}`) as HandlerRun;
 }
