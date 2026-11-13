@@ -15,6 +15,7 @@ import pytest
 
 from shared.export_source_lists import ALERTS, CONFIG_LISTS, KEYWORD_RESEARCH
 from shared.export_source_routes import ExportSourceError, RouteRequest, RouteSource
+from shared.research_jobs import JOB_TYPES, TYPE_AGENT, build_job_item, checkpoint_terminal_result, public_view
 from testing.export_source_fixtures import (
     ADMIN,
     USER,
@@ -108,6 +109,19 @@ def test_a_job_exports_the_lists_of_its_type_when_the_route_leaves_the_others_ou
     rows = row_values(all_rows(_over(KEYWORD_RESEARCH, Routes({'/api/keyword-research/job-1': job})), {'id': 'job-1'}))
 
     assert [sheet for sheet, _values in rows] == sheets
+
+
+@pytest.mark.parametrize('job_type', JOB_TYPES)
+def test_a_finished_job_of_every_type_exports_as_the_detail_route_answers_it(job_type):
+    # The route's own shaping (`public_view` of a job ended by `checkpoint_terminal_result`), so the
+    # export is checked against what GET /api/keyword-research/{id} answers, not a hand-made job.
+    row = build_job_item('job-1', job_type, {'rounds': []} if job_type == TYPE_AGENT else {})
+    status, fields = checkpoint_terminal_result(row)
+    detail = public_view({**row, **fields, 'status': status})
+
+    rows = all_rows(_over(KEYWORD_RESEARCH, Routes({'/api/keyword-research/job-1': detail})), {'id': 'job-1'})
+
+    assert rows == []
 
 
 def test_without_an_id_the_export_is_every_job_of_the_history_of_that_type():

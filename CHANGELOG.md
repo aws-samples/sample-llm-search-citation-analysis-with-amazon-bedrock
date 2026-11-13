@@ -9,6 +9,18 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.5] - 2026-11-13
+
+### Added
+
+- **`npm run e2e:exports`** (`scripts/e2e_exports.py`, also run by `npm run e2e`): exports the newest Research Agent,
+  keyword expansion and competitor analysis job of a deployed stack through the real export service, checks that each
+  export ends `ready`, downloads the file and checks it is a workbook of the reported size, then deletes the export.
+  Free: it reads stored data only. It would have caught the 2.54.4 bug, where every such export failed.
+- `test_export_source_lists.py` exports a finished job of every type as the detail route itself shapes it
+  (`public_view` of a job ended by `checkpoint_terminal_result`), so the export tests can no longer drift from what
+  `GET /api/keyword-research/{id}` answers.
+
 ## [2.54.4] - 2026-11-13
 
 ### Fixed
