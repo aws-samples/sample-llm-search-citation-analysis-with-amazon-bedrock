@@ -56,9 +56,12 @@ def _round_queries(round_entry: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 
 
 def _job_list(sheet: str, column_names: tuple[Column, ...], items: str, **options: Any) -> RouteList:
+    # A job answers only the lists of its type: an agent's keywords and rounds,
+    # an expansion's keywords, a competitor analysis' analysis. The others are
+    # absent, which reads as an empty sheet, not a failed export.
     return RouteList(
         sheet, column_names, _RESEARCH_ROUTER, _JOB_PATH, items, SINGLE,
-        path_param='id', partial_flags=(), forwards=(), only_with='id', **options,
+        path_param='id', partial_flags=(), forwards=(), only_with='id', optional=True, **options,
     )
 
 
