@@ -9,6 +9,17 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.4] - 2026-11-13
+
+### Fixed
+
+- **Exporting one keyword research job always failed with `ExportSourceError`** ("`/api/keyword-research/{id}`
+  answered without its list analysis"). The export reads three sheets from the job (Keywords, Competitor keywords,
+  Agent queries), but a job answers only the lists of its type: a Research Agent job has keywords and rounds, an
+  expansion only keywords, a competitor analysis only its analysis. The missing list failed the whole export, for
+  every job type, since the export service shipped (2.45.0). A list the job does not have is now an empty sheet
+  (`shared/export_source_lists.py`); the tests use the per-type shapes the route really answers.
+
 ## [2.54.3] - 2026-11-11
 
 ### Fixed

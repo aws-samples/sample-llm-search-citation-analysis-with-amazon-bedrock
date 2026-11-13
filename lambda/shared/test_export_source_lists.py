@@ -93,6 +93,23 @@ def test_agent_queries_carry_their_round_strategy_and_decision():
     assert rows == [(1, 'broad', 'q1', 'continue'), (2, 'narrow', 'q2', None), (2, 'narrow', 'q3', None)]
 
 
+# The detail route answers only the lists of the job's type (shapes read from a deployed router, 2026-11-10).
+_AGENT_JOB = {'id': 'job-1', 'type': 'agent', 'keywords': _JOB['keywords'], 'rounds': _JOB['rounds']}
+_EXPANSION_JOB = {'id': 'job-1', 'type': 'expansion', 'keywords': _JOB['keywords']}
+_COMPETITOR_JOB = {'id': 'job-1', 'type': 'competitor', 'analysis': _JOB['analysis']}
+
+
+@pytest.mark.parametrize(('job', 'sheets'), [
+    (_AGENT_JOB, ['Keywords'] * 3 + ['Agent queries'] * 3),
+    (_EXPANSION_JOB, ['Keywords'] * 3),
+    (_COMPETITOR_JOB, ['Competitor keywords'] * 3),
+], ids=['agent', 'expansion', 'competitor'])
+def test_a_job_exports_the_lists_of_its_type_when_the_route_leaves_the_others_out(job, sheets):
+    rows = row_values(all_rows(_over(KEYWORD_RESEARCH, Routes({'/api/keyword-research/job-1': job})), {'id': 'job-1'}))
+
+    assert [sheet for sheet, _values in rows] == sheets
+
+
 def test_without_an_id_the_export_is_every_job_of_the_history_of_that_type():
     route = PagedRoute([{'id': f'job-{index:03}', 'type': 'agent'} for index in range(250)])
     rows = all_rows(_over(KEYWORD_RESEARCH, route), {'type': 'agent'})
