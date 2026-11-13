@@ -13,13 +13,15 @@ process.
 
 ### Added
 
-- **`npm run e2e:exports`** (`scripts/e2e_exports.py`, also run by `npm run e2e`): exports the newest Research Agent,
-  keyword expansion and competitor analysis job of a deployed stack through the real export service, checks that each
-  export ends `ready`, downloads the file and checks it is a workbook of the reported size, then deletes the export.
-  Free: it reads stored data only. It would have caught the 2.54.4 bug, where every such export failed.
-- `test_export_source_lists.py` exports a finished job of every type as the detail route itself shapes it
-  (`public_view` of a job ended by `checkpoint_terminal_result`), so the export tests can no longer drift from what
-  `GET /api/keyword-research/{id}` answers.
+- **`npm run e2e:exports`** (`scripts/e2e_exports.py`, also run by `npm run e2e`): for each research type (Research
+  Agent, keyword expansion, competitor analysis), exports the newest job of a deployed stack that finished
+  (`completed` or `partial`) with keywords. It goes through the real export service and checks that each export ends
+  `ready` with rows. Then it downloads the file, checks it is a workbook of the reported size, and deletes the export.
+  A type with no such job is skipped and reported. Free: it reads stored data only. It would have caught the 2.54.4
+  bug, where every such export failed.
+- `test_export_source_lists.py` exports a finished job of every type, with one completed step of results, as the
+  detail route itself shapes it (`public_view` of a job ended by `checkpoint_terminal_result`), and checks its sheets
+  and row counts. The export tests can no longer drift from what `GET /api/keyword-research/{id}` answers.
 
 ## [2.54.4] - 2026-11-13
 

@@ -5,15 +5,15 @@ data already stored, so no AI engine, search provider or DataForSEO is called.
 
 Against the real ``CitationAnalysis-API-Exports`` Lambda and ``CitationAnalysis-Export`` state machine, as an Admin:
 
-1. Keyword research, one job of each type (Research Agent, keyword expansion, competitor analysis), the newest of
-   ``GET /api/keyword-research/history``: ``POST /api/exports`` with the job id must answer 202 and the export must
-   end ``ready``. Each type's detail route answers only the lists of its type, which failed every such export with
+1. Keyword research, one job of each type (Research Agent, keyword expansion, competitor analysis): the newest of
+   ``GET /api/keyword-research/history`` that finished (``completed`` or ``partial``) with keywords.
+   ``POST /api/exports`` with the job id must answer 202, and the export must end ``ready`` with rows. Each type's detail route answers only the lists of its type, which failed every such export with
    ``ExportSourceError`` until 2.54.4 (``answered without its list analysis``).
 2. The ready file downloads through its presigned URL and is a workbook (XLSX is a zip: it starts with ``PK``) of
    the size the export reports.
 3. Each export is deleted again (``DELETE /api/exports/{id}``), also when a step fails.
 
-A type with no job yet is skipped and reported. It runs against a deployed stack with AWS credentials that may
+A type with no finished job yet is skipped and reported. It runs against a deployed stack with AWS credentials that may
 invoke its API Lambdas, so `npm run validate` leaves it out.
 
 Usage: ``.venv/bin/python scripts/e2e_exports.py [--region us-west-2] [--timeout 300]``
@@ -25,6 +25,7 @@ import argparse
 import http.client
 import sys
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 from e2e_live import E2EFailureError, LiveApi, api_event, expect, require
@@ -35,14 +36,21 @@ JOB_TYPES = ('agent', 'expansion', 'competitor')
 EXPORT_RESOURCE = '/api/exports/{id}'
 POLL_SECONDS = 5
 FINISHED = ('ready', 'failed', 'cancelled')
+#: A job of these statuses has results; ``failed`` jobs and running ones are passed over.
+RESULT_STATUSES = ('completed', 'partial')
+#: How far back the history is searched for a finished job of each type.
+HISTORY_LIMIT = 20
 
 
-def newest_job(api: LiveApi, job_type: str) -> str | None:
-    """The id of the newest research job of ``job_type``, or ``None`` before the first."""
-    query = {'type': job_type, 'limit': '1'}
+def newest_job(api: LiveApi, job_type: str) -> dict[str, Any] | None:
+    """The newest research job of ``job_type`` that finished with results, or ``None`` when there is none yet.
+
+    A running job, or one that failed with no keywords, would export an incomplete or empty file and check no data.
+    """
+    query = {'type': job_type, 'limit': str(HISTORY_LIMIT)}
     status, body = api.call(RESEARCH, api_event('GET', '/api/keyword-research/history', query=query))
     items = expect(f'keyword research history of {job_type} jobs', status, body, 200).get('items') or []
-    return items[0]['id'] if items else None
+    return next((item for item in items if item.get('status') in RESULT_STATUSES and int(item.get('keyword_count') or 0) > 0), None)
 
 
 def start_export(api: LiveApi, job_type: str, job_id: str) -> str:
@@ -105,16 +113,20 @@ def delete_export(api: LiveApi, export_id: str) -> None:
 
 
 def run(api: LiveApi, timeout: float) -> list[str]:
-    """Export one job of every type; the types that have no job yet."""
+    """Export one finished job of every type; the types that have none yet."""
     skipped: list[str] = []
     for job_type in JOB_TYPES:
-        job_id = newest_job(api, job_type)
-        if job_id is None:
+        job = newest_job(api, job_type)
+        if job is None:
             skipped.append(job_type)
             continue
-        export_id = start_export(api, job_type, job_id)
+        print(f'..   {job_type} job {job["id"]}: {job.get("status")}, {job.get("keyword_count")} keywords')
+        export_id = start_export(api, job_type, str(job['id']))
         try:
-            check_file(job_type, wait_for(api, job_type, export_id, timeout))
+            export = wait_for(api, job_type, export_id, timeout)
+            rows = export.get('rows')
+            require(f'the {job_type} export holds rows', isinstance(rows, int) and rows > 0, export)
+            check_file(job_type, export)
         finally:
             delete_export(api, export_id)
     return skipped
