@@ -194,7 +194,7 @@ class ScopeSeries:
         self.owned: str = str(doc.get('owned', '')) if usable and doc else owned
         """The owned-domains fingerprint the rows' citation counts were built with (``shared.kpi_tally.owned_fingerprint``)."""
         self.always: frozenset[str] = frozenset()
-        """Brand names (lower case) a row never drops: the tracked brands."""
+        """Brand keys (``normalize_brand_key``) a row never drops: the tracked brands."""
         self._index = {keyword: position for position, keyword in enumerate(self.members)}
 
     def index_of(self, keyword: str) -> int:
