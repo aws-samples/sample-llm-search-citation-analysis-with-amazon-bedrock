@@ -139,6 +139,18 @@ class TestHotelProperties:
     def test_industry_words_never_join_two_businesses(self, index: BrandIndex, name: str) -> None:
         assert index.canonical(name) is None
 
+    @pytest.mark.parametrize(('index', 'name', 'classification'), [
+        pytest.param(AIRLINE_INDEX, 'Altiplano Hotels', 'other', id='a-hotel-keeps-its-classification-under-an-airline'),
+        pytest.param(HOTEL_INDEX, 'Costamar Airlines', 'other', id='an-airline-keeps-its-classification-under-a-chain'),
+        pytest.param(HOTEL_INDEX, 'Costamar Airport Hotel', 'first_party', id='a-property-naming-its-industry-is-the-chains'),
+    ])
+    def test_a_business_of_another_industry_is_not_owned_by_the_tracked_brand(self, index, name, classification) -> None:
+        brands = [{'name': name, 'classification': 'other'}]
+
+        canonicalize_brands(brands, index)
+
+        assert brands[0]['classification'] == classification
+
     def test_aliases_on_both_sides_name_nothing(self) -> None:
         index = BrandIndex(['Lumen Hotels'], ['Lumen Group'])
 

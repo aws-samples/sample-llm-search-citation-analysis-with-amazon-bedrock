@@ -146,10 +146,21 @@ class BrandIndex:
         """
         core, family = _company_core(key)
         same = [(brand, _company_core(brand_key)[1]) for brand_key, brand in self._brands.items() if _company_core(brand_key)[0] == core]
-        if family is None:
-            return [brand for brand, _family in same]
-        named = {other for _brand, other in same if other is not None}
-        return [brand for brand, other in same if other == family or (other is None and named <= {family})]
+        return [brand for brand, other in same if self._same_industry(family, other, core)]
+
+    def _same_industry(self, family: str | None, other: str | None, core: str) -> bool:
+        """Whether a name of industry ``family`` can be a tracked name of industry ``other`` whose core is ``core``.
+
+        Yes when the name names no industry, when both name the same one, or
+        when the tracked name names none and no other tracked name of that core
+        names a different one (the "altiplano" alias of "Altiplano Air" is an airline).
+        """
+        if family is None or other == family:
+            return True
+        if other is not None:
+            return False
+        named = {_company_core(brand_key)[1] for brand_key in self._brands if _company_core(brand_key)[0] == core}
+        return named - {None} <= {family}
 
     def owner(self, name: str) -> tuple[str, str] | None:
         """``(configured spelling, classification)`` of the one tracked brand whose name ``name`` starts with, or ``None``.
@@ -158,12 +169,19 @@ class BrandIndex:
         ("Example Hotels Old Town", "Brisa Plaza" with "Brisa"
         tracked) belongs to that brand but is a separate entity: it keeps its
         own name and takes the brand's classification. Of nested tracked names
-        ("Sky" and "Sky Andes" for "Sky Andes Express") the longest owns it.
+        ("Sky" and "Sky Andes" for "Sky Andes Express") the longest owns it. A
+        name of another industry is not the brand's ("Costamar Airlines" is no
+        hotel of "Costamar").
         """
         key = normalize_brand_key(name)
         if not key:
             return None
-        longer = [(brand_key, brand) for brand_key, brand in self._brands.items() if _is_word_prefix(brand_key, key)]
+        family = _company_core(key)[1]
+        longer = []
+        for brand_key, brand in self._brands.items():
+            brand_core, brand_family = _company_core(brand_key)
+            if _is_word_prefix(brand_key, key) and self._same_industry(family, brand_family, brand_core):
+                longer.append((brand_key, brand))
         return max(longer, key=lambda fit: len(fit[0]))[1] if longer else None
 
 
