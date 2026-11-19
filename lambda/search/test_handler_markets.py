@@ -25,7 +25,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from shared.brand_names import BRANDS_VERSION
 from testing.handler_fixtures import handler_fixture
 from testing.provider_response_fixtures import (
     CHILE_MARKET_JSON,
@@ -435,15 +434,14 @@ class TestBrandedRows:
         row = _stored_rows(storage)[0]
         assert (row['branded'], row['branded_version']) == (True, 1)
 
-    def test_records_the_citation_rule_each_answer_row_was_stored_under(self, storage):
+    @pytest.mark.parametrize(('field', 'version'), [
+        pytest.param('citations_version', 2, id='citation-rule'),
+        pytest.param('brands_version', 2, id='brand-name-rule'),
+    ])
+    def test_records_the_rules_each_answer_row_was_stored_under(self, storage, field, version):
         storage.store(_llm_result())
 
-        assert _stored_rows(storage)[0]['citations_version'] == 2
-
-    def test_records_the_brand_name_rule_each_answer_row_was_stored_under(self, storage):
-        storage.store(_llm_result())
-
-        assert _stored_rows(storage)[0]['brands_version'] == BRANDS_VERSION
+        assert _stored_rows(storage)[0][field] == version
 
     def test_marks_an_answer_to_a_query_naming_no_tracked_brand_neutral(self, storage):
         storage.store({**_llm_result(), 'query': 'best airline from Santiago'})
