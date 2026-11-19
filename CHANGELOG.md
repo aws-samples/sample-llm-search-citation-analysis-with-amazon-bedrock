@@ -9,6 +9,28 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.6] - 2026-11-19
+
+### Fixed
+
+- **Every hotel of a chain was counted as the chain** (and every store or branch of any tracked brand). Since 2.38.1
+  an extracted name was renamed to a tracked brand whenever the tracked name was its first word(s): with "Example
+  Hotels" tracked, "Example Hotels Old Town", "Example Hotels Harbour" and "Example Hotels Airport" were all stored as
+  "Example Hotels", so the leaderboard showed one row for three hotels and per-property visibility was lost. A name is now
+  renamed only when it is another spelling of a tracked brand: the same name, the same name without its trailing
+  company words ("S.A.", "Hotels", "Airlines", `shared/brand_names.py`), or the first word(s) of exactly one tracked
+  brand ("Sky" for "Sky Airline"). A name that only starts with a tracked brand keeps its own name, takes that
+  brand's classification and names it as its `parent_company` (`BrandIndex.owner`), so each property has its own row
+  and still counts for the brand. Tracked names that are aliases of one brand ("Example", "Example Hotels")
+  resolve to the first configured one. The extraction prompt also asks for each location as its own entry: the
+  2.38.1 rule that folds loyalty programmes and fare products into their company read as "fold hotels into the
+  chain" too.
+
+### Upgrade notes
+
+- Runs stored since 2.38.1 keep the chain name for their properties; the next run of a keyword stores them by
+  property. Re-extracting stored answers is planned as a dashboard action.
+
 ## [2.54.5] - 2026-11-13
 
 ### Added

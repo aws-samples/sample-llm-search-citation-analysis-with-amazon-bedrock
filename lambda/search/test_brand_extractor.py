@@ -163,6 +163,16 @@ class TestExtractionPrompt:
         ) in prompt
         assert 'inherit the parent classification' not in prompt
 
+    def test_tells_the_model_that_each_location_of_a_chain_is_its_own_entry(self) -> None:
+        extractor = extractor_with(tracked_brands=tracking(['Costamar'], ['Brisa Hoteles']))
+
+        prompt = extractor._build_extraction_prompt(TEXT)
+
+        assert (
+            '   - Individual locations are separate entries: a hotel, restaurant, store or branch of a chain keeps its '
+            'own name as the text gives it'
+        ) in prompt
+
     def test_asks_for_the_tracked_spelling_of_a_tracked_brands_name(self) -> None:
         prompt = brand_extractor.LLMBrandExtractor()._build_extraction_prompt(TEXT)
 

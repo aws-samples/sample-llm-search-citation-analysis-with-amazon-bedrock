@@ -33,7 +33,7 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 
 **Cell.** One (keyword, persona, AI engine, market) combination. Comparisons between runs match answers cell by cell (see [Changes and trends](#changes-and-trends)).
 
-**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively.
+**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively. A hotel, store or branch named after a tracked brand ("<chain> <city centre>") is a brand of its own, listed by its own name and classified like the brand it belongs to, so a chain's properties are counted for the brand and still shown one by one.
 
 **Sighting.** One brand named in one answer. A brand named several times in the same answer is still one sighting, at its best position (and with the sentiment of that sighting). Otherwise a long answer that repeats a name would outweigh a short one.
 

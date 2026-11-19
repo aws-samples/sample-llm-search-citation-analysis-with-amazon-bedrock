@@ -62,7 +62,7 @@ class TestBrandIndexCanonical:
         pytest.param('Condor', ('Condor Sur', 'competitor'), id='condor-is-condor-sur'),
         pytest.param('Altiplano Air', ('Altiplano Air', 'first_party'), id='first-party'),
         pytest.param('ALTIPLANO', ('altiplano', 'first_party'), id='lower-case-first-party-alias'),
-        pytest.param('Altiplano Airlines', ('altiplano', 'first_party'), id='alias-is-the-first-word'),
+        pytest.param('Altiplano Airlines', ('Altiplano Air', 'first_party'), id='company-word-variant-is-the-first-configured-alias'),
         pytest.param('Skyline', None, id='not-a-whole-word'),
         pytest.param('JetPuma', None, id='unknown'),
         pytest.param('', None, id='empty'),
@@ -83,6 +83,57 @@ class TestBrandIndexCanonical:
 
     def test_strips_the_configured_spelling_it_returns(self) -> None:
         assert BrandIndex([], [' Sky Airline ']).canonical('sky airline') == SKY_AIRLINE
+
+
+#: A hotel chain's configuration: the chain under three aliases, one property tracked by name, one competitor chain.
+HOTEL_INDEX = BrandIndex(
+    ['Costamar', 'Costamar Hotels', 'Costamar Hotel Company', 'Costamar Torre Norte'], ['Brisa Hoteles'],
+)
+COSTAMAR = ('Costamar', 'first_party')
+
+
+class TestHotelProperties:
+    @pytest.mark.parametrize(('name', 'expected'), [
+        pytest.param('Costamar', COSTAMAR, id='the-chain'),
+        pytest.param('COSTAMAR HOTELS', ('Costamar Hotels', 'first_party'), id='a-configured-alias'),
+        pytest.param('Costamar Hotels S.A.', COSTAMAR, id='an-alias-with-a-legal-form-is-the-first-alias'),
+        pytest.param('Costamar Torre Norte Hotel', ('Costamar Torre Norte', 'first_party'), id='a-tracked-property'),
+        pytest.param('Brisa', ('Brisa Hoteles', 'competitor'), id='the-competitor-by-its-first-word'),
+        pytest.param('Costamar Ciudad de Lugo', None, id='a-property-is-not-the-chain'),
+        pytest.param('Brisa Plaza Lugo', None, id='a-competitor-property-is-not-the-competitor'),
+    ])
+    def test_a_property_named_after_its_chain_is_not_another_spelling_of_the_chain(self, name, expected) -> None:
+        assert HOTEL_INDEX.canonical(name) == expected
+
+    @pytest.mark.parametrize(('name', 'owner'), [
+        pytest.param('Costamar Ciudad de Lugo', COSTAMAR, id='first-party-property'),
+        pytest.param('Costamar Torre Norte Suites', ('Costamar Torre Norte', 'first_party'), id='longest-tracked-name-owns-it'),
+        pytest.param('Brisa Hoteles Plaza', ('Brisa Hoteles', 'competitor'), id='competitor-property'),
+        pytest.param('Costamar', None, id='the-chain-owns-not-itself'),
+        pytest.param('Hotel Riazul', None, id='an-independent-hotel'),
+    ])
+    def test_names_the_tracked_brand_a_property_belongs_to(self, name, owner) -> None:
+        assert HOTEL_INDEX.owner(name) == owner
+
+    def test_every_property_of_the_chain_keeps_its_own_row_under_the_chain(self) -> None:
+        brands = [
+            {'name': 'Costamar Ciudad de Lugo', 'classification': 'other', 'parent_company': None},
+            {'name': 'Costamar Atlántico', 'classification': 'other', 'parent_company': 'Costamar Hotel Company'},
+            {'name': 'Costamar Hotels', 'classification': 'other'},
+        ]
+
+        canonicalize_brands(brands, HOTEL_INDEX)
+
+        assert [(brand['name'], brand['classification'], brand.get('parent_company')) for brand in brands] == [
+            ('Costamar Ciudad de Lugo', 'first_party', 'Costamar'),
+            ('Costamar Atlántico', 'first_party', 'Costamar Hotel Company'),
+            ('Costamar Hotels', 'first_party', None),
+        ]
+
+    def test_aliases_on_both_sides_name_nothing(self) -> None:
+        index = BrandIndex(['Lumen Hotels'], ['Lumen Group'])
+
+        assert index.canonical('Lumen') is None
 
 
 class TestBrandIndexFromConfig:

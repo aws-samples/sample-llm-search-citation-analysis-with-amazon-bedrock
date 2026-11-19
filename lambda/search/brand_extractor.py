@@ -243,6 +243,7 @@ CRITICAL CLASSIFICATION RULES - USE INTELLIGENT MATCHING:
    - If a parent company is tracked, ALL its sub-brands and subsidiaries should be classified the same way
    - Use your knowledge of corporate ownership and brand portfolios in this industry
    - Report the company that is recommended, not its products: loyalty programmes (e.g. a frequent-flyer or rewards programme), cabin or fare products, and alliances are not separate brands — fold their mentions into the parent company's entry, unless that programme or product is itself listed among the tracked names above
+   - Individual locations are separate entries: a hotel, restaurant, store or branch of a chain keeps its own name as the text gives it (for example the chain's name followed by the property's), with the chain as its parent_company. Never fold one location into the chain or into another location
 3. Match by ownership knowledge:
    - Use your knowledge of which brands own which properties or subsidiaries
    - Individual property or product names may belong to larger groups
