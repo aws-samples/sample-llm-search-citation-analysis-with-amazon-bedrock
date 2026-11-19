@@ -326,8 +326,8 @@ class TestSnapshotMetrics:
         'hotel beach': answers_from_rows([_row('hotel beach', ('Rival', 'competitor', 2), ('Guide', 'other', 1))]),
     }
 
-    def test_measures_snapshots_with_cited_only_citations_and_like_for_like_cells(self) -> None:
-        assert KPI_VERSION == 4
+    def test_measures_snapshots_with_per_location_brands_cited_only_citations_and_like_for_like_cells(self) -> None:
+        assert KPI_VERSION == 5
 
     def test_records_the_kpi_version(self) -> None:
         assert snapshot_metrics(self.ANSWERS)['kpi_version'] == KPI_VERSION

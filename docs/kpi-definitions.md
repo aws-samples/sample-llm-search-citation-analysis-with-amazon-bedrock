@@ -242,7 +242,7 @@ These apply the same formulas to a slice of the scope's answers:
   | Lost keyword mention | a keyword was mentioned in the previous snapshot and is not now | — |
   | Improvement after a content change | the visibility score rose by at least the threshold after a content change recorded between the two snapshots | 5 points |
 
-  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`, 4 since 2.43); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
+  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`, 5 since 2.54.6); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
 
   **Like for like.** The rules do not compare the two snapshots' pooled values. They compare the neutral answers (queries that do not name the brand) of the [cells](#conventions) answered in both runs: the previous run's rows are read back for the group's current keywords, and a keyword, persona, engine or market present in only one run is left out, so enabling an engine or adding a persona never reads as a gain or a loss. Each snapshot stores its `comparison` with the previous one:
 

@@ -37,8 +37,9 @@ process.
 
 - For a chain whose properties are named after it, share of voice and positions shift from the first run after the
   upgrade: each property is now its own first-party (or competitor) brand, so an answer naming three of your hotels
-  and one competitor's counts three first-party mentions instead of one. KPI alerts compare consecutive runs and may
-  fire once on that run.
+  and one competitor's counts three first-party mentions instead of one. `KPI_VERSION` is 5, so the KPI snapshot of
+  that first run is not compared with the earlier ones: it sets a new baseline for every group and raises no alert
+  from the rule change.
 - Runs stored since 2.38.1 keep the chain name for their properties; the next run of a keyword stores them by
   property. Re-extracting stored answers is planned as a dashboard action.
 
