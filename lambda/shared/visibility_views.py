@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
+from shared.brand_names import normalize_brand_key
 from shared.kpi_engine import (
     COMPETITOR,
     FIRST_PARTY,
@@ -64,12 +65,16 @@ def _of_persona(answers: Iterable[Answer], persona: str | None) -> list[Answer]:
     return [answer for answer in answers if persona is None or answer.persona == persona]
 
 
-def _listed_brands(rows: list[dict[str, Any]], tracked_brands: Iterable[str]) -> list[dict[str, Any]]:
-    """The first ``BRANDS_LIMIT`` leaderboard rows, then the first-party and tracked brands ranked below them."""
-    tracked = {name.lower() for name in tracked_brands}
+def listed_leaderboard(rows: list[dict[str, Any]], tracked_brands: Iterable[str]) -> list[dict[str, Any]]:
+    """The first ``BRANDS_LIMIT`` leaderboard rows, then the first-party and tracked brands ranked below them.
+
+    Tracked brands match by brand key (``normalize_brand_key``). The live view and its snapshot
+    (``artifact_latest.listed_brands``) both list through here.
+    """
+    tracked = {normalize_brand_key(name) for name in tracked_brands}
     beyond = [
         row for row in rows[BRANDS_LIMIT:]
-        if row['classification'] == FIRST_PARTY or row['name'].lower() in tracked
+        if row['classification'] == FIRST_PARTY or normalize_brand_key(row['name']) in tracked
     ]
     return rows[:BRANDS_LIMIT] + beyond
 
@@ -135,7 +140,7 @@ def visibility_view(
         'keywords_with_data': sum(row['has_data'] for row in rows),
         'kpis': brand_kpis(pooled, domains),
         'change': _run_change(latest, previous, domains),
-        'brands': _listed_brands(brands, tracked_brands),
+        'brands': listed_leaderboard(brands, tracked_brands),
         'brands_total': len(brands),
         'engines': engine_breakdown(pooled, domains),
         'sources': sources[:SOURCES_LIMIT],
@@ -202,12 +207,12 @@ def _absent_brand(runs: list[RunTally]) -> dict[str, Any]:
 
 
 def _period_tables(series: Mapping[str, list[RunTally]]) -> tuple[list[dict[str, Any]], dict[str, dict[str, dict[str, Any]]]]:
-    """The window's leaderboard and each period's brand rows by lower-cased name."""
+    """The window's leaderboard and each period's brand rows by brand key (``normalize_brand_key``)."""
     pools = {key: BrandPool.of(runs) for key, runs in series.items()}
     window = BrandPool()
     for pool in pools.values():
         window.add_pool(pool)
-    return window.table(), {key: {row['name'].lower(): row for row in pool.table()} for key, pool in pools.items()}
+    return window.table(), {key: {normalize_brand_key(row['name']): row for row in pool.table()} for key, pool in pools.items()}
 
 
 def _brand_trends(
@@ -227,7 +232,7 @@ def _brand_trends(
         'competitors': [
             {
                 'name': name,
-                'points': [_brand_point(key, periods[key].get(name.lower()) or _absent_brand(series[key])) for key in series],
+                'points': [_brand_point(key, periods[key].get(normalize_brand_key(name)) or _absent_brand(series[key])) for key in series],
             }
             for name in leaders
         ],
@@ -241,7 +246,7 @@ def brand_series(tables: tuple[list[dict[str, Any]], dict[str, dict[str, dict[st
         {
             'name': row['name'],
             'classification': row['classification'],
-            'points': [_brand_point(key, table[row['name'].lower()]) for key, table in periods.items() if row['name'].lower() in table],
+            'points': [_brand_point(key, table[normalize_brand_key(row['name'])]) for key, table in periods.items() if normalize_brand_key(row['name']) in table],
         }
         for row in window
     ]

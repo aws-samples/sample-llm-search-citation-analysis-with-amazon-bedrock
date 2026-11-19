@@ -15,11 +15,16 @@ process.
 
 - **The Brands view listed one brand twice when answers spelled it with and without accents** ("Brisa Plaza Marítima"
   and "Brisa Plaza Maritima" as two rows). The KPI engine has compared brand names case-, accent- and
-  whitespace-insensitively since 2.38.1 (`normalize_brand_key`), but the Brands view, its snapshot partials, its
-  appearance pages and the Visibility leaderboard's tracked-brand check still matched on lower case only
-  (`shared/brand_mention_views.py`, `partial_mentions.py`, `artifact_mentions.py`, `artifact_latest.py`,
-  `api/get-brand-mentions.py`). They now use `normalize_brand_key` too: one row per brand, under the spelling of its
-  first mention, and asking for a brand without its accents finds it. KeywordLatest objects move to format 3, since
+  whitespace-insensitively since 2.38.1 (`normalize_brand_key`), but these still matched on lower case only:
+  - the Brands view, its snapshot partials and its appearance pages (`shared/brand_mention_views.py`,
+    `partial_mentions.py`, `artifact_mentions.py`, `api/get-brand-mentions.py`);
+  - the Visibility leaderboard's tracked-brand check, live and from a snapshot. Both now list through one function,
+    `visibility_views.listed_leaderboard`, so they cannot differ;
+  - the Visibility brand trends' lookup of each period's row (`visibility_views.py`);
+  - the tracked brands a stored scope series always keeps (`scope_series*.py`).
+
+  They now use `normalize_brand_key` too: one row per brand, under the spelling of its first mention, and asking for
+  a brand without its accents finds it. KeywordLatest objects move to format 3, since
   their `mentions` part is keyed by brand; a format-2 object reads as absent and is rebuilt from the answers.
 
 ### Upgrade notes

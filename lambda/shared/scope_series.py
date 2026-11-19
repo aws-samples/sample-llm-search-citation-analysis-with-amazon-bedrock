@@ -29,6 +29,7 @@ from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from shared.brand_names import normalize_brand_key
 from shared.kpi_engine import SPLIT_LABELS
 from shared.kpi_tally import COUNT_FIELDS, BrandTally, RunTally
 
@@ -135,8 +136,8 @@ class SeriesRow:
             self.brands_total = len(self.brands)
 
     def truncate(self, keep: int, always: Collection[str]) -> None:
-        """Keep the first-party brands, the brands named in ``always`` (lower case) and the ``keep`` most visible others."""
-        pinned = {key for key, stored in self.brands.items() if stored[_CLASS] == 'first_party' or str(stored[_NAME]).lower() in always}
+        """Keep the first-party brands, the brands named in ``always`` (brand keys) and the ``keep`` most visible others."""
+        pinned = {key for key, stored in self.brands.items() if stored[_CLASS] == 'first_party' or normalize_brand_key(str(stored[_NAME])) in always}
         others = sorted((stored for key, stored in self.brands.items() if key not in pinned), key=brand_leaderboard_key)
         if len(others) <= keep:
             return
