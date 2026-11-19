@@ -49,6 +49,7 @@ from shared.ai_clients import (
     PERPLEXITY_TIMEOUT_SECONDS,
     perplexity_agent_text,
 )
+from shared.brand_names import BRANDS_VERSION
 from shared.config import Provider, asks_plain_keyword, enabled_without_config
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dataforseo_client import DataForSeoError
@@ -890,6 +891,7 @@ def _result_item(
         item["branded"] = bool(is_branded and is_branded(item["query"]))
         item["branded_version"] = BRANDED_MATCHER_VERSION
         item["citations_version"] = CITATIONS_VERSION
+        item["brands_version"] = BRANDS_VERSION
     if s3_uri:
         item["raw_response_s3_uri"] = s3_uri
     metadata = result.get("metadata", {})

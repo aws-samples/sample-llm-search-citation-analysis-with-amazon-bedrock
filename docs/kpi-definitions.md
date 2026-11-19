@@ -33,7 +33,7 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 
 **Cell.** One (keyword, persona, AI engine, market) combination. Comparisons between runs match answers cell by cell (see [Changes and trends](#changes-and-trends)).
 
-**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively.
+**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-, accent- and whitespace-insensitively. A hotel, store or branch named after a tracked brand ("<chain> <city centre>") is a brand of its own, listed by its own name and classified like the brand it belongs to, so a chain's properties are counted for the brand and still shown one by one. Answer rows written since 2.54.6 record this rule as `brands_version` `2`; earlier rows stored every name that started with a tracked brand as that brand.
 
 **Sighting.** One brand named in one answer. A brand named several times in the same answer is still one sighting, at its best position (and with the sentiment of that sighting). Otherwise a long answer that repeats a name would outweigh a short one.
 
@@ -242,7 +242,7 @@ These apply the same formulas to a slice of the scope's answers:
   | Lost keyword mention | a keyword was mentioned in the previous snapshot and is not now | — |
   | Improvement after a content change | the visibility score rose by at least the threshold after a content change recorded between the two snapshots | 5 points |
 
-  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`, 4 since 2.43); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
+  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`, 5 since 2.54.6); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
 
   **Like for like.** The rules do not compare the two snapshots' pooled values. They compare the neutral answers (queries that do not name the brand) of the [cells](#conventions) answered in both runs: the previous run's rows are read back for the group's current keywords, and a keyword, persona, engine or market present in only one run is left out, so enabling an engine or adding a persona never reads as a gain or a loss. Each snapshot stores its `comparison` with the previous one:
 

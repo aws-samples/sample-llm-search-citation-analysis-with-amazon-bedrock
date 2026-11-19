@@ -30,8 +30,10 @@ MAX_NOTIFICATION_EMAILS = 100
 #: The KPI definitions snapshots are measured with; 2 = the KPIs of 2.21.0 (docs/kpi-definitions.md);
 #: 3 = Google AI Overviews joined the answer engines, so earlier snapshots are not comparable;
 #: 4 = only cited URLs are citations, blank answers are no answers, and changes are judged on the
-#: neutral answers of the cells both runs answered (3 and 4 both arrived in 2.43.0).
-KPI_VERSION = 4
+#: neutral answers of the cells both runs answered (3 and 4 both arrived in 2.43.0);
+#: 5 = a location named after a tracked brand is its own brand under it (2.54.6, ``brands_version`` 2), which moves a
+#: chain's share of voice and positions, so the first run after it sets a new baseline instead of raising alerts.
+KPI_VERSION = 5
 
 DEFAULT_ALERT_SETTINGS: dict[str, Any] = {
     'enabled': True,
