@@ -28,6 +28,7 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 
 from shared.answer_queries import latest_run_timestamp, previous_run_timestamp, query_keyword_run_rows
+from shared.brand_names import normalize_brand_key
 from shared.dynamo_decimal import to_int
 from shared.keyword_major_pages import PageRequest, keyword_major_page
 from shared.request_deadline import current_deadline
@@ -238,7 +239,7 @@ def collect_brands(results: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
             name = brand.get('name')
             if not name:
                 continue
-            entry = brands.setdefault(name.lower(), _new_brand(name, brand))
+            entry = brands.setdefault(normalize_brand_key(name), _new_brand(name, brand))
             _add_appearance(entry, result, brand, provider)
 
     ordered = list(brands.values())
@@ -362,7 +363,7 @@ def appearance_rows(
     Each row names its brand and classification, so a page is readable on its
     own (one Excel row per appearance).
     """
-    wanted = brand.strip().lower() if brand else None
+    wanted = normalize_brand_key(brand) if brand else None
     return [
         {
             'brand': entry['name'],
@@ -371,7 +372,7 @@ def appearance_rows(
             **appearance,
         }
         for entry in _classified(collect_brands(results), classification)
-        if wanted is None or entry['name'].lower() == wanted
+        if wanted is None or normalize_brand_key(entry['name']) == wanted
         for appearance in entry['appearances']
     ]
 
@@ -383,7 +384,7 @@ def rank_map(brands: Iterable[Mapping[str, Any]]) -> dict[str, list[Any]]:
     snapshot appearance pages order and label appearances alike.
     """
     return {
-        entry['name'].lower(): [entry['overall_rank'], len(entry['appearances']), entry['classification'], entry['name']]
+        normalize_brand_key(entry['name']): [entry['overall_rank'], len(entry['appearances']), entry['classification'], entry['name']]
         for entry in brands
     }
 
@@ -402,16 +403,16 @@ def keyword_appearances(
     know is not listed. ``classification`` and ``brand`` filter as
     ``appearance_rows`` does.
     """
-    wanted = brand.strip().lower() if brand else None
+    wanted = normalize_brand_key(brand) if brand else None
     found: list[dict[str, Any]] = []
     for row in rows:
         provider = row.get('provider') or 'unknown'
         for stored in row.get('brands') or []:
             name = stored.get('name')
-            ranked = ranks.get(name.lower()) if name else None
+            ranked = ranks.get(normalize_brand_key(name)) if name else None
             if ranked is None or (classification and ranked[2] != classification):
                 continue
-            if wanted is not None and name.lower() != wanted:
+            if wanted is not None and normalize_brand_key(name) != wanted:
                 continue
             found.append({
                 'brand': ranked[3], 'classification': ranked[2], 'overall_rank': ranked[0],

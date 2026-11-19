@@ -9,6 +9,33 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.54.7] - 2026-11-19
+
+### Fixed
+
+- **The Brands view listed one brand twice when answers spelled it with and without accents** ("Brisa Plaza Marítima"
+  and "Brisa Plaza Maritima" as two rows). The KPI engine has compared brand names case-, accent- and
+  whitespace-insensitively since 2.38.1 (`normalize_brand_key`), but the Brands view, its snapshot partials, its
+  appearance pages and the Visibility leaderboard's tracked-brand check still matched on lower case only
+  (`shared/brand_mention_views.py`, `partial_mentions.py`, `artifact_mentions.py`, `artifact_latest.py`,
+  `api/get-brand-mentions.py`). They now use `normalize_brand_key` too: one row per brand, under the spelling of its
+  first mention, and asking for a brand without its accents finds it. KeywordLatest objects move to format 3, since
+  their `mentions` part is keyed by brand; a format-2 object reads as absent and is rebuilt from the answers.
+
+### Upgrade notes
+
+- **Run the `latest` backfill once after deploying**, as for 2.52.0, so every KeywordLatest object is rebuilt in
+  format 3 and the scope snapshots follow (README, "KPI backfill"):
+
+  ```bash
+  aws lambda invoke --function-name CitationAnalysis-Deduplication --invocation-type Event \
+    --cli-binary-format raw-in-base64-out \
+    --payload '{"action":"backfill_keyword_run_kpis","latest":true,"chain":true}' out.json
+  ```
+
+  Until it finishes, a scope whose keywords have no format-3 object yet is read from its answers (slower, same
+  figures). No stored answer is rewritten (D1).
+
 ## [2.54.6] - 2026-11-19
 
 ### Fixed
