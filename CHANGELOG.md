@@ -16,18 +16,29 @@ process.
 - **Every hotel of a chain was counted as the chain** (and every store or branch of any tracked brand). Since 2.38.1
   an extracted name was renamed to a tracked brand whenever the tracked name was its first word(s): with "Example
   Hotels" tracked, "Example Hotels Old Town", "Example Hotels Harbour" and "Example Hotels Airport" were all stored as
-  "Example Hotels", so the leaderboard showed one row for three hotels and per-property visibility was lost. A name is now
-  renamed only when it is another spelling of a tracked brand: the same name, the same name without its trailing
-  company words ("S.A.", "Hotels", "Airlines", `shared/brand_names.py`), or the first word(s) of exactly one tracked
-  brand ("Sky" for "Sky Airline"). A name that only starts with a tracked brand keeps its own name, takes that
-  brand's classification and names it as its `parent_company` (`BrandIndex.owner`), so each property has its own row
-  and still counts for the brand. Tracked names that are aliases of one brand ("Example", "Example Hotels")
-  resolve to the first configured one. The extraction prompt also asks for each location as its own entry: the
-  2.38.1 rule that folds loyalty programmes and fare products into their company read as "fold hotels into the
-  chain" too.
+  "Example Hotels", so the leaderboard showed one row for three hotels and per-property visibility was lost.
+  `shared/brand_names.py` now renames a name only when it is another spelling of a tracked brand:
+  - the same name;
+  - the same name without its trailing legal words ("S.A.", "Inc.", "Group") and industry words. Industry words
+    count only within one industry ("Sky Airlines" is "Sky Airline", "Sky Hotels" is not), so they never join two
+    businesses that share a first word;
+  - the first word(s) of exactly one tracked brand ("Sky" for "Sky Airline").
+
+  A name that only starts with a tracked brand keeps its own name, takes that brand's classification and names it as
+  its `parent_company` (`BrandIndex.owner`), so each property has its own row and still counts for the brand. Every
+  alias of one tracked brand ("Example", "Example Hotels", "Example Hotels S.A."), exact spellings included, is shown
+  under the first configured one, so a brand is one leaderboard row. The extraction prompt also asks for each
+  location as its own entry: the 2.38.1 rule that folds loyalty programmes and fare products into their company
+  read as "fold hotels into the chain" too.
+- Answer rows record the brand-name rule they were stored under (`brands_version`, 2), as they record their citation
+  rule (D2, D3): rows without it are from before 2.54.6.
 
 ### Upgrade notes
 
+- For a chain whose properties are named after it, share of voice and positions shift from the first run after the
+  upgrade: each property is now its own first-party (or competitor) brand, so an answer naming three of your hotels
+  and one competitor's counts three first-party mentions instead of one. KPI alerts compare consecutive runs and may
+  fire once on that run.
 - Runs stored since 2.38.1 keep the chain name for their properties; the next run of a keyword stores them by
   property. Re-extracting stored answers is planned as a dashboard action.
 

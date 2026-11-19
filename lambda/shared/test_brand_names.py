@@ -61,7 +61,7 @@ class TestBrandIndexCanonical:
         pytest.param('American', ('American Airlines', 'competitor'), id='american-is-american-airlines'),
         pytest.param('Condor', ('Condor Sur', 'competitor'), id='condor-is-condor-sur'),
         pytest.param('Altiplano Air', ('Altiplano Air', 'first_party'), id='first-party'),
-        pytest.param('ALTIPLANO', ('altiplano', 'first_party'), id='lower-case-first-party-alias'),
+        pytest.param('ALTIPLANO', ('Altiplano Air', 'first_party'), id='an-alias-answers-the-first-configured-name'),
         pytest.param('Altiplano Airlines', ('Altiplano Air', 'first_party'), id='company-word-variant-is-the-first-configured-alias'),
         pytest.param('Skyline', None, id='not-a-whole-word'),
         pytest.param('JetPuma', None, id='unknown'),
@@ -95,7 +95,7 @@ COSTAMAR = ('Costamar', 'first_party')
 class TestHotelProperties:
     @pytest.mark.parametrize(('name', 'expected'), [
         pytest.param('Costamar', COSTAMAR, id='the-chain'),
-        pytest.param('COSTAMAR HOTELS', ('Costamar Hotels', 'first_party'), id='a-configured-alias'),
+        pytest.param('COSTAMAR HOTELS', COSTAMAR, id='a-configured-alias-is-the-first-alias'),
         pytest.param('Costamar Hotels S.A.', COSTAMAR, id='an-alias-with-a-legal-form-is-the-first-alias'),
         pytest.param('Costamar Torre Norte Hotel', ('Costamar Torre Norte', 'first_party'), id='a-tracked-property'),
         pytest.param('Brisa', ('Brisa Hoteles', 'competitor'), id='the-competitor-by-its-first-word'),
@@ -127,8 +127,17 @@ class TestHotelProperties:
         assert [(brand['name'], brand['classification'], brand.get('parent_company')) for brand in brands] == [
             ('Costamar Ciudad de Lugo', 'first_party', 'Costamar'),
             ('Costamar Atlántico', 'first_party', 'Costamar Hotel Company'),
-            ('Costamar Hotels', 'first_party', None),
+            ('Costamar', 'first_party', None),
         ]
+
+    @pytest.mark.parametrize(('index', 'name'), [
+        pytest.param(AIRLINE_INDEX, 'Sky Hotels', id='a-hotel-is-not-the-airline'),
+        pytest.param(AIRLINE_INDEX, 'Altiplano Hotels', id='a-hotel-is-not-a-bare-alias-of-the-airline'),
+        pytest.param(BrandIndex([], ['Northwind Airlines']), 'Northwind Hotels', id='another-industry-same-first-word'),
+        pytest.param(HOTEL_INDEX, 'Costamar Airlines', id='an-airline-is-not-the-hotel-chain'),
+    ])
+    def test_industry_words_never_join_two_businesses(self, index: BrandIndex, name: str) -> None:
+        assert index.canonical(name) is None
 
     def test_aliases_on_both_sides_name_nothing(self) -> None:
         index = BrandIndex(['Lumen Hotels'], ['Lumen Group'])
