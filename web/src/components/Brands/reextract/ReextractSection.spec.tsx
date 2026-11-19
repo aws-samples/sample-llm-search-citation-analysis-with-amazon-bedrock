@@ -188,6 +188,17 @@ describe('ReextractSection job panel', () => {
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
   });
 
+  it('says a capped job stopped at the estimated count and can run again', async () => {
+    await renderReextractSection({
+      job: {
+        ...DONE_JOB,
+        capped: true 
+      } 
+    });
+
+    expect(jobPanel()).toHaveTextContent('It stopped at the answers the estimate counted. Run it again to re-extract the rest.');
+  });
+
   it('reads the job again when a live reextract message arrives', async () => {
     const api = await renderReextractSection();
     api.job = DONE_JOB;

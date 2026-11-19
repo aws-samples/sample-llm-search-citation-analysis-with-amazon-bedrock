@@ -71,10 +71,14 @@ BATCH_SECONDS: Final = 240.0
 WORKER_MARGIN_SECONDS: Final = 30.0
 #: Up to this many keywords, the rebuild names them; beyond it every keyword is rebuilt (the event stays small).
 REBUILD_LIST_MAX: Final = 500
-_ANSWER_PROJECTION: Final = 'keyword, timestamp_provider, #response, market_id, brands, brand_count, brands_version'
+#: How a row's brands were made, when a re-extract made them (copied into the history entry that replaces them).
+_LINEAGE_FIELDS: Final = ('brands_extracted_at', 'brands_model', 'brands_extracted_by', 'brands_job_id')
+_ANSWER_PROJECTION: Final = (
+    'keyword, timestamp_provider, #response, market_id, brands, brand_count, brands_version, ' + ', '.join(_LINEAGE_FIELDS)
+)
 _ANSWER_NAMES: Final = {'#response': 'response'}
 
-Outcome = Literal['done', 'out_of_time', 'stopping']
+Outcome = Literal['done', 'out_of_time', 'stopping', 'capped']
 
 
 class JobStore(Protocol):
@@ -99,8 +103,20 @@ class _Tallies:
     def of(cls, job: Mapping[str, Any]) -> _Tallies:
         return cls(*(int(job.get(name) or 0) for name in ('answers_done', 'answers_skipped', 'answers_failed', 'keywords_done')))
 
+    @property
+    def seen(self) -> int:
+        return self.answers_done + self.answers_skipped + self.answers_failed
+
+    def count(self, outcome: WriteOutcome) -> None:
+        if outcome == 'done':
+            self.answers_done += 1
+        elif outcome == 'skipped':
+            self.answers_skipped += 1
+        else:
+            self.answers_failed += 1
+
     def as_changes(self, total: int) -> dict[str, int]:
-        seen = self.answers_done + self.answers_skipped + self.answers_failed
+        seen = self.seen
         return {
             'answers_done': self.answers_done, 'answers_skipped': self.answers_skipped,
             'answers_failed': self.answers_failed, 'keywords_done': self.keywords_done,
@@ -152,18 +168,38 @@ def _extract(row: Mapping[str, Any], configs: BrandConfigs) -> dict[str, Any] | 
         return None
 
 
-def replace_brands(
-    table: Any, row: Mapping[str, Any], brand_data: Mapping[str, Any], *, job_id: str, only_outdated: bool,
-) -> bool:
-    """Write ``brand_data`` on ``row``, its previous brands appended to ``brands_history``; whether the row was written.
+@dataclass(frozen=True)
+class Lineage:
+    """Who and what rewrites an answer's brands (D4): the job, the Admin who started it, the model that extracted."""
 
-    ``False`` when the row is gone or, with ``only_outdated``, already current (another writer got there first).
+    job_id: str
+    actor: str
+    model: str
+
+
+WriteOutcome = Literal['done', 'skipped', 'failed']
+
+
+def _previous(row: Mapping[str, Any], lineage: Lineage, now: str) -> dict[str, Any]:
+    """The ``brands_history`` entry of ``row``'s brands as they were, with how they were made and what replaced them."""
+    return {
+        'brands_version': int(row.get('brands_version') or 0), 'brands': row.get('brands') or [],
+        'brand_count': row.get('brand_count') or 0,
+        **{name: row[name] for name in _LINEAGE_FIELDS if row.get(name) is not None},
+        'replaced_at': now, 'job_id': lineage.job_id, 'replaced_by': lineage.actor,
+    }
+
+
+def replace_brands(
+    table: Any, row: Mapping[str, Any], brand_data: Mapping[str, Any], *, lineage: Lineage, only_outdated: bool,
+) -> WriteOutcome:
+    """Write ``brand_data`` on ``row`` with its lineage, the previous brands appended to ``brands_history``.
+
+    ``skipped`` when the row is gone or, with ``only_outdated``, already current (another writer got there first);
+    ``failed`` when DynamoDB refused the write for another reason (an item grown past 400 KB, for one): the row keeps
+    its brands and the job goes on.
     """
     now = get_timestamp()
-    previous = {
-        'brands_version': int(row.get('brands_version') or 0), 'brands': row.get('brands') or [],
-        'brand_count': row.get('brand_count') or 0, 'replaced_at': now, 'job_id': job_id,
-    }
     condition = 'attribute_exists(keyword)'
     if only_outdated:
         condition += ' AND (attribute_not_exists(brands_version) OR brands_version < :version)'
@@ -172,20 +208,26 @@ def replace_brands(
             Key={'keyword': row['keyword'], 'timestamp_provider': row['timestamp_provider']},
             UpdateExpression=(
                 'SET brands = :brands, brand_count = :count, brands_version = :version, brands_extracted_at = :now, '
+                'brands_model = :model, brands_extracted_by = :actor, brands_job_id = :job, '
                 'brands_history = list_append(if_not_exists(brands_history, :empty), :previous)'
             ),
             ConditionExpression=condition,
             ExpressionAttributeValues={
                 ':brands': convert_floats_to_decimal(list(brand_data.get('brands') or [])),
                 ':count': int(brand_data.get('brand_count') or 0), ':version': BRANDS_VERSION, ':now': now,
-                ':empty': [], ':previous': [previous],
+                ':model': lineage.model, ':actor': lineage.actor, ':job': lineage.job_id,
+                ':empty': [], ':previous': [_previous(row, lineage, now)],
             },
         )
     except ClientError as error:
         if is_conditional_check_failure(error):
-            return False
-        raise
-    return True
+            return 'skipped'
+        logger.warning(
+            'Re-extract: row %r at %s not written (%s)', row.get('keyword'), row.get('timestamp_provider'),
+            error.response.get('Error', {}).get('Code'),
+        )
+        return 'failed'
+    return 'done'
 
 
 def answer_pages(table: Any, keyword: str, filters: ReextractFilters, after: str | None) -> Iterator[list[dict[str, Any]]]:
@@ -215,6 +257,8 @@ class ReextractPass:
     tallies: _Tallies = field(init=False)
     filters: ReextractFilters = field(init=False)
     touched: set[str] = field(default_factory=set)
+    model: str = ''
+    """The extraction model of the last batch (saved on the job, D4)."""
 
     def __post_init__(self) -> None:
         self.tallies = _Tallies.of(self.job)
@@ -226,30 +270,41 @@ class ReextractPass:
 
     def _save(self, changes: Mapping[str, Any]) -> None:
         total = int(self.job.get('answers_total') or 0)
-        self.job = self.jobs.save(self.job_id, self.step, {**self.tallies.as_changes(total), **changes}, self.touched)
+        model = {'model': self.model} if self.model else {}
+        self.job = self.jobs.save(self.job_id, self.step, {**self.tallies.as_changes(total), **model, **changes}, self.touched)
         self.touched = set()
         publish_change(REEXTRACT_CHANGED, {'job_id': self.job_id, 'status': self.job.get('status')})
 
+    @property
+    def room(self) -> int:
+        """Answers the job may still take: it never extracts more than the count the Admin confirmed (``answers_cap``)."""
+        cap = int(self.job.get('answers_cap') or self.job.get('answers_total') or 0)
+        return cap - self.tallies.seen
+
     def _batch(self, rows: list[dict[str, Any]]) -> None:
         self.configs.load({_market_id(row) for row in rows})
-        # Resolved here so the extraction threads find the saved model cached (shared.models).
-        get_model_id(ModelRole.EXTRACTION)
+        # Resolved here, so the extraction threads find the saved model cached (shared.models) and the rows name it.
+        self.model = get_model_id(ModelRole.EXTRACTION)
+        lineage = Lineage(self.job_id, str(self.job.get('created_by') or ''), self.model)
         results = list(self.pool.map(lambda row: _extract(row, self.configs), rows))
         for row, brand_data in zip(rows, results, strict=True):
-            if brand_data is None:
-                self.tallies.answers_failed += 1
-            elif replace_brands(self.search_table, row, brand_data, job_id=self.job_id, only_outdated=self.filters.only_outdated):
-                self.tallies.answers_done += 1
+            outcome = 'failed' if brand_data is None else replace_brands(
+                self.search_table, row, brand_data, lineage=lineage, only_outdated=self.filters.only_outdated,
+            )
+            self.tallies.count(outcome)
+            if outcome == 'done':
                 self.touched.add(str(row['keyword']))
-            else:
-                self.tallies.answers_skipped += 1
 
     def _keyword(self, scoped: ScopedKeyword, after: str | None) -> Outcome:
         for page in answer_pages(self.search_table, scoped.keyword, self.filters, after):
-            for start in range(0, len(page), BATCH_SIZE):
+            start = 0
+            while start < len(page):
+                if self.room <= 0:
+                    return 'capped'
                 if self.deadline.remaining() < BATCH_SECONDS:
                     return 'out_of_time'
-                rows = page[start:start + BATCH_SIZE]
+                rows = page[start:start + min(BATCH_SIZE, self.room)]
+                start += len(rows)
                 self._batch(rows)
                 self._save({'cursor_keyword': scoped.keyword, 'cursor_key': rows[-1]['timestamp_provider']})
                 if self.job.get('status') == 'stopping':
@@ -278,11 +333,11 @@ class ReextractPass:
             self._save({'cursor_keyword': scoped.keyword, 'cursor_key': None})
         return 'done'
 
-    def finish(self, status: str, error: str | None = None) -> None:
+    def finish(self, status: str, error: str | None = None, *, capped: bool = False) -> None:
         """End the job: status, the KPI rebuild of the keywords it rewrote, the pointer freed, the change announced."""
         touched = {str(keyword) for keyword in self.job.get('touched_keywords') or ()} | self.touched
         rebuild = 'started' if touched and start_kpi_rebuild(touched) else None
-        self._save({'status': status, 'error': error, 'finished_at': get_timestamp(), 'rebuild': rebuild})
+        self._save({'status': status, 'error': error, 'finished_at': get_timestamp(), 'rebuild': rebuild, 'capped': capped})
         self.jobs.release(self.job_id)
 
     def chain(self, function_name: str) -> None:
@@ -326,7 +381,7 @@ def run_pass(work: ReextractPass, keywords: Callable[[], list[ScopedKeyword]], f
             work.chain(function_name)
             return 'continued'
         status = 'stopped' if outcome == 'stopping' else 'done'
-        work.finish(status)
+        work.finish(status, capped=outcome == 'capped')
     except StaleStepError:
         logger.info('Re-extract %s: another invocation owns the job', work.job_id)
         return 'ignored'

@@ -86,8 +86,9 @@ def _work(rows: list[dict[str, Any]], pool: ThreadPoolExecutor, *, job: dict[str
 
 def _stopping_work(pool: ThreadPoolExecutor) -> reextract_worker.ReextractPass:
     """A pass over one batch and one answer more, whose job is asked to stop at its first save."""
-    job = _job()
-    return _work(_many(reextract_worker.BATCH_SIZE + 1), pool, job=job, jobs=FakeJobs(copy.deepcopy(job), stop_after_saves=1))
+    answers = reextract_worker.BATCH_SIZE + 1
+    job = _job(answers_total=answers, answers_cap=answers)
+    return _work(_many(answers), pool, job=job, jobs=FakeJobs(copy.deepcopy(job), stop_after_saves=1))
 
 
 def _released(work: reextract_worker.ReextractPass) -> list[str]:
@@ -115,6 +116,24 @@ class TestRewrite:
     def test_keeps_the_previous_brands_in_the_history(self, rewritten):
         (previous,) = _row(rewritten, 'hotels')['brands_history']
         assert (previous['brands'], previous['brands_version'], previous['job_id']) == ([{'name': 'Costamar'}], 0, rewritten.job_id)
+
+    def test_names_the_job_the_admin_and_the_model_on_the_row(self, rewritten):
+        row = _row(rewritten, 'hotels')
+        assert (row['brands_job_id'], row['brands_extracted_by'], row['brands_model']) == (
+            rewritten.job_id, 'admin@example.com', 'global.anthropic.claude-haiku-5-5',
+        )
+
+    def test_a_second_rewrite_keeps_how_the_first_was_made_in_the_history(self, extract, invoker, pool):
+        first = {'brands_version': 2, 'brands_model': 'global.anthropic.claude-sonnet-5-5', 'brands_extracted_by': 'other@example.com'}
+        work = _work([answer_row('hotels', **first)], pool, job=_job(filters={'only_outdated': False}))
+        work.run([_HOTELS])
+        (previous,) = _row(work, 'hotels')['brands_history']
+        assert (previous['brands_model'], previous['brands_extracted_by'], previous['replaced_by']) == (
+            'global.anthropic.claude-sonnet-5-5', 'other@example.com', 'admin@example.com',
+        )
+
+    def test_the_job_names_the_model_that_ran(self, rewritten):
+        assert rewritten.job['model'] == 'global.anthropic.claude-haiku-5-5'
 
     def test_extracts_with_the_brand_config_of_the_answers_market(self, extract, invoker, pool):
         work = _work([answer_row('hoteles', market_id=_MARKET.market_id)], pool)
@@ -205,11 +224,21 @@ class TestEnd:
             assert reextract_worker.run_pass(work, lambda: [_HOTELS], 'worker-fn') == 'failed'
         assert work.job['error'] == 'Brand extraction is turned off'
 
-    def test_a_storage_error_fails_the_job_and_frees_the_next_start(self, extract, invoker, pool):
+    def test_a_row_dynamodb_refuses_counts_as_failed_and_the_job_goes_on(self, extract, invoker, pool):
         work = _work([answer_row('hotels')], pool)
-        work.search_table.update_error = ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'slow down'}}, 'UpdateItem')
-        assert reextract_worker.run_pass(work, lambda: [_HOTELS], 'worker-fn') == 'failed'
-        assert (work.job['status'], _released(work)) == ('failed', [work.job_id])
+        work.search_table.update_error = ClientError({'Error': {'Code': 'ValidationException', 'Message': 'Item size has exceeded the maximum allowed size'}}, 'UpdateItem')
+        assert reextract_worker.run_pass(work, lambda: [_HOTELS], 'worker-fn') == 'done'
+        assert (work.job['answers_failed'], _released(work)) == (1, [work.job_id])
+
+    def test_a_job_extracts_no_more_answers_than_were_confirmed(self, extract, invoker, pool):
+        work = _work([answer_row('hotels', 'claude'), answer_row('hotels', 'openai')], pool, job=_job(answers_total=1, answers_cap=1))
+        assert reextract_worker.run_pass(work, lambda: [_HOTELS], 'worker-fn') == 'done'
+        assert (len(work.search_table.updates), work.job['capped']) == (1, True)
+
+    def test_a_job_that_covered_everything_is_not_capped(self, extract, invoker, pool):
+        work = _work([answer_row('hotels')], pool)
+        reextract_worker.run_pass(work, lambda: [_HOTELS], 'worker-fn')
+        assert work.job['capped'] is False
 
 
 class TestHandler:

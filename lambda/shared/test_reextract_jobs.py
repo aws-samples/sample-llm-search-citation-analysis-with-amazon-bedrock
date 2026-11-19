@@ -99,7 +99,7 @@ class TestJobView:
         assert (view['answers_done'], view['estimated_cost_usd'], view['status']) == (4, 0.011, 'running')
 
     def test_hides_the_workers_bookkeeping(self):
-        assert {'step', 'cursor_keyword', 'cursor_key', 'touched_keywords', 'expires_at'} & job_view(_item()).keys() == set()
+        assert {'step', 'cursor_keyword', 'cursor_key', 'touched_keywords', 'answers_cap'} & job_view(_item()).keys() == set()
 
 
 _NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)

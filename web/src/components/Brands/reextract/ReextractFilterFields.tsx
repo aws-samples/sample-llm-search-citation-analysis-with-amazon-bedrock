@@ -24,7 +24,7 @@ export function ReextractFilterFields({
     <div className="space-y-4">
       <fieldset>
         <legend className="mb-1 text-sm font-semibold text-gray-900">Keyword groups</legend>
-        <p className="mb-2 text-sm text-gray-500">None selected re-extracts the answers of every keyword.</p>
+        <p className="mb-2 text-sm text-gray-500">None selected re-extracts the answers of every active keyword.</p>
         {groupsError !== null && <p className="text-sm text-red-700">{groupsError}</p>}
         <div className="grid gap-2 sm:grid-cols-2">
           {groups.map((group) => (

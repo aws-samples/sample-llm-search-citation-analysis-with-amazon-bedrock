@@ -147,7 +147,7 @@ All functions run Python 3.12. Lambda allocates CPU in proportion to memory. The
 
 - **1,769 MB (one vCPU):** API-StatsInsights, API-CitationsContent, API-GetBrandMentions and ReportInsights (they deserialize thousands of rows per request, and the live window row cap scales with memory); KpiAlerts (300 s); ExportWorker (900 s); GenerateSummary (900 s), which builds the run summary and, in process, a citation rollup of up to 100,000 Citations rows and a snapshot build within one 450 MB unit; ScopeSnapshotWorker (900 s), whose fold units, series turns, rollup shards and merges peaked at about 606 MB of heap and under 600 CPU s at 10x.
 - **1,024 MB:** API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-ManageBrandConfig, API-GetPersonaRankings, ParseKeywords, Crawler, and Deduplication (300 s), which also records each keyword run's KPI counts and `KeywordLatest` object.
-- **512 MB:** API-Health, API-ManageUsers, API-SelfReflection, API-ContentStudio, API-Exports, Mcp, the Search functions, ResearchWorker and ContentStudioWorker.
+- **512 MB:** API-Health, API-ManageUsers, API-SelfReflection, API-ContentStudio, API-Exports, Mcp, the Search functions, ResearchWorker, ContentStudioWorker and ReextractWorker (900 s).
 - **256 MB:** KpiWriteFailureRelay, LiveEventsRelay (15 s) and SeoCallbacks (10 s).
 
 API functions stop at API Gateway's 29 s; inside it, every request carries a time budget (`lambda/shared/request_deadline.py`) and answers partial data with a truncation flag instead of a 504.
@@ -161,6 +161,7 @@ API functions stop at API Gateway's 29 s; inside it, every request carries a tim
 | ReportInsights | `lambda/report-insights/` | GenerateInsights workflow step and on-demand regenerate: one Bedrock narrative per fully covered keyword group |
 | ScopeSnapshotWorker | `lambda/generate-summary/` | Every step of the distributed scope snapshot build (`CitationAnalysis-ScopeSnapshotBuild`) |
 | ExportWorker, API-Exports | `lambda/export-worker/`, `lambda/api/exports.py` | The export service: the `CitationAnalysis-Export` steps, and the `/api/exports` routes |
+| ReextractWorker | `lambda/search/reextract_worker.py` | Re-extract stored answers: runs the brand extraction again on stored answers, keeping the previous brands (see [Re-extract stored answers](#re-extract-stored-answers)) |
 | KpiWriteFailureRelay | inline (`lib/constructs/kpi-write-failure-alarm.ts`) | Publishes the KPI write-failure alarm to the KPI alerts topic |
 | Mcp (stack `CitationAnalysisMcpStack`) | `lambda/mcp/` | MCP server: JSON-RPC over Streamable HTTP, tool catalogue, replays tool calls against the API handler Lambdas |
 | SeoRouter, SeoJobs, Search-google_ai_overview (stack `CitationAnalysisSeoStack`) | `lambda/seo/`, `lambda/seo-jobs/`, `lambda/search/` | The SEO API's one router (512 MB), every step of the SEO state machines (1,024 MB, 15 minutes), and the Google AI Overviews engine |
@@ -175,11 +176,12 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 
 | Table (`CitationAnalysis-…`) | Key | Holds |
 |---|---|---|
-| SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands and its `market_id` |
+| SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands and its `market_id`; `brands_version` is the brand-name rule the brands were extracted under. A [re-extract](#re-extract-stored-answers) adds `brands_extracted_at`, `brands_model`, `brands_extracted_by` and `brands_job_id`, and appends the brands it replaced to `brands_history` |
 | Citations | keyword / normalized_url | Every deduplicated citation, with `content_type` (`video` or `page`) |
 | KeywordRunKpis | keyword / run_timestamp | One row of KPI counts per keyword and run (at most 25 brands), which the history views add up instead of re-reading every answer; see [KPI backfill](#kpi-backfill) |
 | KeywordRunBrands | keyword / run_timestamp | The full brand list of a keyword run, written only when it names more than 25 brands; read by the scope series and window view jobs |
 | Exports | export_id | Export jobs (GSI `OwnerCreatedIndex` owner / created_at; TTL 7 days) |
+| ReextractJobs | job_id | Re-extract jobs (who started each, the filters, the model, progress) and the `current` item that keeps one active; kept, no TTL: they are the audit record of the answers they rewrote |
 | CrawledContent | normalized_url / crawled_at | Crawled page content, summaries and SEO data |
 | Keywords | id | Keywords; `group_ids` holds group membership, `market_id` the market, `concept_id` the keyword a translation localizes |
 | KeywordGroups | id | Keyword groups |
@@ -195,7 +197,7 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | ReportInsights | scope_key / run_timestamp | Written insights per keyword group and market (TTL), read by the reports |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
 
-These 24 tables are in `CitationAnalysisStack`. `CitationAnalysisMcpStack` adds `CitationAnalysis-McpState` (spend tokens, per-caller counters, audit), and `CitationAnalysisSeoStack` adds the six below.
+These 25 tables are in `CitationAnalysisStack`. `CitationAnalysisMcpStack` adds `CitationAnalysis-McpState` (spend tokens, per-caller counters, audit), and `CitationAnalysisSeoStack` adds the six below.
 
 The SEO stack (`CitationAnalysisSeoStack`) adds its own tables, with the same settings. Measurements are kept and
 never expire (Silver); only caches, receipts, locks and crawl bookkeeping carry a TTL:
@@ -441,13 +443,15 @@ the chain), or after changing the tracked brands, an Admin can run the extractio
 Settings › Brand tracking › **Re-extract stored answers**, `POST /api/reextract`, or MCP `estimate_reextract` then
 `start_reextract`.
 
-- **What it covers**: every keyword, or chosen groups and keywords; optionally only runs from / until a day; by
-  default only answers stored under an older rule ("only outdated").
+- **What it covers**: every active keyword, or chosen groups and keywords; optionally only runs from / until a day;
+  by default only answers stored under an older rule ("only outdated"). A job never extracts more answers than its
+  estimate counted; when the count was cut short (a very large deployment), run it again for the rest.
 - **Cost**: one Bedrock call of the extraction model per answer (Claude Haiku 5.5 by default, about $0.0011 an
   answer, so about $1.10 per 1,000 answers). The estimate shows the count and cost before anything starts.
-- **What it changes**: each answer's `brands`, `brand_count` and `brands_version`. The previous brands are appended
-  to the row's `brands_history` with the job id, and the raw answers in S3 are never touched. An answer whose
-  extraction fails keeps its brands and is counted as failed.
+- **What it changes**: each answer's `brands`, `brand_count` and `brands_version`, plus who and what made them
+  (`brands_extracted_at`, `brands_model`, `brands_extracted_by`, `brands_job_id`). The previous brands are appended
+  to the row's `brands_history` with how they were made and the job that replaced them, and the raw answers in S3
+  are never touched. An answer whose extraction or write fails keeps its brands and is counted as failed.
 - **Afterwards**: the job rebuilds the KPI rows and `KeywordLatest` objects of every keyword it rewrote (the KPI
   backfill with `rebuild`, then `latest`), which then start a scope snapshot build; the dashboard shows the new
   figures once that build is current.

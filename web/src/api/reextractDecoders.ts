@@ -46,6 +46,8 @@ export interface ReextractJob {
   readonly estimated_cost_usd: number;
   readonly error: string | null;
   readonly rebuild: string | null;
+  /** The job stopped at the answer count its estimate showed (the count was cut by the request time budget). */
+  readonly capped?: boolean;
 }
 
 /** `GET /api/reextract`: the newest job, and whether one is active. */
@@ -111,7 +113,8 @@ function hasJobProgress(value: Record<string, unknown>): boolean {
   ].every(isCount)
     && isCost(value.estimated_cost_usd)
     && isNullableString(value.error)
-    && isNullableString(value.rebuild);
+    && isNullableString(value.rebuild)
+    && (value.capped === undefined || typeof value.capped === 'boolean');
 }
 
 export function isReextractJob(value: unknown): value is ReextractJob {

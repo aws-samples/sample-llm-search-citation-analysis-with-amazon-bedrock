@@ -53,7 +53,8 @@ class AnswersTable(MemoryTable):
             raise conditional_failure()
         row.update({
             'brands': values[':brands'], 'brand_count': values[':count'], 'brands_version': values[':version'],
-            'brands_extracted_at': values[':now'],
+            'brands_extracted_at': values[':now'], 'brands_model': values[':model'],
+            'brands_extracted_by': values[':actor'], 'brands_job_id': values[':job'],
             'brands_history': list(row.get('brands_history') or values[':empty']) + values[':previous'],
         })
         self.updates.append(dict(Key))

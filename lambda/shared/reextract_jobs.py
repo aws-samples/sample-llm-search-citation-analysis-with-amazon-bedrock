@@ -1,5 +1,6 @@
 """
-Re-extract jobs (2.55.0): the ``CitationAnalysis-ReextractJobs`` table (PK ``job_id``).
+Re-extract jobs (2.55.0): the ``CitationAnalysis-ReextractJobs`` table (PK ``job_id``, no TTL: each job is the audit
+record of the answers it rewrote, D4).
 
 One item per job, plus the pointer item ``job_id = 'current'`` naming the newest job and whether it is active. A
 start writes the job, then takes the pointer with a conditional put, so at most one job runs per deployment (D4);
@@ -28,13 +29,11 @@ ACTIVE_STATUSES: Final = frozenset({'running', 'stopping'})
 POINTER_ID: Final = 'current'
 #: A job that saved nothing for this long has lost its worker (a worker invocation saves at least every few minutes).
 STALE_SECONDS: Final = 20 * 60
-#: Jobs are kept this long (TTL ``expires_at``); the answers they rewrote keep their ``brands_history`` for ever.
-RETENTION_DAYS: Final = 90
 #: The fields a job's answer carries (the rest is the worker's bookkeeping).
 PUBLIC_FIELDS: Final = (
     'job_id', 'status', 'created_at', 'created_by', 'finished_at', 'filters', 'brands_version',
     'answers_total', 'answers_done', 'answers_skipped', 'answers_failed', 'keywords_total', 'keywords_done',
-    'estimated_cost_usd', 'model', 'error', 'rebuild',
+    'estimated_cost_usd', 'model', 'error', 'rebuild', 'capped',
 )
 _COUNT_FIELDS: Final = ('brands_version', 'answers_total', 'answers_done', 'answers_skipped', 'answers_failed',
                         'keywords_total', 'keywords_done')
@@ -69,6 +68,7 @@ def job_view(item: Mapping[str, Any]) -> dict[str, Any]:
     view['created_by'] = view['created_by'] or ''
     view['created_at'] = view['created_at'] or ''
     view['model'] = view['model'] or ''
+    view['capped'] = view['capped'] is True
     return view
 
 
@@ -84,21 +84,23 @@ def is_stale(item: Mapping[str, Any], now: datetime) -> bool:
 
 def new_job_item(
     filters: Mapping[str, Any], created_by: str, *, answers: int, keywords: int, cost: float, brands_version: int,
-    model: str = '', now: datetime | None = None,
+    model: str = '',
 ) -> dict[str, Any]:
-    """A running job's first item: nothing done yet, at step 0. ``model`` is the extraction model it was priced for
-    (lineage, D4: every rewritten answer names the job in its ``brands_history``)."""
+    """A running job's first item: nothing done yet, at step 0.
+
+    ``answers`` is the count the Admin confirmed and the most the job extracts (``answers_cap``: a count the request
+    deadline cut never lets the job spend more than was shown). ``model`` is the extraction model it was priced for;
+    the worker replaces it with the one it ran. Jobs are kept (no TTL): they are the audit record of a rewrite (D4).
+    """
     stamp = get_timestamp()
-    moment = now or datetime.now(UTC)
     return {
         'job_id': f'rx-{uuid.uuid4().hex[:16]}',
         'status': 'running', 'created_at': stamp, 'updated_at': stamp, 'created_by': created_by,
         'finished_at': None, 'filters': dict(filters), 'brands_version': brands_version,
-        'answers_total': answers, 'answers_done': 0, 'answers_skipped': 0, 'answers_failed': 0,
+        'answers_total': answers, 'answers_cap': answers, 'capped': False, 'answers_done': 0, 'answers_skipped': 0, 'answers_failed': 0,
         'keywords_total': keywords, 'keywords_done': 0,
         'estimated_cost_usd': Decimal(str(cost)), 'model': model, 'error': None, 'rebuild': None,
         'step': 0, 'cursor_keyword': None, 'cursor_key': None,
-        'expires_at': int((moment + timedelta(days=RETENTION_DAYS)).timestamp()),
     }
 
 

@@ -714,10 +714,10 @@ interface ReextractServiceInputs {
  * `citation-analysis.reextract` events. The API Lambda only counts SearchResults rows.
  */
 function reextractService(scope: Construct, inputs: ReextractServiceInputs): void {
+  // No TTL: a job is the audit record of the answers it rewrote (who, filters, model; D4). One small item per job.
   const table = citationAnalysisTable(scope, 'ReextractJobsTable', {
     tableName: 'CitationAnalysis-ReextractJobs',
     partitionKey: stringKey('job_id'),
-    timeToLiveAttribute: 'expires_at',
   });
   const { searchResults, keywords, brandConfig, providerConfig } = inputs.tables;
 

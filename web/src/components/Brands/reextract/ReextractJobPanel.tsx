@@ -50,6 +50,7 @@ function FinishedDetails({ job }: { readonly job: ReextractJob }) {
     <>
       <p className="text-sm text-gray-500">Finished {formatDate(job.finished_at)}</p>
       {job.error !== null && <p className="text-sm text-red-700">{job.error}</p>}
+      {job.capped === true && <p className="text-sm text-gray-600">It stopped at the answers the estimate counted. Run it again to re-extract the rest.</p>}
       {job.rebuild === 'started' && <p className="text-sm text-gray-600">The KPIs are being rebuilt from the new results.</p>}
     </>
   );

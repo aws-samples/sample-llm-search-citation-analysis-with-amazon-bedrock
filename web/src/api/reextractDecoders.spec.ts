@@ -62,6 +62,17 @@ describe('isReextractJob', () => {
   it('rejects a job whose failed count is a fraction', () => {
     expect(isReextractJob(buildReextractJob({ answers_failed: 1.5 }))).toBe(false);
   });
+
+  it('accepts a capped job', () => {
+    expect(isReextractJob(buildReextractJob({ capped: true }))).toBe(true);
+  });
+
+  it('rejects a capped flag that is not a boolean', () => {
+    expect(isReextractJob({
+      ...RUNNING_JOB,
+      capped: 'yes',
+    })).toBe(false);
+  });
 });
 
 describe('isReextractStatus', () => {

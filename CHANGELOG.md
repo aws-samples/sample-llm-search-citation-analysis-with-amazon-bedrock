@@ -16,24 +16,26 @@ process.
 - **Re-extract stored answers** (Settings › Brand tracking, Admin only). Answers stored before 2.54.6 still carry
   the old brand names (every hotel of a chain stored as the chain), and new tracked brands only apply to new answers.
   An Admin can now run the brand extraction again on answers already stored:
-  - filters: every keyword, or chosen groups and keywords; optionally only runs from / until a day; by default only
-    answers stored under an older brand-name rule (`brands_version` below 2);
+  - filters: every active keyword, or chosen groups and keywords; optionally only runs from / until a day; by
+    default only answers stored under an older brand-name rule (`brands_version` below 2);
   - an estimate first: the answer and keyword count and the Bedrock cost (about $0.0011 an answer with the default
     Claude Haiku 5.5; prices in the new `shared/bedrock_pricing.py`);
   - one job at a time per deployment, with live progress (`reextract.changed` on `/deployment/reextract`) and a
     Stop button.
 
   Nothing is overwritten without keeping it (D1): each rewritten answer gets the new `brands`, `brand_count` and
-  `brands_version`, and its previous brands are appended to `brands_history` with the job id. Raw answers in S3 are
-  never touched, and an answer whose extraction fails keeps its brands (`answers_failed`). When the job ends (done,
-  stopped or failed), the KPI rows and KeywordLatest objects of every keyword it rewrote are rebuilt, then the scope
-  snapshots.
+  `brands_version` and names who and what made them (`brands_extracted_at`, `brands_model`, `brands_extracted_by`,
+  `brands_job_id`, D4); its previous brands are appended to `brands_history` with how they were made and the job that
+  replaced them. Raw answers in S3 are never touched, and an answer whose extraction or write fails keeps its brands
+  (`answers_failed`) while the job goes on. A job never extracts more answers than its estimate showed (`capped`
+  when the count was cut short: run it again for the rest). When the job ends (done, stopped or failed), the KPI rows
+  and KeywordLatest objects of every keyword it rewrote are rebuilt, then the scope snapshots.
 
   - REST: `POST /api/reextract/estimate`, `POST /api/reextract` (202, 409 while one runs), `GET /api/reextract`,
     `GET /api/reextract/{id}`, `POST /api/reextract/{id}/stop` on the config-mgmt router (`api/manage-reextract.py`).
   - MCP: `get_reextract_status`, `estimate_reextract` → `start_reextract` (estimate-then-confirm, Admin, 2 per caller
     per UTC day, `mcpLimits.reextractsPerDay`), `stop_reextract`; the catalogue has 56 operations.
-  - Infrastructure: table `CitationAnalysis-ReextractJobs` (on-demand, TTL 90 days) and Lambda
+  - Infrastructure: table `CitationAnalysis-ReextractJobs` (on-demand, no TTL: the jobs are the audit record) and Lambda
     `CitationAnalysis-ReextractWorker` (the search code, `reextract_worker.handler`, 512 MB, 900 s, eight extractions
     in flight, chaining itself until the job is done). No fixed cost.
 
@@ -53,7 +55,7 @@ process.
 ### Upgrade notes
 
 - Deploy as usual. To give answers stored before 2.54.6 the per-property names, open Settings › Brand tracking ›
-  Re-extract stored answers, choose the groups (or every keyword), check the estimate, and start. The KPI alert
+  Re-extract stored answers, choose the groups (or every active keyword), check the estimate, and start. The KPI alert
   baseline is not reset again: the runs it rewrites predate the 2.54.6 baseline.
 
 ## [2.54.7] - 2026-11-19
