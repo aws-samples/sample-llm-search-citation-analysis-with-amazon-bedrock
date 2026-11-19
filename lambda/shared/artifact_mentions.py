@@ -48,6 +48,7 @@ from shared.brand_mention_views import (
     keyword_appearances,
     with_brands_cursor,
 )
+from shared.brand_names import normalize_brand_key
 from shared.keyword_major_pages import PageRequest, Slot, list_fingerprint, snapshot_page_fields
 from shared.partial_contract import KeywordLatest, Partial
 from shared.partial_mentions import ALL_COMBO, UNRANKED, aggregate_score, combo_key, merge, ranked_brands
@@ -322,12 +323,12 @@ def appearances_fingerprint(build_id: str, params: Mapping[str, Any]) -> str:
     brand = params.get('brand')
     return list_fingerprint(
         'appearances', build_id, params.get('query_prompt_id'), params.get('provider'), params.get('classification'),
-        brand.strip().lower() if brand else None,
+        normalize_brand_key(brand) if brand else None,
     )
 
 
 def _brand_slots(index: Mapping[str, Any], combo: str, classification: str | None, brand: str) -> tuple[list[Slot], int]:
-    entry = index['brands'].get(brand.strip().lower())
+    entry = index['brands'].get(normalize_brand_key(brand))
     if entry is None:
         return [], 0
     ranked = entry['c'].get(combo)

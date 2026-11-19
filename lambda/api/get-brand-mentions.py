@@ -64,6 +64,7 @@ from shared.brand_mention_views import (
     read_run_rows,
     with_brands_cursor,
 )
+from shared.brand_names import normalize_brand_key
 from shared.cursors import CURSOR_ERROR_MESSAGE, CURSOR_QUERY_PARAM
 from shared.decorators import api_handler, optional_limit, optional_provider, validate
 from shared.keyword_major_pages import list_fingerprint
@@ -302,7 +303,7 @@ def get_appearance_page(
     lists = [keyword_appearances(rows, ranks, page.classification, page.brand) for rows in keyword_rows]
     fingerprint = list_fingerprint(
         'live-appearances', [(keyword, _rows_timestamp(rows, None)) for keyword, (rows, _runs) in loaded.values.items()],
-        filters.params(), page.classification, page.brand.strip().lower() if page.brand else None,
+        filters.params(), page.classification, normalize_brand_key(page.brand) if page.brand else None,
     )
     request, rejected = live_lists_page(lists, page.next_token, fingerprint, page.limit, event)
     if request is None:

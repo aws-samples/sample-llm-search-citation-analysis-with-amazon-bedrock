@@ -33,12 +33,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from shared import partial_kpi
-from shared.brand_names import FIRST_PARTY
 from shared.kpi_engine import DEFAULT_PERSONA, engines_not_covered
 from shared.partial_contract import KeywordLatest, KeywordLatestRun, Partial
 from shared.snapshot_artifacts import ArtifactBuilder, SnapshotArtifacts, encode_snapshot_cursor
 from shared.view_builder import ViewBuilder, params_of
-from shared.visibility_views import BRANDS_LIMIT, SOURCES_LIMIT, run_change_fields
+from shared.visibility_views import BRANDS_LIMIT, SOURCES_LIMIT, listed_leaderboard, run_change_fields
 
 NAME = 'latest'
 
@@ -190,9 +189,7 @@ def narrowed_brands(leaderboard: list[dict[str, Any]], brand: str | None) -> lis
 def listed_brands(leaderboard: list[dict[str, Any]], brand: str | None, tracked_brands: Iterable[str]) -> tuple[list[dict[str, Any]], int]:
     """``visibility_view``'s ``brands`` and ``brands_total``: the leaderboard narrowed to ``brand``, its top ``BRANDS_LIMIT``, then the first-party and tracked brands below."""
     rows = narrowed_brands(leaderboard, brand)
-    tracked = {name.lower() for name in tracked_brands}
-    beyond = [row for row in rows[BRANDS_LIMIT:] if row['classification'] == FIRST_PARTY or row['name'].lower() in tracked]
-    return rows[:BRANDS_LIMIT] + beyond, len(rows)
+    return listed_leaderboard(rows, tracked_brands), len(rows)
 
 
 @dataclass(frozen=True)

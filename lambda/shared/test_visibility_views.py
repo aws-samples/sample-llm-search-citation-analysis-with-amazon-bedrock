@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from shared.artifact_latest import listed_brands
 from shared.kpi_engine import TRENDED_KPIS, Answer, answers_from_rows
 from shared.kpi_tally import run_tallies
 from shared.visibility_views import (
@@ -15,6 +16,7 @@ from shared.visibility_views import (
     LATEST_BRANDS_LIMIT,
     PERIODS,
     SOURCES_LIMIT,
+    listed_leaderboard,
     period_key,
     trend_view,
     visibility_view,
@@ -177,6 +179,21 @@ class TestBrandsLimit:
 
     def test_counts_every_brand_beyond_the_limit(self):
         assert visibility_view(['spa'], self.ANSWERS)['brands_total'] == BRANDS_LIMIT + 22
+
+    def test_lists_a_tracked_brand_below_the_limit_configured_with_accents_the_answers_left_out(self):
+        brands = visibility_view(['spa'], self.ANSWERS, tracked_brands=['Zz Trácked  Rival'])['brands']
+
+        assert brands[-1]['name'] == 'Zz Tracked Rival'
+
+    def test_lists_the_same_rows_live_and_from_a_snapshot(self):
+        leaderboard = [
+            *({'name': f'Brand {index:03d}', 'classification': 'other'} for index in range(BRANDS_LIMIT + 5)),
+            {'name': 'Zz Tracked Rival', 'classification': 'competitor'},
+        ]
+
+        live = listed_leaderboard(leaderboard, ['Zz Trácked Rival'])
+
+        assert (listed_brands(leaderboard, None, ['Zz Trácked Rival']), live[-1]['name']) == ((live, BRANDS_LIMIT + 6), 'Zz Tracked Rival')
 
 
 class TestPeriodKey:

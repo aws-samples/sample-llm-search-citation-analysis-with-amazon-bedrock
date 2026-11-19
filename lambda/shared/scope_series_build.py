@@ -31,6 +31,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from shared.brand_names import normalize_brand_key
 from shared.keyword_latest import entry_tally
 from shared.kpi_tally import RunTally
 from shared.request_deadline import Deadline
@@ -185,7 +186,7 @@ def _save_partial(inputs: SeriesInputs, plan: SeriesPlan, outcome: SeriesOutcome
 def _update_family(inputs: SeriesInputs, family: list[str], deadline: Deadline, outcome: SeriesOutcome) -> None:
     previous = {key: load_series(inputs.store, key, scope_dir(key), inputs.starting.get(key), inputs.owned) for key in family}
     plan = plan_series(previous, {key: inputs.members[key] for key in family}, inputs.owned, history=inputs.history is not None)
-    always = frozenset(name.lower() for name in inputs.tracked)
+    always = frozenset(normalize_brand_key(name) for name in inputs.tracked)
     for series in (*plan.series.values(), *plan.checks.values()):
         series.always = always
     if inputs.history is not None:

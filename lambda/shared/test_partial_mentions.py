@@ -85,3 +85,16 @@ def test_merge_never_mutates_the_part():
     merge(merge(None, parts[0]), parts[1])
 
     assert parts[1] == before
+
+
+def test_build_keys_one_brand_for_spellings_that_differ_in_accents():
+    rows = [
+        {'keyword': 'hotel spa', 'timestamp': 't', 'timestamp_provider': f't#{provider}#default', 'provider': provider,
+         'query_prompt_id': 'default', 'citations': [], 'brands': [{'name': name, 'classification': 'competitor', 'rank': 1}]}
+        for provider, name in (('openai', 'Brisa Plaza Marítima'), ('claude', 'BRISA PLAZA MARITIMA'))
+    ]
+
+    part = build(rows, PartialConfig())
+
+    assert part is not None
+    assert list(part['brands'][ALL_COMBO]) == ['brisa plaza maritima']

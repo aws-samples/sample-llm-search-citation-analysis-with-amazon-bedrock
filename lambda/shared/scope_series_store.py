@@ -28,6 +28,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from shared.brand_names import normalize_brand_key
 from shared.keyword_run_brands import query_run_brands, with_all_brands
 from shared.keyword_run_kpis import query_stored_runs
 from shared.kpi_tally import RunTally
@@ -179,7 +180,7 @@ def finish_checks(plan: SeriesPlan) -> list[str]:
 
 def series_document(series: ScopeSeries, tracked: Iterable[str]) -> dict[str, Any]:
     """The stored form of ``series``: ``SERIES_RUNS`` rows, each keeping the first-party and tracked brands plus ``SERIES_BRANDS`` others."""
-    return series.to_json(keep_brands=SERIES_BRANDS, always={name.lower() for name in tracked}, runs=SERIES_RUNS)
+    return series.to_json(keep_brands=SERIES_BRANDS, always={normalize_brand_key(name) for name in tracked}, runs=SERIES_RUNS)
 
 
 __all__ = [

@@ -36,6 +36,7 @@ import copy
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from shared.brand_names import normalize_brand_key
 from shared.dynamo_decimal import to_int
 from shared.kpi_engine import COMPETITOR, FIRST_PARTY, SENTIMENT_LABELS, answer_from_row
 from shared.partial_contract import Partial, PartialConfig, RunRows
@@ -104,7 +105,7 @@ def _add_row_brands(brands: dict[str, dict[str, Any]], row: Mapping[str, Any], c
         position = order_key(keyword, sort_key, index)
         for combo in combos:
             entries = brands.setdefault(combo, {})
-            stats = entries.setdefault(name.lower(), _new_stats(brand, position))
+            stats = entries.setdefault(normalize_brand_key(name), _new_stats(brand, position))
             _add_appearance(stats, brand, provider, position)
 
 

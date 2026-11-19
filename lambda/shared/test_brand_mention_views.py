@@ -179,3 +179,22 @@ class TestProviderEntry:
 
     def test_previews_the_first_200_characters(self):
         assert provider_entry(_row('openai', [], response='b' * 300))['response_preview'] == 'b' * 200 + '...'
+
+
+class TestBrandIdentity:
+    """One leaderboard row per brand, whatever accents or spacing an answer used (the KPI engine's identity)."""
+
+    ROWS = [
+        _row('openai', [_brand('Brisa Plaza Marítima')]),
+        _row('claude', [_brand('Brisa  Plaza Maritima')]),
+    ]
+
+    def test_counts_spellings_that_differ_in_accents_and_spacing_as_one_brand(self) -> None:
+        brands = brand_summary(self.ROWS, None)['brands']
+
+        assert [(brand['name'], brand['total_mentions']) for brand in brands] == [('Brisa Plaza Marítima', 2)]
+
+    def test_lists_every_appearance_of_a_brand_asked_for_without_its_accents(self) -> None:
+        rows = appearance_rows(self.ROWS, None, 'brisa plaza maritima')
+
+        assert [row['brand'] for row in rows] == ['Brisa Plaza Marítima', 'Brisa Plaza Marítima']
