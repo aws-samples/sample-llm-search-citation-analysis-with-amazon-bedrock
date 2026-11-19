@@ -56,7 +56,7 @@ describe('grantTo', () => {
 
   it('passes the default limits as MCP_LIMITS', () => {
     expect(extractStateEnvVars(template).MCP_LIMITS).toBe(
-      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50}'
+      '{"runsInFlight":1,"runsPerDay":5,"jobsPerDay":20,"maxRunKeywords":50,"reextractsPerDay":2}'
     );
   });
 
@@ -70,7 +70,7 @@ describe('grantTo', () => {
 describe('readMcpLimits', () => {
   it('keeps the defaults without the context', () => {
     expect(limitsFromContext(undefined)).toStrictEqual({
-      runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50,
+      runsInFlight: 1, runsPerDay: 5, jobsPerDay: 20, maxRunKeywords: 50, reextractsPerDay: 2,
     });
   });
 

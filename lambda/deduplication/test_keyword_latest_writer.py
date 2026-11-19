@@ -140,18 +140,44 @@ class TestLatestBackfillAction:
         assert invoked.invocations == [{'action': 'build_scope_snapshots', 'reason': 'keyword_latest_backfill'}]
 
     def test_a_chained_pass_cut_by_the_deadline_invokes_itself_with_the_cursor(self, dedup):
-        invoked = RecordingLambda()
-        context = lambda_context(60_000)
-        context.invoked_function_arn = 'arn:aws:lambda:eu-west-1:123456789012:function:dedup'
         event = {'action': 'backfill_keyword_run_kpis', 'latest': True, 'chain': True, 'keywords': [_KEYWORD]}
-        with (
-            patch.object(dedup.run_kpis_action, 'lambda_client', invoked),
-            patch.object(dedup.run_kpis_action, 'request_deadline_scope', return_value=nullcontext(spent_deadline())),
-        ):
-            dedup.handler(event, context)
-        assert invoked.invocations == [{**event, 'cursor': {'scan_key': None, 'keyword': _KEYWORD, 'after': None}}]
+        assert _chained_invocations(dedup, event, spent=True) == [{**event, 'cursor': {'scan_key': None, 'keyword': _KEYWORD, 'after': None}}]
 
     def test_refuses_the_latest_mode_without_a_bucket(self, dedup, monkeypatch):
         monkeypatch.delenv('SCOPE_SNAPSHOT_BUCKET')
         with pytest.raises(dedup.run_kpis_action.KeywordLatestNotDeployedError, match='SCOPE_SNAPSHOT_BUCKET'):
             dedup.handler({'action': 'backfill_keyword_run_kpis', 'latest': True, 'keywords': [_KEYWORD]}, lambda_context(60_000))
+
+
+_REBUILD = {'action': 'backfill_keyword_run_kpis', 'rebuild': True, 'chain': True, 'then_latest': True, 'keywords': [_KEYWORD]}
+
+
+def _chained_invocations(dedup: Any, event: dict[str, Any], *, spent: bool = False) -> list[dict[str, Any]]:
+    """What a chained backfill invocation of ``event`` invokes next (its deadline already spent with ``spent``)."""
+    invoked = RecordingLambda()
+    context = lambda_context(60_000)
+    context.invoked_function_arn = 'arn:aws:lambda:eu-west-1:123456789012:function:dedup'
+    deadline = patch.object(dedup.run_kpis_action, 'request_deadline_scope', return_value=nullcontext(spent_deadline())) if spent else nullcontext()
+    with patch.object(dedup.run_kpis_action, 'lambda_client', invoked), deadline:
+        dedup.handler(event, context)
+    return invoked.invocations
+
+
+class TestKpiRebuildThenLatest:
+    """The re-extract worker's rebuild: a chained KPI pass with ``then_latest``."""
+
+    def test_a_finished_kpi_pass_starts_the_latest_pass_over_the_same_keywords(self, dedup):
+        assert _chained_invocations(dedup, _REBUILD) == [
+            {'action': 'backfill_keyword_run_kpis', 'rebuild': True, 'chain': True, 'keywords': [_KEYWORD], 'latest': True},
+        ]
+
+    def test_a_kpi_pass_cut_by_the_deadline_keeps_then_latest_for_the_next_invocation(self, dedup):
+        assert [invocation.get('then_latest') for invocation in _chained_invocations(dedup, _REBUILD, spent=True)] == [True]
+
+    def test_a_finished_kpi_pass_without_then_latest_starts_nothing(self, dedup):
+        event = {key: value for key, value in _REBUILD.items() if key != 'then_latest'}
+        assert _chained_invocations(dedup, event) == []
+
+    def test_the_kpi_rebuild_writes_the_complete_brand_row_of_a_capped_run(self, dedup, tables):
+        dedup.handler({'action': 'backfill_keyword_run_kpis', 'rebuild': True, 'keywords': [_KEYWORD]}, lambda_context(60_000))
+        assert [item['brands_total'] for item in tables['brands'][_KEYWORD]] == [_expected_full(0).brands_total, _expected_full(1).brands_total]

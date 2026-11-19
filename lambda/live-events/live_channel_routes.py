@@ -4,7 +4,8 @@ Which AWS AppSync Events channel hears which EventBridge event, and what it is t
 Two channel namespaces (``CitationAnalysisEventsStack``):
 
 - ``/deployment/<topic>``: state every signed-in user of the deployment may read through the REST API (runs,
-  research jobs, Content Studio, ranking analyses, narratives, view jobs, snapshots, KPI alerts, SEO jobs). Any
+  research jobs, Content Studio, ranking analyses, narratives, view jobs, snapshots, KPI alerts, SEO jobs, brand
+  re-extracts). Any
   Cognito user of the deployment's user pool may subscribe.
 - ``/user/<sub>/<topic>``: state only its owner may read (exports). The namespace's ``onSubscribe`` handler refuses
   a subscription whose second segment is not the caller's own Cognito ``sub``, so a user hears only their own.
@@ -59,6 +60,7 @@ ROUTES: Final[Mapping[tuple[str, str], ChannelRoute]] = {
     ('citation-analysis.alerts', 'kpi-alerts.raised'): ChannelRoute('alerts', ('execution_id', 'count')),
     ('citation-analysis.exports', 'export.changed'): ChannelRoute('exports', ('export_id', 'status'), owner_only=True),
     ('citation-analysis.seo', 'seo-job.changed'): ChannelRoute('seo', ('feature', 'id')),
+    ('citation-analysis.reextract', 'reextract.changed'): ChannelRoute('reextract', ('job_id', 'status')),
 }
 
 #: The ``type`` of a Step Functions status change as the channel tells it.

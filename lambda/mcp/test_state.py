@@ -27,10 +27,15 @@ def table(monkeypatch) -> FakeStateTable:
 
 
 class TestLimits:
-    def test_defaults_to_one_in_flight_five_runs_twenty_jobs_and_fifty_keywords(self):
+    def test_defaults_to_one_in_flight_five_runs_twenty_jobs_fifty_keywords_and_two_reextracts(self):
         assert state.limits() == state.Limits(
-            runs_in_flight=1, runs_per_day=5, jobs_per_day=20, max_run_keywords=50,
+            runs_in_flight=1, runs_per_day=5, jobs_per_day=20, max_run_keywords=50, reextracts_per_day=2,
         )
+
+    def test_reads_the_reextracts_per_day_key_of_mcp_limits(self, monkeypatch):
+        monkeypatch.setenv('MCP_LIMITS', json.dumps({'reextractsPerDay': 1}))
+
+        assert state.limits().reextracts_per_day == 1
 
     def test_reads_the_camel_case_keys_of_mcp_limits(self, monkeypatch):
         monkeypatch.setenv('MCP_LIMITS', json.dumps({'runsPerDay': 2, 'maxRunKeywords': 10}))

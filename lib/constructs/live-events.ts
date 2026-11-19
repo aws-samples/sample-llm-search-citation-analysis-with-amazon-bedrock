@@ -51,6 +51,7 @@ export const CHANGE_EVENT_SOURCES = {
   alerts: 'citation-analysis.alerts',
   exports: 'citation-analysis.exports',
   seo: 'citation-analysis.seo',
+  reextract: 'citation-analysis.reextract',
 } as const;
 
 type ChangeEventArea = keyof typeof CHANGE_EVENT_SOURCES;

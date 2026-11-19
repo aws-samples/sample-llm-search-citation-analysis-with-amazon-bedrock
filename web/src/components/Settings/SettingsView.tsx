@@ -9,6 +9,7 @@ import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useProviderConfig } from '../../hooks/useProviderConfig';
 import { BrandConfigContent } from '../Brands/BrandConfigContent';
+import { ReextractSection } from '../Brands/reextract/ReextractSection';
 import { countTrackedBrands } from '../Brands/brandConfigSummary';
 import { usePublishSettingsAttention } from '../Layout/settingsAttention';
 import { AlertsConfig } from './AlertsConfig';
@@ -78,14 +79,17 @@ function SectionContent({
   switch (section) {
     case 'brand-config':
       return (
-        <BrandConfigContent
-          config={brandConfig.config}
-          presets={brandConfig.presets}
-          loading={brandConfig.loading}
-          onSave={brandConfig.saveConfig}
-          onExpandAllBrands={brandConfig.expandAllBrands}
-          onFindCompetitors={brandConfig.findCompetitors}
-        />
+        <>
+          <BrandConfigContent
+            config={brandConfig.config}
+            presets={brandConfig.presets}
+            loading={brandConfig.loading}
+            onSave={brandConfig.saveConfig}
+            onExpandAllBrands={brandConfig.expandAllBrands}
+            onFindCompetitors={brandConfig.findCompetitors}
+          />
+          <ReextractSection />
+        </>
       );
     case 'query-prompts':
       return <QueryPromptsManager isAdmin={isAdmin} />;

@@ -9,6 +9,7 @@ Routes:
 - GET/PUT/POST /api/alerts/* -> manage-alerts handler
 - GET/POST/PUT/DELETE /api/custom-reports/* -> manage-custom-reports handler
 - GET/PUT/POST /api/markets -> manage-markets handler
+- GET/POST /api/reextract/* -> manage-reextract handler (Admin: re-extract stored answers' brands)
 """
 
 import sys
@@ -28,6 +29,7 @@ ROUTE_MAP = {
     '/api/alerts': 'manage-alerts.py',
     '/api/custom-reports': 'manage-custom-reports.py',
     '/api/markets': 'manage-markets.py',
+    '/api/reextract': 'manage-reextract.py',
 }
 
 handler = route_map_handler(__file__, ROUTE_MAP, __name__)

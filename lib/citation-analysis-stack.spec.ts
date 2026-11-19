@@ -324,6 +324,7 @@ const SAVED_BEDROCK_MODEL_CALLERS = [
   'CitationAnalysis-API-ContentStudio',
   'CitationAnalysis-ContentStudioWorker',
   'CitationAnalysis-API-ConfigMgmt',
+  'CitationAnalysis-ReextractWorker',
 ].sort((left, right) => left.localeCompare(right));
 
 beforeAll(() => {
@@ -2507,7 +2508,7 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
     const tierEnvironments = bedrockTierEnvironments(template);
 
-    expect(tierEnvironments).toHaveLength(18);
+    expect(tierEnvironments).toHaveLength(19);
     expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 

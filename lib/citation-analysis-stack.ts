@@ -686,6 +686,80 @@ function exportService(scope: Construct, inputs: ExportServiceInputs): lambda.Fu
 /** Measured at 10x (report-w6-b.md): every fold unit, series turn, rollup shard and merge peaks <= ~606 MB of heap and < 600 s CPU. */
 const SCOPE_SNAPSHOT_WORKER_MEMORY_MB = 1769;
 
+/** The re-extract worker's fixed name: the API Lambda starts it, and it invokes itself, by name. */
+const REEXTRACT_WORKER_FUNCTION_NAME = 'CitationAnalysis-ReextractWorker';
+
+/** What the re-extract service (2.55.0) reads and writes in the main stack. */
+interface ReextractServiceInputs {
+  sharedLayer: lambda.ILayerVersion;
+  /** The API Lambda serving `/api/reextract` (`manage-reextract.py`). */
+  api: lambda.Function;
+  /** The Deduplication Lambda: the KPI and KeywordLatest rebuild of the keywords a job rewrote. */
+  rebuild: lambda.IFunction;
+  tables: {
+    searchResults: dynamodb.ITable;
+    keywords: dynamodb.ITable;
+    brandConfig: dynamodb.ITable;
+    providerConfig: dynamodb.ITable;
+  };
+}
+
+/**
+ * Re-extract stored answers (2.55.0): the jobs table (one item per job and the `current` pointer that keeps one
+ * job active at a time), the worker that extracts brands again on stored answers (the search code bundle, handler
+ * `reextract_worker.handler`), and the API Lambda's rights to estimate, start, read and stop a job.
+ *
+ * Least privilege: the worker queries and updates SearchResults rows (it never puts or deletes one), reads the
+ * active keywords and the brand config, invokes only itself and the Deduplication Lambda, and announces only
+ * `citation-analysis.reextract` events. The API Lambda only counts SearchResults rows.
+ */
+function reextractService(scope: Construct, inputs: ReextractServiceInputs): void {
+  const table = citationAnalysisTable(scope, 'ReextractJobsTable', {
+    tableName: 'CitationAnalysis-ReextractJobs',
+    partitionKey: stringKey('job_id'),
+    timeToLiveAttribute: 'expires_at',
+  });
+  const { searchResults, keywords, brandConfig, providerConfig } = inputs.tables;
+
+  const worker = workerFunction(scope, 'ReextractWorker', {
+    functionName: REEXTRACT_WORKER_FUNCTION_NAME,
+    code: lambdaSourceCode('search'),
+    handler: 'reextract_worker.handler',
+    layers: [inputs.sharedLayer],
+    // Each invocation extracts until 30 s before this, then hands the job on.
+    timeout: cdk.Duration.seconds(900),
+    // I/O-bound: eight Bedrock calls in flight and one SearchResults page of answers.
+    memorySize: 512,
+    description: 'Re-extract stored answers: run the brand extraction again, keeping the previous brands',
+    environment: {
+      DYNAMODB_TABLE_REEXTRACT_JOBS: table.tableName,
+      DYNAMODB_TABLE_SEARCH_RESULTS: searchResults.tableName,
+      DYNAMODB_TABLE_KEYWORDS: keywords.tableName,
+      DYNAMODB_TABLE_BRAND_CONFIG: brandConfig.tableName,
+      // The extraction model an Admin saved in Settings › Bedrock models (shared/models.py).
+      DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfig.tableName,
+      KPI_REBUILD_FUNCTION_NAME: inputs.rebuild.functionName,
+      ...bedrockTierEnv,
+    },
+  });
+  allow(worker, ['dynamodb:GetItem', 'dynamodb:UpdateItem'], [table.tableArn]);
+  allow(worker, ['dynamodb:Query', 'dynamodb:UpdateItem'], [searchResults.tableArn]);
+  allow(worker, ['dynamodb:Query'], [`${keywords.tableArn}/index/StatusIndex`]);
+  allow(worker, ['dynamodb:GetItem'], [brandConfig.tableArn]);
+  allowSavedBedrockModels(worker, providerConfig);
+  worker.addToRolePolicy(claudeInvokeModelStatement(cdk.Stack.of(scope)));
+  // Named, not referenced: a function cannot reference its own ARN in its policy.
+  allow(worker, ['lambda:InvokeFunction'], [namedFunctionArn(scope, REEXTRACT_WORKER_FUNCTION_NAME), inputs.rebuild.functionArn]);
+  allowChangeEvents(worker, scope, ['reextract']);
+
+  inputs.api.addEnvironment('DYNAMODB_TABLE_REEXTRACT_JOBS', table.tableName);
+  inputs.api.addEnvironment('REEXTRACT_WORKER_FUNCTION_NAME', REEXTRACT_WORKER_FUNCTION_NAME);
+  inputs.api.addEnvironment('DYNAMODB_TABLE_SEARCH_RESULTS', searchResults.tableName);
+  allow(inputs.api, ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:UpdateItem'], [table.tableArn]);
+  allow(inputs.api, ['dynamodb:Query'], [searchResults.tableArn]);
+  allow(inputs.api, ['lambda:InvokeFunction'], [worker.functionArn]);
+}
+
 /** What the distributed build reads and writes in the main stack. */
 interface ScopeSnapshotBuildInputs {
   sharedLayer: lambda.ILayerVersion;
@@ -2510,7 +2584,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts, custom reports and markets)
+    // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts, custom reports, markets and re-extract)
     const configMgmtFunction = apiFunction(this, 'ConfigMgmt', sharedLayer, {
       functionName: DASHBOARD_API_FUNCTION_NAMES['config-mgmt'],
       handlerFiles: [
@@ -2522,6 +2596,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-alerts.py',
         'manage-custom-reports.py',
         'manage-markets.py',
+        'manage-reextract.py',
       ],
       // Provider and model checks, market proposals and schedule pages run
       // under the request deadline and are I/O-bound. 2.45.0: Power Tuning
@@ -2529,7 +2604,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       // 48% of 256 MB; 1024 MB (owner decision 2026-11-07) for the 2.8 s
       // cold starts measured live at 256 MB.
       memorySize: 1024,
-      description: 'API: Consolidated query prompts, schedules, providers, KPI alerts, custom reports and markets',
+      description: 'API: Consolidated query prompts, schedules, providers, KPI alerts, custom reports, markets and re-extract',
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
@@ -2973,6 +3048,22 @@ export class CitationAnalysisStack extends cdk.Stack {
         // this one, so a reference would be a cycle. An SEO export fails with a
         // clear error while the SEO stack is not deployed.
         seo: lambda.Function.fromFunctionName(this, 'SeoRouterForExports', SEO_ROUTER_FUNCTION_NAME),
+      },
+    });
+
+    // ========================================
+    // Re-extract stored answers (2.55.0): /api/reextract on ConfigMgmt
+    // ========================================
+
+    reextractService(this, {
+      sharedLayer,
+      api: configMgmtFunction,
+      rebuild: deduplicationFunction,
+      tables: {
+        searchResults: searchResultsTable,
+        keywords: keywordsTable,
+        brandConfig: brandConfigTable,
+        providerConfig: providerConfigTable,
       },
     });
 

@@ -38,6 +38,8 @@ export interface McpLimits {
   readonly jobsPerDay: number;
   /** Keywords one `start_run` may cover. */
   readonly maxRunKeywords: number;
+  /** Brand re-extract jobs (Admin, 2.55.0) a caller may start per UTC day. */
+  readonly reextractsPerDay: number;
 }
 
 export const DEFAULT_MCP_LIMITS: McpLimits = {
@@ -45,6 +47,7 @@ export const DEFAULT_MCP_LIMITS: McpLimits = {
   runsPerDay: 5,
   jobsPerDay: 20,
   maxRunKeywords: 50,
+  reextractsPerDay: 2,
 };
 
 /**

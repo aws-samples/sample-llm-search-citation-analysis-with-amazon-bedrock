@@ -9,6 +9,53 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.55.0] - 2026-11-20
+
+### Added
+
+- **Re-extract stored answers** (Settings › Brand tracking, Admin only). Answers stored before 2.54.6 still carry
+  the old brand names (every hotel of a chain stored as the chain), and new tracked brands only apply to new answers.
+  An Admin can now run the brand extraction again on answers already stored:
+  - filters: every keyword, or chosen groups and keywords; optionally only runs from / until a day; by default only
+    answers stored under an older brand-name rule (`brands_version` below 2);
+  - an estimate first: the answer and keyword count and the Bedrock cost (about $0.0011 an answer with the default
+    Claude Haiku 5.5; prices in the new `shared/bedrock_pricing.py`);
+  - one job at a time per deployment, with live progress (`reextract.changed` on `/deployment/reextract`) and a
+    Stop button.
+
+  Nothing is overwritten without keeping it (D1): each rewritten answer gets the new `brands`, `brand_count` and
+  `brands_version`, and its previous brands are appended to `brands_history` with the job id. Raw answers in S3 are
+  never touched, and an answer whose extraction fails keeps its brands (`answers_failed`). When the job ends (done,
+  stopped or failed), the KPI rows and KeywordLatest objects of every keyword it rewrote are rebuilt, then the scope
+  snapshots.
+
+  - REST: `POST /api/reextract/estimate`, `POST /api/reextract` (202, 409 while one runs), `GET /api/reextract`,
+    `GET /api/reextract/{id}`, `POST /api/reextract/{id}/stop` on the config-mgmt router (`api/manage-reextract.py`).
+  - MCP: `get_reextract_status`, `estimate_reextract` → `start_reextract` (estimate-then-confirm, Admin, 2 per caller
+    per UTC day, `mcpLimits.reextractsPerDay`), `stop_reextract`; the catalogue has 56 operations.
+  - Infrastructure: table `CitationAnalysis-ReextractJobs` (on-demand, TTL 90 days) and Lambda
+    `CitationAnalysis-ReextractWorker` (the search code, `reextract_worker.handler`, 512 MB, 900 s, eight extractions
+    in flight, chaining itself until the job is done). No fixed cost.
+
+### Fixed
+
+- **The KPI backfill with `rebuild` dropped the brands past the 25th of a run.** It rewrote the capped KPI row but
+  not the run's complete brand row (`CitationAnalysis-KeywordRunBrands`), which only a new run wrote. It now writes
+  both, as a run does.
+
+### Changed
+
+- The KPI backfill takes `then_latest`: a chained KPI pass, once done, starts the `latest` pass over the same
+  keywords (the re-extract's rebuild).
+- The brand extractor takes `strict`: a failed model call, an empty answer or an answer without a JSON array raises
+  `BrandExtractionError` instead of reading as "no brands". Runs keep the old behaviour; the re-extract uses `strict`.
+
+### Upgrade notes
+
+- Deploy as usual. To give answers stored before 2.54.6 the per-property names, open Settings › Brand tracking ›
+  Re-extract stored answers, choose the groups (or every keyword), check the estimate, and start. The KPI alert
+  baseline is not reset again: the runs it rewrites predate the 2.54.6 baseline.
+
 ## [2.54.7] - 2026-11-19
 
 ### Fixed

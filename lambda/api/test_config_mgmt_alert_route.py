@@ -1,4 +1,4 @@
-"""ConfigMgmt dispatch coverage for the alerts, custom-reports, providers (incl. Bedrock models) and markets APIs."""
+"""ConfigMgmt dispatch coverage for the alerts, custom-reports, providers (incl. Bedrock models), markets and re-extract APIs."""
 
 from __future__ import annotations
 
@@ -31,6 +31,9 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
         ('GET', '/api/markets', '/api/markets', 'manage-markets.py'),
         ('PUT', '/api/markets', '/api/markets', 'manage-markets.py'),
         ('POST', '/api/markets', '/api/markets', 'manage-markets.py'),
+        ('POST', '/api/reextract/estimate', '/api/reextract/estimate', 'manage-reextract.py'),
+        ('GET', '/api/reextract', '/api/reextract', 'manage-reextract.py'),
+        ('POST', '/api/reextract/{id}/stop', '/api/reextract/rx-1/stop', 'manage-reextract.py'),
     ],
 )
 def test_dispatches_each_config_path_to_its_handler_file(

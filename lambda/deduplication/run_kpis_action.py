@@ -153,27 +153,39 @@ def _kpis_backfill(event: dict[str, Any], deadline: Deadline) -> KeywordRunKpisB
     rollups = keyword_run_kpis_table(dynamodb)
     if rollups is None:
         raise RollupNotDeployedError
-    return KeywordRunKpisBackfill(_search_results_table(), rollups, get_brand_config(), deadline, rebuild=event.get('rebuild') is True)
+    return KeywordRunKpisBackfill(
+        _search_results_table(), rollups, get_brand_config(), deadline,
+        rebuild=event.get('rebuild') is True, brands=keyword_run_brands_table(dynamodb),
+    )
 
 
 def _continue(event: dict[str, Any], context: Any, response: dict[str, Any]) -> None:
-    """After a ``chain`` invocation: invoke this Lambda again with the cursor, or start a scope snapshot build once ``latest`` is done."""
+    """After a ``chain`` invocation: invoke this Lambda again with the cursor; once done, start the ``latest`` pass
+    (``then_latest``, after a KPI pass) or, after a ``latest`` pass, a scope snapshot build."""
     if event.get('chain') is not True:
         return
     if response['done']:
         if response['mode'] == 'latest':
             start_snapshot_build(lambda_client, 'keyword_latest_backfill')
+            return
+        if event.get('then_latest') is True:
+            following = {key: value for key, value in event.items() if key not in ('cursor', 'then_latest')}
+            _invoke_again(context, {**following, 'latest': True}, 'latest')
         return
+    _invoke_again(context, {**event, 'cursor': response['cursor']}, response['mode'])
+
+
+def _invoke_again(context: Any, event: dict[str, Any], mode: str) -> None:
     function_name = getattr(context, 'invoked_function_arn', None)
     if not function_name:
         return
     try:
         lambda_client.invoke(
             FunctionName=function_name, InvocationType='Event',
-            Payload=json.dumps({**event, 'cursor': response['cursor']}, default=str).encode('utf-8'),
+            Payload=json.dumps(event, default=str).encode('utf-8'),
         )
     except (ClientError, BotoCoreError):
-        logger.exception('Could not continue the %s backfill', response['mode'])
+        logger.exception('Could not continue the %s backfill', mode)
 
 
 def backfill_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -181,9 +193,11 @@ def backfill_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     Event: ``cursor`` (from the previous response), optional ``keywords``
     (else every keyword of the Keywords table), ``rebuild``, ``latest``
-    (rebuild the KeywordLatest objects instead of the KPI rows) and ``chain``
+    (rebuild the KeywordLatest objects instead of the KPI rows), ``chain``
     (invoke itself again with the cursor until done; a finished ``latest``
-    pass then starts a scope snapshot build). Answers ``done``, ``mode`` and
+    pass then starts a scope snapshot build) and ``then_latest`` (a chained
+    KPI pass, once done, starts the ``latest`` pass over the same keywords:
+    the re-extract worker's rebuild). Answers ``done``, ``mode`` and
     the ``cursor`` to invoke it with next.
     """
     explicit = event.get('keywords')

@@ -68,6 +68,10 @@
     {"route": "/api/custom-reports", "methods": ["GET", "POST"], "policy": "bounded", "bound": "<= 50 reports x <= 30 blocks", "volume_test": null},
     {"route": "/api/custom-reports/{id}", "methods": ["PUT", "DELETE"], "policy": "single_item", "bound": "one report", "volume_test": null},
     {"route": "/api/markets", "methods": ["GET", "POST", "PUT"], "policy": "bounded", "bound": "<= 50 markets", "volume_test": null},
+    {"route": "/api/reextract", "methods": ["GET", "POST"], "policy": "single_item", "bound": "one job (filters <= 1000 group and keyword ids)", "volume_test": null},
+    {"route": "/api/reextract/estimate", "methods": ["POST"], "policy": "bounded", "bound": "answer, keyword and cost counts plus the filters echoed (<= 1000 ids)", "volume_test": null},
+    {"route": "/api/reextract/{id}", "methods": ["GET"], "policy": "single_item", "bound": "one job", "volume_test": null},
+    {"route": "/api/reextract/{id}/stop", "methods": ["POST"], "policy": "single_item", "bound": "one job", "volume_test": null},
 
     {"route": "/api/trigger-analysis", "methods": ["POST"], "policy": "bounded", "bound": "execution id and counts", "volume_test": null},
     {"route": "/api/trigger-keyword-analysis", "methods": ["POST"], "policy": "bounded", "bound": "resolved keyword texts of one scope (<= 1000, about 50 KB)", "volume_test": null},

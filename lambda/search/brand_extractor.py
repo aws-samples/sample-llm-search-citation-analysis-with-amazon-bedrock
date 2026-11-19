@@ -140,6 +140,10 @@ def _normalize_sentiment_fields(brand: dict[str, Any], include_sentiment: bool) 
         brand['sentiment_reason'] = reason
 
 
+class BrandExtractionError(RuntimeError):
+    """A strict extraction got no readable answer from the model (never the same as "no brands")."""
+
+
 class LLMBrandExtractor:
     """Extract brand mentions using LLM for intelligent parsing and classification."""
 
@@ -152,9 +156,14 @@ class LLMBrandExtractor:
         # The tracked brands by any spelling: the model's names are mapped back onto the configured ones.
         self._brand_index = BrandIndex.from_config(self.config)
 
-    def extract_mentions(self, text: str) -> list[dict[str, Any]]:
+    def extract_mentions(self, text: str, *, strict: bool = False) -> list[dict[str, Any]]:
         """
         Extract brand mentions from text using LLM.
+
+        With ``strict``, a failed read (Bedrock raised, answered nothing, or
+        answered something that is not a JSON array) raises
+        ``BrandExtractionError`` instead of reading as "no brands": the
+        re-extract worker must never replace stored brands with a failure.
 
         Returns:
             List of dicts with brand information
@@ -170,18 +179,27 @@ class LLMBrandExtractor:
         try:
             # Call shared Bedrock client with EXTRACTION role
             response_text = invoke_bedrock(prompt, ModelRole.EXTRACTION, max_tokens=EXTRACTION_MAX_TOKENS, temperature=0)
-        except Exception:
+        except Exception as error:
             logger.exception("Error calling Bedrock for brand extraction")
+            if strict:
+                raise BrandExtractionError('Bedrock call failed') from error
             return []
 
         if not response_text:
             logger.warning("Empty response from Bedrock")
+            if strict:
+                raise BrandExtractionError('Bedrock answered nothing')
             return []
 
+        parsed = self._parse_llm_response(response_text)
+        if parsed is None:
+            if strict:
+                raise BrandExtractionError('Bedrock answered no JSON array')
+            parsed = []
         # Classify brands as first_party, competitor, or other, then put every tracked
         # brand under its configured spelling and classification ("SKY Airline" and
         # "Sky" both become the configured "Sky Airline").
-        brands = canonicalize_brands(self._classify_brands(self._parse_llm_response(response_text)), self._brand_index)
+        brands = canonicalize_brands(self._classify_brands(parsed), self._brand_index)
         include_sentiment = bool(self.config.get("include_sentiment", True))
         for brand in brands:
             _normalize_sentiment_fields(brand, include_sentiment)
@@ -326,8 +344,8 @@ JSON OUTPUT:"""
 
         return brands
 
-    def _parse_llm_response(self, response_text: str) -> list[dict[str, Any]]:
-        """Parse the LLM's JSON array response via the shared helper.
+    def _parse_llm_response(self, response_text: str) -> list[dict[str, Any]] | None:
+        """Parse the LLM's JSON array response via the shared helper; ``None`` when it holds no JSON array.
 
         Only object entries are brands; anything else in the array (a bare
         string, a nested list) is dropped rather than failing the extraction.
@@ -338,16 +356,18 @@ JSON OUTPUT:"""
                 "brand_extraction_parse_failed preview=%r",
                 response_text[:300],
             )
-            return []
+            return None
         return [brand for brand in brands if isinstance(brand, dict)]
 
-def extract_brands_from_response(response_text: str, config: dict | None = None) -> dict[str, Any]:
+def extract_brands_from_response(response_text: str, config: dict | None = None, *, strict: bool = False) -> dict[str, Any]:
     """
     Extract brand mentions from LLM response using Bedrock.
 
     Args:
         response_text: The full LLM response text
         config: Optional extraction configuration (if None or empty, loads from DynamoDB)
+        strict: Raise ``BrandExtractionError`` when the model's answer cannot be read
+            (``LLMBrandExtractor.extract_mentions``), instead of returning no brands
 
     Returns:
         Dict with 'brands' (list of mentions) and 'brand_count'
@@ -361,7 +381,7 @@ def extract_brands_from_response(response_text: str, config: dict | None = None)
     logger.info('Starting brand extraction for text of %s chars', len(response_text))
 
     extractor = LLMBrandExtractor(config=config)
-    mentions = extractor.extract_mentions(response_text)
+    mentions = extractor.extract_mentions(response_text, strict=strict)
 
     logger.info('Brand extraction complete: %s brands found', len(mentions))
 

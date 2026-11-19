@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 import boto3
 from boto3.dynamodb.conditions import Key
 from branded_query import BRANDED_MATCHER_VERSION, branded_query_matcher_for
+from extraction_settings import extraction_brand_config
 from google_ai_overview import CALL_WORST_CASE_SECONDS as AIO_CALL_WORST_CASE_SECONDS
 from google_ai_overview import query_google_ai_overview
 from perplexity_sources import perplexity_sources
@@ -30,7 +31,7 @@ from api_clients import (
     clean_url,
     extract_citations_from_response,
 )
-from brand_extractor import DEFAULT_EXTRACTION_CONFIG, extract_brands_from_response
+from brand_extractor import extract_brands_from_response
 from search_clients import (
     AgentCoreSearchClient,
     BraveSearchClient,
@@ -80,22 +81,6 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
-
-# Load extraction config
-_extraction_config = None
-def get_extraction_config() -> dict[str, Any]:
-    """Load extraction config from file (cached)."""
-    global _extraction_config
-    if _extraction_config is None:
-        try:
-            config_path = os.path.join(os.path.dirname(__file__), 'extraction_config.json')
-            with open(config_path, encoding='utf-8') as f:
-                _extraction_config = json.load(f)
-            logger.info("Loaded extraction config")
-        except (OSError, json.JSONDecodeError) as e:
-            logger.warning('Failed to load extraction config: %s, using defaults', e)
-            _extraction_config = {"hotel_extraction": {"enabled": True, "config": {}}}
-    return _extraction_config
 
 # Environment variables
 DYNAMODB_TABLE_SEARCH_RESULTS = search_results_table_name()
@@ -818,21 +803,6 @@ def execute_all_providers(
     return results
 
 
-def _extraction_brand_config(market: Market | None, stored: dict[str, Any]) -> dict[str, Any] | None:
-    """The brand config extraction uses (``market``'s competitors and aliases added), or ``None`` when extraction is off.
-
-    Without a market it is the stored config as is; with one, the stored
-    config (the extractor's defaults when nothing is stored) plus the
-    market's extra names.
-    """
-    extraction_config = get_extraction_config()
-    if not extraction_config.get("brand_extraction", {}).get("enabled", True):
-        return None
-    brand_config = brand_config_for_market(stored or DEFAULT_EXTRACTION_CONFIG, market) if market else stored
-    logger.info('Loaded brand config for extraction: industry=%s', (brand_config or {}).get('industry') or 'default')
-    return brand_config
-
-
 def _extracted_brands(result: dict[str, Any], brand_config: dict[str, Any] | None) -> dict[str, Any]:
     """Brand mentions in an LLM result's text (none for search providers, non-``success`` rows,
     empty answers or extraction off)."""
@@ -947,7 +917,7 @@ def store_search_results(
         table = dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS)
         # Load brand config once upfront and reuse for all providers (avoids repeated DynamoDB reads)
         stored = get_brand_config()
-        brand_config = _extraction_brand_config(market, stored)
+        brand_config = extraction_brand_config(market, stored)
         is_branded = branded_query_matcher_for(brand_config_for_market(stored, market))
 
         for result in results:

@@ -5,7 +5,8 @@ Rows are written by the workflow from the release that adds the table on;
 older runs are read raw by the windowed reports (``shared.scoped_reports``)
 until this backfill has rolled them up. It walks keywords (the Keywords
 table, every status, or the ``keywords`` of the event) and each keyword's
-SearchResults partition oldest run first, writing one row per run.
+SearchResults partition oldest run first, writing one row per run (and, for
+a run naming more brands than the row keeps, its KeywordRunBrands row).
 
 Resumable and bounded: it stops when the invocation's deadline (activated by
 the caller, ``shared.request_deadline``) is spent and answers a ``cursor``;
@@ -46,6 +47,7 @@ from shared.keyword_latest import (
     read_keyword_latest,
     rebuild_keyword_latest,
 )
+from shared.keyword_run_brands import put_run_brands
 from shared.keyword_run_kpis import (
     BRANDS_PER_RUN,
     emit_write_failure_metric,
@@ -128,6 +130,8 @@ class KeywordRunKpisBackfill:
     rebuild: bool = False
     stats: BackfillStats = field(default_factory=BackfillStats)
     mode: BackfillMode = 'kpis'
+    brands: Any | None = None
+    """The KeywordRunBrands table: a run naming more brands than its KPI row keeps gets its brand row there (``None``: no row)."""
 
     def __post_init__(self) -> None:
         self.owned_domains = owned_domains_from(self.brand_config)
@@ -138,9 +142,12 @@ class KeywordRunKpisBackfill:
         if not self.rebuild and existing.get(timestamp) == self.fingerprint:
             self.stats.runs_skipped += 1
             return
-        tally = run_tally(keyword, timestamp, answers_from_rows(rows), self.owned_domains, brand_cap=BRANDS_PER_RUN, tracked_brands=self.tracked)
+        answers = answers_from_rows(rows)
+        tally = run_tally(keyword, timestamp, answers, self.owned_domains, brand_cap=BRANDS_PER_RUN, tracked_brands=self.tracked)
         try:
             put_run_tally(self.rollups, tally)
+            if self.brands is not None and tally.brands_total > BRANDS_PER_RUN:
+                put_run_brands(self.brands, run_tally(keyword, timestamp, answers, self.owned_domains))
         except (ClientError, BotoCoreError):
             logger.exception('KeywordRunKpis backfill: row of %r at %s not written', keyword, timestamp)
             emit_write_failure_metric('backfill')
