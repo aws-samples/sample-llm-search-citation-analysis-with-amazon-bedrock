@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -43,6 +44,13 @@ class TestStart:
         refused = _item()
         jobs.start(refused)
         assert jobs.get(refused['job_id']) is None
+
+    def test_a_start_that_loses_the_race_is_kept_as_failed_with_the_reason(self, jobs, monkeypatch):
+        first, _ = jobs.start(_item())
+        monkeypatch.setattr(jobs, 'current', MagicMock(side_effect=[(None, False), (first, True)]))
+        late = _item()
+        assert jobs.start(late) == (None, first)
+        assert (jobs.get(late['job_id'])['status'], jobs.get(late['job_id'])['error']) == ('failed', 'Another re-extract started first')
 
     def test_a_job_can_start_once_the_previous_one_is_released(self, jobs, finished):
         jobs.release(finished['job_id'])

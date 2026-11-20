@@ -755,7 +755,8 @@ function reextractService(scope: Construct, inputs: ReextractServiceInputs): voi
   inputs.api.addEnvironment('DYNAMODB_TABLE_REEXTRACT_JOBS', table.tableName);
   inputs.api.addEnvironment('REEXTRACT_WORKER_FUNCTION_NAME', REEXTRACT_WORKER_FUNCTION_NAME);
   inputs.api.addEnvironment('DYNAMODB_TABLE_SEARCH_RESULTS', searchResults.tableName);
-  allow(inputs.api, ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:UpdateItem'], [table.tableArn]);
+  // No DeleteItem: a job is never deleted (the audit record of a rewrite, D4).
+  allow(inputs.api, ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'], [table.tableArn]);
   allow(inputs.api, ['dynamodb:Query'], [searchResults.tableArn]);
   allow(inputs.api, ['lambda:InvokeFunction'], [worker.functionArn]);
 }

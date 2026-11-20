@@ -1,7 +1,7 @@
 """Doubles for the re-extract tests (``shared.reextract*``, ``api/manage-reextract.py``, ``search/reextract_worker.py``).
 
 - ``FakeJobs``: the job store's interface over one in-memory job (step checks and ``touched_keywords`` included).
-- ``JobTable``: a job table that answers ``get_item`` / ``put_item`` / ``delete_item`` / ``update_item`` with the
+- ``JobTable``: a job table that answers ``get_item`` / ``put_item`` / ``update_item`` with the
   conditions ``shared.reextract_jobs`` sends, so the store itself runs for real in the tests.
 - ``answer_row`` / ``answers_table``: SearchResults rows and a table holding them that also answers the brand rewrite.
 - ``RecordingInvoker``: a Lambda client recording each asynchronous invocation (function and payload).
@@ -134,13 +134,11 @@ class JobTable:
         self.items[str(Item['job_id'])] = copy.deepcopy(dict(Item))
         return {}
 
-    def delete_item(self, Key: Mapping[str, Any], **_params: Any) -> dict[str, Any]:
-        self.items.pop(Key['job_id'], None)
-        return {}
-
-    def _update_holds(self, item: Mapping[str, Any] | None, condition: str, values: Mapping[str, Any]) -> bool:
+    def _update_holds(self, item: Mapping[str, Any] | None, condition: str | None, values: Mapping[str, Any]) -> bool:
         if item is None:
             return False
+        if condition is None:
+            return True
         checks = {
             '#step = :step': lambda: item.get('step') == values.get(':step'),
             'job_ref = :job': lambda: item.get('job_ref') == values.get(':job'),
@@ -152,7 +150,7 @@ class JobTable:
     def update_item(self, Key: Mapping[str, Any], **params: Any) -> dict[str, Any]:
         item = self.items.get(Key['job_id'])
         names, values = params.get('ExpressionAttributeNames') or {}, params.get('ExpressionAttributeValues') or {}
-        if not self._update_holds(item, params['ConditionExpression'], values) or item is None:
+        if not self._update_holds(item, params.get('ConditionExpression'), values) or item is None:
             raise conditional_failure()
         expression = params['UpdateExpression']
         assignments, _, added = expression.removeprefix('SET ').partition(' ADD ')

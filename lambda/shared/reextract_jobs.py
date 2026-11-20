@@ -152,12 +152,21 @@ class ReextractJobs:
         except ClientError as error:
             if not is_conditional_check_failure(error):
                 raise
-            self.table.delete_item(Key={'job_id': item['job_id']})
+            # Kept, never deleted (D4): the job that lost the race for the pointer never ran.
+            self._end_unrun(item['job_id'], 'Another re-extract started first')
             winner, _ = self.current()
             return None, winner
         if stale is not None:
             self._mark_stalled(stale['job_id'])
         return item, None
+
+    def _end_unrun(self, job_id: str, reason: str) -> None:
+        self.table.update_item(
+            Key={'job_id': job_id},
+            UpdateExpression='SET #status = :failed, #error = :error, finished_at = :now',
+            ExpressionAttributeNames={'#status': 'status', '#error': 'error'},
+            ExpressionAttributeValues={':failed': 'failed', ':error': reason, ':now': get_timestamp()},
+        )
 
     def _mark_stalled(self, job_id: str) -> None:
         try:
