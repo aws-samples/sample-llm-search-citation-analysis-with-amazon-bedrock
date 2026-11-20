@@ -457,7 +457,7 @@ Settings › Brand tracking › **Re-extract stored answers**, `POST /api/reextr
   figures once that build is current.
 
 One job runs at a time per deployment (`CitationAnalysis-ReextractJobs`, worker `CitationAnalysis-ReextractWorker`,
-about 30 minutes per 1,000 answers); it can be stopped, and what it already rewrote stays rewritten.
+about an hour per 1,000 answers: 112 took under 7 minutes on our deployment); it can be stopped, and what it already rewrote stays rewritten.
 
 ## Getting started
 
