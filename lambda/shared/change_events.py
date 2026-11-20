@@ -69,6 +69,8 @@ KPI_ALERTS_RAISED: Final = ChangeKind('citation-analysis.alerts', 'kpi-alerts.ra
 EXPORT_CHANGED: Final = ChangeKind('citation-analysis.exports', 'export.changed')
 #: A step of an SEO job ran (``feature``, ``id``): a rank-tracking run, local SEO job, Lighthouse run or site audit.
 SEO_JOB_CHANGED: Final = ChangeKind('citation-analysis.seo', 'seo-job.changed')
+#: A brand re-extract job saved progress or ended (``job_id``, ``status``), from its worker.
+REEXTRACT_CHANGED: Final = ChangeKind('citation-analysis.reextract', 'reextract.changed')
 
 
 #: What a publish may raise; logged, never raised into the work that changed state.

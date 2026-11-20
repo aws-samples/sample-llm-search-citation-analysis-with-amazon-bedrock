@@ -61,7 +61,7 @@ def test_a_kind_outside_the_platform_prefix_is_refused():
 
 
 def test_kinds_are_unique():
-    assert len(PUBLISHED_KINDS) == 9
+    assert len(PUBLISHED_KINDS) == 10
     assert len({(kind.source, kind.detail_type) for kind in PUBLISHED_KINDS}) == len(PUBLISHED_KINDS)
 
 

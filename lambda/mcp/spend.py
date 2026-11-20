@@ -7,8 +7,10 @@ read tool, counts the calls the spend will make, and binds a single-use
 token to the caller, the family and the exact API request (``state``). The
 start presents the token, which is consumed atomically before anything else,
 then passes the per-caller limits and replays the request. No dollar
-figures: the estimate is a call count (for the ``seo`` family, DataForSEO
-calls with the static price of one call, ``seo_spend``). Read-only counting, so an estimate
+figures of our own: the estimate is a call count (for the ``seo`` family, DataForSEO
+calls with the static price of one call, ``seo_spend``); a ``reextract`` estimate
+passes on the answer count and Bedrock cost the API's own estimate route computes.
+Read-only counting, so an estimate
 never spends; the API handlers still apply their own checks to the start.
 """
 
@@ -56,7 +58,7 @@ MAX_KEYWORD_PAGES = 20
 #: The UTC-day counter each family draws from here. ``seo`` has none: the SEO API counts every billed DataForSEO
 #: call of a paid lookup against the user's one daily limit, set in Settings, whatever client sent it
 #: (``shared.seo_spend_limit``), and an Admin's SEO job is confirmed on its own.
-COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs'}
+COUNTERS = {'run': 'runs', 'research': 'jobs', 'content': 'jobs', 'reextract': 'reextracts'}
 #: The free route answering the caller's paid DataForSEO calls today and the limit.
 SEO_DAILY_CALLS_PATH = '/api/seo/daily-calls'
 _RUNNING = 'RUNNING'
@@ -252,9 +254,40 @@ def estimate_seo(caller: Caller, route: Route, _arguments: JsonObject) -> Estima
     return Estimate(counts, summary, calls.blocker, notes)
 
 
+#: What the re-extract estimate passes on from ``POST /api/reextract/estimate``.
+REEXTRACT_COUNTS = ('answers', 'answers_current', 'keywords', 'estimated_cost_usd', 'model', 'brands_version',
+                    'truncated', 'filters')
+REEXTRACT_ESTIMATE_PATH = '/api/reextract/estimate'
+
+
+def _dollars(value: Any) -> str:
+    amount = float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
+    return f'${amount:.4f}' if 0 < amount < 0.01 else f'${amount:.2f}'
+
+
+def estimate_reextract(caller: Caller, route: Route, _arguments: JsonObject) -> Estimate:
+    """The answers ``start_reextract`` would extract brands from again and their Bedrock cost, as the API counts them."""
+    request = Route(route.router, 'POST', REEXTRACT_ESTIMATE_PATH, REEXTRACT_ESTIMATE_PATH, None, None, route.body)
+    body = _answer(caller, request)
+    answer: JsonObject = body if isinstance(body, dict) else {}
+    counts = {name: answer.get(name) for name in REEXTRACT_COUNTS}
+    answers = int(answer.get('answers') or 0)
+    at_least = 'at least ' if answer.get('truncated') else ''
+    summary = (f'{at_least}{answers} stored answer(s) of {at_least}{int(answer.get("keywords") or 0)} keyword(s) to '
+               f're-extract with {answer.get("model") or "the extraction model"}; '
+               f'estimated Bedrock cost {_dollars(answer.get("estimated_cost_usd"))} USD')
+    notes = ["Each answer's previous brands are kept in its brands_history; raw answers are never changed.",
+             'One re-extract runs at a time; follow it with get_reextract_status, stop it with stop_reextract.']
+    if answer.get('truncated'):
+        notes.append('The count ran out of time: the figures are lower bounds.')
+    blocker = None if answers else 'No stored answer matches the filters; nothing to re-extract'
+    return Estimate(counts, summary, blocker, notes)
+
+
 Estimator = Callable[[Caller, Route, JsonObject], Estimate]
 ESTIMATORS: dict[str, Estimator] = {
     'run': estimate_run, 'research': estimate_research, 'content': estimate_content, 'seo': estimate_seo,
+    'reextract': estimate_reextract,
 }
 
 
@@ -268,11 +301,13 @@ STARTS = {
     'estimate_seo_backlinks': 'run_seo_backlinks',
     'estimate_seo_local': 'run_seo_local',
     'estimate_seo_job': 'start_seo_job',
+    'estimate_reextract': 'start_reextract',
 }
 _DAILY_WHAT = {
     'run': 'analysis runs',
     'research': 'research or content jobs',
     'content': 'research or content jobs',
+    'reextract': 're-extract jobs',
 }
 
 
@@ -303,7 +338,8 @@ class _Call:
 
 def _per_day(family: str) -> int:
     limits = state.limits()
-    return limits.runs_per_day if family == 'run' else limits.jobs_per_day
+    per_family = {'run': limits.runs_per_day, 'reextract': limits.reextracts_per_day}
+    return per_family.get(family, limits.jobs_per_day)
 
 
 def _limit_message(family: str) -> str:

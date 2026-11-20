@@ -8,6 +8,7 @@ from live_channel_routes import ROUTES, channel_message, is_channel_segment
 from shared.change_events import (
     EXPORT_CHANGED,
     NARRATIVE_FINISHED,
+    REEXTRACT_CHANGED,
     RESEARCH_JOB_CHANGED,
     SELF_REFLECTION_FINISHED,
 )
@@ -54,6 +55,15 @@ def test_a_deployment_event_goes_to_its_topic_with_only_the_route_fields():
 
     assert routed is not None
     assert routed.message == {'type': 'view-job.finished', 'job_id': 'j1', 'status': 'done'}
+
+
+def test_a_reextract_change_goes_to_the_reextract_topic_with_its_job_and_status():
+    routed = channel_message(change_event(REEXTRACT_CHANGED, {'job_id': 'rx-1', 'status': 'running'}), STATE_MACHINE_TOPICS)
+
+    assert routed is not None
+    assert (routed.channel, routed.message) == (
+        '/deployment/reextract', {'type': 'reextract.changed', 'job_id': 'rx-1', 'status': 'running'},
+    )
 
 
 def test_an_owner_only_event_goes_to_the_owners_channel_without_the_owner_in_the_message():

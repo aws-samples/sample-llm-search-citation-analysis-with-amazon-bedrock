@@ -47,10 +47,11 @@ SPEND_TOOLS = [
     ('estimate_seo_backlinks', 'run', False), ('run_seo_backlinks', 'run', False),
     ('estimate_seo_local', 'run', False), ('run_seo_local', 'run', False),
     ('estimate_seo_job', 'run', True), ('start_seo_job', 'run', True),
+    ('estimate_reextract', 'run', True), ('start_reextract', 'run', True),
 ]
 SPEND_STARTS = [
     'start_run', 'start_research', 'generate_content_brief',
-    'run_seo_keywords', 'run_seo_domain', 'run_seo_backlinks', 'run_seo_local', 'start_seo_job',
+    'run_seo_keywords', 'run_seo_domain', 'run_seo_backlinks', 'run_seo_local', 'start_seo_job', 'start_reextract',
 ]
 SPEND_ESTIMATES = [name for name, _scope, _admin in SPEND_TOOLS if name.startswith('estimate_')]
 
@@ -132,10 +133,10 @@ class TestToolsList:
             '{"destructiveHint": false, "openWorldHint": false, "readOnlyHint": false}',
         }
 
-    def test_manage_keywords_the_spend_starts_and_call_tool_are_the_only_tools_not_marked_read_only(self):
+    def test_manage_keywords_the_spend_starts_stop_reextract_and_call_tool_are_the_only_tools_not_marked_read_only(self):
         writers = [tool['name'] for tool in tool_listing(full=True) if tool['annotations']['readOnlyHint'] is False]
 
-        assert writers == ['manage_keywords', *SPEND_STARTS, 'call_tool']
+        assert writers == ['manage_keywords', *SPEND_STARTS, 'stop_reextract', 'call_tool']
 
     def test_spend_operations_are_catalogue_only(self):
         assert [tool.name for tool in OPERATIONS if tool.spend is not None and tool.direct] == []
@@ -301,10 +302,10 @@ class TestManageKeywordsRouting:
         with pytest.raises(InvalidArguments, match=missing):
             _route('manage_keywords', arguments)
 
-    def test_manage_keywords_is_the_only_write_tool_besides_spend_and_is_not_admin_gated(self):
+    def test_manage_keywords_and_the_admin_only_stop_reextract_are_the_only_write_tools_besides_spend(self):
         writers = [tool for tool in OPERATIONS if tool.scope == 'write' and tool.spend is None]
 
-        assert [(tool.name, tool.admin) for tool in writers] == [('manage_keywords', False)]
+        assert [(tool.name, tool.admin) for tool in writers] == [('manage_keywords', False), ('stop_reextract', True)]
 
     def test_add_posts_the_market_and_the_concept_of_the_keyword(self):
         route = _route('manage_keywords', {'action': 'add', 'keyword': 'vuelos altiplano air', 'market_id': 'cl-es', 'concept_id': 'kw_1'})
@@ -418,6 +419,7 @@ class TestSpendEntries:
         ('estimate_content_brief', 'generate_content_brief'), ('estimate_seo_keywords', 'run_seo_keywords'),
         ('estimate_seo_domain', 'run_seo_domain'), ('estimate_seo_backlinks', 'run_seo_backlinks'),
         ('estimate_seo_local', 'run_seo_local'), ('estimate_seo_job', 'start_seo_job'),
+        ('estimate_reextract', 'start_reextract'),
     ])
     def test_an_estimate_and_its_start_build_the_same_api_request(self, estimate, start):
         arguments = dict(find_operation(estimate).examples[0])

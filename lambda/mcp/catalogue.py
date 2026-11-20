@@ -26,6 +26,7 @@ import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, NamedTuple
 
 JsonObject = dict[str, Any]
@@ -45,7 +46,7 @@ class NotFound(LookupError):
 
 
 class Spend(NamedTuple):
-    """What a spend operation is: its ``family`` (``run``, ``research``, ``content``, ``seo``) and ``step`` (``estimate``, ``start``)."""
+    """What a spend operation is: its ``family`` (``run``, ``research``, ``content``, ``seo``, ``reextract``) and ``step`` (``estimate``, ``start``)."""
 
     family: str
     step: str
@@ -487,12 +488,13 @@ def _tool(
     *,
     direct: bool = False,
     write: bool = False,
+    admin: bool = False,
     shape: Callable[[Any], Any] | None = None,
     select: Selector | None = None,
 ) -> Tool:
     return Tool(
         name=name, tab=tab, description=description, tags=tuple(tags),
-        scope='write' if write else 'read', admin=False, direct=direct, read_only=not write,
+        scope='write' if write else 'read', admin=admin, direct=direct, read_only=not write,
         input_schema=schema, examples=tuple(examples), route=route, shape=shape, select=select,
     )
 
@@ -837,6 +839,85 @@ _SEO_SPEND_TOOLS: tuple[Tool, ...] = (
         ('rank tracking', 'rank check', 'site audit', 'crawl', 'snapshot', 'rank grid', 'batch', 'start'),
         _SEO_JOB_SCHEMA, ({'job': 'rank_run', 'tracker_id': 'trk-1'},),
         _checked_dispatch('job', _SEO_JOBS), admin=True,
+    ),
+)
+
+# --- Brand re-extract (router ``config-mgmt``, Admin only) ------------------------------
+
+_REEXTRACT_PATH = '/api/reextract'
+_REEXTRACT_DATES = ('since', 'until')
+_REEXTRACT_SCHEMA = _schema({
+    'group_ids': _string_list('Only answers of keywords in these groups'),
+    'keyword_ids': _string_list('Only answers of these keywords'),
+    'since': _string('Only runs on or after this UTC day, YYYY-MM-DD'),
+    'until': _string('Only runs on or before this UTC day, YYYY-MM-DD'),
+    'only_outdated': _boolean('Skip answers already at the current brand rule (default true)'),
+})
+_REEXTRACT_TAGS = ('re-extract', 'reextract', 'brand extraction', 'extract brands again', 'stored answers', 'brands',
+                   'brands_version', 'reprocess', 'backfill', 'bedrock', 'estimate', 'cost')
+_REEXTRACT_EXAMPLE: JsonObject = {'group_ids': [_EXAMPLE_GROUP], 'since': '2026-09-01'}
+
+
+_ISO_DAY = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def _iso_day(arguments: JsonObject, name: str) -> str:
+    """A ``YYYY-MM-DD`` argument that names a real day."""
+    value = arguments[name]
+    if not _ISO_DAY.fullmatch(value):
+        raise InvalidArguments(f'{name} must be a date YYYY-MM-DD')
+    try:
+        date.fromisoformat(value)
+    except ValueError as error:
+        raise InvalidArguments(f'{name} must be a date YYYY-MM-DD') from error
+    return value
+
+
+def _reextract_route(arguments: JsonObject) -> Route:
+    """``POST /api/reextract`` with the filters; ``only_outdated`` is always sent, so the token binds it."""
+    body: JsonObject = {
+        **_body(arguments, 'group_ids', 'keyword_ids'),
+        **{name: _iso_day(arguments, name) for name in _REEXTRACT_DATES if arguments.get(name) is not None},
+        'only_outdated': arguments.get('only_outdated') is not False,
+    }
+    return Route('config-mgmt', 'POST', _REEXTRACT_PATH, _REEXTRACT_PATH, None, None, body)
+
+
+def _reextract_stop_route(arguments: JsonObject) -> Route:
+    job_id = _seo_segment(arguments, 'job_id')
+    return Route('config-mgmt', 'POST', f'{_REEXTRACT_PATH}/{job_id}/stop', f'{_REEXTRACT_PATH}/{{id}}/stop',
+                 {'id': job_id}, None, {})
+
+
+_REEXTRACT_TOOLS: tuple[Tool, ...] = (
+    _tool(
+        'get_reextract_status', _SETTINGS,
+        'Admin: the newest brand re-extract job (status, answers done, skipped and failed of the total, estimated '
+        'cost) and whether one is running.',
+        ('re-extract status', 'reextract', 'brand extraction job', 'progress', 'is it finished', 'job status'),
+        _schema({}), _get_route('config-mgmt', _REEXTRACT_PATH), ({},), admin=True,
+    ),
+    _spend_tool(
+        'estimate_reextract',
+        'Step 1 of a brand re-extract (admin): Bedrock extracts brands again from stored answers. States the answer '
+        'count and estimated Bedrock cost in USD, returns a confirmation_token. Show it and wait for approval.',
+        _REEXTRACT_TAGS, _REEXTRACT_SCHEMA, (_REEXTRACT_EXAMPLE,),
+        spend=Spend('reextract', 'estimate'), tab=_SETTINGS, route=_reextract_route, scope='run', admin=True,
+    ),
+    _spend_tool(
+        'start_reextract',
+        'Step 2 (admin, spends Bedrock credit): start the re-extract estimate_reextract priced, with its '
+        'confirmation_token and the same filters. Only after the user approved. Follow with get_reextract_status.',
+        _REEXTRACT_TAGS, _confirming(_REEXTRACT_SCHEMA),
+        ({**_REEXTRACT_EXAMPLE, CONFIRMATION_ARGUMENT: _EXAMPLE_CONFIRMATION},),
+        spend=Spend('reextract', 'start'), tab=_SETTINGS, route=_reextract_route, scope='run', admin=True,
+    ),
+    _tool(
+        'stop_reextract', _SETTINGS,
+        'Admin: stop a running brand re-extract job by job_id. Answers already done keep their new brands.',
+        ('stop re-extract', 'cancel re-extract', 'abort', 'stop job', 'reextract'),
+        _schema({'job_id': _string('job_id from get_reextract_status')}, ('job_id',)),
+        _reextract_stop_route, ({'job_id': 'rx-0a1b2c'},), write=True, admin=True,
     ),
 )
 
@@ -1291,6 +1372,7 @@ OPERATIONS: tuple[Tool, ...] = (
         spend=Spend('content', 'start'), tab=_CONTENT_STUDIO, route=_content_brief_route, scope='write',
     ),
     *_SEO_SPEND_TOOLS,
+    *_REEXTRACT_TOOLS,
 )
 
 _BY_NAME: dict[str, Tool] = {tool.name: tool for tool in OPERATIONS}
@@ -1350,9 +1432,9 @@ META_TOOLS: tuple[JsonObject, ...] = (
         'Find more operations by free text: providers, personas, totals, engine answers, persona rankings, prompt '
         'insights, report insights, recent runs, run status, crawled pages, sentiment examples, custom reports, '
         'schedules, alerts, research jobs, Content Studio, SEO keyword metrics, SEO vs GEO, SEO recommendations, rank '
-        'tracking, domain and backlink snapshots, site audits, local jobs; and the estimate-then-start '
+        'tracking, domain and backlink snapshots, site audits, local jobs, re-extract status; and the estimate-then-start '
         'operations that spend credit: analysis runs, keyword research, content briefs, DataForSEO lookups (keywords, '
-        'SERP, domains, backlinks, local) and SEO jobs.',
+        'SERP, domains, backlinks, local), SEO jobs and brand re-extracts.',
         SEARCH_TOOLS_SCHEMA, read_only=True,
     ),
     _meta(

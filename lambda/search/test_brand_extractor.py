@@ -361,14 +361,14 @@ class TestParseLlmResponse:
     def test_returns_an_empty_list_for_an_empty_array(self) -> None:
         assert brand_extractor.LLMBrandExtractor()._parse_llm_response('[]') == []
 
-    def test_returns_an_empty_list_when_the_response_has_no_array(self) -> None:
-        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('No brands are mentioned.') == []
+    def test_returns_none_when_the_response_has_no_array(self) -> None:
+        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('No brands are mentioned.') is None
 
-    def test_returns_an_empty_list_for_malformed_json(self) -> None:
-        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('[{"name": "Marriott",]') == []
+    def test_returns_none_for_malformed_json(self) -> None:
+        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('[{"name": "Marriott",]') is None
 
-    def test_returns_an_empty_list_when_the_top_level_value_is_an_object(self) -> None:
-        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('{"name": "Marriott"}') == []
+    def test_returns_none_when_the_top_level_value_is_an_object(self) -> None:
+        assert brand_extractor.LLMBrandExtractor()._parse_llm_response('{"name": "Marriott"}') is None
 
     def test_drops_array_entries_that_are_not_objects(self) -> None:
         brands = brand_extractor.LLMBrandExtractor()._parse_llm_response('["Marriott", {"name": "Hilton"}, 3]')
@@ -422,6 +422,30 @@ class TestExtractMentions:
         bedrock.side_effect = RuntimeError('ThrottlingException')
 
         assert brand_extractor.LLMBrandExtractor().extract_mentions(TEXT) == []
+
+
+class TestStrictExtractMentions:
+    """``strict`` (the re-extract worker): a failed read raises instead of reading as "no brands"."""
+
+    @pytest.mark.parametrize(('answer', 'reason'), [
+        (RuntimeError('ThrottlingException'), 'Bedrock call failed'),
+        ('', 'answered nothing'),
+        ('I could not find any brands.', 'no JSON array'),
+    ])
+    def test_raises_when_the_model_gives_no_readable_answer(self, bedrock, answer, reason) -> None:
+        bedrock.side_effect = [answer]
+
+        with pytest.raises(brand_extractor.BrandExtractionError, match=reason):
+            brand_extractor.LLMBrandExtractor().extract_mentions(TEXT, strict=True)
+
+    def test_returns_no_mentions_when_the_model_answers_an_empty_array(self, bedrock) -> None:
+        assert brand_extractor.LLMBrandExtractor().extract_mentions(TEXT, strict=True) == []
+
+    def test_extract_brands_from_response_passes_strict_on(self, bedrock) -> None:
+        bedrock.return_value = ''
+
+        with pytest.raises(brand_extractor.BrandExtractionError, match='answered nothing'):
+            brand_extractor.extract_brands_from_response(TEXT, config={'industry': 'hotels'}, strict=True)
 
 
 AIRLINE_ANSWER = json.dumps([

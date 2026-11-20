@@ -383,7 +383,7 @@ class TestBrandExtractionPerMarket:
         assert (config['industry'], config['tracked_brands']['competitors']) == ('general', ['Sky Airline', 'JetSMART'])
 
     def test_extracts_nothing_when_extraction_is_switched_off(self, search_handler, storage):
-        with patch.object(search_handler, 'get_extraction_config', return_value={'brand_extraction': {'enabled': False}}):
+        with patch('extraction_settings.get_extraction_config', return_value={'brand_extraction': {'enabled': False}}):
             storage.store(market=build_market())
 
         assert (storage.extract.call_count, _stored_rows(storage)[0]['brand_count']) == (0, 0)

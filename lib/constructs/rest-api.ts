@@ -387,6 +387,15 @@ function addSettingsRoutes(apiResource: apigateway.IResource, route: Route): voi
   // suggestions) are Admin-gated in `manage-markets.py`.
   route(apiResource.addResource('markets'), 'config-mgmt', 'GET', 'PUT', 'POST');
 
+  // Re-extract stored answers (2.55.0), Admin-gated in `manage-reextract.py`:
+  // estimate, start, read the newest job or one job, stop it.
+  const reextractResource = apiResource.addResource('reextract');
+  route(reextractResource, 'config-mgmt', 'GET', 'POST');
+  route(reextractResource.addResource('estimate'), 'config-mgmt', 'POST');
+  const reextractIdResource = reextractResource.addResource('{id}');
+  route(reextractIdResource, 'config-mgmt', 'GET');
+  route(reextractIdResource.addResource('stop'), 'config-mgmt', 'POST');
+
   const usersResource = apiResource.addResource('users');
   route(usersResource, 'users', 'GET', 'POST');
   route(usersResource.addResource('groups'), 'users', 'GET');

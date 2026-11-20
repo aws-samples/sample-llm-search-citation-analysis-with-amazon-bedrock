@@ -18,7 +18,8 @@ export type DeploymentTopic =
   | 'view-jobs'
   | 'snapshots'
   | 'alerts'
-  | 'seo';
+  | 'seo'
+  | 'reextract';
 
 export type UserTopic = 'exports';
 

@@ -8,7 +8,7 @@ Lambda role holds prefix-wide read *and* write over every provider secret
 (AUDIT-2026-08-19 §0.3).
 
 This file closes that hole with one table. Every mutating admin route across all
-nine handler modules is listed below and must:
+ten handler modules is listed below and must:
 
 1. Return 403 for an authenticated caller in the wrong group.
 2. Return 403 for an authenticated caller with no group claim at all — the
@@ -53,6 +53,7 @@ _SHARED_ENV = {
     'DYNAMODB_TABLE_ALERT_SETTINGS': 'test-alert-settings',
     'DYNAMODB_TABLE_CONTENT_CHANGES': 'test-content-changes',
     'KPI_ALERTS_TOPIC_ARN': 'arn:aws:sns:us-east-1:123456789012:test-kpi-alerts',
+    'REEXTRACT_WORKER_FUNCTION_NAME': 'test-reextract-worker',
 }
 
 
@@ -127,6 +128,11 @@ MUTATING_ADMIN_ROUTES = [
     Route('manage-markets.py', 'POST', '/api/markets', body={'keyword': 'hotels', 'market_ids': ['cl-es']}),
     Route('manage-markets.py', 'POST', '/api/markets', body={'propose': {'country': 'CL', 'language': 'es'}}),
 
+    # manage-reextract.py — a re-extract spends Bedrock on every stored answer and rewrites their brands.
+    Route('manage-reextract.py', 'POST', '/api/reextract/estimate', body={}),
+    Route('manage-reextract.py', 'POST', '/api/reextract', body={}),
+    Route('manage-reextract.py', 'POST', '/api/reextract/rx-1/stop', {'id': 'rx-1'}),
+
     # Both trigger handlers — unbounded provider spend per request.
     Route('trigger-analysis.py', 'POST', '/api/trigger-analysis'),
     Route('trigger-keyword-analysis.py', 'POST', '/api/trigger-keyword-analysis',
@@ -198,7 +204,7 @@ def call(route: Route, groups: str | None) -> tuple[int, MagicMock]:
 
 @pytest.mark.parametrize('route', MUTATING_ADMIN_ROUTES, ids=str)
 class TestEveryMutatingRouteRequiresAdmin:
-    """One class, three invariants, applied to all 28 mutating admin routes."""
+    """One class, three invariants, applied to every mutating admin route."""
 
     def test_denies_a_caller_in_the_wrong_group(self, route: Route) -> None:
         status, _ = call(route, groups='Users')
@@ -229,13 +235,14 @@ class TestSuiteCoversEveryHandlerModule:
     just less coverage. These assertions make that visible.
     """
 
-    def test_covers_all_nine_admin_handler_modules(self) -> None:
+    def test_covers_all_ten_admin_handler_modules(self) -> None:
         assert sorted({route.module for route in MUTATING_ADMIN_ROUTES}) == [
             'manage-alerts.py',
             'manage-brand-config.py',
             'manage-markets.py',
             'manage-providers.py',
             'manage-query-prompts.py',
+            'manage-reextract.py',
             'manage-schedule.py',
             'manage-users.py',
             'trigger-analysis.py',
